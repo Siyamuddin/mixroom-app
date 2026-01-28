@@ -1,0 +1,14 @@
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles/JuceModules.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles/edit_cache.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles/rebuild_cache.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles/list_install_components.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles/install.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles/install/local.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles/install/strip.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-build/CMakeFiles/oboe.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-build/CMakeFiles/edit_cache.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-build/CMakeFiles/rebuild_cache.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-build/CMakeFiles/list_install_components.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-build/CMakeFiles/install.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-build/CMakeFiles/install/local.dir
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-build/CMakeFiles/install/strip.dir

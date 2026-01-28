@@ -1,0 +1,12 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: harfbuzz subsetter
+Description: HarfBuzz font subsetter
+Version: 11.3.3
+
+Requires: harfbuzz = 11.3.3
+Libs: -L${libdir} -lharfbuzz-subset
+Cflags: -I${includedir}/harfbuzz

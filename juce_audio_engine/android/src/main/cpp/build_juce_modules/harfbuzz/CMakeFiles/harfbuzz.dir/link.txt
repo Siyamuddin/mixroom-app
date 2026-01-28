@@ -1,0 +1,2 @@
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar qc libharfbuzz.a CMakeFiles/harfbuzz.dir/src/harfbuzz.cc.o
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ranlib libharfbuzz.a

@@ -1,0 +1,14 @@
+# Target labels
+ oboe-populate
+# Source files and their labels
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/CMakeFiles/oboe-populate
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/CMakeFiles/oboe-populate.rule
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/CMakeFiles/oboe-populate-complete.rule
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-build.rule
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-configure.rule
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-download.rule
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-install.rule
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-mkdir.rule
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-patch.rule
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-test.rule
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-update.rule

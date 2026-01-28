@@ -1,0 +1,6 @@
+{
+	"InstallScripts": [
+		"/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/cmake_install.cmake"
+	],
+	"Parallel": false
+}

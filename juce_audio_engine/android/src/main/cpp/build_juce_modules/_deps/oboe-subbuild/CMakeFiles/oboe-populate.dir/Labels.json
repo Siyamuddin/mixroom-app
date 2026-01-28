@@ -1,0 +1,43 @@
+{
+	"sources": [
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/CMakeFiles/oboe-populate"
+		},
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/CMakeFiles/oboe-populate.rule"
+		},
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/CMakeFiles/oboe-populate-complete.rule"
+		},
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-build.rule"
+		},
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-configure.rule"
+		},
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-download.rule"
+		},
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-install.rule"
+		},
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-mkdir.rule"
+		},
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-patch.rule"
+		},
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-test.rule"
+		},
+		{
+			"file": "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-update.rule"
+		}
+	],
+	"target": {
+		"labels": [
+			"oboe-populate"
+		],
+		"name": "oboe-populate"
+	}
+}

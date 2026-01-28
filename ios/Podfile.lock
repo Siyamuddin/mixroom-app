@@ -1,0 +1,404 @@
+PODS:
+  - AppAuth (2.0.0):
+    - AppAuth/Core (= 2.0.0)
+    - AppAuth/ExternalUserAgent (= 2.0.0)
+  - AppAuth/Core (2.0.0)
+  - AppAuth/ExternalUserAgent (2.0.0):
+    - AppAuth/Core
+  - AppCheckCore (11.2.0):
+    - GoogleUtilities/Environment (~> 8.0)
+    - GoogleUtilities/UserDefaults (~> 8.0)
+    - PromisesObjC (~> 2.4)
+  - audio_session (0.0.1):
+    - Flutter
+  - audio_waveforms (0.0.1):
+    - Flutter
+  - audioplayers_darwin (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - background_downloader (0.0.1):
+    - Flutter
+  - better_player (0.0.1):
+    - Cache (~> 6.0.0)
+    - Flutter
+    - GCDWebServer
+    - HLSCachingReverseProxyServer
+    - PINCache
+  - Cache (6.0.0)
+  - DKImagePickerController/Core (4.3.9):
+    - DKImagePickerController/ImageDataManager
+    - DKImagePickerController/Resource
+  - DKImagePickerController/ImageDataManager (4.3.9)
+  - DKImagePickerController/PhotoGallery (4.3.9):
+    - DKImagePickerController/Core
+    - DKPhotoGallery
+  - DKImagePickerController/Resource (4.3.9)
+  - DKPhotoGallery (0.0.19):
+    - DKPhotoGallery/Core (= 0.0.19)
+    - DKPhotoGallery/Model (= 0.0.19)
+    - DKPhotoGallery/Preview (= 0.0.19)
+    - DKPhotoGallery/Resource (= 0.0.19)
+    - SDWebImage
+    - SwiftyGif
+  - DKPhotoGallery/Core (0.0.19):
+    - DKPhotoGallery/Model
+    - DKPhotoGallery/Preview
+    - SDWebImage
+    - SwiftyGif
+  - DKPhotoGallery/Model (0.0.19):
+    - SDWebImage
+    - SwiftyGif
+  - DKPhotoGallery/Preview (0.0.19):
+    - DKPhotoGallery/Model
+    - DKPhotoGallery/Resource
+    - SDWebImage
+    - SwiftyGif
+  - DKPhotoGallery/Resource (0.0.19):
+    - SDWebImage
+    - SwiftyGif
+  - easy_video_editor (0.0.5):
+    - Flutter
+  - ffmpeg_kit_flutter_new_full (7.1.1):
+    - ffmpeg_kit_flutter_new_full/full (= 7.1.1)
+    - Flutter
+  - ffmpeg_kit_flutter_new_full/full (7.1.1):
+    - Flutter
+  - file_picker (0.0.1):
+    - DKImagePickerController/PhotoGallery
+    - Flutter
+  - Flutter (1.0.0)
+  - flutter_appauth (0.0.1):
+    - AppAuth (= 2.0.0)
+    - Flutter
+  - flutter_file_dialog (0.0.1):
+    - Flutter
+  - flutter_gemma (0.11.13):
+    - Flutter
+    - MediaPipeTasksGenAI (= 0.10.24)
+    - MediaPipeTasksGenAIC (= 0.10.24)
+    - TensorFlowLiteC (= 0.0.1-nightly.20250619)
+    - TensorFlowLiteSelectTfOps (= 0.0.1-nightly.20250619)
+    - TensorFlowLiteSwift (= 0.0.1-nightly.20250619)
+  - flutter_native_splash (2.4.3):
+    - Flutter
+  - flutter_onnxruntime (0.0.1):
+    - Flutter
+    - onnxruntime-objc (= 1.22.0)
+  - flutter_sound (9.28.0):
+    - Flutter
+    - flutter_sound_core (= 9.28.0)
+  - flutter_sound_core (9.28.0)
+  - flutter_webrtc (1.2.0):
+    - Flutter
+    - WebRTC-SDK (= 137.7151.04)
+  - GCDWebServer (3.5.4):
+    - GCDWebServer/Core (= 3.5.4)
+  - GCDWebServer/Core (3.5.4)
+  - google_sign_in_ios (0.0.1):
+    - Flutter
+    - FlutterMacOS
+    - GoogleSignIn (~> 9.0)
+    - GTMSessionFetcher (>= 3.4.0)
+  - GoogleSignIn (9.1.0):
+    - AppAuth (~> 2.0)
+    - AppCheckCore (~> 11.0)
+    - GTMAppAuth (~> 5.0)
+    - GTMSessionFetcher/Core (~> 3.3)
+  - GoogleUtilities/Environment (8.1.0):
+    - GoogleUtilities/Privacy
+  - GoogleUtilities/Logger (8.1.0):
+    - GoogleUtilities/Environment
+    - GoogleUtilities/Privacy
+  - GoogleUtilities/Privacy (8.1.0)
+  - GoogleUtilities/UserDefaults (8.1.0):
+    - GoogleUtilities/Logger
+    - GoogleUtilities/Privacy
+  - GTMAppAuth (5.0.0):
+    - AppAuth/Core (~> 2.0)
+    - GTMSessionFetcher/Core (< 4.0, >= 3.3)
+  - GTMSessionFetcher (3.5.0):
+    - GTMSessionFetcher/Full (= 3.5.0)
+  - GTMSessionFetcher/Core (3.5.0)
+  - GTMSessionFetcher/Full (3.5.0):
+    - GTMSessionFetcher/Core
+  - HLSCachingReverseProxyServer (0.1.0):
+    - GCDWebServer (~> 3.5)
+    - PINCache (>= 3.0.1-beta.3)
+  - image_gallery_saver (2.0.2):
+    - Flutter
+  - image_picker_ios (0.0.1):
+    - Flutter
+  - juce_audio_engine (0.0.1):
+    - Flutter
+  - just_audio (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - large_file_handler (0.0.1):
+    - Flutter
+  - libwebp (1.5.0):
+    - libwebp/demux (= 1.5.0)
+    - libwebp/mux (= 1.5.0)
+    - libwebp/sharpyuv (= 1.5.0)
+    - libwebp/webp (= 1.5.0)
+  - libwebp/demux (1.5.0):
+    - libwebp/webp
+  - libwebp/mux (1.5.0):
+    - libwebp/demux
+  - libwebp/sharpyuv (1.5.0)
+  - libwebp/webp (1.5.0):
+    - libwebp/sharpyuv
+  - MediaPipeTasksGenAI (0.10.24):
+    - MediaPipeTasksGenAIC (= 0.10.24)
+  - MediaPipeTasksGenAIC (0.10.24)
+  - onnxruntime-c (1.22.0)
+  - onnxruntime-objc (1.22.0):
+    - onnxruntime-objc/Core (= 1.22.0)
+  - onnxruntime-objc/Core (1.22.0):
+    - onnxruntime-c (= 1.22.0)
+  - open_file_ios (0.0.1):
+    - Flutter
+  - package_info_plus (0.4.5):
+    - Flutter
+  - path_provider_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - permission_handler_apple (9.3.0):
+    - Flutter
+  - PINCache (3.0.4):
+    - PINCache/Arc-exception-safe (= 3.0.4)
+    - PINCache/Core (= 3.0.4)
+  - PINCache/Arc-exception-safe (3.0.4):
+    - PINCache/Core
+  - PINCache/Core (3.0.4):
+    - PINOperation (~> 1.2.3)
+  - PINOperation (1.2.3)
+  - PromisesObjC (2.4.0)
+  - record_ios (1.1.0):
+    - Flutter
+  - SDWebImage (5.21.5):
+    - SDWebImage/Core (= 5.21.5)
+  - SDWebImage/Core (5.21.5)
+  - share_plus (0.0.1):
+    - Flutter
+  - shared_preferences_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - SwiftyGif (5.4.5)
+  - TensorFlowLiteC (0.0.1-nightly.20250619):
+    - TensorFlowLiteC/Core (= 0.0.1-nightly.20250619)
+  - TensorFlowLiteC/Core (0.0.1-nightly.20250619)
+  - TensorFlowLiteSelectTfOps (0.0.1-nightly.20250619)
+  - TensorFlowLiteSwift (0.0.1-nightly.20250619):
+    - TensorFlowLiteSwift/Core (= 0.0.1-nightly.20250619)
+  - TensorFlowLiteSwift/Core (0.0.1-nightly.20250619):
+    - TensorFlowLiteC (= 0.0.1-nightly.20250619)
+    - TensorFlowLiteSwift/Privacy (= 0.0.1-nightly.20250619)
+  - TensorFlowLiteSwift/Privacy (0.0.1-nightly.20250619)
+  - url_launcher_ios (0.0.1):
+    - Flutter
+  - video_player_avfoundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - video_thumbnail (0.0.1):
+    - Flutter
+    - libwebp
+  - wakelock_plus (0.0.1):
+    - Flutter
+  - WebRTC-SDK (137.7151.04)
+
+DEPENDENCIES:
+  - audio_session (from `.symlinks/plugins/audio_session/ios`)
+  - audio_waveforms (from `.symlinks/plugins/audio_waveforms/ios`)
+  - audioplayers_darwin (from `.symlinks/plugins/audioplayers_darwin/darwin`)
+  - background_downloader (from `.symlinks/plugins/background_downloader/ios`)
+  - better_player (from `.symlinks/plugins/better_player/ios`)
+  - easy_video_editor (from `.symlinks/plugins/easy_video_editor/ios`)
+  - ffmpeg_kit_flutter_new_full (from `.symlinks/plugins/ffmpeg_kit_flutter_new_full/ios`)
+  - file_picker (from `.symlinks/plugins/file_picker/ios`)
+  - Flutter (from `Flutter`)
+  - flutter_appauth (from `.symlinks/plugins/flutter_appauth/ios`)
+  - flutter_file_dialog (from `.symlinks/plugins/flutter_file_dialog/ios`)
+  - flutter_gemma (from `.symlinks/plugins/flutter_gemma/ios`)
+  - flutter_native_splash (from `.symlinks/plugins/flutter_native_splash/ios`)
+  - flutter_onnxruntime (from `.symlinks/plugins/flutter_onnxruntime/ios`)
+  - flutter_sound (from `.symlinks/plugins/flutter_sound/ios`)
+  - flutter_webrtc (from `.symlinks/plugins/flutter_webrtc/ios`)
+  - google_sign_in_ios (from `.symlinks/plugins/google_sign_in_ios/darwin`)
+  - image_gallery_saver (from `.symlinks/plugins/image_gallery_saver/ios`)
+  - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
+  - juce_audio_engine (from `.symlinks/plugins/juce_audio_engine/ios`)
+  - just_audio (from `.symlinks/plugins/just_audio/darwin`)
+  - large_file_handler (from `.symlinks/plugins/large_file_handler/ios`)
+  - open_file_ios (from `.symlinks/plugins/open_file_ios/ios`)
+  - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
+  - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
+  - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
+  - record_ios (from `.symlinks/plugins/record_ios/ios`)
+  - share_plus (from `.symlinks/plugins/share_plus/ios`)
+  - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
+  - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
+  - video_player_avfoundation (from `.symlinks/plugins/video_player_avfoundation/darwin`)
+  - video_thumbnail (from `.symlinks/plugins/video_thumbnail/ios`)
+  - wakelock_plus (from `.symlinks/plugins/wakelock_plus/ios`)
+
+SPEC REPOS:
+  trunk:
+    - AppAuth
+    - AppCheckCore
+    - Cache
+    - DKImagePickerController
+    - DKPhotoGallery
+    - flutter_sound_core
+    - GCDWebServer
+    - GoogleSignIn
+    - GoogleUtilities
+    - GTMAppAuth
+    - GTMSessionFetcher
+    - HLSCachingReverseProxyServer
+    - libwebp
+    - MediaPipeTasksGenAI
+    - MediaPipeTasksGenAIC
+    - onnxruntime-c
+    - onnxruntime-objc
+    - PINCache
+    - PINOperation
+    - PromisesObjC
+    - SDWebImage
+    - SwiftyGif
+    - TensorFlowLiteC
+    - TensorFlowLiteSelectTfOps
+    - TensorFlowLiteSwift
+    - WebRTC-SDK
+
+EXTERNAL SOURCES:
+  audio_session:
+    :path: ".symlinks/plugins/audio_session/ios"
+  audio_waveforms:
+    :path: ".symlinks/plugins/audio_waveforms/ios"
+  audioplayers_darwin:
+    :path: ".symlinks/plugins/audioplayers_darwin/darwin"
+  background_downloader:
+    :path: ".symlinks/plugins/background_downloader/ios"
+  better_player:
+    :path: ".symlinks/plugins/better_player/ios"
+  easy_video_editor:
+    :path: ".symlinks/plugins/easy_video_editor/ios"
+  ffmpeg_kit_flutter_new_full:
+    :path: ".symlinks/plugins/ffmpeg_kit_flutter_new_full/ios"
+  file_picker:
+    :path: ".symlinks/plugins/file_picker/ios"
+  Flutter:
+    :path: Flutter
+  flutter_appauth:
+    :path: ".symlinks/plugins/flutter_appauth/ios"
+  flutter_file_dialog:
+    :path: ".symlinks/plugins/flutter_file_dialog/ios"
+  flutter_gemma:
+    :path: ".symlinks/plugins/flutter_gemma/ios"
+  flutter_native_splash:
+    :path: ".symlinks/plugins/flutter_native_splash/ios"
+  flutter_onnxruntime:
+    :path: ".symlinks/plugins/flutter_onnxruntime/ios"
+  flutter_sound:
+    :path: ".symlinks/plugins/flutter_sound/ios"
+  flutter_webrtc:
+    :path: ".symlinks/plugins/flutter_webrtc/ios"
+  google_sign_in_ios:
+    :path: ".symlinks/plugins/google_sign_in_ios/darwin"
+  image_gallery_saver:
+    :path: ".symlinks/plugins/image_gallery_saver/ios"
+  image_picker_ios:
+    :path: ".symlinks/plugins/image_picker_ios/ios"
+  juce_audio_engine:
+    :path: ".symlinks/plugins/juce_audio_engine/ios"
+  just_audio:
+    :path: ".symlinks/plugins/just_audio/darwin"
+  large_file_handler:
+    :path: ".symlinks/plugins/large_file_handler/ios"
+  open_file_ios:
+    :path: ".symlinks/plugins/open_file_ios/ios"
+  package_info_plus:
+    :path: ".symlinks/plugins/package_info_plus/ios"
+  path_provider_foundation:
+    :path: ".symlinks/plugins/path_provider_foundation/darwin"
+  permission_handler_apple:
+    :path: ".symlinks/plugins/permission_handler_apple/ios"
+  record_ios:
+    :path: ".symlinks/plugins/record_ios/ios"
+  share_plus:
+    :path: ".symlinks/plugins/share_plus/ios"
+  shared_preferences_foundation:
+    :path: ".symlinks/plugins/shared_preferences_foundation/darwin"
+  url_launcher_ios:
+    :path: ".symlinks/plugins/url_launcher_ios/ios"
+  video_player_avfoundation:
+    :path: ".symlinks/plugins/video_player_avfoundation/darwin"
+  video_thumbnail:
+    :path: ".symlinks/plugins/video_thumbnail/ios"
+  wakelock_plus:
+    :path: ".symlinks/plugins/wakelock_plus/ios"
+
+SPEC CHECKSUMS:
+  AppAuth: 1c1a8afa7e12f2ec3a294d9882dfa5ab7d3cb063
+  AppCheckCore: cc8fd0a3a230ddd401f326489c99990b013f0c4f
+  audio_session: 9bb7f6c970f21241b19f5a3658097ae459681ba0
+  audio_waveforms: a6dde7fe7c0ea05f06ffbdb0f7c1b2b2ba6cedcf
+  audioplayers_darwin: 4f9ca89d92d3d21cec7ec580e78ca888e5fb68bd
+  background_downloader: 50e91d979067b82081aba359d7d916b3ba5fadad
+  better_player: 472a1f3471b8991bde82327c91498b0f7934245d
+  Cache: 4ca7e00363fca5455f26534e5607634c820ffc2d
+  DKImagePickerController: 946cec48c7873164274ecc4624d19e3da4c1ef3c
+  DKPhotoGallery: b3834fecb755ee09a593d7c9e389d8b5d6deed60
+  easy_video_editor: 3b4b38c40be7344935f79698115ee36077df8a57
+  ffmpeg_kit_flutter_new_full: 409b012eb2c900b377f6c904bea43f6572daa9e6
+  file_picker: a0560bc09d61de87f12d246fc47d2119e6ef37be
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  flutter_appauth: d4abcf54856e5d8ba82ed7646ffc83245d4aa448
+  flutter_file_dialog: ca8d7fbd1772d4f0c2777b4ab20a7787ef4e7dd8
+  flutter_gemma: 8ed32b19abae2e069095437401f0a2d5ec46c0cb
+  flutter_native_splash: c32d145d68aeda5502d5f543ee38c192065986cf
+  flutter_onnxruntime: 744f037980e9fb685736bfeceaf4c2dd8c381f8a
+  flutter_sound: b9236a5875299aaa4cef1690afd2f01d52a3f890
+  flutter_sound_core: 427465f72d07ab8c3edbe8ffdde709ddacd3763c
+  flutter_webrtc: c3e21fc0dcd9d8eb246ae4d5256fcbeb2f5ecd22
+  GCDWebServer: 2c156a56c8226e2d5c0c3f208a3621ccffbe3ce4
+  google_sign_in_ios: 00dfa94252eb10278b64828c81bcb7158a81a53a
+  GoogleSignIn: fcee2257188d5eda57a5e2b6a715550ffff9206d
+  GoogleUtilities: 00c88b9a86066ef77f0da2fab05f65d7768ed8e1
+  GTMAppAuth: 217a876b249c3c585a54fd6f73e6b58c4f5c4238
+  GTMSessionFetcher: 5aea5ba6bd522a239e236100971f10cb71b96ab6
+  HLSCachingReverseProxyServer: 59935e1e0244ad7f3375d75b5ef46e8eb26ab181
+  image_gallery_saver: 14711d79da40581063e8842a11acf1969d781ed7
+  image_picker_ios: e0ece4aa2a75771a7de3fa735d26d90817041326
+  juce_audio_engine: 1b96610ac6964016ac465b2778aca2fc312ac9e0
+  just_audio: 4e391f57b79cad2b0674030a00453ca5ce817eed
+  large_file_handler: b37481e9b4972562ffcdc8f75700f47cd592bcec
+  libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
+  MediaPipeTasksGenAI: 076ba7032a6e9da16db9c7cf0c3b67c751c18bc1
+  MediaPipeTasksGenAIC: ec35d9f431f6a6b651a0bc9f67a4ed149ffa575c
+  onnxruntime-c: 7f778680e96145956c0a31945f260321eed2611a
+  onnxruntime-objc: 83d28b87525bd971259a66e153ea32b5d023de19
+  open_file_ios: 5ff7526df64e4394b4fe207636b67a95e83078bb
+  package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
+  path_provider_foundation: bb55f6dbba17d0dccd6737fe6f7f34fbd0376880
+  permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
+  PINCache: d9a87a0ff397acffe9e2f0db972ac14680441158
+  PINOperation: fb563bcc9c32c26d6c78aaff967d405aa2ee74a7
+  PromisesObjC: f5707f49cb48b9636751c5b2e7d227e43fba9f47
+  record_ios: f75fa1d57f840012775c0e93a38a7f3ceea1a374
+  SDWebImage: e9c98383c7572d713c1a0d7dd2783b10599b9838
+  share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
+  shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
+  SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
+  TensorFlowLiteC: 215ef57653dd0fa09a474e7d94d79ae64a870b28
+  TensorFlowLiteSelectTfOps: c71d7dcd063f5d66ae1b9a85cc5aa993f824eff9
+  TensorFlowLiteSwift: 6de8da348de331778167a0f751ad74c41d8b0554
+  url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
+  video_player_avfoundation: dd410b52df6d2466a42d28550e33e4146928280a
+  video_thumbnail: b637e0ad5f588ca9945f6e2c927f73a69a661140
+  wakelock_plus: e29112ab3ef0b318e58cfa5c32326458be66b556
+  WebRTC-SDK: 40d4f5ba05cadff14e4db5614aec402a633f007e
+
+PODFILE CHECKSUM: 88586367a7842131f79ba619cf1bf30ff56a5ea5
+
+COCOAPODS: 1.16.2
