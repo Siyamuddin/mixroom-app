@@ -1,36 +1,32 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/material.dart';
 
-import 'package:audio_waveforms/audio_waveforms.dart';
-
+// TODO: rename to AudioClip, because 'Tracks' should be equivalent to 'Rows' in the project, rather than a single audio clip
 class AudioTrack {
-  File file;
-  File originalFile; // for gain
-  // final AudioPlayer player;
-  final PlayerController waveformController;
-  final Duration audioDuration;
+  File file; // should be the saved file name in project/audio when persisted
+  File originalFile; // might be deprecated
+  final Duration audioDuration; // consider storing these 3 duration fields in just ms? rather than duration object
   Duration trimStart;
   Duration trimEnd;
   double offset;
-  double crossfade;
-  Timer? audioStartTimer;
-  bool audioStarted;
-  List<AutomationPoint> volumeAutomation; // NEW property
-  Duration currentPosition;
+  double crossfade; // deprecated
+  Timer? audioStartTimer; // deprecated
+  bool audioStarted; // unused, should deprecate
+  List<AutomationPoint> volumeAutomation; // probably deprecated
+  Duration currentPosition; // I think deprecated/unused
   late List<double> normWaveformData;
   double gain;
-  // consider moving the below FX into a separate class
-  double reverb;
-  double echo;
+  double reverb; // deprecated
+  double echo; // deprecated
   bool didExtractWaveform;
   double y; // deprecated
   int rowIndex; // -1 = unassigned (shouldn't exist), can be 0-x where 0 is first row at top
+  String label; // UI name (renameable, non-unique)
 
   AudioTrack._({
     required this.file,
     required this.originalFile,
-    // required this.player,
-    required this.waveformController,
     required this.audioDuration,
     required this.trimStart,
     required this.trimEnd,
@@ -47,6 +43,7 @@ class AudioTrack {
     this.didExtractWaveform = false,
     this.y = 0.0,
     this.rowIndex = -1,
+    required this.label,
   })  : currentPosition = currentPosition ?? Duration.zero,
         volumeAutomation =
             volumeAutomation ?? [AutomationPoint(x: 0.0, volume: 1.0), AutomationPoint(x: 1.0, volume: 1.0)];
@@ -54,8 +51,6 @@ class AudioTrack {
   static Future<AudioTrack> create({
     required File file,
     required File originalFile,
-    // required AudioPlayer player,
-    required PlayerController waveformController,
     required Duration audioDuration,
     Duration trimStart = Duration.zero,
     Duration trimEnd = Duration.zero,
@@ -71,13 +66,12 @@ class AudioTrack {
     bool didExtractWaveform = false,
     double y = 0, // deprecated
     int rowIndex = -1,
+    required String label,
   }) async {
     // Then create instance
     return AudioTrack._(
       file: file,
       originalFile: originalFile,
-      // player: player,
-      waveformController: waveformController,
       audioDuration: audioDuration,
       trimStart: trimStart,
       trimEnd: trimEnd,
@@ -94,10 +88,13 @@ class AudioTrack {
       didExtractWaveform: didExtractWaveform,
       y: 0, // deprecated
       rowIndex: rowIndex,
+      label: label,
     );
   }
 }
 
+// consider making extendable to general automation points, not just volume
+// so can change 'volume' to 'value' or something
 class AutomationPoint {
   double x; // UPDATED: X = time in ms in the timeline.   OLD: normalized x (0.0 = left, 1.0 = right)
   double volume; // normalized volume (0.0 = silent, 1.0 = full)
@@ -116,9 +113,10 @@ class AutomationPoint {
 
 class EffectSnapshot {
   final String effectId; // name or path
+  final bool bypassed;
   final Map<String, dynamic> params;
 
-  EffectSnapshot(this.effectId, this.params);
+  EffectSnapshot(this.effectId, this.bypassed, this.params);
 }
 
 class RowEffectsSnapshot {
@@ -197,6 +195,7 @@ extension AutomationPointJson on AutomationPoint {
 extension EffectSnapshotJson on EffectSnapshot {
   Map<String, dynamic> toJson() => {
         "effectId": effectId,
+        "bypassed": bypassed,
         "params": params,
       };
 
@@ -204,6 +203,7 @@ extension EffectSnapshotJson on EffectSnapshot {
     final rawParams = (json["params"] as Map).cast<String, dynamic>();
     return EffectSnapshot(
       json["effectId"] as String,
+      json["bypassed"] as bool,
       rawParams,
     );
   }
@@ -232,5 +232,92 @@ extension MasterEffectsSnapshotJson on MasterEffectsSnapshot {
     return MasterEffectsSnapshot(
       (json["effects"] as List).map((e) => EffectSnapshotJson.fromJson((e as Map).cast<String, dynamic>())).toList(),
     );
+  }
+}
+
+// Wrappers for any metering bars
+class MeterFrame {
+  final double peakL, peakR; // 0..1
+  final double rmsL, rmsR; // 0..1
+  final bool clip; // latched clip indicator (optional)
+
+  const MeterFrame({
+    required this.peakL,
+    required this.peakR,
+    required this.rmsL,
+    required this.rmsR,
+    required this.clip,
+  });
+
+  static const zero = MeterFrame(peakL: 0, peakR: 0, rmsL: 0, rmsR: 0, clip: false);
+}
+
+class MeterBus extends ChangeNotifier {
+  final int numRows;
+
+  MeterFrame master = MeterFrame.zero;
+  late final List<MeterFrame> rows = List.filled(numRows, MeterFrame.zero, growable: false);
+
+  MeterBus({required this.numRows});
+
+  void setMaster(MeterFrame v) {
+    master = v;
+    notifyListeners();
+  }
+
+  void setRow(int row, MeterFrame v) {
+    if (row < 0 || row >= rows.length) return;
+    rows[row] = v;
+    notifyListeners();
+  }
+
+  void zeroAll() {
+    master = MeterFrame.zero;
+    for (int i = 0; i < rows.length; i++) {
+      rows[i] = MeterFrame.zero;
+    }
+    notifyListeners();
+  }
+
+  void decayAll({double mul = 0.85}) {
+    MeterFrame decay(MeterFrame f) {
+      final peakL = (f.peakL * mul);
+      final peakR = (f.peakR * mul);
+      final rmsL = (f.rmsL * mul);
+      final rmsR = (f.rmsR * mul);
+
+      // clamp tiny values to 0 to avoid infinite tail
+      double z(double v) => (v < 0.001) ? 0.0 : v;
+
+      return MeterFrame(
+        peakL: z(peakL),
+        peakR: z(peakR),
+        rmsL: z(rmsL),
+        rmsR: z(rmsR),
+        clip: false, // drop clip when stopped (simple)
+      );
+    }
+
+    master = decay(master);
+    for (int i = 0; i < rows.length; i++) {
+      rows[i] = decay(rows[i]);
+    }
+    notifyListeners();
+  }
+
+  bool get isAllZero {
+    bool frameIsZero(MeterFrame f) {
+      return f.peakL == 0.0 && f.peakR == 0.0 && f.rmsL == 0.0 && f.rmsR == 0.0 && f.clip == false;
+    }
+
+    // master
+    if (!frameIsZero(master)) return false;
+
+    // rows
+    for (final r in rows) {
+      if (!frameIsZero(r)) return false;
+    }
+
+    return true;
   }
 }

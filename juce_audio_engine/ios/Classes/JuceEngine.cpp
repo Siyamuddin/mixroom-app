@@ -176,6 +176,9 @@ void JuceEngine::shutdownEngine()
         trackAutomationNodes[t] = nullptr;
         trackGainNodes[t] = nullptr;
         trackPanNodes[t] = nullptr;
+
+        rowMeterTapNodes[t] = nullptr;
+        rowMeterTaps[t] = nullptr;
     }
 
     // Clear clip structures
@@ -197,6 +200,9 @@ void JuceEngine::shutdownEngine()
         trackAutomationProcessors[t] = nullptr;
         trackGainProcessors[t] = nullptr;
         trackPanProcessors[t] = nullptr;
+
+        rowMeterTapNodes[t] = nullptr;
+        rowMeterTaps[t] = nullptr;
     }
 
     trackBusEffectChains.clear();
@@ -305,13 +311,25 @@ void JuceEngine::ensureBusGraphInitialised()
         // trackPanProcessors[t]->prepareToPlay(sampleRate, blockSize);
         trackPanProcessors[t]->pan->setValueNotifyingHost(0.5f);
 
-        // Wire: TrackInput → Automation → TrackGain → TrackPan → MasterGain
+        // Meter tap (post-pan)
+        auto mt = std::make_unique<MeterTapProcessor>(
+            &rowMeters[t].peakL,
+            &rowMeters[t].peakR,
+            &rowMeters[t].rmsL,
+            &rowMeters[t].rmsR,
+            &rowMetersEnabled);
+
+        rowMeterTaps[t] = mt.get();
+        rowMeterTapNodes[t] = graph.addNode(std::move(mt));
+
+        // Wire: TrackInput → Automation → TrackGain → TrackPan → RowMeterTap → MasterGain
         for (int ch = 0; ch < 2; ++ch)
         {
             graph.addConnection({{trackInputNodes[t]->nodeID, ch}, {trackAutomationNodes[t]->nodeID, ch}});
             graph.addConnection({{trackAutomationNodes[t]->nodeID, ch}, {trackGainNodes[t]->nodeID, ch}});
             graph.addConnection({{trackGainNodes[t]->nodeID, ch}, {trackPanNodes[t]->nodeID, ch}});
-            graph.addConnection({{trackPanNodes[t]->nodeID, ch}, {masterGainNode->nodeID, ch}});
+            graph.addConnection({{trackPanNodes[t]->nodeID, ch}, {rowMeterTapNodes[t]->nodeID, ch}});
+            graph.addConnection({{rowMeterTapNodes[t]->nodeID, ch}, {masterGainNode->nodeID, ch}});
         }
     }
 
@@ -330,11 +348,11 @@ void JuceEngine::loadTrack(int idx, const File &file)
 
 void JuceEngine::loadClip(int clipIndex, int rowIndex, const juce::File &file)
 {
-    juceLogToFlutter("JuceEngine::loadClip");
+    // juceLogToFlutter("JuceEngine::loadClip");
 
     if (clipIndex < 0 || clipIndex >= kMaxClips)
     {
-        juceLogToFlutter("loadClip: clipIndex out of range");
+        juceLogToFlutter("loadClip: clipIndex < 0 or greater than kMaxClips");
         return;
     }
 
@@ -455,7 +473,7 @@ void JuceEngine::loadClip(int clipIndex, int rowIndex, const juce::File &file)
 // ============================================================
 void JuceEngine::removeTrack(int trackIndex)
 {
-    juceLogToFlutter(("JuceEngine::removeTrack clipIndex=" + juce::String(trackIndex)).toRawUTF8());
+    // juceLogToFlutter(("JuceEngine::removeTrack clipIndex=" + juce::String(trackIndex)).toRawUTF8());
 
     if (trackIndex < 0 || trackIndex >= trackNodes.size())
         return;
@@ -530,7 +548,7 @@ void JuceEngine::removeTrack(int trackIndex)
     if (trackIndex < clipTrackAssignments.size())
         clipTrackAssignments.remove(trackIndex); // no “ghost” assignment
 
-    juceLogToFlutter("removeTrack: clip removed, arrays compacted");
+    // juceLogToFlutter("removeTrack: clip removed, arrays compacted");
 }
 
 // ============================================================
@@ -538,7 +556,7 @@ void JuceEngine::removeTrack(int trackIndex)
 // ============================================================
 void JuceEngine::removePluginEffect(int trackIdx, int effectIndex)
 {
-    juceLogToFlutter("Hello from JuceEngine::removePluginEffect");
+    // juceLogToFlutter("Hello from JuceEngine::removePluginEffect");
     if (trackIdx < 0 || trackIdx >= trackEffectChains.size())
         return;
     auto *chain = trackEffectChains[trackIdx];
@@ -554,7 +572,7 @@ void JuceEngine::removePluginEffect(int trackIdx, int effectIndex)
 
 void JuceEngine::reorderPluginEffects(int trackIdx, int fromIndex, int toIndex)
 {
-    juceLogToFlutter("Hello from JuceEngine::reorderPluginEffects");
+    // juceLogToFlutter("Hello from JuceEngine::reorderPluginEffects");
     if (trackIdx < 0 || trackIdx >= trackEffectChains.size())
         return;
     auto *chain = trackEffectChains[trackIdx];
@@ -743,7 +761,7 @@ double JuceEngine::getTrackDuration(int trackIndex)
 // ============================================================
 juce::Array<juce::NamedValueSet> JuceEngine::getPluginParameterInfo(int trackIndex, int effectIndex)
 {
-    juceLogToFlutter("Hello from JuceEngine::getPluginParameterInfo");
+    // juceLogToFlutter("Hello from JuceEngine::getPluginParameterInfo");
     Array<NamedValueSet> results;
     if (trackIndex < 0 || trackIndex >= trackEffectChains.size())
         return results;
@@ -852,7 +870,7 @@ juce::StringArray JuceEngine::getTrackEffects(int trackIndex)
 // ============================================================
 void JuceEngine::insertPluginEffect(int trackIdx, const juce::String &pluginPath, std::function<void(bool)> callback)
 {
-    juceLogToFlutter("Hello from JuceEngine::insertPluginEffect");
+    // juceLogToFlutter("Hello from JuceEngine::insertPluginEffect");
 
     if (trackIdx < 0 || trackIdx >= trackEffectChains.size())
     {
@@ -1049,7 +1067,7 @@ void JuceEngine::setTrackVolume(int trackIdx, float volume)
 // ============================================================
 juce::String JuceEngine::exportMix(const File &outFile)
 {
-    juceLogToFlutter("Hello from JuceEngine::exportMix");
+    // juceLogToFlutter("Hello from JuceEngine::exportMix");
 
     WavAudioFormat fmt;
     auto fs = std::unique_ptr<FileOutputStream>(outFile.createOutputStream());
@@ -1168,7 +1186,7 @@ void JuceEngine::bypassTrack(int trackIndex, bool shouldBypass)
 // ============================================================
 void JuceEngine::bypassPlugin(int trackIndex, int effectIndex, bool shouldBypass)
 {
-    juceLogToFlutter("Hello from JuceEngine::bypassPlugin");
+    // juceLogToFlutter("Hello from JuceEngine::bypassPlugin");
     if (trackIndex < 0 || trackIndex >= trackEffectChains.size())
         return;
 
@@ -1184,7 +1202,7 @@ void JuceEngine::bypassPlugin(int trackIndex, int effectIndex, bool shouldBypass
 
 bool JuceEngine::getPluginBypassState(int trackIndex, int effectIndex)
 {
-    juceLogToFlutter("Hello from JuceEngine::getPluginBypassState");
+    // juceLogToFlutter("Hello from JuceEngine::getPluginBypassState");
     if (trackIndex < 0 || trackIndex >= trackEffectChains.size())
         return false;
 
@@ -1508,7 +1526,7 @@ void JuceEngine::insertTrackEffect(int trackRow,
                                    const juce::String &pluginPath,
                                    std::function<void(bool)> callback)
 {
-    juceLogToFlutter("Hello from JuceEngine::insertTrackEffect");
+    // juceLogToFlutter("Hello from JuceEngine::insertTrackEffect");
 
     if (trackRow < 0 || trackRow >= trackBusEffectChains.size())
     {
@@ -1609,7 +1627,7 @@ void JuceEngine::insertTrackEffect(int trackRow,
 
 void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
 {
-    juceLogToFlutter("Hello from JuceEngine::removeTrackEffect");
+    // juceLogToFlutter("Hello from JuceEngine::removeTrackEffect");
 
     if (trackRow < 0 || trackRow >= trackBusEffectChains.size())
         return;
@@ -1628,7 +1646,7 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
 
 void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
 {
-    juceLogToFlutter("Hello from JuceEngine::reorderTrackEffects");
+    // juceLogToFlutter("Hello from JuceEngine::reorderTrackEffects");
 
     if (trackRow < 0 || trackRow >= trackBusEffectChains.size())
         return;
@@ -1677,7 +1695,7 @@ void JuceEngine::setTrackEffectParameter(int trackRow,
                                          const juce::String &paramName,
                                          const juce::var &newValue)
 {
-    juceLogToFlutter("JuceEngine::setTrackEffectParameter");
+    // juceLogToFlutter("JuceEngine::setTrackEffectParameter");
 
     if (trackRow < 0 || trackRow >= trackBusEffectChains.size())
         return;
@@ -1847,7 +1865,7 @@ void JuceEngine::setRowPan(int row, float pan)
 void JuceEngine::insertMasterEffect(const juce::String &pluginPath,
                                     std::function<void(bool)> callback)
 {
-    juceLogToFlutter("Hello from JuceEngine::insertMasterEffect");
+    // juceLogToFlutter("Hello from JuceEngine::insertMasterEffect");
 
     if (!masterEffectChain)
         masterEffectChain = new juce::Array<AudioProcessorGraph::NodeID>();
@@ -2178,10 +2196,11 @@ void JuceEngine::rewireMasterFxChain()
     {
         for (int t = 0; t < kNumTracks; ++t)
         {
-            if (trackPanNodes[t] != nullptr)
+            auto src = rowMeterTapNodes[t]; // post-pan + metered
+            if (src != nullptr)
             {
                 for (int ch = 0; ch < 2; ++ch)
-                    graph.addConnection({{trackPanNodes[t]->nodeID, ch},
+                    graph.addConnection({{src->nodeID, ch},
                                          {entryNode->nodeID, ch}});
             }
         }
@@ -2238,7 +2257,7 @@ void JuceEngine::moveClipToRow(int clipIndex, int newRow)
 
 juce::Array<juce::NamedValueSet> JuceEngine::getTrackPluginParameterInfo(int row, int effectIndex)
 {
-    juceLogToFlutter("Hello from JuceEngine::getTrackPluginParameterInfo");
+    // juceLogToFlutter("Hello from JuceEngine::getTrackPluginParameterInfo");
     juce::Array<juce::NamedValueSet> results;
 
     if (row < 0 || row >= trackBusEffectChains.size())
@@ -2319,7 +2338,7 @@ juce::Array<juce::NamedValueSet> JuceEngine::getTrackPluginParameterInfo(int row
 
 juce::Array<juce::NamedValueSet> JuceEngine::getMasterPluginParameterInfo(int effectIndex)
 {
-    juceLogToFlutter("Hello from JuceEngine::getMasterPluginParameterInfo");
+    // juceLogToFlutter("Hello from JuceEngine::getMasterPluginParameterInfo");
     juce::Array<juce::NamedValueSet> results;
 
     if (masterEffectChain == nullptr)
@@ -2668,6 +2687,206 @@ void JuceEngine::captureOutput(float *const *output,
         buffer.copyFrom(ch, 0, output[ch], numSamples);
 
     recorderWriter->writeFromAudioSampleBuffer(buffer, 0, numSamples);
+}
+
+void JuceEngine::setMasterMeterEnabled(bool enabled)
+{
+    masterMeterEnabled.store(enabled, std::memory_order_relaxed);
+}
+
+// returns {peakL, peakR, rmsL, rmsR}
+const std::array<float, 4> JuceEngine::getMasterMeterValues()
+{
+    return {
+        masterMeter.peakL.load(std::memory_order_relaxed),
+        masterMeter.peakR.load(std::memory_order_relaxed),
+        masterMeter.rmsL.load(std::memory_order_relaxed),
+        masterMeter.rmsR.load(std::memory_order_relaxed),
+    };
+}
+
+void JuceEngine::updateMasterMeterFromOutput(const float *const *out,
+                                             int numOutCh,
+                                             int numSamples) noexcept
+{
+    if (!masterMeterEnabled.load(std::memory_order_relaxed))
+        return;
+    if (numOutCh < 2 || out == nullptr || out[0] == nullptr || out[1] == nullptr)
+        return;
+    if (numSamples <= 0)
+        return;
+
+    const float *outL = out[0];
+    const float *outR = out[1];
+
+    float peakL = 0.0f, peakR = 0.0f;
+    double sumSqL = 0.0, sumSqR = 0.0;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float l = outL[i];
+        const float r = outR[i];
+
+        const float al = std::abs(l);
+        const float ar = std::abs(r);
+
+        if (al > peakL)
+            peakL = al;
+        if (ar > peakR)
+            peakR = ar;
+
+        // clip latch (0 dBFS ≈ 1.0f)
+        if (al >= 0.999f || ar >= 0.999f)
+            masterClipLatched.store(true, std::memory_order_relaxed);
+
+        sumSqL += (double)l * (double)l;
+        sumSqR += (double)r * (double)r;
+    }
+
+    const float rmsL = (float)std::sqrt(sumSqL / (double)numSamples);
+    const float rmsR = (float)std::sqrt(sumSqR / (double)numSamples);
+
+    // light smoothing (UI jitter reduction)
+    constexpr float alpha = 0.25f;
+    auto smooth = [](float prev, float next)
+    { return prev + alpha * (next - prev); };
+
+    const float prevPeakL = masterMeter.peakL.load(std::memory_order_relaxed);
+    const float prevPeakR = masterMeter.peakR.load(std::memory_order_relaxed);
+    const float prevRmsL = masterMeter.rmsL.load(std::memory_order_relaxed);
+    const float prevRmsR = masterMeter.rmsR.load(std::memory_order_relaxed);
+
+    masterMeter.peakL.store(smooth(prevPeakL, peakL), std::memory_order_relaxed);
+    masterMeter.peakR.store(smooth(prevPeakR, peakR), std::memory_order_relaxed);
+    masterMeter.rmsL.store(smooth(prevRmsL, rmsL), std::memory_order_relaxed);
+    masterMeter.rmsR.store(smooth(prevRmsR, rmsR), std::memory_order_relaxed);
+}
+
+bool JuceEngine::getMasterClipLatched() const noexcept
+{
+    return masterClipLatched.load(std::memory_order_relaxed);
+}
+
+void JuceEngine::clearMasterClipLatched() noexcept
+{
+    masterClipLatched.store(false, std::memory_order_relaxed);
+}
+
+void JuceEngine::setRowMetersEnabled(bool enabled)
+{
+    rowMetersEnabled.store(enabled, std::memory_order_relaxed);
+}
+
+const std::array<float, 4> JuceEngine::getRowMeterValues(int row)
+{
+    if (row < 0 || row >= kNumTracks)
+        return {0, 0, 0, 0};
+
+    return {
+        rowMeters[row].peakL.load(std::memory_order_relaxed),
+        rowMeters[row].peakR.load(std::memory_order_relaxed),
+        rowMeters[row].rmsL.load(std::memory_order_relaxed),
+        rowMeters[row].rmsR.load(std::memory_order_relaxed),
+    };
+}
+
+std::vector<float> JuceEngine::getAllMeterValues() const
+{
+    constexpr int stride = 5;
+    const int total = stride * (1 + kNumTracks);
+
+    std::vector<float> out;
+    out.resize(total);
+
+    // ---- MASTER ----
+    const float mPeakL = masterMeter.peakL.load(std::memory_order_relaxed);
+    const float mPeakR = masterMeter.peakR.load(std::memory_order_relaxed);
+    const float mRmsL = masterMeter.rmsL.load(std::memory_order_relaxed);
+    const float mRmsR = masterMeter.rmsR.load(std::memory_order_relaxed);
+    const bool mClip = masterClipLatched.load(std::memory_order_relaxed);
+
+    out[0] = mPeakL;
+    out[1] = mPeakR;
+    out[2] = mRmsL;
+    out[3] = mRmsR;
+    out[4] = mClip ? 1.0f : 0.0f;
+
+    // ---- ROWS ----
+    for (int row = 0; row < kNumTracks; ++row)
+    {
+        const int base = stride * (1 + row);
+
+        out[base + 0] = rowMeters[row].peakL.load(std::memory_order_relaxed);
+        out[base + 1] = rowMeters[row].peakR.load(std::memory_order_relaxed);
+        out[base + 2] = rowMeters[row].rmsL.load(std::memory_order_relaxed);
+        out[base + 3] = rowMeters[row].rmsR.load(std::memory_order_relaxed);
+
+        // If you don’t have row clip yet, set 0 for now
+        out[base + 4] = 0.0f;
+        // If you DO have it:
+        // out[base + 4] = rowMeters[row].clip.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
+    }
+
+    return out;
+}
+
+const std::array<float, 5> JuceEngine::getClipCompressorMeter(int clipIndex, int effectIndex)
+{
+    if (clipIndex < 0 || clipIndex >= trackEffectChains.size())
+        return {0, 0, 0, 0, 0};
+
+    auto *chain = trackEffectChains[clipIndex];
+    if (!chain || effectIndex < 0 || effectIndex >= chain->size())
+        return {0, 0, 0, 0, 0};
+
+    auto nodeID = chain->getReference(effectIndex);
+    auto node = graph.getNodeForId(nodeID);
+    if (!node)
+        return {0, 0, 0, 0, 0};
+
+    if (auto *comp = dynamic_cast<CompressorAudioProcessor *>(node->getProcessor()))
+        return comp->getMeterStrip();
+
+    return {0, 0, 0, 0, 0};
+}
+
+const std::array<float, 5> JuceEngine::getRowCompressorMeter(int row, int effectIndex)
+{
+    if (row < 0 || row >= trackBusEffectChains.size())
+        return {0, 0, 0, 0, 0};
+
+    auto *chain = trackBusEffectChains[row];
+    if (!chain || effectIndex < 0 || effectIndex >= chain->size())
+        return {0, 0, 0, 0, 0};
+
+    auto nodeID = chain->getReference(effectIndex);
+    auto node = graph.getNodeForId(nodeID);
+    if (!node)
+        return {0, 0, 0, 0, 0};
+
+    if (auto *comp = dynamic_cast<CompressorAudioProcessor *>(node->getProcessor()))
+        return comp->getMeterStrip();
+
+    return {0, 0, 0, 0, 0};
+}
+
+const std::array<float, 5> JuceEngine::getMasterCompressorMeter(int effectIndex)
+{
+    if (!masterEffectChain)
+        return {0, 0, 0, 0, 0};
+
+    if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
+        return {0, 0, 0, 0, 0};
+
+    auto nodeID = masterEffectChain->getReference(effectIndex);
+    auto node = graph.getNodeForId(nodeID);
+    if (!node)
+        return {0, 0, 0, 0, 0};
+
+    if (auto *comp = dynamic_cast<CompressorAudioProcessor *>(node->getProcessor()))
+        return comp->getMeterStrip();
+
+    return {0, 0, 0, 0, 0};
 }
 
 const juce::StringArray JuceEngine::mixroomPlugins{

@@ -1,6 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:mixroom/helpers/open_mixroom_service.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path/path.dart' as p;
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/screens/audio_editor.dart';
 
@@ -11,14 +16,38 @@ class ProjectsScreen extends StatefulWidget {
   State<ProjectsScreen> createState() => _ProjectsScreenState();
 }
 
+const double kActionCardHeight = 72;
+
 class _ProjectsScreenState extends State<ProjectsScreen> {
   List<ProjectMeta> _projects = [];
   bool _loading = true;
+  StreamSubscription<String>? _importSub;
 
   @override
   void initState() {
     super.initState();
     _refresh();
+
+    // Cold start
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final initial = OpenMixroomService.consumeInitialPathOnce();
+      if (initial != null) {
+        await _importProjectFromIncomingFile(File(initial));
+      }
+    });
+
+    // Warm start
+    _importSub = OpenMixroomService.stream.listen((path) async {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _importProjectFromIncomingFile(File(path));
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _importSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _refresh() async {
@@ -32,6 +61,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     showLoadingDialog(context, message: 'Opening project…');
 
     // 2. Let UI render the dialog
+    // TODO: also an arbitrary delay to hide the blocking UI lag involved in opening the project
     await Future.delayed(const Duration(milliseconds: 300));
 
     // 3. Push editor
@@ -56,6 +86,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
     showLoadingDialog(context, message: 'Creating project…');
 
+    // TODO: arbitrary delay to prevent bad UX from (probably) unavoidable blocking UI lag when going to DAW screen
     await Future.delayed(const Duration(milliseconds: 300));
 
     final dir = await ProjectManager.createNewProjectDir(name: "Untitled Project");
@@ -103,8 +134,20 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final newName = res.trim();
     if (newName.isEmpty) return;
 
-    await ProjectManager.renameProject(meta.dir, newName);
-    await _refresh();
+    try {
+      await ProjectManager.renameProject(meta.dir, newName);
+      await _refresh();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("✅ Project renamed")),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("⚠️ Rename failed: $e")),
+      );
+    }
   }
 
   Future<void> _deleteProject(ProjectMeta meta) async {
@@ -124,6 +167,157 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     if (ok != true) return;
     await ProjectManager.deleteProject(meta.dir);
     await _refresh();
+  }
+
+  Future<void> _shareProject(ProjectMeta meta) async {
+    try {
+      showLoadingDialog(context, message: 'Exporting…');
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      final bundlePath = await ProjectBundle.exportMixroomBundle(
+        projectDir: meta.dir,
+        audioMode: BundleAudioMode.flacLossless,
+      );
+
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+
+      final params = ShareParams(
+        files: [XFile(bundlePath)],
+        // title: meta.name, // shows in some share UIs
+        // subject: meta.name, // used by some email clients
+      );
+
+      await SharePlus.instance.share(params);
+    } catch (e) {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('⚠️ Export failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _importProjectFromIncomingFile(File bundleFile) async {
+    final canCreate = await ProjectManager.canCreateNew();
+
+    if (!canCreate) {
+      _showProjectLimitDialog();
+      return;
+    }
+
+    await _importProjectFromFile(bundleFile.path);
+  }
+
+  Future<void> _importProjectFromFile(String path) async {
+    try {
+      if (!path.toLowerCase().endsWith('.mixroom')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select a .mixroom project file')),
+        );
+        return;
+      }
+      showLoadingDialog(context, message: 'Importing…');
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      // If your engine expects WAV only, use convertFlacToWav48k.
+      // If you later add FLAC support end-to-end, switch to keepAsBundled.
+      final newDir = await ProjectBundleImport.importMixroomBundle(
+        bundleFile: File(path),
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      );
+
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+
+      // Open imported project immediately (optional)
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AudioEditorScreen(mode: "Pro", projectDir: newDir),
+        ),
+      );
+
+      await _refresh();
+    } catch (e) {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('⚠️ Import failed: $e')),
+      );
+    }
+  }
+
+  Widget _compactActionCard({
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required VoidCallback? onTap,
+  }) {
+    return _GlassCard(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Icon(icon, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showProjectLimitDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF0C1A32),
+        title: const Text(
+          "Project limit reached",
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          "Delete a project to create or import a new one.",
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -163,20 +357,56 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const SizedBox(height: 12),
-                  _GlassCard(
-                    child: ListTile(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                      leading: const Icon(Icons.add_circle_outline, color: Colors.white),
-                      title: Text(
-                        canCreate ? "New Project" : "Project limit reached (5/5)",
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: SizedBox(
+                          height: kActionCardHeight,
+                          child: _compactActionCard(
+                            icon: Icons.add_circle_outline,
+                            title: canCreate ? "New Project" : "Project limit reached",
+                            subtitle: canCreate ? "Create a new project" : "Delete one to continue",
+                            onTap: () {
+                              if (!canCreate) {
+                                _showProjectLimitDialog();
+                                return;
+                              }
+                              _newProject();
+                            },
+                          ),
+                        ),
                       ),
-                      subtitle: Text(
-                        canCreate ? "Create a new project" : "Delete one to create a new project",
-                        style: const TextStyle(color: Colors.white70),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 1,
+                        child: SizedBox(
+                          height: kActionCardHeight,
+                          child: _compactActionCard(
+                            icon: Icons.file_download_outlined,
+                            title: "Import",
+                            subtitle: null,
+                            onTap: () async {
+                              if (!canCreate) {
+                                _showProjectLimitDialog();
+                                return;
+                              }
+
+                              final res = await FilePicker.platform.pickFiles(
+                                type: FileType.any,
+                                // allowedExtensions: ['mixroom', 'zip'], // allow zip just in case
+                                withData: false,
+                              );
+                              if (res == null || res.files.isEmpty) return;
+
+                              final path = res.files.single.path;
+                              if (path == null) return;
+                              _importProjectFromFile(path);
+                            },
+                          ),
+                        ),
                       ),
-                      onTap: canCreate ? _newProject : null,
-                    ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Expanded(
@@ -206,11 +436,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                     icon: const Icon(Icons.more_vert, color: Colors.white70),
                                     onSelected: (v) async {
                                       if (v == "open") await _openProject(p.dir);
+                                      if (v == "share") await _shareProject(p);
                                       if (v == "rename") await _renameProject(p);
                                       if (v == "delete") await _deleteProject(p);
                                     },
                                     itemBuilder: (_) => const [
                                       PopupMenuItem(value: "open", child: Text("Open")),
+                                      PopupMenuItem(value: "share", child: Text("Share (.mixroom)")),
                                       PopupMenuItem(value: "rename", child: Text("Rename")),
                                       PopupMenuItem(value: "delete", child: Text("Delete")),
                                     ],

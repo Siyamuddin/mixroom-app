@@ -5,7 +5,6 @@ import 'dart:isolate';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
-import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
@@ -81,7 +80,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
-import 'package:mixroom/widgets/side_menu.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -129,7 +127,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
   bool _loadedOnce = false;
 
   Duration _scrubPosition = Duration.zero;
-  bool _isScrubbing = false;
   bool _isPlaying = false;
 
   // Multi-track support
@@ -140,18 +137,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
   bool _isSyncing = false;
   double _syncProgress = 0.0;
 
-  // for bluetooth connection
-  bool _isScanning = false;
-  bool _isConnecting = false;
-  bool _deviceFound = false;
   double _downloadProgress = 0.0;
   bool _showProgressDialog = false;
   String _progressMessage = "";
   String _currentOperation = "";
-  List<String> _guitarFiles = [];
-
-  // late Ticker _ticker;
-  Duration _lastKnownPosition = Duration.zero;
 
   // A timer to update automation and the scrubber in audio-only mode.
   // NOTE: DO NOT USE TIMER class. it is not based on monotonic timer, so it will be inaccurate
@@ -165,38 +154,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
   // string of export filter to pass to effects screen
   String filterString = "";
 
-  // when press play, need to pre-warm audio, but volume should be muted during pre-warm
-  bool _preWarmState = false;
-
-  // PICK VIDEO
-  bool _isPickingFile = false; // Add this flag to track file picker state
-  bool _isLoadingVideo = false;
+  // PICK MEDIA
   bool _isLoadingAudio = false;
   bool _isLoadingNextScreen = false;
 
   StateSetter? _audioEditorStateSetter; // Store the StateSetter
 
-  // for snapping automation points to seek line
-  static const double _trimSnapPx = 8.0;
-  static const double _autoSnapNorm = 0.02;
-
-  int _expandedTrackIndex = -1;
-  int _selectedTrackIndex = -1;
-
-  Set<int> _expandedSegments = {};
-  bool _isExporting = false;
-
-  bool _showAutomationSection = false;
-
   Duration _audioOnlyOverallDuration = Duration.zero;
-
-  final _timelineScroll = ScrollController();
 
   final int kWaveformSPS = 200; // samples per second for UI
   final int kMinSamples = 1024; // ensure enough resolution for short clips
   final int kMaxSamples = 200000; // safety cap for very long files
 
+  // NOTE: these must have parity with the same variables in JuceEngine.h
+  // think about moving these numbers out so they are adjustable from externally, one source of truth
   static const int kNumRows = 5;
+  static const int kNumClips = 500; // pro-mode opportunity to restrict to arbitrary number for free ver
 
   int _selectedRow = 0; // one row always selected (by default row 0 (row 1 visually))
   int? _recordRow; // only one can be armed
@@ -207,7 +180,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
   bool _isRecording = false;
   double _recordingStartMs = 0; // project time where the recording starts
   String? _recordingFilePath; // temp recorded file (m4a/wav/etc)
-  DateTime? _recordingWallClockStart;
   Timer? _recordingPeakTimer;
 
   // for live preview waveform
@@ -223,12 +195,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
   );
   final List<bool> _rowMuted = List<bool>.filled(kNumRows, false);
   final List<bool> _rowSoloed = List<bool>.filled(kNumRows, false);
-  bool get _anySoloActive => _rowSoloed.any((s) => s);
   final List<bool> _rowExpanded = List<bool>.filled(kNumRows, false);
 
   // for copy/paste logic
-  // TODO: later this should be a quick copy in JUCE rather than a deep copy
-  File? _copiedAudioFile;
+  AudioTrack? _copiedAudioClip;
   Duration _copiedTrimStart = Duration.zero;
   Duration _copiedTrimEnd = Duration.zero;
 
@@ -282,28 +252,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
   bool _isThinking = false;
   late final MixChangeHighlighter _mixHighlighter = MixChangeHighlighter();
   bool _chatWarm = false;
-  bool _isDialogOpen = false; // to fix an issue on iPad iOS 26 where opening some dialogue would insta-close it
+  bool _isDialogOpen = false; // to fix weird issue on iPad iOS 26 where opening some dialogue would insta-close it
   bool _isMasterPopupOpen = false; // same thing as above
+
+  late final MeterBus _meters;
+  Timer? _meterTimer;
+  bool _meterPollingBusy = false; // overlap guard
+  static const int _meterStride = 5; // peakL, peakR, rmsL, rmsR, clip(0/1)
+  Timer? _meterDecayTimer;
+  bool _meterPolling = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    prewarmFFT(); // so that AI sync first run is not heavy
-    // Initialize the ticker to update every ~16ms (about 60fps)
-    // _ticker = createTicker((elapsed) async {
-    //   // Use the elapsed time to compute an interpolated position.
-    //   // For instance, add elapsed to _lastKnownPosition and update UI.
-    //   final interpolatedPosition = _lastKnownPosition + elapsed;
-    //   _updatePosition(interpolatedPosition);
-    // });
+    // prewarmFFT(); // so that AI sync first run is not heavy (this was for video/audio sync)
+
     _transportTicker = Ticker((_) {
       if (!_isPlaying) return;
-
-      // single source of truth
-      // setState(() {
-      //   _globalAudioClock = _transportBase + _transportStopwatch.elapsed;
-      // });
 
       _transportStateSetter?.call(() {
         _globalAudioClock = _transportBase + _transportStopwatch.elapsed;
@@ -390,6 +356,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
       });
     });
 
+    _meters = MeterBus(numRows: kNumRows);
+    // _startMeterPolling();
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       setState(() => _isLoadingNextScreen = true);
       JuceAudioEngine.initialise(); // heavy blocking native call
@@ -399,103 +368,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     });
   }
 
-  // Future<void> _startTicker() async {
-  //   // Stop any previous ticker.
-  //   _ticker.stop();
-  //   // Get the current position from the video controller.
-  //   _lastKnownPosition = _scrubPosition; //_videoController!.value.position;
-  //   _ticker.start();
-  // }
-
-  // Future<void> _stopTicker() async {
-  //   _ticker.stop();
-  // }
-
-  // void _updatePosition(Duration position) async {
-  //   // setState(() {
-  //   // Update scrubPosition at a high frequency.
-  //   WidgetsBinding.instance.addPostFrameCallback((_) async {
-  //     _scrubPosition = position;
-  //     if (position.inMilliseconds > _scrubPosition.inMilliseconds) {
-  //       // _scrubPosition = duration;
-  //       for (var track in _audioTracks) {
-  //         // track.player.pause();
-  //         track.audioStarted = false;
-  //       }
-  //       JuceAudioEngine.pause();
-  //       // Optionally update _isPlaying state if needed.
-  //       _isPlaying = false;
-  //       _pausePlayback();
-  //       _stopTicker();
-  //     }
-  //     // });
-
-  //     if (!_isScrubbing && mounted && _isPlaying) {
-  //       for (int i = 0; i < _audioTracks.length; i++) {
-  //         final track = _audioTracks[i];
-  //         final seconds = await JuceAudioEngine.getCurrentPosition(i);
-  //         track.currentPosition = Duration(microseconds: (seconds * 1e6).round());
-
-  //         if (track.currentPosition >= track.trimEnd) {
-  //           await JuceAudioEngine.bypassTrack(i, true);
-  //           continue;
-  //         }
-
-  //         // NOTE THAT this drift doesn't indicate the true distance between the video
-  //         // and audio because the ticker is slightly off from the video
-  //         // print("drift: ${((_videoPosition - track.currentPosition).inMilliseconds/10).round()/100}");
-
-  //         final offsetDuration = Duration(milliseconds: (track.offset * 1000).toInt());
-  //         if (position >= offsetDuration) {
-  //           // Calculate how far the audio has progressed relative to its trim range.
-  //           final effectiveTime = position - offsetDuration;
-  //           final effectiveDuration = track.trimEnd - track.trimStart;
-  //           double normalizedTime = effectiveDuration.inMilliseconds > 0
-  //               ? effectiveTime.inMilliseconds / effectiveDuration.inMilliseconds
-  //               : 0.0;
-  //           normalizedTime = normalizedTime.clamp(0.0, 1.0);
-
-  //           // Compute the new volume from the automation curve.
-  //           double newVolume = getVolumeForAutomation(track.volumeAutomation, normalizedTime);
-
-  //           // Optionally, combine this with your universal crossfade if desired.
-  //           // For example, multiply with _universalCrossfade:
-  //           newVolume *= min(1.0, _universalCrossfade * 2);
-
-  //           // COMMENT OUT BECAUSE WE DO MAKE A NEW MP3 TIME GAIN IS CHANGED
-  //           newVolume *= track.gain; // adjust for gain // this should not be above 1.0
-
-  //           // SETVOLUME (1.0>) LEADS TO BUG IN THIS AUDIO PKG
-  //           // Update the audio track volume.
-  //           if (!_preWarmState) {
-  //             // track.player.setVolume(newVolume);
-  //             JuceAudioEngine.setTrackVolume(i, newVolume);
-  //             //KIND OF BUG WHERE IF YOU SET A TRACK VOLUME BUT YOU DON'T PLAY IT BEFORE EXPORTING, IT WON'T APPLY
-  //           }
-
-  //           // If the track hasn’t started yet, start it.
-  //           if (!track.audioStarted) {
-  //             continue;
-  //           }
-  //         }
-  //       }
-  //     }
-  //   });
-  // }
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // _ticker.dispose();
     _amplitudeSub?.cancel();
     _micRecorder.dispose();
     for (var track in _audioTracks) {
-      // track.player.dispose();
-      track.waveformController.dispose();
       track.audioStartTimer?.cancel();
     }
     _transportTicker?.dispose();
 
+    _stopMeterPolling(decayToZero: false);
+    _meterTimer?.cancel();
+    _meterTimer = null;
+    _meterDecayTimer?.cancel();
+    _meters.dispose();
     // JuceAudioEngine.shutdown();
     // print("JUCE shutdown called");
     super.dispose();
@@ -509,7 +396,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
       } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
         debugPrint("App Paused or Inactive on Android - Disposing.");
         _pausePlayback();
-        // _stopTicker();
+        setState(() {
+          _isPlaying = false;
+        });
+      }
+    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+      if (state == AppLifecycleState.resumed) {
+        // debugPrint("App Resumed on iOS");
+      } else if (state == AppLifecycleState.paused) {
+        //} || state == AppLifecycleState.inactive) {
+        // debugPrint("App Paused or Inactive on iOS");
+        _pauseAudio(_audioEditorStateSetter!);
         setState(() {
           _isPlaying = false;
         });
@@ -539,6 +436,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
       for (final t in tracks) {
         final map = (t as Map).cast<String, dynamic>();
         final fileName = map["fileName"] as String;
+        final label = map["label"] as String;
         final rowIndex = (map["rowIndex"] as int?) ?? 0;
 
         final trimStartMs = (map["trimStartMs"] as int?) ?? 0;
@@ -557,16 +455,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
           continue;
         }
 
-        // This uses your existing pipeline (FFmpeg to temp wav, loadClip into JUCE, PlayerController)
-        await _addAudioTrackFromFile(
-          audioFile,
-          rowIndex,
-          offsetSec * 1000.0,
+        await _addAudioTrackFromProjectFile(
+          projectAudioFile: audioFile,
+          label: label,
+          row: rowIndex,
+          timeMs: offsetSec * 1000.0,
           trimStartRequested: Duration(milliseconds: trimStartMs),
           trimEndRequested: Duration(milliseconds: trimEndMs),
+          gain: gain,
+          crossfade: crossfade,
+          automation: automation.isNotEmpty ? automation : null,
         );
 
         // After _addAudioTrackFromFile, the newest track is last
+        // I think this code is deprecated
         final tr = _audioTracks.last;
         tr.crossfade = crossfade;
         tr.gain = gain;
@@ -640,7 +542,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
       for (int i = 0; i < _audioTracks.length; i++) {
         final tr = _audioTracks[i];
 
-        final src = tr.originalFile.existsSync() ? tr.originalFile : tr.file;
+        // final src = tr.originalFile.existsSync() ? tr.originalFile : tr.file;
+        final src = tr.file;
 
         if (!src.existsSync()) continue;
 
@@ -656,6 +559,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
 
         tracksJson.add({
           "fileName": fileName, //tr.file.path,
+          "label": tr.label, // what user sees, doesn't have to be unique
           "trimStartMs": tr.trimStart.inMilliseconds,
           "trimEndMs": tr.trimEnd.inMilliseconds,
           "offset": tr.offset,
@@ -666,8 +570,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
         });
       }
 
-      // Capture FX snapshots
-      final usedRows = _audioTracks.map((t) => t.rowIndex).where((r) => r >= 0).toSet().toList()..sort();
+      // Garbage collect unreferenced audio files
+      final referenced = _audioTracks.map((t) => p.basename(t.file.path)).whereType<String>().toSet();
+      final files = audioDir.listSync().whereType<File>();
+      for (final f in files) {
+        final name = p.basename(f.path);
+        if (!referenced.contains(name)) {
+          try {
+            await f.delete();
+          } catch (_) {}
+        }
+      }
+
+      // Capture FX snapshots (maybe don't do this since it is destructive, user could have FX chains on empty rows)
+      // final usedRows = _audioTracks.map((t) => t.rowIndex).where((r) => r >= 0).toSet().toList()..sort();
+      final usedRows = List<int>.generate(kNumRows, (i) => i);
 
       final rowFx = <Map<String, dynamic>>[];
       for (final r in usedRows) {
@@ -751,6 +668,108 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     fft.realFft(paddedDummy);
   }
 
+  void _startMeterPolling() {
+    if (_meterPolling) return;
+    _meterPolling = true;
+
+    _meterTimer?.cancel();
+    _meterDecayTimer?.cancel();
+
+    _meterTimer = Timer.periodic(const Duration(milliseconds: 33), (_) async {
+      // prevent overlapping async ticks (super important)
+      if (!_meterPolling) return; // stopped mid-flight
+      if (_meterPollingBusy) return; // prevent overlap
+      _meterPollingBusy = true;
+
+      try {
+        final packed = await JuceAudioEngine.getAllMeterValues();
+        if (!_meterPolling || packed.isEmpty) return;
+
+        // expected length: 5 * (1 + kNumRows)
+        final stride = _meterStride;
+
+        // ---- MASTER ----
+        if (packed.length >= stride) {
+          final m0 = 0;
+
+          _meters.setMaster(
+            MeterFrame(
+              peakL: packed[m0 + 0].clamp(0.0, 1.0),
+              peakR: packed[m0 + 1].clamp(0.0, 1.0),
+              rmsL: packed[m0 + 2].clamp(0.0, 1.0),
+              rmsR: packed[m0 + 3].clamp(0.0, 1.0),
+              clip: packed[m0 + 4] > 0.5,
+            ),
+          );
+        }
+
+        // ---- ROWS ----
+        // Use whichever source of truth you already have:
+        // - kNumRows (your constant)
+        // - or _meters.rows.length
+        final rowCount = kNumRows; // or: _meters.rows.length
+
+        for (int row = 0; row < rowCount; row++) {
+          final base = stride * (1 + row);
+          if (base + 4 >= packed.length) break;
+
+          _meters.setRow(
+            row,
+            MeterFrame(
+              peakL: packed[base + 0].clamp(0.0, 1.0),
+              peakR: packed[base + 1].clamp(0.0, 1.0),
+              rmsL: packed[base + 2].clamp(0.0, 1.0),
+              rmsR: packed[base + 3].clamp(0.0, 1.0),
+              clip: packed[base + 4] > 0.5,
+            ),
+          );
+        }
+      } catch (_) {
+        // ignore transient channel errors
+      } finally {
+        _meterPollingBusy = false;
+      }
+    });
+  }
+
+  void _stopMeterPolling({bool decayToZero = true}) {
+    _meterPolling = false;
+    _meterTimer?.cancel();
+    _meterTimer = null;
+
+    // in case we stopped while an await was in-flight
+    _meterPollingBusy = false;
+
+    if (!decayToZero) {
+      _meterDecayTimer?.cancel();
+      _meters.zeroAll();
+      return;
+    }
+
+    _startMeterDecayToZero();
+  }
+
+  void _startMeterDecayToZero() {
+    _meterDecayTimer?.cancel();
+
+    // ~30fps-ish but cheap
+    _meterDecayTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
+      // if we started polling again, stop decaying
+      if (_meterPolling) {
+        _meterDecayTimer?.cancel();
+        _meterDecayTimer = null;
+        return;
+      }
+
+      _meters.decayAll(mul: 0.82); // tweak feel: 0.75 faster, 0.9 slower
+
+      if (_meters.isAllZero) {
+        _meterDecayTimer?.cancel();
+        _meterDecayTimer = null;
+      }
+    });
+  }
+
   /// Calculate effective audio position for a given track based on video position.
   Duration _calculateEffectiveAudioPositionForTrack(AudioTrack track, Duration videoPos) {
     final offsetDuration = Duration(milliseconds: (track.offset * 1000).toInt());
@@ -788,9 +807,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     }
   }
 
-  // TODO: slight chance that JuceAudioEngine.play and the _globalAudioClock could have a slight mismatch (sometimes)
+  // TODO: maybe fixed already but slight chance that JuceAudioEngine.play and the _globalAudioClock could have a slight mismatch (sometimes)
   // think for play -> pause -> play -> pause... chance they could desync until a seek event matches them
-  // try get to sync more consistently
   // in cases where mismatch, the JUCE is always early and the UI lags. so try to do UI calculations first and then play JUCE
   // usually seems to happen after opening effects maybe? i don't know
   Future<void> _resumeAudio(StateSetter setLocalState) async {
@@ -867,6 +885,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
       ..start();
 
     _transportTicker?.start();
+
+    _startMeterPolling();
   }
 
   Future<void> _pauseAudio(StateSetter setLocalState) async {
@@ -880,6 +900,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
       track.audioStarted = false; // Reset flag on pause so that resume triggers play.
     }
     JuceAudioEngine.pause();
+
+    _stopMeterPolling();
   }
 
   Future<void> _restartAudio(StateSetter setLocalState) async {
@@ -912,9 +934,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
       _globalAudioClock = newStartPoint;
       _isPlaying = false;
     });
+
+    _stopMeterPolling();
   }
 
-  // deprecated I think? maybe some parts of it should be refactored elsewhere
+  // basically calling this every 'frame' to see if every audio clip should start, remain playing, or be paused
+  // pretty unscaleable/overkill, so move this to JUCE
   void _updateAudioAutomation(Duration globalClock) {
     for (int i = 0; i < _audioTracks.length; i++) {
       final track = _audioTracks[i];
@@ -946,56 +971,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
       }
       track.currentPosition = effectiveAudioPos;
     }
-  }
-
-  Widget _buildTimeDisplay() {
-    // if ((_videoController == null || !_videoController!.value.isInitialized) && betterController == null) {
-    //   return const SizedBox.shrink();
-    // }
-
-    //stuff for audio-only
-    Duration overallDuration = Duration.zero;
-    if (_audioTracks.isNotEmpty) {
-      overallDuration = _audioTracks.map((track) {
-        final offsetDuration = Duration(milliseconds: (track.offset * 1000).round());
-        final trackDuration = track.trimEnd - track.trimStart;
-        return offsetDuration + trackDuration;
-      }).reduce((a, b) => a > b ? a : b);
-    }
-
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFF3A3A3A), // slightly lighter than black
-          borderRadius: BorderRadius.circular(30),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _formatDuration(_scrubPosition), //_audioOnly ? _globalAudioClock : _videoPosition),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                letterSpacing: 0.5,
-              ),
-            ),
-            const SizedBox(width: 6),
-            const Text(
-              '/',
-              style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.normal),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              _formatDuration(overallDuration),
-              style: const TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.normal),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   // Pause helper
@@ -1266,14 +1241,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
 
   // THINGS FOR AI SYNC END-----
 
-  Future<void> createWaveformData(AudioTrack track, double width) async {
-    final sampleCount = PlayerWaveStyle().getSamplesForWidth(width);
-    final rawData = await track.waveformController.extractWaveformData(path: track.file.path, noOfSamples: sampleCount);
-    setState(() {
-      track.normWaveformData = normalizeWaveform(rawData);
-    });
-  }
-
   List<double> normalizeWaveform(List<double> data) {
     if (data.isEmpty) return [];
 
@@ -1309,253 +1276,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
       final f = t - a;
       return data[a] * (1.0 - f) + data[b] * f;
     });
-  }
-
-  Widget _buildWaveformWithTrim(int index, AudioTrack track, Duration fullDuration) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double boxWidth = constraints.maxWidth;
-        final double paddingH = 10.0;
-        final double effectiveWidth = boxWidth - (2 * paddingH);
-        final double totalMs = fullDuration.inMilliseconds.toDouble();
-
-        if (totalMs <= 0) {
-          return SizedBox(width: boxWidth, height: 80.0);
-        }
-
-        final ValueNotifier<double> trimStartNotifier = ValueNotifier(track.trimStart.inMilliseconds.toDouble());
-        final ValueNotifier<double> trimEndNotifier = ValueNotifier(track.trimEnd.inMilliseconds.toDouble());
-
-        // if(track.normWaveformData.isEmpty) {
-        //   createWaveformData(track, boxWidth);
-        // }
-        if (!track.didExtractWaveform) {
-          track.didExtractWaveform = true; // guard so we only ever do it once
-          final samples = PlayerWaveStyle().getSamplesForWidth(boxWidth);
-          // initialize it cuz on android it takes a long time to extract waveformdata
-          track.normWaveformData = List<double>.filled(samples, 1.0, growable: false);
-          track.waveformController.extractWaveformData(path: track.file.path, noOfSamples: samples).then((raw) {
-            setState(() {
-              if (Platform.isAndroid) {
-                final shaped = resampleLinear(raw, samples);
-                track.normWaveformData = normalizeWaveform(shaped);
-              } else {
-                track.normWaveformData = normalizeWaveform(raw);
-              }
-            });
-          }).catchError((e) {
-            print("Waveform extraction failed: $e");
-          });
-        }
-
-        return ValueListenableBuilder<double>(
-          valueListenable: trimStartNotifier,
-          builder: (context, trimStartMs, child) {
-            return ValueListenableBuilder<double>(
-              valueListenable: trimEndNotifier,
-              builder: (context, trimEndMs, child) {
-                final double trimmedDurationMs = trimEndMs - trimStartMs;
-                return SizedBox(
-                  height: 80,
-                  width: boxWidth,
-                  child: Stack(
-                    children: [
-                      // ✅ Waveform
-                      Positioned.fill(
-                        // left: 0,//paddingH,
-                        // top: 0,
-                        // width: effectiveWidth,
-                        // height: 80,
-                        child: AudioFileWaveforms(
-                          // key: ValueKey(track.file.path + String(track.normWaveformData.hashCode)),
-                          key: ValueKey('${track.file.path}_${track.normWaveformData.hashCode}'),
-                          size: Size(effectiveWidth, 80),
-                          waveformData: track.normWaveformData, // NEW CHANGE
-                          playerController: track.waveformController,
-                          continuousWaveform: false,
-                          enableSeekGesture: false,
-                          waveformType: WaveformType.fitWidth,
-                          playerWaveStyle: const PlayerWaveStyle(seekLineColor: Color(0xFF888888), showSeekLine: false),
-                        ),
-                      ),
-                      // seek line for waveform
-                      Positioned.fill(
-                        child: CustomPaint(
-                          painter: _WaveformSeekLinePainter(
-                            // videoPosition: _audioOnly ? _globalAudioClock : _videoPosition, // big change
-                            audioPosition: track.currentPosition,
-                            trimStart: track.trimStart,
-                            trimEnd: track.trimEnd,
-                            totalAudioDuration: fullDuration,
-                            lineColor: Color.fromARGB(255, 255, 255, 255),
-                          ),
-                        ),
-                      ),
-                      // ✅ Left shading (Before Trim Start)
-                      Positioned(
-                        left: 0, //paddingH,
-                        top: 0,
-                        bottom: 0,
-                        width: effectiveWidth * (trimStartMs / totalMs),
-                        child: Container(color: Colors.black.withOpacity(0.3)),
-                      ),
-
-                      // ✅ Right shading (After Trim End)
-                      Positioned(
-                        left: paddingH + effectiveWidth * (trimEndMs / totalMs),
-                        top: 0,
-                        bottom: 0,
-                        right: 0, //paddingH,
-                        child: Container(color: Colors.black.withOpacity(0.3)),
-                      ),
-
-                      // ✅ Trim Start Handle
-                      _buildTrimHandle(
-                        left: paddingH + (effectiveWidth * (trimStartMs / totalMs)),
-                        onDragUpdate: (dx) {
-                          double newTrimStart = trimStartMs + (dx / effectiveWidth) * totalMs;
-                          newTrimStart = newTrimStart.clamp(0, trimEndMs - 100);
-
-                          // // --- SNAP LOGIC START ---
-                          // // Compute current seek‐line X within this trimmed waveform
-                          // final effectiveTimeMs = (_videoPosition.inMilliseconds - (track.offset * 1000)).clamp(0, trimmedDurationMs);
-                          // final double seekX = paddingH + effectiveWidth * ((trimStartMs + effectiveTimeMs) / totalMs);
-                          // final double handleX = paddingH + effectiveWidth * (newTrimStart / totalMs);
-                          // if ((handleX - seekX).abs() < _trimSnapPx) {
-                          //   newTrimStart = ((seekX - paddingH) / effectiveWidth) * totalMs;
-                          // }
-                          // // --- SNAP LOGIC END ---
-
-                          trimStartNotifier.value = newTrimStart;
-                          track.trimStart = Duration(milliseconds: newTrimStart.round());
-
-                          final effectivePos = _calculateEffectiveAudioPositionForTrack(
-                            track,
-                            _globalAudioClock,
-                          ); //or _scrubPosition
-                          JuceAudioEngine.seek(index, effectivePos.inMicroseconds / 1e6);
-                          track.currentPosition = effectivePos;
-                        },
-                      ),
-
-                      // ✅ Trim End Handle
-                      _buildTrimHandle(
-                        left: paddingH + (effectiveWidth * (trimEndMs / totalMs)),
-                        onDragUpdate: (dx) {
-                          double newTrimEnd = trimEndMs + (dx / effectiveWidth) * totalMs;
-                          newTrimEnd = newTrimEnd.clamp(trimStartMs + 100, totalMs);
-
-                          // // --- SNAP LOGIC START ---
-                          // final effectiveTimeMs = (_videoPosition.inMilliseconds - (track.offset * 1000)).clamp(0, trimmedDurationMs);
-                          // final double seekX = paddingH
-                          //   + effectiveWidth * ((trimStartMs + effectiveTimeMs) / totalMs);
-                          // final double handleX = paddingH + effectiveWidth * (newTrimEnd / totalMs);
-                          // if ((handleX - seekX).abs() < _trimSnapPx) {
-                          //   newTrimEnd = ((seekX - paddingH) / effectiveWidth) * totalMs;
-                          // }
-                          // // --- SNAP LOGIC END ---
-
-                          trimEndNotifier.value = newTrimEnd;
-                          track.trimEnd = Duration(milliseconds: newTrimEnd.round());
-
-                          final effectivePos = _calculateEffectiveAudioPositionForTrack(
-                            track,
-                            _globalAudioClock,
-                          ); //or _scrubPosition
-                          JuceAudioEngine.seek(index, effectivePos.inMicroseconds / 1e6);
-                          track.currentPosition = effectivePos;
-                        },
-                      ),
-                    ],
-                  ),
-                );
-              },
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildTrimHandle({required double left, required Function(double) onDragUpdate}) {
-    return Positioned(
-      left: left - 10,
-      top: 0,
-      bottom: 0,
-      child: GestureDetector(
-        onHorizontalDragUpdate: (details) {
-          onDragUpdate(details.delta.dx);
-        },
-        onHorizontalDragEnd: (details) {
-          // ✅ Immediately refresh UI when user stops dragging
-          setState(() {});
-        },
-        child: Container(width: 20, height: 80, color: Color(0x80B03A2E)),
-      ),
-    );
-  }
-
-  // 2. Progress and error handling methods
-  void _showProgress(String message) {
-    if (mounted) {
-      setState(() {
-        _progressMessage = message;
-        _showProgressDialog = true;
-        _downloadProgress = 0.0;
-      });
-    }
-  }
-
-  void _updateDownloadProgress(int bytesReceived, [int? totalBytes]) {
-    if (mounted) {
-      setState(() {
-        if (totalBytes != null) {
-          _downloadProgress = bytesReceived / totalBytes;
-        }
-        _progressMessage = "Downloading... ${(_downloadProgress * 100).toStringAsFixed(1)}%";
-      });
-    }
-  }
-
-  void _hideProgress() {
-    if (mounted) {
-      setState(() {
-        _showProgressDialog = false;
-        _downloadProgress = 0.0;
-      });
-    }
-  }
-
-  void _showError(String message) {
-    _hideProgress();
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 3)));
-    }
-    print("Error: $message");
-  }
-
-  void _showOpenSettingsPrompt() {
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Bluetooth Required"),
-        content: Text("Please enable Bluetooth to connect to your instrument"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(L10n.translate(context, 'Cancel'))),
-          // TextButton(
-          //   onPressed: () {
-          //     Navigator.pop(context);
-          //     FlutterBluePlus.openBluetoothSettings();
-          //   },
-          //   child: Text("Open Settings"),
-          // ),
-        ],
-      ),
-    );
   }
 
   // 4. Progress Indicator Widget (add to your build method)
@@ -1599,14 +1319,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     }
 
     // 4) Prepare file path (CHANGE → WAV)
-    final tmpDir = await getTemporaryDirectory();
-    final filePath = '${tmpDir.path}/mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav';
+    final audioDir = ProjectManager.audioDir(_projectDir);
+    if (!await audioDir.exists()) await audioDir.create(recursive: true);
+    final filePath = p.join(audioDir.path, 'mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav');
 
     // 5) Start JUCE recording (NEW)
     final ok = await JuceAudioEngine.startRecording(
       filePath,
       _selectedChannelStart,
-      2, //_selectedChannelCount, TODO: (TEMP TO ALLOW NANOCORTEX RECORDING)
+      2, //_selectedChannelCount, TODO: (TEMP TO ALLOW NANOCORTEX RECORDING) (do the 1+2, 3+4 selection stuff)
     );
 
     print("printing $_selectedChannelStart $_selectedChannelCount");
@@ -1619,7 +1340,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     // 6) UI state (UNCHANGED)
     setState(() {
       _recordingFilePath = filePath;
-      _recordingWallClockStart = DateTime.now();
       _isRecording = true;
     });
 
@@ -1645,8 +1365,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     // 1) Stop JUCE recorder
     await JuceAudioEngine.stopRecording();
 
-    final recordedPath = _recordingFilePath;
-    if (recordedPath == null || !File(recordedPath).existsSync()) {
+    if (_recordingFilePath == null || !File(_recordingFilePath!).existsSync()) {
       setState(() {
         _isRecording = false;
         _recordingFilePath = null;
@@ -1661,26 +1380,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     final int row = _recordRow ?? 0;
     final double startMs = _recordingStartMs;
 
-    // final appDocs = await getApplicationDocumentsDirectory();
-    // final processedPath = '${appDocs.path}/mixroom_rec_processed_${DateTime.now().millisecondsSinceEpoch}.wav';
-
-    // setState(() {
-    //   _isRecording = false;
-    //   _recordingFilePath = processedPath; //recordedPath;
-    // });
-
-    final appDocs = await getApplicationDocumentsDirectory();
-    final processedPath = '${appDocs.path}/mixroom_rec_processed_${DateTime.now().millisecondsSinceEpoch}.wav';
-
-    // ACTUALLY CREATE THE FILE
-    // await FFmpegKit.execute(
-    //   '-y -i "$recordedPath" "$processedPath"',
-    // );
-    await File(recordedPath).copy(processedPath);
-
     setState(() {
       _isRecording = false;
-      _recordingFilePath = processedPath;
     });
 
     // 2) Insert recorded clip (UNCHANGED)
@@ -1696,7 +1397,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
           }) =>
               _addAudioTrackFromFile(file, row, timeMs),
           tracks: _audioTracks,
-          file: File(processedPath), //recordedPath),
+          file: File(_recordingFilePath!),
           row: row,
           timeMs: startMs,
         ),
@@ -1712,232 +1413,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     }
   }
 
-  Future<void> _startRecording() async {
-    // 1) Require an armed row
-    if (_recordRow == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Select a track to record on first.'),
-        ), //L10n.translate(context, 'Select a track to record on first.'))),
-      );
-      return;
-    }
-
-    // 2) Mic permission
-    final hasPerm = await _micRecorder.hasPermission();
-    if (!hasPerm) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Microphone permission is required to record.'),
-        ), //L10n.translate(context, 'Microphone permission is required to record.'))),
-      );
-      return;
-    }
-
-    // 3) Determine where in the project we start recording
-    _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
-
-    // 4) If not already playing, start playback from current position
-    if (!_isPlaying) {
-      await _togglePlayPauseAudio(_audioEditorStateSetter!); // this sets _isPlaying = true and starts automation
-    }
-
-    // 5) Prepare file path
-    final tmpDir = await getTemporaryDirectory();
-    final filePath = '${tmpDir.path}/mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.m4a'; // should be wav?
-
-    // 6) Start recorder (48 kHz, AAC)
-    // await _micRecorder.start(
-    //   path: filePath,
-    //   encoder: AudioEncoder.aacLc,
-    //   bitRate: 128000,
-    //   samplingRate: 48000,
-    // );
-
-    await _micRecorder.start(const RecordConfig(), path: filePath);
-
-    // 7) Listen to amplitude for live preview (simple peak list 0..1)
-    _amplitudeSub?.cancel();
-    _recordingPeaks = [];
-    _amplitudeSub = _micRecorder.onAmplitudeChanged(const Duration(milliseconds: 50)).listen((amp) {
-      // amp.current is in dBFS, approx [-160..0], we map ~[-45..0] → [0..1]
-      final normalized = (((amp.current ?? -45.0) + 45.0) / 45.0).clamp(0.0, 1.0);
-      setState(() {
-        _recordingPeaks.add(normalized);
-      });
-    });
-
-    setState(() {
-      _recordingFilePath = filePath;
-      _recordingWallClockStart = DateTime.now();
-      _isRecording = true;
-    });
-  }
-
-  Future<void> _stopRecording({bool keepPlaying = true}) async {
-    if (!_isRecording) return;
-
-    _amplitudeSub?.cancel();
-    _amplitudeSub = null;
-
-    String? recordedPath;
-    try {
-      recordedPath = await _micRecorder.stop();
-    } catch (e) {
-      debugPrint("Recorder stop error: $e");
-    }
-
-    if (recordedPath == null || !File(recordedPath).existsSync()) {
-      setState(() {
-        _isRecording = false;
-        _recordingPeaks = [];
-        _recordingFilePath = null;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Recording failed or no data captured.'),
-        ), //L10n.translate(context, 'Recording failed or no data captured.'))),
-      );
-      return;
-    }
-
-    final int? row = _recordRow;
-    final double startMs = _recordingStartMs;
-
-    setState(() {
-      _isRecording = false;
-      _recordingPeaks = [];
-      _recordingFilePath = recordedPath;
-    });
-
-    // 1) Insert the recorded clip into the project using your existing pipeline
-    try {
-      // await _addAudioTrackFromFile(
-      //   File(recordedPath),
-      //   row ?? 0,
-      //   startMs,
-      // );
-
-      await _undoManager.execute(
-        AddAudioTrackAction(
-          addTrack: ({
-            required File file,
-            required int row,
-            required double timeMs,
-            Duration? trimStartRequested,
-            Duration? trimEndRequested,
-          }) =>
-              _addAudioTrackFromFile(file, row, timeMs),
-          tracks: _audioTracks,
-          file: File(recordedPath),
-          row: row ?? 0,
-          timeMs: startMs,
-        ),
-      );
-    } catch (e) {
-      debugPrint("Error adding recorded track: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to add recorded track.'),
-        ), //L10n.translate(context, 'Failed to add recorded track.'))),
-      );
-    }
-
-    // 2) Optionally stop playback too (if user pressed pause/record)
-    if (!keepPlaying && _isPlaying) {
-      await _togglePlayPauseAudio(_audioEditorStateSetter!);
-    }
-  }
-
-  // DEPRECATED
-  // Instead of the deprecated single-audio _pickAudioFile, use _addAudioTrack.
-  Future<void> _addAudioTrack() async {
-    _pausePlayback();
-    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
-    if (result != null && result.files.isNotEmpty && result.files.single.path != null) {
-      setState(() {
-        _isLoadingAudio = true;
-      });
-
-      final newFile = File(result.files.single.path!);
-      // final newPlayer = AudioPlayer();
-      // NEW
-
-      // TODO: figure out if there's setup required for juce like below
-      // await newPlayer.setAudioContext(AudioContext(
-      //   android: AudioContextAndroid(
-      //     usageType: AndroidUsageType.media,
-      //     contentType: AndroidContentType.music,
-      //     audioFocus: AndroidAudioFocus.none, // because of android vid play issue
-      //     isSpeakerphoneOn: true, // because of android vid play issue
-      //   ),
-      // ));
-
-      // make it always 48k sample rate
-      final tmpDir = await getTemporaryDirectory();
-      final baseName = newFile.path.split('/').last;
-      // final resampledPath = '${tmpDir.path}/$baseName';
-
-      final baseNameNoExt = baseName.contains('.') ? baseName.substring(0, baseName.lastIndexOf('.')) : baseName;
-      final resampledPath = '${tmpDir.path}/$baseNameNoExt.wav';
-
-      // 1) Transcode to 48 kHz PCM WAV (fast, one‐time cost):
-      await FFmpegKit.execute(
-        '-i "${newFile.path}" -ar 48000 -y "$resampledPath"', // DO .WAV
-      );
-      final newFile_48 = File(resampledPath);
-
-      // await newPlayer.setSourceDeviceFile(newFile.path);
-      // final dur = await newPlayer.getDuration() ?? Duration.zero;
-
-      // await JuceAudioEngine.loadTrack(_audioTracks.length, newFile_48.path);
-      await JuceAudioEngine.loadClip(_audioTracks.length, _selectedRow, newFile_48.path);
-
-      // final dur = await JuceAudioEngine.getTrackDuration(0);
-      final durSeconds = await JuceAudioEngine.getTrackDuration(_audioTracks.length);
-      final dur = Duration(milliseconds: (durSeconds * 1000).round());
-
-      final newController = PlayerController();
-      await newController.preparePlayer(path: newFile_48.path);
-
-      // Create a new AudioTrack instance with a fixed audioDuration.
-      final newTrack = await AudioTrack.create(
-        file: newFile_48,
-        originalFile: newFile_48,
-        // player: newPlayer,
-        waveformController: newController,
-        audioDuration: dur, // Fixed duration for this track.
-        trimStart: Duration.zero,
-        trimEnd: dur,
-        offset: 0.0,
-        crossfade: 1.0,
-        rowIndex: _selectedRow,
-      );
-
-      _startWaveformExtraction(newTrack);
-
-      // Listen to the player's position to pause it when trimEnd is reached.
-      // NOTE: THIS WAS INTENDED TO UPDATE CURRENTPOS SO THAT SEEK LINES PROGRESS BASED ON THIS VAL
-      // newPlayer.onPositionChanged.listen((position) {
-      //   setState(() {
-      //     newTrack.currentPosition = position;
-      //   });
-      //   if (_isPlaying && position >= newTrack.trimEnd) {
-      //     newPlayer.pause();
-      //   }
-      // });
-
-      setState(() {
-        newTrack.offset = _globalAudioClock.inMilliseconds.toDouble() / 1000.0; // place it where the playhead is
-        _audioTracks.add(newTrack);
-        _isLoadingAudio = false;
-      });
-      _updateOverallDurationIfNeeded();
-    }
-  }
-
-  // this executes a deep copy, which is inefficient for a DAW
-  // do a shallow copy in JUCE layer later
   Future<void> _addAudioTrackFromFile(
     File fromFile,
     int row,
@@ -1945,6 +1420,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     Duration? trimStartRequested,
     Duration? trimEndRequested,
   }) async {
+    if (_audioTracks.length >= kNumClips) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Max number of audio clips reached (500). Unable to add more clips.")));
+      return;
+    }
+
     _pausePlayback();
     setState(() {
       _isLoadingAudio = true;
@@ -1952,13 +1433,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
 
     final newFile = fromFile; //File(result.files.single.path!);
 
-    // make it always 48k sample rate
-    final tmpDir = await getTemporaryDirectory();
-    final baseName = newFile.path.split('/').last;
-    // final resampledPath = '${tmpDir.path}/$baseName';
+    final audioDir = ProjectManager.audioDir(_projectDir);
+    if (!await audioDir.exists()) await audioDir.create(recursive: true);
+    if (!newFile.existsSync()) return;
 
+    final baseName = p.basename(newFile.path);
     final baseNameNoExt = baseName.contains('.') ? baseName.substring(0, baseName.lastIndexOf('.')) : baseName;
-    final resampledPath = '${tmpDir.path}/$baseNameNoExt.wav';
+
+    // --- collision-safe temp name ---
+    String candidatePath = p.join(audioDir.path, '$baseNameNoExt.wav');
+
+    int suffix = 1;
+
+    // Keep incrementing if another track already uses this temp path
+    while (_audioTracks.any((t) => t.file.path == candidatePath)) {
+      candidatePath = p.join(audioDir.path, '$baseNameNoExt #$suffix.wav');
+      suffix++;
+    }
+
+    final resampledPath = candidatePath;
 
     // 1) Transcode to 48 kHz PCM WAV (fast, one‐time cost):
     // TODO: maybe change this to preserve user's input data
@@ -1973,23 +1466,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     final durSeconds = await JuceAudioEngine.getTrackDuration(_audioTracks.length);
     final dur = Duration(milliseconds: (durSeconds * 1000).round());
 
-    // is this necessary anymore?
-    // TODO: might be deprecated
-    final newController = PlayerController();
-    await newController.preparePlayer(path: newFile_48.path);
-
     // Create a new AudioTrack instance with a fixed audioDuration.
     final newTrack = await AudioTrack.create(
       file: newFile_48,
-      originalFile: newFile_48,
-      // player: newPlayer,
-      waveformController: newController,
+      originalFile: newFile_48, // might be unused
       audioDuration: dur, // Fixed duration for this track.
       trimStart: Duration.zero,
       trimEnd: dur,
-      offset: 0.0, // TODO: set this to the current playheadMs if you want it to spawn where track is now
+      offset: 0.0,
       crossfade: 1.0,
       rowIndex: row,
+      label: baseNameNoExt,
     );
 
     _startWaveformExtraction(newTrack);
@@ -2004,30 +1491,185 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     _updateOverallDurationIfNeeded();
   }
 
+  // optimized to not make unnecessary calls that normal addAudioTrack needs
+  Future<void> _pasteAudioTrack(
+    AudioTrack clip,
+    int row,
+    double timeMs, {
+    Duration? trimStartRequested,
+    Duration? trimEndRequested,
+  }) async {
+    if (_audioTracks.length >= kNumClips) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Max number of audio clips reached (500). Unable to add more clips.")));
+      return;
+    }
+
+    await JuceAudioEngine.loadClip(_audioTracks.length, row, clip.file.path);
+    final dur = clip.audioDuration;
+
+    // Create a new AudioTrack instance with a fixed audioDuration.
+    final newTrack = await AudioTrack.create(
+      file: clip.file,
+      originalFile: clip.file, // might be unused
+      audioDuration: dur, // Fixed duration for this track.
+      trimStart: Duration.zero,
+      trimEnd: dur,
+      offset: 0.0,
+      crossfade: 1.0,
+      rowIndex: row,
+      label: clip.label,
+    );
+
+    newTrack.normWaveformData = clip.normWaveformData;
+
+    setState(() {
+      newTrack.offset = timeMs / 1000.0;
+      newTrack.trimStart = trimStartRequested ?? Duration.zero;
+      newTrack.trimEnd = trimEndRequested ?? dur;
+      _audioTracks.add(newTrack);
+    });
+    _updateOverallDurationIfNeeded();
+  }
+
+  // used by loadProject, skips renaming logic in normal addAudioTrack
+  Future<void> _addAudioTrackFromProjectFile({
+    required File projectAudioFile,
+    required String label,
+    required int row,
+    required double timeMs,
+    Duration? trimStartRequested,
+    Duration? trimEndRequested,
+    double? gain,
+    double? crossfade,
+    List<AutomationPoint>? automation,
+  }) async {
+    // no FFmpeg, no temp renaming
+    await JuceAudioEngine.loadClip(_audioTracks.length, row, projectAudioFile.path);
+
+    final durSeconds = await JuceAudioEngine.getTrackDuration(_audioTracks.length);
+    final dur = Duration(milliseconds: (durSeconds * 1000).round());
+
+    final newTrack = await AudioTrack.create(
+      file: projectAudioFile, // points directly to project/audio
+      originalFile: projectAudioFile, // unused
+      audioDuration: dur,
+      trimStart: Duration.zero,
+      trimEnd: dur,
+      offset: 0.0,
+      crossfade: 1.0,
+      rowIndex: row,
+      label: label,
+    );
+
+    newTrack.offset = timeMs / 1000.0;
+    newTrack.trimStart = trimStartRequested ?? Duration.zero;
+    newTrack.trimEnd = trimEndRequested ?? dur;
+
+    if (gain != null) newTrack.gain = gain;
+    if (crossfade != null) newTrack.crossfade = crossfade;
+    if (automation != null && automation.isNotEmpty) {
+      newTrack.volumeAutomation = automation;
+    }
+
+    _startWaveformExtraction(newTrack);
+
+    setState(() {
+      _audioTracks.add(newTrack);
+    });
+
+    _updateOverallDurationIfNeeded();
+  }
+
   void _startWaveformExtraction(AudioTrack c) async {
-    if (!c.didExtractWaveform) {
-      c.didExtractWaveform = true;
+    if (c.didExtractWaveform) return;
+    c.didExtractWaveform = true;
 
-      final durMs = c.audioDuration.inMilliseconds;
-      final durSec = (durMs / 1000.0).clamp(0.001, double.infinity);
+    try {
+      final inputPath = c.file.path;
 
-      // final target = (durSec * kWaveformSPS).round().clamp(kMinSamples, kMaxSamples);
-      //TODO: THIS IS TEMPORARY, FIGURE OUT HOW TO GET HI-RES EXTRACTWAVEFORM TO NOT BLOCK UI
-      final target = 1200;
+      // ---- Timeline truth ----
+      final durSec = (c.audioDuration.inMilliseconds / 1000.0).clamp(0.001, double.infinity);
 
-      // initialize placeholder with zeros so it looks neutral (flat line)
+      // ---- Resolution knob (bars per second) ----
+      const int kWaveformSPS = 150;
+
+      // ---- Safety caps ----
+      const int minPoints = 256;
+      const int maxPoints = 20000;
+
+      // Target points is now time-based
+      int target = (durSec * kWaveformSPS).round();
+      target = target.clamp(minPoints, maxPoints);
+
+      // Placeholder (flat waveform until done)
       c.normWaveformData = List<double>.filled(target, 0.0, growable: false);
+      setState(() {});
 
-      c.waveformController.extractWaveformData(path: c.file.path, noOfSamples: target).then((raw) {
-        // raw is arbitrary scale; normalize to [-1..1]
-        // don't normalize, but amplify
-        final norm = amplifyAndCapWaveform(raw); //normalizeWaveform(raw);
-        setState(() {
-          c.normWaveformData = norm;
-        });
-      }).catchError((e) {
-        debugPrint("Waveform extraction failed: $e");
+      // ---- Decode speed knob ----
+      const int pcmRate = 8000;
+
+      final tmpDir = await getTemporaryDirectory();
+      final rawPath = "${tmpDir.path}/wf_${c.hashCode}.raw";
+
+      // Decode mono PCM
+      await FFmpegKit.execute(
+        '-i "$inputPath" -ac 1 -ar $pcmRate -f s16le -y "$rawPath"',
+      );
+
+      final bytes = await File(rawPath).readAsBytes();
+      if (bytes.length < 2) return;
+
+      final totalSamples = bytes.length ~/ 2;
+
+      // Expected timeline samples (duration-based, stable)
+      final expectedSamples = (durSec * pcmRate).round().clamp(1, 1 << 30);
+
+      // Map expected timeline → decoded samples
+      double mapExpectedToDecoded(double expectedIndex) {
+        return expectedIndex * totalSamples / expectedSamples;
+      }
+
+      // ---- Compute RMS buckets ----
+      final out = List<double>.filled(target, 0.0, growable: false);
+
+      for (int i = 0; i < target; i++) {
+        final expStart = (i / target) * expectedSamples;
+        final expEnd = ((i + 1) / target) * expectedSamples;
+
+        int start = mapExpectedToDecoded(expStart).floor();
+        int end = mapExpectedToDecoded(expEnd).floor();
+
+        start = start.clamp(0, totalSamples);
+        end = end.clamp(0, totalSamples);
+
+        if (end <= start) continue;
+
+        double sumSq = 0.0;
+        int count = 0;
+
+        for (int s = start; s < end; s++) {
+          final bi = s * 2;
+          int v = bytes[bi] | (bytes[bi + 1] << 8);
+          if ((v & 0x8000) != 0) v -= 0x10000;
+
+          final f = v / 32768.0;
+          sumSq += f * f;
+          count++;
+        }
+
+        final rms = math.sqrt(sumSq / count);
+        out[i] = rms.clamp(0.0, 1.0);
+      }
+
+      final norm = amplifyAndCapWaveform(out);
+
+      if (!mounted) return;
+      setState(() {
+        c.normWaveformData = norm;
       });
+    } catch (e) {
+      debugPrint("Waveform extraction failed: $e");
     }
   }
 
@@ -2077,10 +1719,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
         return;
 
         _pausePlayback();
-        // _stopTicker();
-        for (var track in _audioTracks) {
-          track.waveformController.dispose();
-        }
         JuceAudioEngine.shutdown();
 
         if (!mounted) return;
@@ -2108,65 +1746,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
       final fail_str = L10n.translate(context, 'Export canceled or failed.');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(fail_str)));
     }
-  }
-
-  Widget _buildFloatingTransportBar() {
-    final theme = Theme.of(context);
-
-    // stuff for audio-only
-    Duration overallDuration = Duration.zero;
-    if (_audioTracks.isNotEmpty) {
-      overallDuration = _audioTracks.map((track) {
-        final offsetDuration = Duration(milliseconds: (track.offset * 1000).round());
-        final trackDuration = track.trimEnd - track.trimStart;
-        return offsetDuration + trackDuration;
-      }).reduce((a, b) => a > b ? a : b);
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      setState(() {
-        _audioOnlyOverallDuration = overallDuration;
-      });
-    });
-
-    // return Positioned(
-    //   bottom: 24,
-    //   left: 16,
-    //   right: 16,
-    // child: ClipRRect(
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(35),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: const Color.fromARGB(255, 13, 13, 13).withOpacity(0.75),
-            // borderRadius: BorderRadius.circular(35),
-            // border: Border.all(
-            //   color: const Color.fromARGB(255, 39, 39, 39), // Or adjust to your desired grey
-            //   width: 1.5,
-            // ),
-          ),
-          child: Row(
-            children: [
-              // Play/Pause button
-              IconButton(
-                icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
-                onPressed: _togglePlayPause,
-              ),
-
-              // Restart button
-              IconButton(
-                icon: const Icon(Icons.replay, color: Colors.white),
-                onPressed: () {
-                  _restartAudio(_audioEditorStateSetter!);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   void _showAddMediaOptions() {
@@ -2228,7 +1807,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
                         tracks: _audioTracks,
                         file: File(result.files.single.path!),
                         row: _selectedRow,
-                        timeMs: 0.0, // TODO: maybe make this equal to the current playhead Ms instead of start
+                        timeMs: _globalAudioClock.inMilliseconds.toDouble(), //0.0 sets it to start
                       ),
                     );
                   }
@@ -2239,23 +1818,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
         );
       },
     );
-  }
-
-  Future<double?> getVideoDurationSeconds(String path) async {
-    final session = await FFprobeKit.execute('-v quiet -print_format json -show_format "$path"');
-
-    final rc = await session.getReturnCode();
-    if (ReturnCode.isSuccess(rc)) {
-      final output = await session.getOutput();
-      if (output != null && output.isNotEmpty) {
-        final jsonMap = jsonDecode(output);
-        final format = jsonMap['format'];
-        if (format != null && format['duration'] != null) {
-          return double.tryParse(format['duration']);
-        }
-      }
-    }
-    return null;
   }
 
   Future<void> _snapshotFxBypassState() async {
@@ -2408,6 +1970,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
                                   fontSize: 12,
                                 ),
                               ),
+                              const SizedBox(width: 10),
+
+                              // meter in the middle
+                              Expanded(
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: AnimatedBuilder(
+                                    animation: _meters,
+                                    builder: (_, __) {
+                                      return MiniStereoMeterHorizontal(
+                                        frame: _meters.master,
+                                        width: 160,
+                                        height: 18,
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+
+                              const SizedBox(width: 12),
+
                               Row(
                                 children: [
                                   const Text(
@@ -2496,48 +2079,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildMasterRackContent() {
-    const double volumeContentHeight = 200.0;
-
-    // 💡 Max height for the Effects tab. The content will scroll inside this.
-    const double effectsMaxHeight = 400.0;
-    return DefaultTabController(
-      length: 2,
-      child: Builder(
-        // <-- Use Builder to access the TabController
-        builder: (BuildContext context) {
-          final TabController? tabController = DefaultTabController.of(context);
-          final double currentHeight = tabController?.index == 0 ? volumeContentHeight : effectsMaxHeight;
-          print(currentHeight);
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Tabs
-              Container(
-                decoration: BoxDecoration(color: const Color(0xFF252B3A), borderRadius: BorderRadius.circular(12)),
-                child: TabBar(
-                  indicatorColor: Colors.white,
-                  tabs: [
-                    Tab(text: "Volume"),
-                    Tab(text: "Effects"),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              // Content (scrollable)
-              SizedBox(
-                height: currentHeight,
-                child: TabBarView(children: [_buildMasterVolumePage(), _buildMasterEffectsPage()]),
-              ),
-            ],
-          );
-        },
       ),
     );
   }
@@ -2653,6 +2194,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
         );
       },
       projectBpm: _tempo.toDouble(),
+      meters: _meters,
+      getMasterCompressorMeter: (fx) => JuceAudioEngine.getMasterCompressorMeter(fx),
     );
   }
 
@@ -2683,40 +2226,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
                   await _pauseAudio(_audioEditorStateSetter ?? (fn) {});
                 }
 
-                final choice = await showDialog<String>(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    backgroundColor: const Color(0xFF0C1A32),
-                    title: const Text("Save project?", style: TextStyle(color: Colors.white)),
-                    content: const Text("Do you want to save before leaving?", style: TextStyle(color: Colors.white70)),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(context, "cancel"), child: const Text("Cancel")),
-                      TextButton(onPressed: () => Navigator.pop(context, "nosave"), child: const Text("Don't Save")),
-                      ElevatedButton(onPressed: () => Navigator.pop(context, "save"), child: const Text("Save")),
-                    ],
-                  ),
-                );
-
-                _isDialogOpen = false;
-
-                if (choice == "cancel" || choice == null) return;
-
-                if (choice == "save") {
-                  await _saveProject();
-                }
-
-                // If new project and user chose don't save and nothing was ever saved -> delete project folder
-                if (choice == "nosave" && !_everSaved) {
-                  try {
-                    await ProjectManager.deleteProject(_projectDir);
-                  } catch (_) {}
-                }
+                await _saveProject();
 
                 if (mounted) {
                   // Dispose resources before navigating
                   _pausePlayback();
                   for (var track in _audioTracks) {
-                    track.waveformController.dispose();
                     track.audioStartTimer?.cancel();
                   }
                   JuceAudioEngine.shutdown();
@@ -4320,63 +3835,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     return Container(width: 1, height: height * 0.6, color: Colors.white.withOpacity(0.2));
   }
 
-  Widget _roundIconButton({required IconData icon, String? label, VoidCallback? onTap}) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        GestureDetector(
-          onTap: onTap,
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.06), borderRadius: BorderRadius.circular(20)),
-            child: Icon(icon, size: 20, color: Colors.white),
-          ),
-        ),
-        if (label != null) ...[
-          const SizedBox(height: 4),
-          Text(label, style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.7))),
-        ],
-      ],
-    );
-  }
-
-  Widget _pill(String text) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(color: Colors.white.withOpacity(0.08), borderRadius: BorderRadius.circular(12)),
-        child: Text(text),
-      );
-
-  Widget _transportBtn(IconData icon, {VoidCallback? onTap, String? label, bool primary = false}) {
-    final bg = primary ? Colors.white.withOpacity(0.25) : Colors.white.withOpacity(0.12);
-    final child = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            width: 48,
-            height: 40,
-            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(16)),
-            child: Icon(icon, color: Colors.white),
-          ),
-        ),
-        if (label != null) ...[
-          const SizedBox(height: 4),
-          Text(label, style: const TextStyle(fontSize: 11, color: Colors.white70)),
-        ],
-      ],
-    );
-    return child;
-  }
-
   void _handleCopyClip(int clipIndex) {
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
 
     setState(() {
-      _copiedAudioFile = clip.originalFile; // just remember the file for now
+      _copiedAudioClip = clip;
       _copiedTrimStart = clip.trimStart;
       _copiedTrimEnd = clip.trimEnd;
     });
@@ -4388,7 +3852,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
     final clip = _audioTracks[clipIndex];
 
     // track.audioStartTimer?.cancel();
-    // track.waveformController.dispose();
 
     // setState(() {
     //   _audioTracks.removeAt(clipIndex);
@@ -4403,14 +3866,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
         clip: clip,
         originalIndex: clipIndex,
         addTrack: ({
-          required File file,
+          required AudioTrack clip,
           required int row,
           required double timeMs,
           required Duration trimStartRequested,
           required Duration trimEndRequested,
         }) =>
-            _addAudioTrackFromFile(
-          file,
+            _pasteAudioTrack(
+          // NOTE: undo action for deleteclip is closer to _pasteAudioTrack than _addAudioTrack since we don't need to rehandle encoding + name conflict
+          clip,
           row,
           timeMs,
           trimStartRequested: trimStartRequested,
@@ -4421,37 +3885,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
         },
       ),
     );
-    _undoManager
-        .clear(); // NOTE: this means deleting a track deletes all undo history. can delete this if that's not desired
 
+    // NOTE: this means deleting a track deletes all undo history. can delete this if that's not desired
+    // of course, the undoManager.execute above doesn't get added to history
+    // _undoManager.clear();
+
+    // TODO: not sure if this part/delay is needed
     Future.delayed(Duration(milliseconds: 50), () {
       setState(() {}); // force a repaint
     });
   }
 
   Future<void> _handlePasteClipAt(int row, double timeMs) async {
-    if (_copiedAudioFile == null) return;
+    if (_copiedAudioClip == null) return;
 
-    // await _addAudioTrackFromFile(_copiedAudioFile!, row, timeMs,
-    //     trimStartRequested: _copiedTrimStart, trimEndRequested: _copiedTrimEnd);
+    if (_audioTracks.length >= kNumClips) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Max number of audio clips reached (500). Unable to add more clips.")));
+      return;
+    }
+
     await _undoManager.execute(
-      AddAudioTrackAction(
-        addTrack: ({
-          required File file,
+      PasteAudioClipAction(
+        pasteClip: ({
+          required AudioTrack clip,
           required int row,
           required double timeMs,
           Duration? trimStartRequested,
           Duration? trimEndRequested,
         }) =>
-            _addAudioTrackFromFile(
-          file,
+            _pasteAudioTrack(
+          clip,
           row,
           timeMs,
-          trimStartRequested: _copiedTrimStart,
-          trimEndRequested: _copiedTrimEnd,
+          trimStartRequested: trimStartRequested,
+          trimEndRequested: trimEndRequested,
         ),
         tracks: _audioTracks,
-        file: _copiedAudioFile!,
+        clip: _copiedAudioClip!,
         row: row,
         timeMs: timeMs,
         trimStart: _copiedTrimStart,
@@ -4530,32 +4001,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
                                 getTrimEndMs: (t) => t.trimEnd.inMilliseconds.toDouble(),
                                 // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
                                 getPeaks: (c) {
-                                  // waveform extract now handled on addAudioTrack once
-                                  // if (!c.didExtractWaveform) {
-                                  //   c.didExtractWaveform = true;
-
-                                  //   final durMs = c.audioDuration.inMilliseconds;
-                                  //   final durSec = (durMs / 1000.0).clamp(0.001, double.infinity);
-                                  //   final target = (durSec * kWaveformSPS).round().clamp(kMinSamples, kMaxSamples);
-
-                                  //   // initialize placeholder with zeros so it looks neutral (flat line)
-                                  //   c.normWaveformData = List<double>.filled(target, 0.0, growable: false);
-
-                                  //   c.waveformController
-                                  //       .extractWaveformData(
-                                  //     path: c.file.path,
-                                  //     noOfSamples: target,
-                                  //   )
-                                  //       .then((raw) {
-                                  //     // raw is arbitrary scale; normalize to [-1..1]
-                                  //     final norm = normalizeWaveform(raw);
-                                  //     setState(() {
-                                  //       c.normWaveformData = norm;
-                                  //     });
-                                  //   }).catchError((e) {
-                                  //     debugPrint("Waveform extraction failed: $e");
-                                  //   });
-                                  // }
                                   return c.normWaveformData;
                                 },
                                 getY: (c) => c.y, // store a visual Y in your model
@@ -4622,7 +4067,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
                                       originalIndex: i,
                                       oldTrimStart: Duration(milliseconds: os.round()),
                                       oldTrimEnd: Duration(milliseconds: oe.round()),
-                                      oldOffset: oo,
+                                      oldOffset: oo / 1000.0,
                                       newTrimStart: Duration(milliseconds: s.round()),
                                       newTrimEnd: Duration(milliseconds: e.round()),
                                       newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
@@ -4861,7 +4306,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
 
                                 onCopyClip: _handleCopyClip,
                                 onDeleteClip: _handleDeleteClip,
-                                hasCopiedClip: _copiedAudioFile != null,
+                                hasCopiedClip: _copiedAudioClip != null,
                                 onPasteClipAt: _handlePasteClipAt,
                                 onLoopToggle: (enabled) {
                                   setState(() => _loopEnabled = enabled);
@@ -4880,6 +4325,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
                                 registerRowFxRefresher: (fn) {
                                   _refreshRowFx = fn;
                                 },
+                                meters: _meters,
+                                getRowCompressorMeter: (row, fx) => JuceAudioEngine.getRowCompressorMeter(row, fx),
 
                                 mode: widget.mode, // or "Basic"/"Pro" etc
                               ),
@@ -5200,7 +4647,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen> with WidgetsBind
                   ),
                 ),
               ),
-            if (_isLoadingVideo || _isLoadingAudio || _isLoadingNextScreen)
+            if (_isLoadingAudio || _isLoadingNextScreen)
               Positioned.fill(
                 child: Container(
                   color: Colors.black.withOpacity(0.5),
@@ -5302,80 +4749,6 @@ class _Glass extends StatelessWidget {
   }
 }
 
-class _CapsuleButton extends StatelessWidget {
-  final IconData icon;
-  final String? label;
-  final VoidCallback? onTap;
-  final bool filled;
-  final double size; // square icon container
-  final double radius;
-
-  const _CapsuleButton({
-    super.key,
-    required this.icon,
-    this.label,
-    this.onTap,
-    this.filled = false,
-    this.size = 40,
-    this.radius = 20,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final base = filled ? Colors.white.withOpacity(0.16) : Colors.white.withOpacity(0.06);
-
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              color: base,
-              borderRadius: BorderRadius.circular(radius),
-              border: Border.all(color: Colors.white.withOpacity(0.12)),
-              boxShadow: [
-                // soft outer
-                BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 6)),
-                // subtle top highlight
-                const BoxShadow(color: Color(0x22FFFFFF), blurRadius: 0, spreadRadius: 1, offset: Offset(0, -1)),
-              ],
-            ),
-            child: Icon(icon, size: 20, color: Colors.white),
-          ),
-          if (label != null) ...[
-            const SizedBox(height: 4),
-            Text(label!, style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.75), height: 1.0)),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _VerticalDividerThin extends StatelessWidget {
-  const _VerticalDividerThin({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 28,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.white.withOpacity(0.10), Colors.white.withOpacity(0.25), Colors.white.withOpacity(0.10)],
-        ),
-      ),
-    );
-  }
-}
-
 class DotsLoader extends StatefulWidget {
   const DotsLoader({Key? key}) : super(key: key);
 
@@ -5425,58 +4798,6 @@ class _DotsLoaderState extends State<DotsLoader> with SingleTickerProviderStateM
   }
 }
 
-class _WaveformSeekLinePainter extends CustomPainter {
-  _WaveformSeekLinePainter({
-    required this.audioPosition, // ← pass in effectiveAudioPos
-    required this.trimStart,
-    required this.trimEnd,
-    required this.totalAudioDuration,
-    required this.lineColor,
-  });
-
-  final Duration audioPosition;
-  final Duration trimStart;
-  final Duration trimEnd;
-  final Duration totalAudioDuration;
-  final Color lineColor;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint paint = Paint()
-      ..color = lineColor
-      ..strokeWidth = 2.0;
-
-    // First, compute how far into the trimmed region our audioPosition is,
-    // clamped between trimStart and trimEnd:
-    if (audioPosition < trimStart || audioPosition > trimEnd) {
-      return; // nothing to draw if outside the trimmed range
-    }
-
-    // Map [trimStart .. trimEnd] → [0.0 .. 1.0]
-    final trimmedDuration = trimEnd - trimStart;
-    final normalized = (audioPosition - trimStart).inMilliseconds / trimmedDuration.inMilliseconds;
-
-    // Compute X in the total waveform:
-    final trimStartRatio = trimStart.inMilliseconds / totalAudioDuration.inMilliseconds;
-    final trimEndRatio = trimEnd.inMilliseconds / totalAudioDuration.inMilliseconds;
-
-    final waveformStartX = size.width * trimStartRatio;
-    final waveformEndX = size.width * trimEndRatio;
-
-    final seekX = waveformStartX + (waveformEndX - waveformStartX) * normalized;
-    canvas.drawLine(Offset(seekX, 0), Offset(seekX, size.height), paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _WaveformSeekLinePainter old) {
-    return old.audioPosition != audioPosition ||
-        old.trimStart != trimStart ||
-        old.trimEnd != trimEnd ||
-        old.totalAudioDuration != totalAudioDuration ||
-        old.lineColor != lineColor;
-  }
-}
-
 double getVolumeForAutomation(List<AutomationPoint> points, double normalizedTime) {
   if (points.isEmpty) return 1.0;
   if (normalizedTime <= points.first.x) return points.first.volume;
@@ -5488,207 +4809,6 @@ double getVolumeForAutomation(List<AutomationPoint> points, double normalizedTim
     }
   }
   return 1.0;
-}
-
-class VolumeAutomationWidget extends StatefulWidget {
-  final List<AutomationPoint> automationPoints;
-  final double currentNormalizedTime; // normalized current playback time (0.0 to 1.0)
-  final ValueChanged<List<AutomationPoint>> onAutomationChanged;
-
-  const VolumeAutomationWidget({
-    Key? key,
-    required this.automationPoints,
-    required this.currentNormalizedTime,
-    required this.onAutomationChanged,
-  }) : super(key: key);
-
-  @override
-  _VolumeAutomationWidgetState createState() => _VolumeAutomationWidgetState();
-}
-
-class _VolumeAutomationWidgetState extends State<VolumeAutomationWidget> {
-  late List<AutomationPoint> _points;
-  static const double _autoSnapNorm = 0.02;
-  @override
-  void initState() {
-    super.initState();
-    // Create a copy so we can modify it.
-    _points = List.from(widget.automationPoints);
-  }
-
-  @override
-  void didUpdateWidget(covariant VolumeAutomationWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.automationPoints != oldWidget.automationPoints) {
-      setState(() {
-        _points = List.from(widget.automationPoints);
-      });
-    }
-  }
-
-  void _addPoint(Offset localPosition, double width, double height) {
-    double x = (localPosition.dx / width).clamp(0.0, 1.0);
-    double volume = _interpolateVolume(x);
-    setState(() {
-      _points.add(AutomationPoint(x: x, volume: volume));
-      _points.sort((a, b) => a.x.compareTo(b.x));
-    });
-    widget.onAutomationChanged(_points);
-  }
-
-  double _interpolateVolume(double x) {
-    if (_points.isEmpty) return 1.0;
-    if (x <= _points.first.x) return _points.first.volume;
-    if (x >= _points.last.x) return _points.last.volume;
-    for (int i = 0; i < _points.length - 1; i++) {
-      if (x >= _points[i].x && x <= _points[i + 1].x) {
-        double t = (x - _points[i].x) / (_points[i + 1].x - _points[i].x);
-        return _points[i].volume + t * (_points[i + 1].volume - _points[i].volume);
-      }
-    }
-    return 1.0;
-  }
-
-  Widget _buildDraggableHandle(AutomationPoint point, double width, double height) {
-    const double visibleHandleSize = 24;
-    const double hitBoxSize = 48;
-
-    const double edgeExtension = 16; // How much extra space to provide at the edges
-
-    double hitBoxLeft = point.x * width - hitBoxSize / 2;
-    double hitBoxTop = (1 - point.volume) * height - hitBoxSize / 2;
-
-    // Adjust positioning for the first (left edge) and last (right edge) points
-    if (point == _points.first) {
-      hitBoxLeft = -edgeExtension;
-    } else if (point == _points.last) {
-      hitBoxLeft = width - hitBoxSize + edgeExtension;
-    }
-
-    return Positioned(
-      left: hitBoxLeft,
-      top: hitBoxTop,
-      width: hitBoxSize,
-      height: hitBoxSize,
-      child: Listener(
-        // Use Listener instead of RawGestureDetector
-        onPointerMove: (PointerMoveEvent event) {
-          setState(() {
-            double newVolume = point.volume - event.delta.dy / height;
-            newVolume = newVolume.clamp(0.0, 1.0);
-            point.volume = newVolume;
-
-            // Update horizontal position if needed
-            if (point != _points.first && point != _points.last) {
-              double newX = point.x + event.delta.dx / width;
-              int index = _points.indexOf(point);
-              double leftLimit = _points[index - 1].x + 0.01;
-              double rightLimit = _points[index + 1].x - 0.01;
-              point.x = newX.clamp(leftLimit, rightLimit);
-            }
-
-            // snap to seek line
-            double seekNorm = widget.currentNormalizedTime;
-            if ((point.x - seekNorm).abs() < _autoSnapNorm) {
-              point.x = seekNorm;
-            }
-          });
-          widget.onAutomationChanged(_points);
-        },
-        child: Center(
-          child: GestureDetector(
-            onLongPress: () {
-              if (point != _points.first && point != _points.last) {
-                setState(() => _points.remove(point));
-                widget.onAutomationChanged(_points);
-              }
-            },
-            child: Container(
-              width: visibleHandleSize,
-              height: visibleHandleSize,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: (point == _points.first || point == _points.last)
-                    ? const Color(0xFF888888)
-                    : const Color(0xFF2E61A5),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double width = constraints.maxWidth;
-        final double height = constraints.maxHeight;
-        return GestureDetector(
-          onLongPressStart: (details) {
-            final RenderBox box = context.findRenderObject() as RenderBox;
-            final localPos = box.globalToLocal(details.globalPosition);
-            _addPoint(localPos, width, height);
-          },
-          child: Stack(
-            children: [
-              CustomPaint(
-                size: Size(width, height),
-                painter: _AutomationPainter(points: _points, currentNormalizedTime: widget.currentNormalizedTime),
-              ),
-              for (var point in _points) _buildDraggableHandle(point, width, height),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _AutomationPainter extends CustomPainter {
-  final List<AutomationPoint> points;
-  final double currentNormalizedTime;
-  _AutomationPainter({required this.points, required this.currentNormalizedTime});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (points.isEmpty) return;
-    Paint linePaint = Paint()
-      ..color = Color(0xFF888888)
-      ..strokeWidth = 2.0
-      ..style = PaintingStyle.stroke;
-    // Draw the automation curve.
-    Path path = Path();
-    final first = points.first;
-    path.moveTo(first.x * size.width, (1 - first.volume) * size.height);
-    for (var point in points.skip(1)) {
-      path.lineTo(point.x * size.width, (1 - point.volume) * size.height);
-    }
-    canvas.drawPath(path, linePaint);
-
-    // Optionally fill under the curve.
-    Paint fillPaint = Paint()
-      ..color = Color(0x33888888)
-      ..style = PaintingStyle.fill;
-    Path fillPath = Path.from(path);
-    fillPath.lineTo(points.last.x * size.width, size.height);
-    fillPath.lineTo(points.first.x * size.width, size.height);
-    fillPath.close();
-    canvas.drawPath(fillPath, fillPaint);
-
-    // Draw the seek line (non-interactive).
-    double seekX = currentNormalizedTime.isFinite ? currentNormalizedTime * size.width : 0.0;
-    Paint seekPaint = Paint()
-      ..color = Color(0xFF888888)
-      ..strokeWidth = 2;
-    canvas.drawLine(Offset(seekX, 0), Offset(seekX, size.height), seekPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _AutomationPainter oldDelegate) {
-    return oldDelegate.points != points || oldDelegate.currentNormalizedTime != currentNormalizedTime;
-  }
 }
 
 void _findSyncOffsetInBackground(List<Object?> args) {
@@ -6623,1484 +5743,6 @@ class _SocialButton extends StatelessWidget {
 
 // EXPORT SUCCESS SCREEN END
 
-// EFFECTS DRAWER START
-
-class EffectsDrawer extends StatefulWidget {
-  final int trackIndex;
-  final String mode;
-  const EffectsDrawer({Key? key, required this.trackIndex, this.mode = "Basic"}) : super(key: key);
-
-  @override
-  _EffectsDrawerState createState() => _EffectsDrawerState();
-}
-
-class _EffectsDrawerState extends State<EffectsDrawer> {
-  List<String> _effects = [];
-  List<bool> _bypassed = [];
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadEffects();
-  }
-
-  Future<void> _loadEffects() async {
-    final names = await JuceAudioEngine.getTrackEffects(widget.trackIndex);
-    final bypassStates = await Future.wait(
-      List.generate(names.length, (index) async {
-        return await JuceAudioEngine.getPluginBypassState(widget.trackIndex, index);
-      }),
-    );
-    setState(() {
-      _effects = List<String>.from(names);
-      _bypassed = List<bool>.from(bypassStates);
-      _loading = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = theme.primaryColor;
-
-    if (_loading) {
-      return SizedBox(
-        height: 200,
-        child: Center(child: CircularProgressIndicator(color: accent)),
-      );
-    }
-
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.6,
-      minChildSize: 0.3,
-      maxChildSize: 0.9,
-      builder: (_, ctrl) => NotificationListener<ScrollNotification>(
-        onNotification: (_) => true, // prevents bubbling up
-        child: SingleChildScrollView(
-          controller: ctrl,
-          primary: false, // IMPORTANT: prevents gesture hijack
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // --- Grab Handle ---
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                Center(
-                  child: Text(
-                    "${L10n.translate(context, 'Track')} #${widget.trackIndex + 1} ${L10n.translate(context, 'Effects')}",
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                const Divider(height: 24),
-
-                Text(L10n.translate(context, 'Presets'), style: Theme.of(context).textTheme.headlineSmall),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    _buildPresetChip("Concert Hall"),
-                    _buildPresetChip("Echoes"),
-                    _buildPresetChip("LoFi Effect"),
-                    _buildPresetChip("Heavy Crunch"),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // --- Reorderable List ---
-                ReorderableListView(
-                  scrollController: ctrl,
-                  // buildDefaultDragHandles: false,
-                  shrinkWrap: true,
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: EdgeInsets.zero,
-
-                  children: [for (int i = 0; i < _effects.length; i++) _buildEffectTile(i)],
-
-                  proxyDecorator: (child, index, animation) =>
-                      Material(elevation: 6, color: const Color.fromARGB(154, 130, 130, 130), child: child),
-
-                  onReorder: (oldIndex, newIndex) async {
-                    if (oldIndex < 0 || oldIndex >= _effects.length) return;
-                    if (newIndex > oldIndex) newIndex--;
-                    newIndex = newIndex.clamp(0, _effects.length - 1);
-
-                    await JuceAudioEngine.reorderEffects(widget.trackIndex, oldIndex, newIndex);
-                    setState(() {
-                      final name = _effects.removeAt(oldIndex);
-                      final bypass = _bypassed.removeAt(oldIndex);
-                      _effects.insert(newIndex, name);
-                      _bypassed.insert(newIndex, bypass);
-                    });
-                  },
-                ),
-
-                if (_effects.length < 5) Padding(padding: const EdgeInsets.only(top: 8), child: _buildAddTile()),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  ActionChip _buildPresetChip(String name) {
-    const lockedPresets = []; //['LoFi Effect', 'Heavy Crunch'];
-    final isLocked = widget.mode == 'Basic' && lockedPresets.contains(name);
-
-    return ActionChip(
-      backgroundColor: isLocked
-          ? const Color.fromARGB(255, 61, 61, 61) // dimmed if locked
-          : const Color.fromARGB(255, 122, 122, 122),
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            L10n.translate(context, name),
-            style: TextStyle(
-              color: isLocked ? const Color.fromARGB(255, 122, 122, 122) : const Color.fromARGB(255, 255, 255, 255),
-            ),
-          ),
-          if (isLocked)
-            const Padding(
-              padding: EdgeInsets.only(left: 6),
-              child: Icon(Icons.lock, size: 16, color: Color.fromARGB(255, 122, 122, 122)),
-            ),
-        ],
-      ),
-      onPressed: isLocked ? () {} : () => handlePresetLoading(context, name),
-    );
-  }
-
-  void handlePresetLoading(BuildContext context, String presetName) async {
-    final description = () {
-      switch (presetName) {
-        case 'Concert Hall':
-          return L10n.translate(context, 'Applies wide reverb and subtle EQ to simulate a live concert space.');
-        case 'Echoes':
-          return L10n.translate(context, 'Applies reverb and delay to give an echo effect.');
-        case 'LoFi Effect':
-          return L10n.translate(context, 'Applies filters and soft distortion for a vintage, relaxed vibe.');
-        case 'Heavy Crunch':
-          return L10n.translate(context, 'Crushes sound with heavy distortion.');
-        default:
-          return "${L10n.translate(context, 'This will replace your current effects with ')}'$presetName'.";
-      }
-    }();
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(L10n.translate(context, presetName)),
-        content: Text(description),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(L10n.translate(context, 'Cancel'), style: TextStyle(color: Color.fromARGB(255, 218, 218, 218))),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context, true);
-              showDialog(
-                context: context,
-                barrierDismissible: false,
-                builder: (_) => const Center(child: CircularProgressIndicator()),
-              );
-
-              // 1. Remove all effects (if any) on the current track
-              while (_effects.isNotEmpty) {
-                await JuceAudioEngine.removeEffect(widget.trackIndex, 0);
-                setState(() {
-                  _effects.removeAt(0);
-                  _bypassed.removeAt(0);
-                });
-              }
-
-              // 2. have a switch case thing to do "stuff" for each preset name
-              switch (presetName) {
-                case 'Concert Hall':
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom Reverb');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Room Size', 53);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Mix', 20);
-                  break;
-
-                case 'Echoes':
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom Reverb');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Room Size', 40);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Mix', 20);
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom Delay');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Delay Time', 400);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Feedback', 30);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Mix', 30);
-                  break;
-
-                case 'LoFi Effect':
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom EQ');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'LPF Frequency', 2600.0);
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom Distortion');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Drive', 50);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Mix', 85);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Anger', 1);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'LPF Frequency', 2800.0);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Distortion Type', "Mode 3");
-                  break;
-
-                case 'Heavy Crunch':
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom Distortion');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Drive', 100);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Mix', 100);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Anger', 1);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Volume', 12);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Pre Shape', 3.0);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Distortion Type', "Mode 3");
-                  break;
-
-                default:
-                  print('⚠️ No matching preset logic for: $presetName');
-              }
-              await _loadEffects();
-
-              // Dismiss loading modal
-              Navigator.of(context).pop();
-            },
-            child: Text(L10n.translate(context, 'Load Preset')),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      print('✅ Loaded preset: $presetName');
-    }
-  }
-
-  Widget _buildEffectTile(int idx) {
-    return ReorderableDragStartListener(
-      key: ValueKey("effect_$idx"),
-      index: idx,
-      child: ListTile(
-        contentPadding: EdgeInsets.all(0),
-        key: ValueKey("effect_$idx"),
-        leading: const Icon(Icons.drag_handle),
-        title: Text(_effects[idx]),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Bypass toggle
-            Switch(
-              value: !_bypassed[idx],
-              onChanged: (active) {
-                final shouldBypass = !active;
-                JuceAudioEngine.bypassPlugin(widget.trackIndex, idx, shouldBypass);
-                setState(() => _bypassed[idx] = shouldBypass);
-              },
-              activeColor: const Color.fromARGB(255, 231, 231, 231), // thumb color when ON
-              inactiveThumbColor: const Color.fromARGB(255, 186, 186, 186), // thumb color when OFF
-              inactiveTrackColor: const Color.fromARGB(255, 235, 235, 235), // track color when OFF
-              activeTrackColor: const Color.fromARGB(255, 54, 54, 54), // track color when ON
-            ),
-            // Delete button
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: Color.fromARGB(255, 255, 164, 164)),
-              onPressed: () => _confirmRemove(idx),
-            ),
-          ],
-        ),
-        onTap: () => _openPluginParams(idx),
-      ),
-    );
-    // return ListTile(
-    //   contentPadding: EdgeInsets.all(0),
-    //   key: ValueKey("effect_$idx"),
-    //   leading: const Icon(Icons.drag_handle),
-    //   title: Text(_effects[idx]),
-    //   trailing: Row(
-    //     mainAxisSize: MainAxisSize.min,
-    //     children: [
-    //       // Bypass toggle
-    //       Switch(
-    //         value: !_bypassed[idx],
-    //         onChanged: (active) {
-    //           final shouldBypass = !active;
-    //           JuceAudioEngine.bypassPlugin(
-    //             widget.trackIndex,
-    //             idx,
-    //             shouldBypass,
-    //           );
-    //           setState(() => _bypassed[idx] = shouldBypass);
-    //         },
-    //       ),
-    //       // Delete button
-    //       IconButton(
-    //         icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-    //         onPressed: () => _confirmRemove(idx),
-    //       ),
-    //     ],
-    //   ),
-    //   onTap: () => _openPluginParams(idx),
-    // );
-  }
-
-  Widget _buildAddTile() => ListTile(
-        contentPadding: EdgeInsets.all(0),
-        key: const ValueKey("add_effect"),
-        leading: const Icon(Icons.add_circle_outline),
-        title: Text(L10n.translate(context, 'Add Effect')),
-        onTap: _showAddEffectModal,
-      );
-
-  Future<void> _confirmRemove(int idx) async {
-    final yes = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(L10n.translate(context, 'Delete Effect?')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(L10n.translate(context, 'Cancel'), style: TextStyle(color: Color.fromARGB(255, 218, 218, 218))),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(L10n.translate(context, 'Delete'), style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-    if (yes == true) {
-      await JuceAudioEngine.removeEffect(widget.trackIndex, idx);
-      setState(() {
-        _effects.removeAt(idx);
-        _bypassed.removeAt(idx);
-      });
-    }
-  }
-
-  // Inside your EffectsDrawer:
-  // Future<void> _showAddEffectModal() async {
-  //   final plugins = await JuceAudioEngine.scanPlugins();
-  //   showDialog(
-  //     context: context,
-  //     builder: (_) => AlertDialog(
-  //       title: Text("Add Effect"),
-  //       content: SizedBox(
-  //         width: double.maxFinite,
-  //         height: 300,
-  //         child: ListView(
-  //           children: plugins.map((meta) {
-  //             final name = meta['name'] ?? meta['id'] ?? '';
-  //             final path = meta['id'] ?? '';
-  //             return ListTile(
-  //               title: Text(name),
-  //               onTap: () async {
-  //                 Navigator.pop(context); // close dialog
-  //                 await JuceAudioEngine.insertEffect(widget.trackIndex, path);
-  //                 await _loadEffects();
-  //               },
-  //             );
-  //           }).toList(),
-  //         ),
-  //       ),
-  //     ),
-  //   );
-  // }
-  Future<void> _showAddEffectModal() async {
-    final plugins = await JuceAudioEngine.scanPlugins();
-    const allowedInBasic = ['Mixroom Reverb', 'Mixroom EQ', 'Mixroom Delay', 'Mixroom Distortion', 'Mixroom De-Esser'];
-
-    showDialog(
-      context: context,
-      builder: (_) {
-        return DefaultTabController(
-          length: 2,
-          child: AlertDialog(
-            backgroundColor: const Color.fromARGB(255, 79, 79, 79),
-            titlePadding: const EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 16),
-            contentPadding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: TabBar(
-              labelColor: Color.fromARGB(255, 255, 255, 255),
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: Color.fromARGB(255, 255, 255, 255),
-              indicatorWeight: 2,
-              tabs: [
-                Tab(text: 'Mixroom FX'),
-                Tab(text: L10n.translate(context, 'On Device')),
-              ],
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 400,
-              child: TabBarView(
-                children: [
-                  ListView(
-                    children: [
-                      'Mixroom Reverb',
-                      'Mixroom EQ',
-                      'Mixroom Delay',
-                      'Mixroom Distortion',
-                      'Mixroom De-Esser'
-                    ].map((name) {
-                      final isAllowed = widget.mode == 'Pro' || allowedInBasic.contains(name);
-                      return GestureDetector(
-                        onTap: isAllowed
-                            ? () async {
-                                Navigator.pop(context);
-                                await JuceAudioEngine.insertEffect(widget.trackIndex, name);
-                                await _loadEffects();
-                              }
-                            : null,
-                        child: Opacity(
-                          opacity: isAllowed ? 1.0 : 0.4,
-                          child: ListTile(
-                            title: Text(name),
-                            trailing: isAllowed ? null : const Icon(Icons.lock, size: 18, color: Colors.white70),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  ListView(
-                    children: plugins.map((meta) {
-                      final name = meta['name'] ?? meta['id'] ?? '';
-                      final path = meta['id'] ?? '';
-                      return ListTile(
-                        title: Text(name),
-                        onTap: () async {
-                          Navigator.pop(context); // close dialog
-                          await JuceAudioEngine.insertEffect(widget.trackIndex, path);
-                          await _loadEffects();
-                        },
-                      );
-                    }).toList(),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _openPluginParams(int idx) async {
-    var params = await JuceAudioEngine.getPluginParameters(widget.trackIndex, idx);
-
-    // Limit what parameters are shown if it's basic mode
-    if (widget.mode == "Basic") {
-      switch (_effects[idx]) {
-        case 'Mixroom Reverb':
-          params = params.where((param) {
-            final name = param['name']?.toString() ?? '';
-            return ['Room Size', 'Mix'].contains(name);
-          }).toList();
-          break;
-
-        case 'Mixroom EQ':
-          params = params.where((param) {
-            final name = param['name']?.toString() ?? '';
-            return [
-              'HPF Frequency',
-              'Band 1 Gain',
-              'Band 2 Gain',
-              'Band 3 Gain',
-              'Band 4 Gain',
-              'LPF Frequency',
-            ].contains(name); //['HPF Frequency', 'HPF Slope', 'LPF Frequency', 'LPF Slope'].contains(name);
-          }).toList();
-          break;
-
-        case 'Mixroom Delay':
-          params = params.where((param) {
-            final name = param['name']?.toString() ?? '';
-            return ['Delay Time', 'Feedback', 'Mix'].contains(name);
-          }).toList();
-          break;
-      }
-    }
-
-    showModalBottomSheet(
-      context: context,
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.8, // Max 70% height
-        // minHeight: MediaQuery.of(context).size.height * 0.4, // Min 40% height
-      ),
-      isScrollControlled: true,
-      backgroundColor: const Color.fromARGB(255, 74, 74, 74),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setModalState) {
-            if (_effects[idx] == 'Mixroom EQ') {
-              // Lookup expected params
-              final pHPF = _paramByName(params, 'HPF Frequency');
-              final pLPF = _paramByName(params, 'LPF Frequency');
-              final pB1 = _paramByName(params, 'Band 1 Gain');
-              final pB2 = _paramByName(params, 'Band 2 Gain');
-              final pB3 = _paramByName(params, 'Band 3 Gain');
-              final pB4 = _paramByName(params, 'Band 4 Gain');
-
-              // Fallback to generic UI if essentials missing
-              // if (pHPF == null || pLPF == null) {
-              //   return _buildGenericParamsUI(ctx, idx, params);
-              // }
-
-              // Values for preview
-              final hpfHz = (pHPF!['value'] as num).toDouble();
-              final lpfHz = (pLPF!['value'] as num).toDouble();
-              final bandGains = [
-                (pB1?['value'] as num?)?.toDouble() ?? 0,
-                (pB2?['value'] as num?)?.toDouble() ?? 0,
-                (pB3?['value'] as num?)?.toDouble() ?? 0,
-                (pB4?['value'] as num?)?.toDouble() ?? 0,
-              ];
-              final bandFreqs = [60.0, 400.0, 2000.0, 8000.0]; // your defaults
-
-              return Padding(
-                padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-                child: SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(height: 8),
-                        Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Mixroom EQ', style: Theme.of(ctx).textTheme.titleLarge),
-                        const SizedBox(height: 8),
-                        const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-
-                        // Preview with bands
-                        _EqPreviewFull(hpfHz: hpfHz, lpfHz: lpfHz, bandGains: bandGains, bandFreqs: bandFreqs),
-                        const SizedBox(height: 16),
-
-                        // Sliders row
-                        SizedBox(
-                          height: _eqRowHeight,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              if (pHPF != null)
-                                Expanded(
-                                  child: _verticalFader(
-                                    context: ctx,
-                                    label: 'HPF\nFreq',
-                                    value: (pHPF['value'] as num).toDouble(),
-                                    min: (pHPF['min'] as num).toDouble(),
-                                    max: (pHPF['max'] as num).toDouble(),
-                                    logarithmic: true,
-                                    unit: 'Hz',
-                                    onChanged: (v) {
-                                      setModalState(() => pHPF['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pHPF['name'] as String, v);
-                                    },
-                                  ),
-                                ),
-                              if (pB1 != null)
-                                Expanded(
-                                  child: _verticalFader(
-                                    context: ctx,
-                                    label: 'Band1\nGain',
-                                    value: (pB1['value'] as num).toDouble(),
-                                    min: (pB1['min'] as num).toDouble(),
-                                    max: (pB1['max'] as num).toDouble(),
-                                    unit: 'dB',
-                                    onChanged: (v) {
-                                      setModalState(() => pB1['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pB1['name'] as String, v);
-                                    },
-                                  ),
-                                ),
-                              if (pB2 != null)
-                                Expanded(
-                                  child: _verticalFader(
-                                    context: ctx,
-                                    label: 'Band2\nGain',
-                                    value: (pB2['value'] as num).toDouble(),
-                                    min: (pB2['min'] as num).toDouble(),
-                                    max: (pB2['max'] as num).toDouble(),
-                                    unit: 'dB',
-                                    onChanged: (v) {
-                                      setModalState(() => pB2['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pB2['name'] as String, v);
-                                    },
-                                  ),
-                                ),
-                              if (pB3 != null)
-                                Expanded(
-                                  child: _verticalFader(
-                                    context: ctx,
-                                    label: 'Band3\nGain',
-                                    value: (pB3['value'] as num).toDouble(),
-                                    min: (pB3['min'] as num).toDouble(),
-                                    max: (pB3['max'] as num).toDouble(),
-                                    unit: 'dB',
-                                    onChanged: (v) {
-                                      setModalState(() => pB3['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pB3['name'] as String, v);
-                                    },
-                                  ),
-                                ),
-                              if (pB4 != null)
-                                Expanded(
-                                  child: _verticalFader(
-                                    context: ctx,
-                                    label: 'Band4\nGain',
-                                    value: (pB4['value'] as num).toDouble(),
-                                    min: (pB4['min'] as num).toDouble(),
-                                    max: (pB4['max'] as num).toDouble(),
-                                    unit: 'dB',
-                                    onChanged: (v) {
-                                      setModalState(() => pB4['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pB4['name'] as String, v);
-                                    },
-                                  ),
-                                ),
-                              if (pLPF != null)
-                                Expanded(
-                                  child: _verticalFader(
-                                    context: ctx,
-                                    label: 'LPF\nFreq',
-                                    value: (pLPF['value'] as num).toDouble(),
-                                    min: (pLPF['min'] as num).toDouble(),
-                                    max: (pLPF['max'] as num).toDouble(),
-                                    logarithmic: true,
-                                    unit: 'Hz',
-                                    onChanged: (v) {
-                                      setModalState(() => pLPF['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pLPF['name'] as String, v);
-                                    },
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-
-                        const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-                        const SizedBox(height: 16),
-                        TextButton(
-                          child: Text(
-                            'Close',
-                            style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          onPressed: () => Navigator.pop(ctx),
-                        ),
-                        const SizedBox(height: 32),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }
-
-            // END HERE
-            return Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-              child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-                  child: Column(
-                    // crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 8),
-                      Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        _effects[idx], //L10n.translate(context, 'Parameters'),
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-
-                      // Parameter controls
-                      for (var param in params) ...[
-                        if (param['type'] == 'float') ...[
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(param['name'] as String, style: Theme.of(context).textTheme.bodyLarge),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    // 1) min label
-                                    Text(
-                                      (param['min'] as num).toDouble().toStringAsFixed(2),
-                                      style: Theme.of(context).textTheme.bodySmall,
-                                    ),
-                                    const SizedBox(width: 8),
-
-                                    // 2) the slider with value indicator
-                                    Expanded(
-                                      child: SliderTheme(
-                                        data: SliderTheme.of(context).copyWith(
-                                          showValueIndicator: ShowValueIndicator.always,
-                                          valueIndicatorTextStyle: TextStyle(
-                                            color: const Color.fromARGB(255, 0, 0, 0),
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                        child: Slider(
-                                          value: (param['value'] as num).toDouble().clamp(
-                                                (param['min'] as num).toDouble(),
-                                                (param['max'] as num).toDouble(),
-                                              ),
-                                          min: (param['min'] as num).toDouble(),
-                                          max: (param['max'] as num).toDouble(),
-                                          divisions: 100, // or compute a sensible number
-                                          label: (param['value'] as num).toDouble().toStringAsFixed(2),
-                                          onChanged: (v) {
-                                            setModalState(() => param['value'] = v);
-                                            // final min = (param['min'] as num).toDouble();
-                                            // final max = (param['max'] as num).toDouble();
-                                            // final normalized = ((v - min) / (max - min)).clamp(0.0, 1.0);
-                                            // print("value: ${v} normalized: ${normalized}");
-                                            JuceAudioEngine.setEffect(
-                                              widget.trackIndex,
-                                              idx,
-                                              param['name'] as String,
-                                              v, //normalized, //v,
-                                            );
-                                          },
-                                          onChangeEnd: (v) => {}, // originally put JuceAudioEngine.setEffect here
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-
-                                    // 3) max label
-                                    Text(
-                                      (param['max'] as num).toDouble().toStringAsFixed(2),
-                                      style: Theme.of(context).textTheme.bodySmall,
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ] else if (param['type'] == 'bool') ...[
-                          SwitchListTile(
-                            title: Text(param['name'] as String),
-                            value: param['value'] as bool,
-                            onChanged: (v) => setModalState(() {
-                              param['value'] = v;
-                              JuceAudioEngine.setEffect(widget.trackIndex, idx, param['name'] as String, v);
-                            }),
-                          ),
-                        ] else if (param['type'] == 'choice') ...[
-                          (() {
-                            final keys = param.keys.where((k) => k.startsWith('choice_')).toList()
-                              ..sort((a, b) {
-                                final ai = int.parse(a.split('_')[1]);
-                                final bi = int.parse(b.split('_')[1]);
-                                return ai.compareTo(bi);
-                              });
-                            // 2) build the labels
-                            final choices = keys.map((k) => param[k] as String).toList();
-                            // 3) current
-                            final current = param['value'] as String;
-                            // 4) render a ListTile that pops a dialog
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8.0),
-                              child: ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(param['name'] as String),
-                                trailing: Text(current, style: Theme.of(context).textTheme.bodyLarge),
-                                onTap: () async {
-                                  final picked = await showDialog<String>(
-                                    context: context,
-                                    useRootNavigator: true,
-                                    builder: (ctx) => SimpleDialog(
-                                      title: Text("${L10n.translate(context, 'Select ')}${param['name']}"),
-                                      children: choices.map((c) {
-                                        return SimpleDialogOption(
-                                          child: Text(c),
-                                          onPressed: () => Navigator.pop(ctx, c),
-                                        );
-                                      }).toList(),
-                                    ),
-                                  );
-                                  if (picked != null) {
-                                    setModalState(() => param['value'] = picked);
-                                    JuceAudioEngine.setEffect(widget.trackIndex, idx, param['name'] as String, picked);
-                                  }
-                                },
-                              ),
-                            );
-                          })(),
-                        ] else ...[
-                          ListTile(title: Text(param['name'] as String), trailing: Text("${param['value']}")),
-                        ],
-                      ],
-
-                      const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-                      const SizedBox(height: 16),
-                      TextButton(
-                        child: Text(
-                          L10n.translate(context, 'Close'),
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        onPressed: () => Navigator.pop(ctx),
-                      ),
-                      const SizedBox(height: 32),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildGenericParamsSheet(BuildContext ctx, StateSetter setModalState, List params, int idx) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-          child: Column(
-            children: [
-              const SizedBox(height: 8),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
-              ),
-              const SizedBox(height: 16),
-              Text(L10n.translate(context, 'Parameters'), style: Theme.of(ctx).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-              // 🔁 your existing loop:
-              for (var param in params) ...[
-                if (param['type'] == 'float') ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(param['name'] as String, style: Theme.of(ctx).textTheme.bodyLarge),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Text(
-                              (param['min'] as num).toDouble().toStringAsFixed(2),
-                              style: Theme.of(ctx).textTheme.bodySmall,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: SliderTheme(
-                                data: SliderTheme.of(ctx).copyWith(
-                                  showValueIndicator: ShowValueIndicator.always,
-                                  valueIndicatorTextStyle: const TextStyle(color: Colors.black, fontSize: 12),
-                                ),
-                                child: Slider(
-                                  value: (param['value'] as num).toDouble().clamp(
-                                        (param['min'] as num).toDouble(),
-                                        (param['max'] as num).toDouble(),
-                                      ),
-                                  min: (param['min'] as num).toDouble(),
-                                  max: (param['max'] as num).toDouble(),
-                                  divisions: 100,
-                                  label: (param['value'] as num).toDouble().toStringAsFixed(2),
-                                  onChanged: (v) {
-                                    setModalState(() => param['value'] = v);
-                                    JuceAudioEngine.setEffect(widget.trackIndex, idx, param['name'] as String, v);
-                                  },
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              (param['max'] as num).toDouble().toStringAsFixed(2),
-                              style: Theme.of(ctx).textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ] else if (param['type'] == 'bool') ...[
-                  SwitchListTile(
-                    title: Text(param['name'] as String),
-                    value: param['value'] as bool,
-                    onChanged: (v) {
-                      setModalState(() => param['value'] = v);
-                      JuceAudioEngine.setEffect(widget.trackIndex, idx, param['name'] as String, v);
-                    },
-                  ),
-                ] else if (param['type'] == 'choice') ...[
-                  (() {
-                    final keys = param.keys.where((k) => k.startsWith('choice_')).toList()
-                      ..sort((a, b) => int.parse(a.split('_')[1]).compareTo(int.parse(b.split('_')[1])));
-                    final choices = keys.map((k) => param[k] as String).toList();
-                    final current = param['value'] as String;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(param['name'] as String),
-                        trailing: Text(current, style: Theme.of(ctx).textTheme.bodyLarge),
-                        onTap: () async {
-                          final picked = await showDialog<String>(
-                            context: ctx,
-                            useRootNavigator: true,
-                            builder: (dCtx) => SimpleDialog(
-                              title: Text("${L10n.translate(context, 'Select ')}${param['name']}"),
-                              children: choices.map((c) {
-                                return SimpleDialogOption(child: Text(c), onPressed: () => Navigator.pop(dCtx, c));
-                              }).toList(),
-                            ),
-                          );
-                          if (picked != null) {
-                            setModalState(() => param['value'] = picked);
-                            JuceAudioEngine.setEffect(widget.trackIndex, idx, param['name'] as String, picked);
-                          }
-                        },
-                      ),
-                    );
-                  })(),
-                ] else ...[
-                  ListTile(title: Text(param['name'] as String), trailing: Text("${param['value']}")),
-                ],
-              ],
-              const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-              const SizedBox(height: 16),
-              TextButton(
-                child: Text(
-                  L10n.translate(context, 'Close'),
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                onPressed: () => Navigator.pop(ctx),
-              ),
-              const SizedBox(height: 32),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ---- Sizes for the vertical faders/rows (tweak to taste) ----
-const double _eqFaderHeight = 160;
-const double _eqRowHeight = _eqFaderHeight + 60; // space for labels above/below
-
-Map<String, dynamic>? _paramByName(List params, String name) {
-  for (final p in params) {
-    if ((p['name']?.toString() ?? '') == name) return p as Map<String, dynamic>;
-  }
-  return null;
-}
-
-double _toLogPos(double v, double min, double max) {
-  // guard
-  final lo = (min <= 0) ? 1.0 : min;
-  final hi = (max <= lo) ? lo + 1.0 : max;
-  final vv = v.clamp(lo, hi).toDouble();
-  final lm = math.log(lo), lM = math.log(hi);
-  return (math.log(vv) - lm) / (lM - lm);
-}
-
-double _fromLogPos(double t, double min, double max) {
-  final lo = (min <= 0) ? 1.0 : min;
-  final hi = (max <= lo) ? lo + 1.0 : max;
-  final lm = math.log(lo), lM = math.log(hi);
-  return math.exp(lm + (lM - lm) * t.clamp(0.0, 1.0));
-}
-
-String _fmtHz(double hz) {
-  if (hz >= 1000) {
-    final k = hz / 1000.0;
-    // 1 decimal up to 9.9k, then integer
-    return k < 10 ? '${k.toStringAsFixed(1)}k' : '${k.toStringAsFixed(0)}k';
-  }
-  return hz.toStringAsFixed(hz < 100 ? 1 : 0);
-}
-
-Widget _slopePicker({
-  required BuildContext ctx,
-  required String title,
-  required List<String> choices,
-  required String current,
-  required void Function(String) onPick,
-  bool compact = false,
-}) {
-  if (choices.isEmpty) return const SizedBox.shrink();
-
-  if (compact) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(title, style: Theme.of(ctx).textTheme.bodySmall),
-        const SizedBox(height: 6),
-        DropdownButton<String>(
-          isExpanded: true,
-          value: current.isNotEmpty ? current : choices.first,
-          items: choices.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-          onChanged: (v) {
-            if (v != null) onPick(v);
-          },
-        ),
-      ],
-    );
-  }
-
-  return Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Text(title, style: Theme.of(ctx).textTheme.bodySmall),
-      const SizedBox(height: 6),
-      Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        alignment: WrapAlignment.center,
-        children: choices.map((label) {
-          final selected = label == current;
-          return ChoiceChip(label: Text(label), selected: selected, onSelected: (_) => onPick(label));
-        }).toList(),
-      ),
-    ],
-  );
-}
-
-Widget _verticalFader({
-  required BuildContext context,
-  required String label,
-  required double value,
-  required double min,
-  required double max,
-  int? divisions,
-  required ValueChanged<double> onChanged,
-  String? unit, // e.g. "Hz"
-  bool logarithmic = false,
-  double width = 56, // 👈 new
-}) {
-  final pos = logarithmic ? _toLogPos(value, min, max) : ((value.clamp(min, max) - min) / (max - min));
-
-  final labelText = (unit == 'Hz')
-      ? '${_fmtHz(value)} Hz'
-      : (unit == null ? value.toStringAsFixed(0) : '${value.toStringAsFixed(0)} $unit');
-
-  return SizedBox(
-    width: width, // 👈 respect caller width
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(labelText, style: Theme.of(context).textTheme.labelMedium, overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 6),
-        SizedBox(
-          height: _eqFaderHeight,
-          child: RotatedBox(
-            quarterTurns: 3,
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                showValueIndicator: ShowValueIndicator.never,
-                trackHeight: 4,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-              ),
-              child: Slider(
-                value: pos,
-                min: 0.0,
-                max: 1.0,
-                divisions: divisions ?? 200,
-                onChanged: (p) {
-                  final v = logarithmic ? _fromLogPos(p, min, max) : (min + (max - min) * p);
-                  onChanged(v);
-                },
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(label, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall, maxLines: 2),
-      ],
-    ),
-  );
-}
-
-/// Simple HPF/LPF curve preview (visual aid; not a DSP analyzer)
-class _EqPreview extends StatelessWidget {
-  final double hpfHz;
-  final double lpfHz;
-  final int hpfSlope; // dB/oct (visual hint only)
-  final int lpfSlope;
-
-  const _EqPreview({
-    super.key,
-    required this.hpfHz,
-    required this.lpfHz,
-    required this.hpfSlope,
-    required this.lpfSlope,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 120,
-      decoration: BoxDecoration(
-        color: const Color(0x1A000000),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x33888888)),
-      ),
-      padding: const EdgeInsets.all(8),
-      // Ensure the CustomPaint always has width/height
-      child: SizedBox.expand(
-        child: CustomPaint(
-          painter: _EqPreviewPainter(hpfHz: hpfHz, lpfHz: lpfHz, hpfSlope: hpfSlope, lpfSlope: lpfSlope),
-        ),
-      ),
-    );
-  }
-}
-
-class _EqPreviewPainter extends CustomPainter {
-  final double hpfHz, lpfHz;
-  final int hpfSlope, lpfSlope;
-
-  _EqPreviewPainter({required this.hpfHz, required this.lpfHz, required this.hpfSlope, required this.lpfSlope});
-
-  static const double _minF = 20.0;
-  static const double _maxF = 20000.0;
-
-  // If plugin sends normalized 0..1, map to 20..20k perceptually.
-  double _normToHz(double v) {
-    if (v.isNaN) return _minF;
-    if (v >= 0.0 && v <= 1.0) {
-      final logMin = math.log(_minF), logMax = math.log(_maxF);
-      return math.exp(logMin + (logMax - logMin) * v);
-    }
-    return v;
-  }
-
-  double _log2(num x) => math.log(x) / math.ln2;
-
-  // x-position for a frequency (log scale across the width)
-  double _xForHz(double hz, double w) {
-    final f = hz.clamp(_minF, _maxF).toDouble();
-    final t = (math.log(f) - math.log(_minF)) / (math.log(_maxF) - math.log(_minF));
-    return (t.clamp(0.0, 1.0) as double) * w;
-  }
-
-  // Map slope (dB/oct) to transition width in octaves.
-  // Steeper slope => smaller width. Tuned for clear visuals.
-  double _widthOctavesForSlope(int slopeDbPerOct) {
-    if (slopeDbPerOct <= 0) return 1.0;
-    final w = 8.0 / slopeDbPerOct; // 6dB→~1.33oct, 12→0.67, 24→0.33, 48→0.17
-    return w.clamp(0.15, 1.50);
-  }
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width, h = size.height;
-    if (w <= 1 || h <= 1) return;
-
-    // Baseline axis
-    final axis = Paint()
-      ..color = const Color(0x55888888)
-      ..strokeWidth = 1;
-    canvas.drawLine(Offset(0, h - 1), Offset(w, h - 1), axis);
-
-    // Sanitize / map inputs
-    double hpf = _normToHz(hpfHz);
-    double lpf = _normToHz(lpfHz);
-
-    // Keep order sensible so passband exists
-    if (hpf > lpf) {
-      final mid = (hpf + lpf) * 0.5;
-      hpf = (mid - 1).clamp(_minF, _maxF);
-      lpf = (mid + 1).clamp(_minF, _maxF);
-    }
-    hpf = hpf.clamp(_minF, _maxF);
-    lpf = lpf.clamp(_minF, _maxF);
-
-    // Geometry
-    final xHPF = _xForHz(hpf, w);
-    final xLPF = _xForHz(lpf, w);
-
-    // Pixels per octave across the canvas
-    final totalOct = _log2(_maxF / _minF);
-    final pxPerOct = w / totalOct;
-
-    // Transition widths in pixels derived from slopes
-    double wHPFpx = pxPerOct * _widthOctavesForSlope(hpfSlope);
-    double wLPFpx = pxPerOct * _widthOctavesForSlope(lpfSlope);
-
-    // Ensure transitions fit between HPF and LPF
-    final gap = (xLPF - xHPF).clamp(0.0, w);
-    final needed = wHPFpx + wLPFpx + 8.0; // +margin
-    if (gap < needed && gap > 0) {
-      final k = (gap - 8.0) / (wHPFpx + wLPFpx);
-      final scale = k.clamp(0.1, 1.0);
-      wHPFpx *= scale;
-      wLPFpx *= scale;
-    }
-
-    // HPF transition start (from floor to passband)
-    final xHPF0 = (xHPF - wHPFpx).clamp(0.0, w);
-    // LPF transition end (from passband back to floor)
-    final xLPF1 = (xLPF + wLPFpx).clamp(0.0, w);
-
-    // Vertical targets
-    final floorY = h - 1;
-    final passbandY = h * 0.25; // visual "flat" line
-    final kneeY = h * 0.20; // slightly above passband for a gentle knee
-
-    // Build a filled polygon for visibility
-    final fill = Path()
-      ..moveTo(0, floorY)
-      ..lineTo(xHPF0, floorY)
-      // HPF cubic: floor → knee near cutoff
-      ..cubicTo(xHPF0 + (wHPFpx * 0.35), floorY, xHPF - (wHPFpx * 0.15), kneeY, xHPF, passbandY)
-      // Flat passband to LPF cutoff
-      ..lineTo(xLPF, passbandY)
-      // LPF cubic: passband → floor
-      ..cubicTo(xLPF + (wLPFpx * 0.15), passbandY, xLPF1 - (wLPFpx * 0.35), floorY, xLPF1, floorY)
-      ..lineTo(w, floorY)
-      ..lineTo(w, h)
-      ..lineTo(0, h)
-      ..close();
-
-    final fillPaint = Paint()
-      ..color = const Color(0x33B03A2E) // translucent reddish
-      ..style = PaintingStyle.fill
-      ..isAntiAlias = true;
-    canvas.drawPath(fill, fillPaint);
-
-    // Stroke on top (same geometry but without the bottom edges)
-    final stroke = Path()
-      ..moveTo(0, floorY)
-      ..lineTo(xHPF0, floorY)
-      ..cubicTo(xHPF0 + (wHPFpx * 0.35), floorY, xHPF - (wHPFpx * 0.15), kneeY, xHPF, passbandY)
-      ..lineTo(xLPF, passbandY)
-      ..cubicTo(xLPF + (wLPFpx * 0.15), passbandY, xLPF1 - (wLPFpx * 0.35), floorY, xLPF1, floorY)
-      ..lineTo(w, floorY);
-
-    final strokePaint = Paint()
-      ..color = const Color(0xFFB03A2E)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5
-      ..strokeJoin = StrokeJoin.round
-      ..isAntiAlias = true;
-    canvas.drawPath(stroke, strokePaint);
-
-    // Markers at exact cutoffs
-    final marker = Paint()
-      ..color = const Color(0xFF888888)
-      ..strokeWidth = 1.5;
-    canvas.drawLine(Offset(xHPF, 0), Offset(xHPF, h), marker);
-    canvas.drawLine(Offset(xLPF, 0), Offset(xLPF, h), marker);
-  }
-
-  @override
-  bool shouldRepaint(covariant _EqPreviewPainter old) {
-    return old.hpfHz != hpfHz ||
-        old.lpfHz != lpfSlope || // keep repainting on slope change
-        old.hpfSlope != hpfSlope ||
-        old.lpfSlope != lpfSlope;
-  }
-}
-
-class _EqPreviewFull extends StatelessWidget {
-  final double hpfHz;
-  final double lpfHz;
-  final List<double> bandGains; // dB values
-  final List<double> bandFreqs; // Hz centers
-
-  const _EqPreviewFull({
-    super.key,
-    required this.hpfHz,
-    required this.lpfHz,
-    required this.bandGains,
-    required this.bandFreqs,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 120,
-      decoration: BoxDecoration(
-        color: const Color(0x1A000000),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x33888888)),
-      ),
-      padding: const EdgeInsets.all(8),
-      child: SizedBox.expand(
-        child: CustomPaint(
-          painter: _EqPreviewFullPainter(hpfHz: hpfHz, lpfHz: lpfHz, bandGains: bandGains, bandFreqs: bandFreqs),
-        ),
-      ),
-    );
-  }
-}
-
-class _EqPreviewFullPainter extends CustomPainter {
-  final double hpfHz, lpfHz;
-  final List<double> bandGains;
-  final List<double> bandFreqs;
-
-  _EqPreviewFullPainter({required this.hpfHz, required this.lpfHz, required this.bandGains, required this.bandFreqs});
-
-  static const double _minF = 20.0;
-  static const double _maxF = 20000.0;
-
-  double _log2(num x) => math.log(x) / math.ln2;
-
-  // map Hz → log X position
-  double _xForHz(double hz, double w) {
-    final f = hz.clamp(_minF, _maxF);
-    final t = (math.log(f) - math.log(_minF)) / (math.log(_maxF) - math.log(_minF));
-    return (t.clamp(0.0, 1.0)) * w;
-  }
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width, h = size.height;
-    if (w <= 1 || h <= 1) return;
-
-    // baseline axis
-    final axis = Paint()
-      ..color = const Color(0x55888888)
-      ..strokeWidth = 1;
-    canvas.drawLine(Offset(0, h - 1), Offset(w, h - 1), axis);
-
-    // clamp hpf/lpf
-    double hpf = hpfHz.clamp(_minF, _maxF);
-    double lpf = lpfHz.clamp(_minF, _maxF);
-    if (hpf >= lpf) {
-      final mid = (hpf + lpf) * 0.5;
-      hpf = (mid - 1).clamp(_minF, _maxF);
-      lpf = (mid + 1).clamp(_minF, _maxF);
-    }
-
-    // HPF/LPF markers
-    final xHPF = _xForHz(hpf, w);
-    final xLPF = _xForHz(lpf, w);
-    final marker = Paint()
-      ..color = const Color(0xFF888888)
-      ..strokeWidth = 1.5;
-    canvas.drawLine(Offset(xHPF, 0), Offset(xHPF, h), marker);
-    canvas.drawLine(Offset(xLPF, 0), Offset(xLPF, h), marker);
-
-    // path for overall curve
-    final path = Path();
-    for (int px = 0; px < w; px++) {
-      // frequency at this pixel (log mapped)
-      final f = _minF * math.pow(_maxF / _minF, px / w);
-
-      // start flat at 0dB
-      double db = 0.0;
-
-      // HPF attenuation
-      if (f < hpf) {
-        final oct = _log2(hpf / f);
-        db -= oct * 12; // 12dB/oct approx
-      }
-
-      // LPF attenuation
-      if (f > lpf) {
-        final oct = _log2(f / lpf);
-        db -= oct * 12;
-      }
-
-      // Add band gains as bumps
-      for (int i = 0; i < bandFreqs.length; i++) {
-        final gain = bandGains[i];
-        if (gain.abs() < 0.1) continue;
-
-        final fc = bandFreqs[i];
-        final q = 1.0; // fixed width for Basic preview
-        final bw = fc / q;
-
-        // gaussian-like bump
-        final d = (math.log(f / fc) / math.ln2); // distance in octaves
-        final shape = math.exp(-(d * d) * 2.0); // narrower = steeper
-        db += gain * shape;
-      }
-
-      // map dB (-24..+24) to canvas height
-      final y = h * 0.5 - (db.clamp(-24.0, 24.0) / 24.0) * (h * 0.4);
-
-      if (px == 0) {
-        path.moveTo(px.toDouble(), y);
-      } else {
-        path.lineTo(px.toDouble(), y);
-      }
-    }
-
-    // draw fill under curve
-    final fillPaint = Paint()
-      ..color = const Color(0x33B03A2E)
-      ..style = PaintingStyle.fill;
-    final fillPath = Path.from(path)
-      ..lineTo(w, h)
-      ..lineTo(0, h)
-      ..close();
-    canvas.drawPath(fillPath, fillPaint);
-
-    // draw stroke curve
-    final strokePaint = Paint()
-      ..color = const Color(0xFFB03A2E)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..isAntiAlias = true;
-    canvas.drawPath(path, strokePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _EqPreviewFullPainter old) {
-    return old.hpfHz != hpfHz || old.lpfHz != lpfHz || old.bandGains != bandGains;
-  }
-}
-
-// EFFECTS DRAWER END
-
-class _TrianglePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Path();
-    p.moveTo(size.width / 2, 0);
-    p.lineTo(size.width, size.height);
-    p.lineTo(0, size.height);
-    p.close();
-
-    final paint = Paint()
-      ..color = const Color(0xFF1A1F2E)
-      ..style = PaintingStyle.fill;
-
-    final border = Paint()
-      ..color = Colors.white24
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-
-    canvas.drawPath(p, paint);
-    canvas.drawPath(p, border);
-  }
-
-  @override
-  bool shouldRepaint(_) => false;
-}
-
 // Place this new class definition outside of your main widget's State class.
 class DynamicRackContent extends StatefulWidget {
   // Pass the needed page builders/widgets here.
@@ -8327,7 +5969,67 @@ class AddAudioTrackAction extends EditorUndoAction {
 
     final track = _addedTrack!;
     track.audioStartTimer?.cancel();
-    track.waveformController.dispose();
+
+    tracks.removeAt(_addedIndex!);
+    await JuceAudioEngine.removeTrack(_addedIndex!);
+    await JuceAudioEngine.pause();
+
+    _addedTrack = null;
+    _addedIndex = null;
+  }
+}
+
+class PasteAudioClipAction extends EditorUndoAction {
+  final Future<void> Function({
+    required AudioTrack clip,
+    required int row,
+    required double timeMs,
+    Duration? trimStartRequested,
+    Duration? trimEndRequested,
+  }) pasteClip;
+
+  final List<AudioTrack> tracks;
+  final AudioTrack clip;
+  final int row;
+  final double timeMs;
+  final Duration? trimStart;
+  final Duration? trimEnd;
+
+  AudioTrack? _addedTrack;
+  int? _addedIndex;
+
+  PasteAudioClipAction({
+    required this.pasteClip,
+    required this.tracks,
+    required this.clip,
+    required this.row,
+    required this.timeMs,
+    this.trimStart,
+    this.trimEnd,
+  });
+
+  @override
+  String get description => 'Paste audio clip';
+
+  @override
+  Future<void> redo() async {
+    final beforeCount = tracks.length;
+
+    await pasteClip(clip: clip, row: row, timeMs: timeMs, trimStartRequested: trimStart, trimEndRequested: trimEnd);
+
+    // capture the newly added track
+    if (tracks.length > beforeCount) {
+      _addedIndex = tracks.length - 1;
+      _addedTrack = tracks[_addedIndex!];
+    }
+  }
+
+  @override
+  Future<void> undo() async {
+    if (_addedIndex == null || _addedTrack == null) return;
+
+    final track = _addedTrack!;
+    track.audioStartTimer?.cancel();
 
     tracks.removeAt(_addedIndex!);
     await JuceAudioEngine.removeTrack(_addedIndex!);
@@ -8340,10 +6042,11 @@ class AddAudioTrackAction extends EditorUndoAction {
 
 class DeleteClipAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
+  final AudioTrack clip;
   final int originalIndex;
 
   final Future<void> Function({
-    required File file,
+    required AudioTrack clip,
     required int row,
     required double timeMs,
     required Duration trimStartRequested,
@@ -8353,6 +6056,7 @@ class DeleteClipAction extends EditorUndoAction {
   final VoidCallback onChange;
 
   // snapshot
+  // can deprecate all fields except clip, since all of them derive from clip anyways
   late final File file;
   late final int row;
   late final double timeMs;
@@ -8361,7 +6065,7 @@ class DeleteClipAction extends EditorUndoAction {
 
   DeleteClipAction({
     required this.tracks,
-    required AudioTrack clip,
+    required this.clip,
     required this.originalIndex,
     required this.addTrack,
     required this.onChange,
@@ -8374,7 +6078,7 @@ class DeleteClipAction extends EditorUndoAction {
   }
 
   @override
-  String get description => 'Delete clip';
+  String get description => 'Delete audio clip';
 
   @override
   Future<void> redo() async {
@@ -8382,7 +6086,6 @@ class DeleteClipAction extends EditorUndoAction {
     if (clip == null) return;
 
     clip.audioStartTimer?.cancel();
-    clip.waveformController.dispose();
 
     tracks.removeAt(originalIndex);
     await JuceAudioEngine.removeTrack(originalIndex);
@@ -8393,7 +6096,7 @@ class DeleteClipAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
-    await addTrack(file: file, row: row, timeMs: timeMs, trimStartRequested: trimStart, trimEndRequested: trimEnd);
+    await addTrack(clip: clip, row: row, timeMs: timeMs, trimStartRequested: trimStart, trimEndRequested: trimEnd);
     onChange();
   }
 }
@@ -8425,7 +6128,7 @@ class TrimClipAction extends EditorUndoAction {
   });
 
   @override
-  String get description => 'Trim clip';
+  String get description => 'Trim audio clip';
 
   @override
   Future<void> redo() async {
@@ -8475,7 +6178,7 @@ class MoveClipAction extends EditorUndoAction {
   });
 
   @override
-  String get description => 'Move clip';
+  String get description => 'Move audio clip';
 
   @override
   Future<void> redo() async {
@@ -8980,7 +6683,8 @@ Future<RowEffectsSnapshot> captureRowSnapshot(int row) async {
 
   for (int i = 0; i < effects.length; i++) {
     final params = await JuceAudioEngine.getTrackPluginParameters(row, i);
-    snapshots.add(EffectSnapshot(effects[i], {for (final p in params) p['name']: p['value']}));
+    final isBypassed = await JuceAudioEngine.getRowEffectBypassState(row, i);
+    snapshots.add(EffectSnapshot(effects[i], isBypassed, {for (final p in params) p['name']: p['value']}));
   }
 
   return RowEffectsSnapshot(row, snapshots);
@@ -9001,6 +6705,10 @@ Future<void> restoreRowSnapshot(RowEffectsSnapshot snap) async {
     for (final e in fx.params.entries) {
       await JuceAudioEngine.setTrackEffect(snap.row, i, e.key, e.value);
     }
+
+    if (fx.bypassed) {
+      await JuceAudioEngine.bypassRowEffect(snap.row, i, true);
+    }
   }
 }
 
@@ -9010,7 +6718,8 @@ Future<MasterEffectsSnapshot> captureMasterSnapshot() async {
 
   for (int i = 0; i < effects.length; i++) {
     final params = await JuceAudioEngine.getMasterPluginParameters(i);
-    snapshots.add(EffectSnapshot(effects[i], {for (final p in params) p['name']: p['value']}));
+    final isBypassed = await JuceAudioEngine.getMasterEffectBypassState(i);
+    snapshots.add(EffectSnapshot(effects[i], isBypassed, {for (final p in params) p['name']: p['value']}));
   }
 
   return MasterEffectsSnapshot(snapshots);
@@ -9030,6 +6739,10 @@ Future<void> restoreMasterSnapshot(MasterEffectsSnapshot snap) async {
 
     for (final e in fx.params.entries) {
       await JuceAudioEngine.setMasterEffect(i, e.key, e.value);
+    }
+
+    if (fx.bypassed) {
+      await JuceAudioEngine.bypassMasterEffect(i, true);
     }
   }
 }
@@ -9083,66 +6796,6 @@ class MasterPresetChangeAction extends EditorUndoAction {
 AudioTrack? _resolveClip(List<AudioTrack> tracks, int index) {
   if (index < 0 || index >= tracks.length) return null;
   return tracks[index];
-}
-
-class _CollapsedChatBar extends StatelessWidget {
-  final VoidCallback onTap;
-  const _CollapsedChatBar({super.key, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: _Glass(
-        radius: 22,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        opacity: 0.10,
-        child: Row(
-          children: [
-            _chatIcon(),
-            const SizedBox(width: 10),
-            Text('Type...', style: TextStyle(color: Colors.white.withOpacity(0.72), fontSize: 15)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ExpandedChatBar extends StatelessWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final VoidCallback onSubmit;
-
-  const _ExpandedChatBar({super.key, required this.controller, required this.focusNode, required this.onSubmit});
-
-  @override
-  Widget build(BuildContext context) {
-    return _Glass(
-      radius: 22,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      opacity: 0.14,
-      child: Row(
-        children: [
-          _chatIcon(),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Material(
-              color: Colors.transparent,
-              child: TextField(
-                controller: controller,
-                focusNode: focusNode,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(hintText: 'Type...', border: InputBorder.none),
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSubmit(),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 Widget _chatIcon() {
@@ -9420,4 +7073,124 @@ class _RollingTextState extends State<RollingText> {
 
 List<Map<String, dynamic>> _toMaps(List<AutomationPoint> points) {
   return points.map((p) => p.toMap()).toList();
+}
+
+class MiniStereoMeterHorizontal extends StatelessWidget {
+  final MeterFrame frame;
+  final double width;
+  final double height;
+
+  const MiniStereoMeterHorizontal({
+    super.key,
+    required this.frame,
+    this.width = 120,
+    this.height = 18,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size(width, height),
+      painter: _MiniStereoMeterHorizontalPainter(frame),
+    );
+  }
+}
+
+class _MiniStereoMeterHorizontalPainter extends CustomPainter {
+  final MeterFrame f;
+  _MiniStereoMeterHorizontalPainter(this.f);
+
+  @override
+  void paint(Canvas c, Size s) {
+    // ===== Background slot =====
+    final bg = Paint()..color = const Color(0xFF1A2230); // richer dark blue-gray
+
+    final border = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.white.withOpacity(0.10);
+
+    // NO rounding: clean rectangle
+    final rect = Offset.zero & s;
+    c.drawRect(rect, bg);
+    c.drawRect(rect, border);
+
+    // ===== Tick lines (scale feel) =====
+    final tick = Paint()
+      ..color = Colors.white.withOpacity(0.06)
+      ..strokeWidth = 1;
+
+    for (int i = 1; i <= 4; i++) {
+      final x = s.width * (i / 5.0);
+      c.drawLine(
+        Offset(x, 1),
+        Offset(x, s.height - 1),
+        tick,
+      );
+    }
+
+    // ===== Meter paints =====
+    final peakPaint = Paint()..color = Colors.white.withOpacity(0.80);
+    final rmsPaint = Paint()..color = Colors.white.withOpacity(0.22);
+
+    // Idle floor prevents dead-empty look
+    const idleFloor = 0.015;
+
+    double wFor(double v) => ((v + idleFloor).clamp(0.0, 1.0)) * s.width;
+
+    // Split into two lanes
+    const laneGap = 1.0;
+    final laneH = (s.height - laneGap) / 2.0;
+
+    Rect laneRect(int laneIdx) {
+      final top = laneIdx == 0 ? 0.0 : laneH + laneGap;
+      return Rect.fromLTWH(0, top, s.width, laneH);
+    }
+
+    // ===== Left lane (Top) =====
+    final topLane = laneRect(0);
+
+    final lRmsW = wFor(f.rmsL);
+    final lPeakW = wFor(f.peakL);
+
+    c.drawRect(
+      Rect.fromLTWH(topLane.left, topLane.top, lRmsW, topLane.height),
+      rmsPaint,
+    );
+    c.drawRect(
+      Rect.fromLTWH(topLane.left, topLane.top, lPeakW, topLane.height),
+      peakPaint,
+    );
+
+    // ===== Right lane (Bottom) =====
+    final botLane = laneRect(1);
+
+    final rRmsW = wFor(f.rmsR);
+    final rPeakW = wFor(f.peakR);
+
+    c.drawRect(
+      Rect.fromLTWH(botLane.left, botLane.top, rRmsW, botLane.height),
+      rmsPaint,
+    );
+    c.drawRect(
+      Rect.fromLTWH(botLane.left, botLane.top, rPeakW, botLane.height),
+      peakPaint,
+    );
+
+    // ===== Clip indicator (optional) =====
+    // if (f.clip) {
+    //   final clipPaint = Paint()..color = const Color(0xFFFF4A4A);
+
+    //   // Small square light (pro look)
+    //   c.drawRect(
+    //     Rect.fromLTWH(s.width - 6, 2, 4, 4),
+    //     clipPaint,
+    //   );
+    // }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MiniStereoMeterHorizontalPainter old) {
+    return old.f != f;
+  }
 }

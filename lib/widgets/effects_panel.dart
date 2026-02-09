@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'dart:math' as math;
@@ -24,7 +26,10 @@ class RowEffectsPanel extends StatefulWidget {
   final double projectBpm;
 
   final void Function(int row, int effectIndex, String paramId, dynamic oldValue, dynamic newValue)?
-  onPluginParamCommit;
+      onPluginParamCommit;
+
+  final MeterBus meters;
+  final Future<List<double>> Function(int row, int effectIndex) getRowCompressorMeter;
 
   const RowEffectsPanel({
     Key? key,
@@ -44,6 +49,8 @@ class RowEffectsPanel extends StatefulWidget {
     required this.onPresetCommit,
     this.registerRefresh,
     required this.projectBpm,
+    required this.meters,
+    required this.getRowCompressorMeter,
   }) : super(key: key);
 
   @override
@@ -67,12 +74,23 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   // for Delay Time parameter
   final Map<int, int> _delayDivisionByEffect = {};
 
+  Timer? _compMeterTimer;
+  CompressorStripFrame _compFrame = CompressorStripFrame.zero;
+  CompressorStripFrame _compFrameSmoothed = CompressorStripFrame.zero;
+  bool _compMeterRunning = false;
+
   @override
   void initState() {
     super.initState();
     _loadEffects();
     // widget.registerRefresh?.call = _refetchAll;
     widget.registerRefresh?.call(_refetchAll);
+  }
+
+  @override
+  void dispose() {
+    _stopCompressorMetering();
+    super.dispose();
   }
 
   Future<void> _loadEffects() async {
@@ -208,6 +226,47 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         ],
       ),
     );
+  }
+
+  void _startCompressorMetering({required int effectIndex}) {
+    _stopCompressorMetering();
+    _compMeterRunning = true;
+
+    // ~30fps is plenty; 60fps if you want (16ms)
+    _compMeterTimer = Timer.periodic(const Duration(milliseconds: 33), (_) async {
+      if (!mounted || !_compMeterRunning) return;
+
+      try {
+        final arr = await widget.getRowCompressorMeter(widget.rowIndex, effectIndex);
+        if (!mounted || !_compMeterRunning) return;
+        // arr = [inL, inR, grDb, outL, outR]
+        final next = CompressorStripFrame(
+          inL: (arr.isNotEmpty ? arr[0] : 0).toDouble(),
+          inR: (arr.length > 1 ? arr[1] : 0).toDouble(),
+          grDb: (arr.length > 2 ? arr[2] : 0).toDouble(),
+          outL: (arr.length > 3 ? arr[3] : 0).toDouble(),
+          outR: (arr.length > 4 ? arr[4] : 0).toDouble(),
+        ).clamp();
+
+        // smoothing (simple EMA-ish via lerp)
+        // increase t for snappier response (0.35), decrease for smoother (0.18)
+        const t = 0.25;
+        setState(() {
+          _compFrame = next;
+          _compFrameSmoothed = CompressorStripFrame.lerp(_compFrameSmoothed, next, t);
+        });
+      } catch (_) {
+        // ignore polling errors (plugin might not be ready)
+      }
+    });
+  }
+
+  void _stopCompressorMetering() {
+    _compMeterRunning = false;
+    _compMeterTimer?.cancel();
+    _compMeterTimer = null;
+    _compFrame = CompressorStripFrame.zero;
+    _compFrameSmoothed = CompressorStripFrame.zero;
   }
 
   // used from above when the UI needs to be updated after JUCE state changed from above (undo actions, AI mixer)
@@ -464,7 +523,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     final beforeSnapshots = <EffectSnapshot>[];
     for (int i = 0; i < _effects.length; i++) {
       final params = await widget.getTrackPluginParameters(widget.rowIndex, i);
-      beforeSnapshots.add(EffectSnapshot(_effects[i], {for (final p in params) p['name']: p['value']}));
+      final isBypassed = await widget.getBypassStateForRow(widget.rowIndex, i);
+      beforeSnapshots.add(EffectSnapshot(_effects[i], isBypassed, {for (final p in params) p['name']: p['value']}));
     }
     final before = RowEffectsSnapshot(widget.rowIndex, beforeSnapshots);
 
@@ -526,7 +586,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     final afterSnapshots = <EffectSnapshot>[];
     for (int i = 0; i < _effects.length; i++) {
       final params = await widget.getTrackPluginParameters(widget.rowIndex, i);
-      afterSnapshots.add(EffectSnapshot(_effects[i], {for (final p in params) p['name']: p['value']}));
+      final isBypassed = await widget.getBypassStateForRow(widget.rowIndex, i);
+      afterSnapshots.add(EffectSnapshot(_effects[i], isBypassed, {for (final p in params) p['name']: p['value']}));
     }
     final after = RowEffectsSnapshot(widget.rowIndex, afterSnapshots);
     widget.onPresetCommit?.call(before, after);
@@ -538,38 +599,47 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   // =========================
 
   Widget _buildEffectTile(int idx) {
-    return ReorderableDragStartListener(
-      key: ValueKey("effect_$idx"),
-      index: idx,
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        key: ValueKey("effect_tile_$idx"),
-        leading: const Icon(Icons.drag_handle),
-        title: Text(_effects[idx], style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 15)),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Bypass toggle
-            Switch(
-              value: !_bypassed[idx],
-              onChanged: (active) async {
-                final shouldBypass = !active;
-                await widget.setBypassForRow(widget.rowIndex, idx, shouldBypass);
-                setState(() => _bypassed[idx] = shouldBypass);
-              },
-              activeColor: const Color.fromARGB(255, 231, 231, 231),
-              inactiveThumbColor: const Color.fromARGB(255, 186, 186, 186),
-              inactiveTrackColor: const Color.fromARGB(255, 235, 235, 235),
-              activeTrackColor: const Color.fromARGB(255, 54, 54, 54),
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: Color.fromARGB(255, 255, 164, 164)),
-              onPressed: () => _confirmRemove(idx),
-            ),
-          ],
+    return ListTile(
+      key: ValueKey("effect_$idx"), // key must be on the tile itself
+      contentPadding: EdgeInsets.zero,
+
+      // only this area starts the reorder gesture
+      leading: ReorderableDragStartListener(
+        index: idx,
+        child: const Padding(
+          padding: EdgeInsets.only(left: 6.0, right: 6.0),
+          child: Icon(Icons.drag_handle),
         ),
-        onTap: () => _openPluginParams(idx),
       ),
+
+      title: Text(
+        _effects[idx],
+        style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 15),
+      ),
+
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Switch(
+            value: !_bypassed[idx],
+            onChanged: (active) async {
+              final shouldBypass = !active;
+              await widget.setBypassForRow(widget.rowIndex, idx, shouldBypass);
+              setState(() => _bypassed[idx] = shouldBypass);
+            },
+            activeColor: const Color.fromARGB(255, 231, 231, 231),
+            inactiveThumbColor: const Color.fromARGB(255, 186, 186, 186),
+            inactiveTrackColor: const Color.fromARGB(255, 235, 235, 235),
+            activeTrackColor: const Color.fromARGB(255, 54, 54, 54),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Color.fromARGB(255, 255, 164, 164)),
+            onPressed: () => _confirmRemove(idx),
+          ),
+        ],
+      ),
+
+      onTap: () => _openPluginParams(idx),
     );
   }
 
@@ -656,25 +726,24 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                   ListView(
                     children: ["EQ 3-Band", "Compressor", "De-Esser", "Distortion", "Delay", "Reverb", "EQ Parametric"]
                         .map((name) {
-                          final isAllowed = widget.mode == 'Pro' || allowedInBasic.contains(name);
-                          return GestureDetector(
-                            onTap: isAllowed
-                                ? () async {
-                                    Navigator.pop(context);
-                                    await widget.insertEffectOnRow(widget.rowIndex, name);
-                                    await _loadEffects();
-                                  }
-                                : null,
-                            child: Opacity(
-                              opacity: isAllowed ? 1.0 : 0.4,
-                              child: ListTile(
-                                title: Text(name),
-                                trailing: isAllowed ? null : const Icon(Icons.lock, size: 18, color: Colors.white70),
-                              ),
-                            ),
-                          );
-                        })
-                        .toList(),
+                      final isAllowed = widget.mode == 'Pro' || allowedInBasic.contains(name);
+                      return GestureDetector(
+                        onTap: isAllowed
+                            ? () async {
+                                Navigator.pop(context);
+                                await widget.insertEffectOnRow(widget.rowIndex, name);
+                                await _loadEffects();
+                              }
+                            : null,
+                        child: Opacity(
+                          opacity: isAllowed ? 1.0 : 0.4,
+                          child: ListTile(
+                            title: Text(name),
+                            trailing: isAllowed ? null : const Icon(Icons.lock, size: 18, color: Colors.white70),
+                          ),
+                        ),
+                      );
+                    }).toList(),
                   ),
                   ListView(
                     children: plugins.map((meta) {
@@ -709,6 +778,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       _paramsLoading = true;
       _currentParams = [];
     });
+
+    // Turn on Compressor metering if it is about to be opened
+    if (_effects[idx] == 'Compressor') {
+      _startCompressorMetering(effectIndex: idx);
+    } else {
+      _stopCompressorMetering();
+    }
 
     var params = await widget.getTrackPluginParameters(widget.rowIndex, idx);
 
@@ -1176,6 +1252,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               IconButton(
                 icon: const Icon(Icons.arrow_back),
                 onPressed: () {
+                  _stopCompressorMetering();
                   setState(() {
                     _selectedEffectIndex = null;
                     _currentParams = [];
@@ -1192,6 +1269,16 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           // const SizedBox(height: 8),
           const Divider(color: Color.fromARGB(213, 104, 104, 104)),
           // const SizedBox(height: 8),
+
+          if (effectName == 'Compressor') ...[
+            // _buildCompressorMeterStrip(),
+            const SizedBox(height: 10),
+            GainReductionSliderMeterHorizontal(
+              grDb: _compFrameSmoothed.grDb,
+              maxDb: 24,
+            ),
+            const SizedBox(height: 10),
+          ],
 
           // Params straight in Column
           for (var param in _currentParams) ...[
@@ -1221,45 +1308,62 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                 fontSize: 12,
                               ),
                             ),
-                            child: Slider(
-                              value: (param['value'] as num).toDouble().clamp(
-                                (param['min'] as num).toDouble(),
-                                (param['max'] as num).toDouble(),
-                              ),
-                              min: (param['min'] as num).toDouble(),
-                              max: (param['max'] as num).toDouble(),
-                              divisions: 100,
-                              label: (param['value'] as num).toDouble().toStringAsFixed(2),
-                              // onChanged: (v) {
-                              //   setState(() => param['value'] = v);
-                              //   widget.setTrackEffectParam(
-                              //     widget.rowIndex,
-                              //     idx,
-                              //     param['name'] as String,
-                              //     v,
-                              //   );
-                              // },
-                              onChangeStart: (v) {
-                                _paramDragStartValue = (param['value'] as num).toDouble();
-                              },
-                              onChanged: (v) {
-                                setState(() => param['value'] = v);
-                                widget.setTrackEffectParam(widget.rowIndex, idx, param['name'] as String, v);
-                              },
-                              onChangeEnd: (v) {
-                                if (_paramDragStartValue == null) return;
+                            child: (() {
+                              final effectName = _effects[idx];
+                              final paramName = param['name'] as String;
 
-                                widget.onPluginParamCommit?.call(
-                                  widget.rowIndex,
-                                  idx,
-                                  param['name'] as String,
-                                  _paramDragStartValue!,
-                                  v,
-                                );
+                              final minV = (param['min'] as num).toDouble();
+                              final maxV = (param['max'] as num).toDouble();
+                              final rawV = (param['value'] as num).toDouble().clamp(minV, maxV);
 
-                                _paramDragStartValue = null;
-                              },
-                            ),
+                              final skew = _getParamSkew(effectName, paramName); // null = linear
+
+                              // value -> 0..1
+                              double toNorm(double v) => ((v - minV) / (maxV - minV)).clamp(0.0, 1.0);
+
+                              // 0..1 -> value
+                              double fromNorm(double t) => minV + (maxV - minV) * t.clamp(0.0, 1.0);
+
+                              // if skew exists: position uses norm^skew, and inverse uses ^(1/skew)
+                              final norm = toNorm(rawV);
+                              final sliderPos = (skew == null) ? norm : math.pow(norm, skew).toDouble();
+
+                              return Slider(
+                                value: sliderPos,
+                                min: 0.0,
+                                max: 1.0,
+                                divisions: 200,
+                                label: rawV.toStringAsFixed(2),
+                                onChangeStart: (_) {
+                                  _paramDragStartValue = rawV;
+                                },
+                                onChanged: (p) {
+                                  final t = p.clamp(0.0, 1.0);
+                                  final newNorm = (skew == null) ? t : math.pow(t, 1.0 / skew!).toDouble();
+                                  final v = fromNorm(newNorm);
+
+                                  setState(() => param['value'] = v);
+                                  widget.setTrackEffectParam(widget.rowIndex, idx, paramName, v);
+                                },
+                                onChangeEnd: (p) {
+                                  if (_paramDragStartValue == null) return;
+
+                                  final t = p.clamp(0.0, 1.0);
+                                  final newNorm = (skew == null) ? t : math.pow(t, 1.0 / skew!).toDouble();
+                                  final v = fromNorm(newNorm);
+
+                                  widget.onPluginParamCommit?.call(
+                                    widget.rowIndex,
+                                    idx,
+                                    paramName,
+                                    _paramDragStartValue!,
+                                    v,
+                                  );
+
+                                  _paramDragStartValue = null;
+                                },
+                              );
+                            })(),
                           ),
                         ),
                         // const SizedBox(width: 8),
@@ -1357,6 +1461,9 @@ class MasterEffectsPanel extends StatefulWidget {
   final void Function(double height)? onHeightChanged;
   final double projectBpm;
 
+  final MeterBus meters;
+  final Future<List<double>> Function(int effectIndex) getMasterCompressorMeter;
+
   const MasterEffectsPanel({
     Key? key,
     required this.mode,
@@ -1373,6 +1480,8 @@ class MasterEffectsPanel extends StatefulWidget {
     this.onMasterPluginParamCommit,
     this.onMasterPresetCommit,
     required this.projectBpm,
+    required this.meters,
+    required this.getMasterCompressorMeter,
   }) : super(key: key);
 
   @override
@@ -1395,10 +1504,21 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   // for Delay Time parameter
   final Map<int, int> _delayDivisionByEffect = {};
 
+  Timer? _compMeterTimer;
+  CompressorStripFrame _compFrame = CompressorStripFrame.zero;
+  CompressorStripFrame _compFrameSmoothed = CompressorStripFrame.zero;
+  bool _compMeterRunning = false;
+
   @override
   void initState() {
     super.initState();
     _loadEffects();
+  }
+
+  @override
+  void dispose() {
+    _stopCompressorMetering();
+    super.dispose();
   }
 
   Future<void> _loadEffects() async {
@@ -1521,6 +1641,48 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         ],
       ),
     );
+  }
+
+  void _startCompressorMetering({required int effectIndex}) {
+    _stopCompressorMetering();
+    _compMeterRunning = true;
+
+    _compMeterTimer = Timer.periodic(const Duration(milliseconds: 33), (_) async {
+      if (!mounted || !_compMeterRunning) return;
+
+      try {
+        final arr = await widget.getMasterCompressorMeter(effectIndex);
+        if (!mounted || !_compMeterRunning) return;
+
+        // arr = [inL, inR, grDb, outL, outR]
+        final next = CompressorStripFrame(
+          inL: (arr.isNotEmpty ? arr[0] : 0).toDouble(),
+          inR: (arr.length > 1 ? arr[1] : 0).toDouble(),
+          grDb: (arr.length > 2 ? arr[2] : 0).toDouble(),
+          outL: (arr.length > 3 ? arr[3] : 0).toDouble(),
+          outR: (arr.length > 4 ? arr[4] : 0).toDouble(),
+        ).clamp();
+
+        // smoothing (tweak: 0.18 smoother, 0.35 snappier)
+        const t = 0.25;
+
+        setState(() {
+          _compFrame = next;
+          _compFrameSmoothed = CompressorStripFrame.lerp(_compFrameSmoothed, next, t);
+        });
+      } catch (_) {
+        // swallow polling errors
+      }
+    });
+  }
+
+  void _stopCompressorMetering() {
+    _compMeterRunning = false;
+    _compMeterTimer?.cancel();
+    _compMeterTimer = null;
+
+    _compFrame = CompressorStripFrame.zero;
+    _compFrameSmoothed = CompressorStripFrame.zero;
   }
 
   @override
@@ -1660,7 +1822,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     final beforeSnapshots = <EffectSnapshot>[];
     for (int i = 0; i < _effects.length; i++) {
       final params = await widget.getMasterPluginParameters(i);
-      beforeSnapshots.add(EffectSnapshot(_effects[i], {for (final p in params) p['name']: p['value']}));
+      final isBypassed = await widget.getMasterEffectBypassState(i);
+      beforeSnapshots.add(EffectSnapshot(_effects[i], isBypassed, {for (final p in params) p['name']: p['value']}));
     }
     final before = MasterEffectsSnapshot(beforeSnapshots);
 
@@ -1725,7 +1888,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     final afterSnapshots = <EffectSnapshot>[];
     for (int i = 0; i < _effects.length; i++) {
       final params = await widget.getMasterPluginParameters(i);
-      afterSnapshots.add(EffectSnapshot(_effects[i], {for (final p in params) p['name']: p['value']}));
+      final isBypassed = await widget.getMasterEffectBypassState(i);
+      afterSnapshots.add(EffectSnapshot(_effects[i], isBypassed, {for (final p in params) p['name']: p['value']}));
     }
     final after = MasterEffectsSnapshot(afterSnapshots);
     widget.onMasterPresetCommit?.call(before, after);
@@ -1737,38 +1901,47 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   // =========================
 
   Widget _buildMasterEffectTile(int idx) {
-    return ReorderableDragStartListener(
-      key: ValueKey("master_effect_$idx"),
-      index: idx,
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        key: ValueKey("master_effect_tile_$idx"),
-        leading: const Icon(Icons.drag_handle),
-        title: Text(_effects[idx], style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 15)),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Bypass toggle
-            Switch(
-              value: !_bypassed[idx],
-              onChanged: (active) async {
-                final shouldBypass = !active;
-                await widget.bypassMasterEffect(idx, shouldBypass);
-                setState(() => _bypassed[idx] = shouldBypass);
-              },
-              activeColor: const Color.fromARGB(255, 231, 231, 231),
-              inactiveThumbColor: const Color.fromARGB(255, 186, 186, 186),
-              inactiveTrackColor: const Color.fromARGB(255, 235, 235, 235),
-              activeTrackColor: const Color.fromARGB(255, 54, 54, 54),
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: Color.fromARGB(255, 255, 164, 164)),
-              onPressed: () => _confirmRemove(idx),
-            ),
-          ],
+    return ListTile(
+      key: ValueKey("master_effect_$idx"), // key must be on the tile itself
+      contentPadding: EdgeInsets.zero,
+
+      // only this handle starts reorder drag
+      leading: ReorderableDragStartListener(
+        index: idx,
+        child: const Padding(
+          padding: EdgeInsets.only(left: 6.0, right: 6.0),
+          child: Icon(Icons.drag_handle),
         ),
-        onTap: () => _openPluginParams(idx),
       ),
+
+      title: Text(
+        _effects[idx],
+        style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 15),
+      ),
+
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Switch(
+            value: !_bypassed[idx],
+            onChanged: (active) async {
+              final shouldBypass = !active;
+              await widget.bypassMasterEffect(idx, shouldBypass);
+              setState(() => _bypassed[idx] = shouldBypass);
+            },
+            activeColor: const Color.fromARGB(255, 231, 231, 231),
+            inactiveThumbColor: const Color.fromARGB(255, 186, 186, 186),
+            inactiveTrackColor: const Color.fromARGB(255, 235, 235, 235),
+            activeTrackColor: const Color.fromARGB(255, 54, 54, 54),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Color.fromARGB(255, 255, 164, 164)),
+            onPressed: () => _confirmRemove(idx),
+          ),
+        ],
+      ),
+
+      onTap: () => _openPluginParams(idx),
     );
   }
 
@@ -1854,25 +2027,24 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                   ListView(
                     children: ["EQ 3-Band", "Compressor", "De-Esser", "Distortion", "Delay", "Reverb", "EQ Parametric"]
                         .map((name) {
-                          final isAllowed = widget.mode == 'Pro' || allowedInBasic.contains(name);
-                          return GestureDetector(
-                            onTap: isAllowed
-                                ? () async {
-                                    Navigator.pop(context);
-                                    await widget.insertMasterEffect(name);
-                                    await _loadEffects();
-                                  }
-                                : null,
-                            child: Opacity(
-                              opacity: isAllowed ? 1.0 : 0.4,
-                              child: ListTile(
-                                title: Text(name),
-                                trailing: isAllowed ? null : const Icon(Icons.lock, size: 18, color: Colors.white70),
-                              ),
-                            ),
-                          );
-                        })
-                        .toList(),
+                      final isAllowed = widget.mode == 'Pro' || allowedInBasic.contains(name);
+                      return GestureDetector(
+                        onTap: isAllowed
+                            ? () async {
+                                Navigator.pop(context);
+                                await widget.insertMasterEffect(name);
+                                await _loadEffects();
+                              }
+                            : null,
+                        child: Opacity(
+                          opacity: isAllowed ? 1.0 : 0.4,
+                          child: ListTile(
+                            title: Text(name),
+                            trailing: isAllowed ? null : const Icon(Icons.lock, size: 18, color: Colors.white70),
+                          ),
+                        ),
+                      );
+                    }).toList(),
                   ),
                   ListView(
                     children: plugins.map((meta) {
@@ -1907,6 +2079,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       _paramsLoading = true;
       _currentParams = [];
     });
+
+    if (_effects[idx] == 'Compressor') {
+      _startCompressorMetering(effectIndex: idx);
+    } else {
+      _stopCompressorMetering();
+    }
 
     var params = await widget.getMasterPluginParameters(idx);
 
@@ -2218,7 +2396,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       // Must match JUCE fixed centers for accurate preview
       final freqs = [140.0, 1200.0, 8000.0];
 
-      return Padding(
+      return SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2360,6 +2538,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               IconButton(
                 icon: const Icon(Icons.arrow_back),
                 onPressed: () {
+                  _stopCompressorMetering();
                   setState(() {
                     _selectedEffectIndex = null;
                     _currentParams = [];
@@ -2376,6 +2555,16 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           // const SizedBox(height: 8),
           const Divider(color: Color.fromARGB(213, 104, 104, 104)),
           // const SizedBox(height: 8),
+
+          if (effectName == 'Compressor') ...[
+            // _buildCompressorMeterStrip(),
+            const SizedBox(height: 10),
+            GainReductionSliderMeterHorizontal(
+              grDb: _compFrameSmoothed.grDb,
+              maxDb: 24,
+            ),
+            const SizedBox(height: 10),
+          ],
 
           // Params straight in Column
           for (var param in _currentParams) ...[
@@ -2405,43 +2594,61 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                 fontSize: 12,
                               ),
                             ),
-                            child: Slider(
-                              value: (param['value'] as num).toDouble().clamp(
-                                (param['min'] as num).toDouble(),
-                                (param['max'] as num).toDouble(),
-                              ),
-                              min: (param['min'] as num).toDouble(),
-                              max: (param['max'] as num).toDouble(),
-                              divisions: 100,
-                              label: (param['value'] as num).toDouble().toStringAsFixed(2),
-                              // onChanged: (v) {
-                              //   setState(() => param['value'] = v);
-                              //   widget.setMasterEffectParam(
-                              //     idx,
-                              //     param['name'] as String,
-                              //     v,
-                              //   );
-                              // },
-                              onChangeStart: (v) {
-                                _paramDragStartValue = (param['value'] as num).toDouble();
-                              },
-                              onChanged: (v) {
-                                setState(() => param['value'] = v);
-                                widget.setMasterEffectParam(idx, param['name'] as String, v);
-                              },
-                              onChangeEnd: (v) {
-                                if (_paramDragStartValue == null) return;
+                            child: (() {
+                              final effectName = _effects[idx];
+                              final paramName = param['name'] as String;
 
-                                widget.onMasterPluginParamCommit?.call(
-                                  idx,
-                                  param['name'] as String,
-                                  _paramDragStartValue!,
-                                  v,
-                                );
+                              final minV = (param['min'] as num).toDouble();
+                              final maxV = (param['max'] as num).toDouble();
+                              final rawV = (param['value'] as num).toDouble().clamp(minV, maxV);
 
-                                _paramDragStartValue = null;
-                              },
-                            ),
+                              final skew = _getParamSkew(effectName, paramName); // null = linear
+
+                              // value -> 0..1
+                              double toNorm(double v) => ((v - minV) / (maxV - minV)).clamp(0.0, 1.0);
+
+                              // 0..1 -> value
+                              double fromNorm(double t) => minV + (maxV - minV) * t.clamp(0.0, 1.0);
+
+                              // if skew exists: position uses norm^skew, and inverse uses ^(1/skew)
+                              final norm = toNorm(rawV);
+                              final sliderPos = (skew == null) ? norm : math.pow(norm, skew).toDouble();
+
+                              return Slider(
+                                value: sliderPos,
+                                min: 0.0,
+                                max: 1.0,
+                                divisions: 200,
+                                label: rawV.toStringAsFixed(2),
+                                onChangeStart: (_) {
+                                  _paramDragStartValue = rawV;
+                                },
+                                onChanged: (p) {
+                                  final t = p.clamp(0.0, 1.0);
+                                  final newNorm = (skew == null) ? t : math.pow(t, 1.0 / skew!).toDouble();
+                                  final v = fromNorm(newNorm);
+
+                                  setState(() => param['value'] = v);
+                                  widget.setMasterEffectParam(idx, paramName, v);
+                                },
+                                onChangeEnd: (p) {
+                                  if (_paramDragStartValue == null) return;
+
+                                  final t = p.clamp(0.0, 1.0);
+                                  final newNorm = (skew == null) ? t : math.pow(t, 1.0 / skew!).toDouble();
+                                  final v = fromNorm(newNorm);
+
+                                  widget.onMasterPluginParamCommit?.call(
+                                    idx,
+                                    paramName,
+                                    _paramDragStartValue!,
+                                    v,
+                                  );
+
+                                  _paramDragStartValue = null;
+                                },
+                              );
+                            })(),
                           ),
                         ),
                         // const SizedBox(width: 8),
@@ -2545,6 +2752,45 @@ double _fromLogPos(double t, double min, double max) {
   final hi = (max <= lo) ? lo + 1.0 : max;
   final lm = math.log(lo), lM = math.log(hi);
   return math.exp(lm + (lM - lm) * t.clamp(0.0, 1.0));
+}
+
+double _toQuadPos(double v, double min, double max) {
+  final t = ((v - min) / (max - min)).clamp(0.0, 1.0);
+  return math.sqrt(t); // inverse curve
+}
+
+double _fromQuadPos(double t, double min, double max) {
+  final curved = t * t;
+  return min + (max - min) * curved;
+}
+
+double _toSkewPos(double value, double min, double max, double skew) {
+  final t = ((value - min) / (max - min)).clamp(0.0, 1.0);
+
+  // inverse mapping: slider position
+  return math.pow(t, 1.0 / skew).toDouble();
+}
+
+double _fromSkewPos(double t, double min, double max, double skew) {
+  final curved = math.pow(t.clamp(0.0, 1.0), skew).toDouble();
+
+  return min + (max - min) * curved;
+}
+
+// Some of these values come from JUCE/NativeEffects.cpp
+// effectName → (paramName → skewFactor)
+const Map<String, Map<String, double>> kEffectParamSkew = {
+  "Distortion": {
+    "HPF Frequency": 0.25,
+    "LPF Frequency": 0.25,
+  },
+  "Delay": {
+    "HPF Frequency": 0.35,
+  },
+};
+
+double? _getParamSkew(String effectName, String paramName) {
+  return kEffectParamSkew[effectName]?[paramName];
 }
 
 String _fmtHz(double hz) {
@@ -2794,6 +3040,30 @@ class _Eq3PreviewPainter extends CustomPainter {
     return gainDb * shape;
   }
 
+  void _drawHzLabel(Canvas canvas, double x, double hz, double h) {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: "${_fmtHz(hz)}",
+        style: const TextStyle(
+          color: Color.fromARGB(134, 187, 187, 187),
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+
+    textPainter.layout();
+
+    // ✅ Bottom aligned label
+    final offset = Offset(
+      x - textPainter.width / 2,
+      h - textPainter.height - 2, // bottom padding
+    );
+
+    textPainter.paint(canvas, offset);
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
@@ -2814,9 +3084,22 @@ class _Eq3PreviewPainter extends CustomPainter {
     final marker = Paint()
       ..color = const Color(0x33888888)
       ..strokeWidth = 1;
-    canvas.drawLine(Offset(_xForHz(lowFc, w), 0), Offset(_xForHz(lowFc, w), h), marker);
-    canvas.drawLine(Offset(_xForHz(midFc, w), 0), Offset(_xForHz(midFc, w), h), marker);
-    canvas.drawLine(Offset(_xForHz(highFc, w), 0), Offset(_xForHz(highFc, w), h), marker);
+    // canvas.drawLine(Offset(_xForHz(lowFc, w), 0), Offset(_xForHz(lowFc, w), h), marker);
+    // canvas.drawLine(Offset(_xForHz(midFc, w), 0), Offset(_xForHz(midFc, w), h), marker);
+    // canvas.drawLine(Offset(_xForHz(highFc, w), 0), Offset(_xForHz(highFc, w), h), marker);
+    final xLow = _xForHz(lowFc, w);
+    final xMid = _xForHz(midFc, w);
+    final xHigh = _xForHz(highFc, w);
+
+    // Marker lines
+    canvas.drawLine(Offset(xLow, 0), Offset(xLow, h), marker);
+    canvas.drawLine(Offset(xMid, 0), Offset(xMid, h), marker);
+    canvas.drawLine(Offset(xHigh, 0), Offset(xHigh, h), marker);
+
+    // Frequency labels
+    _drawHzLabel(canvas, xLow, lowFc, h);
+    _drawHzLabel(canvas, xMid, midFc, h);
+    _drawHzLabel(canvas, xHigh, highFc, h);
 
     final path = Path();
     for (int px = 0; px < w; px++) {
@@ -2951,3 +3234,270 @@ const List<DelayDivision> kDelayDivisions = [
   DelayDivision('1/8T', 1 / 3),
   DelayDivision('1/16', 0.25),
 ];
+
+class CompressorStripFrame {
+  final double inL, inR; // 0..1
+  final double outL, outR; // 0..1
+  final double grDb; // negative or 0 (ex: -6.2)
+
+  const CompressorStripFrame({
+    required this.inL,
+    required this.inR,
+    required this.grDb,
+    required this.outL,
+    required this.outR,
+  });
+
+  static const zero = CompressorStripFrame(inL: 0, inR: 0, grDb: 0, outL: 0, outR: 0);
+
+  CompressorStripFrame clamp() {
+    double c01(double v) => v.clamp(0.0, 1.0).toDouble();
+    double cgr(double v) => v.clamp(0.0, 60.0).toDouble();
+    return CompressorStripFrame(
+      inL: c01(inL),
+      inR: c01(inR),
+      grDb: cgr(grDb),
+      outL: c01(outL),
+      outR: c01(outR),
+    );
+  }
+
+  static CompressorStripFrame lerp(CompressorStripFrame a, CompressorStripFrame b, double t) {
+    double l(double x, double y) => x + (y - x) * t;
+    return CompressorStripFrame(
+      inL: l(a.inL, b.inL),
+      inR: l(a.inR, b.inR),
+      grDb: l(a.grDb, b.grDb),
+      outL: l(a.outL, b.outL),
+      outR: l(a.outR, b.outR),
+    );
+  }
+}
+
+class GainReductionSliderMeterHorizontal extends StatelessWidget {
+  /// Positive GR in dB. Example: 0..60 (your engine returns positive now)
+  final double grDb;
+
+  /// Most plugins display 24–30 dB range for readability
+  final double maxDb;
+
+  final double height;
+  final double width;
+
+  /// Smooth UI motion
+  final Duration anim;
+
+  /// Optional peak-hold feel
+  final bool peakHold;
+
+  const GainReductionSliderMeterHorizontal({
+    super.key,
+    required this.grDb,
+    this.maxDb = 24.0,
+    this.height = 18,
+    this.width = 220,
+    this.anim = const Duration(milliseconds: 90),
+    this.peakHold = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final clamped = grDb.clamp(0.0, maxDb);
+    final t = (clamped / maxDb).clamp(0.0, 1.0); // 0..1 (0 = no GR)
+
+    final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: Colors.white.withOpacity(0.55),
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        );
+
+    final readoutStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: Colors.white.withOpacity(0.80),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.2,
+        );
+
+    // Display as negative numbers (plugin convention)
+    final leftLabel = "0";
+    final midLabel = "-${(maxDb / 2).round()}";
+    final rightLabel = "-${maxDb.round()}";
+
+    return SizedBox(
+      width: width,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Top row: title + live value
+          Row(
+            children: [
+              Text("Gain Reduction", style: readoutStyle),
+              const SizedBox(width: 8),
+              // Expanded(
+              //   child: Opacity(
+              //     opacity: 0.0, // keeps right text aligned without extra layout jitter
+              //     child: Text("GR", style: readoutStyle),
+              //   ),
+              // ),
+              // Text("${clamped.toStringAsFixed(1)} dB", style: readoutStyle),
+            ],
+          ),
+          const SizedBox(height: 6),
+
+          // Meter bar
+          _PeakHold01Wrapper(
+            enabled: peakHold,
+            value01: t,
+            child: (displayT) {
+              return TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: displayT),
+                duration: anim,
+                curve: Curves.easeOutCubic,
+                builder: (_, v, __) {
+                  return CustomPaint(
+                    size: Size(width, height),
+                    painter: _GRSliderHorizontalPainter(
+                      t: v,
+                      labelDb: clamped,
+                      maxDb: maxDb,
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+
+          const SizedBox(height: 6),
+
+          // Bottom labels
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text("$leftLabel dB", style: labelStyle),
+              Text("$midLabel dB", style: labelStyle),
+              Text("$rightLabel dB", style: labelStyle),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PeakHold01Wrapper extends StatefulWidget {
+  final bool enabled;
+  final double value01;
+  final Widget Function(double displayT) child;
+
+  const _PeakHold01Wrapper({
+    required this.enabled,
+    required this.value01,
+    required this.child,
+  });
+
+  @override
+  State<_PeakHold01Wrapper> createState() => _PeakHold01WrapperState();
+}
+
+class _PeakHold01WrapperState extends State<_PeakHold01Wrapper> {
+  double _hold = 0.0;
+  DateTime _last = DateTime.now();
+
+  @override
+  void didUpdateWidget(covariant _PeakHold01Wrapper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.enabled) return;
+
+    final now = DateTime.now();
+    final dt = now.difference(_last).inMilliseconds / 1000.0;
+    _last = now;
+
+    final incoming = widget.value01;
+
+    // rise: follow instantly
+    if (incoming > _hold) {
+      _hold = incoming;
+      return;
+    }
+
+    // fall: decay
+    final decayPerSec = 1.4; // tweak feel
+    _hold = (_hold - decayPerSec * dt).clamp(0.0, 1.0);
+
+    if (_hold < incoming) _hold = incoming;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final displayT = widget.enabled ? _hold : widget.value01;
+    return widget.child(displayT);
+  }
+}
+
+class _GRSliderHorizontalPainter extends CustomPainter {
+  final double t; // 0..1 fill amount
+  final double labelDb;
+  final double maxDb;
+
+  _GRSliderHorizontalPainter({
+    required this.t,
+    required this.labelDb,
+    required this.maxDb,
+  });
+
+  @override
+  void paint(Canvas c, Size s) {
+    final w = s.width;
+    final h = s.height;
+
+    // Background "pill"
+    final bg = Paint()..color = const Color(0xFF111827).withOpacity(0.95);
+    final border = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.white.withOpacity(0.12);
+
+    final outer = RRect.fromRectAndRadius(Offset.zero & s, Radius.circular(h / 2));
+    c.drawRRect(outer, bg);
+    c.drawRRect(outer, border);
+
+    // Inner track
+    const pad = 3.0;
+    final track = Rect.fromLTWH(pad, pad, w - pad * 2, h - pad * 2);
+
+    final trackPaint = Paint()..color = Colors.white.withOpacity(0.08);
+    c.drawRRect(RRect.fromRectAndRadius(track, Radius.circular(track.height / 2)), trackPaint);
+
+    // Fill (left -> right)
+    final fillW = (track.width * t).clamp(0.0, track.width);
+    final fillRect = Rect.fromLTWH(track.left, track.top, fillW, track.height);
+
+    final fillPaint = Paint()..color = Colors.white.withOpacity(0.70);
+    c.drawRRect(RRect.fromRectAndRadius(fillRect, Radius.circular(track.height / 2)), fillPaint);
+
+    // Thumb (slider handle look)
+    // Thumb sits at end of fill
+    final thumbX = (track.left + fillW).clamp(track.left, track.right);
+    final thumbW = 6.0;
+    final thumbRect = Rect.fromLTWH(thumbX - thumbW / 2, track.top - 1, thumbW, track.height + 2);
+
+    final thumbPaint = Paint()..color = Colors.white.withOpacity(0.95);
+    c.drawRRect(RRect.fromRectAndRadius(thumbRect, const Radius.circular(6)), thumbPaint);
+
+    // Simple tick marks (optional, subtle)
+    final tick = Paint()
+      ..color = Colors.black.withOpacity(0.20)
+      ..strokeWidth = 1;
+
+    for (int i = 1; i <= 4; i++) {
+      final x = track.left + track.width * (i / 5.0);
+      c.drawLine(Offset(x, track.top + 2), Offset(x, track.bottom - 2), tick);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _GRSliderHorizontalPainter old) {
+    return old.t != t || old.labelDb != labelDb || old.maxDb != maxDb;
+  }
+}

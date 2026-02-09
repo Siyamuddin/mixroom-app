@@ -20,6 +20,16 @@
 				<string>public.audio</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Mixroom Project</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.mixroom.project</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
@@ -99,5 +109,28 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.mixroom.project</string>
+			<key>UTTypeDescription</key>
+			<string>Mixroom Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+			<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+			<key>public.filename-extension</key>
+			<array>
+				<string>mixroom</string>
+			</array>
+			<key>public.mime-type</key>
+			<string>application/x-mixroom</string>
+			</dict>
+		</dict>
+	</array>
+
 </dict>
 </plist>

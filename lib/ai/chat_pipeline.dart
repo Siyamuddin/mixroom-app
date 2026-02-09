@@ -194,9 +194,8 @@ class ChatPipeline {
       _push('user', userText);
 
       if (mergedActions.isEmpty) {
-        final msg = assistantMessage.isNotEmpty
-            ? _appendNotes(assistantMessage, mergedNotes)
-            : "No mix changes were applied.";
+        final msg =
+            assistantMessage.isNotEmpty ? _appendNotes(assistantMessage, mergedNotes) : "No mix changes were applied.";
 
         _push('assistant', msg);
         return ChatPipelineResult.message(msg);
@@ -302,8 +301,7 @@ class ChatPipeline {
       role = 'bass';
     else if (rhs.contains('guitar'))
       role = 'guitar';
-    else if (rhs.contains('synth') || rhs.contains('keys') || rhs.contains('piano'))
-      role = 'synth';
+    else if (rhs.contains('synth') || rhs.contains('keys') || rhs.contains('piano')) role = 'synth';
 
     if (role == null) return null;
     return _RoleOverride(rowIndex: n - 1, role: role);
@@ -373,7 +371,7 @@ class ChatPipeline {
         'roles=[$top] role_consistency=${r.roleConsistency.toStringAsFixed(2)} '
         'spectral{centroid_hz=$centroid zcr=$zcr sibil=$sibil bassy=$bassy} '
         'overlaps=${overlaps.isEmpty ? "none" : overlaps.join(",")} '
-        'fx=[$fx]',
+        'fx=[$fx]', // TODO: paste all parameters within each fx rather than just name
       );
     }
 

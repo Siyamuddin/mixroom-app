@@ -340,6 +340,69 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         [JuceBridge setMasterPanObjC:pan];
         result(nil);
 
+    } 
+    // ===============================
+    // MASTER METER
+    // ===============================
+    else if ([call.method isEqualToString:@"setMasterMeterEnabled"]) {
+        BOOL enabled = [call.arguments[@"enabled"] boolValue];
+        [JuceBridge setMasterMeterEnabledObjC:enabled];
+        result(nil);
+    }
+    else if ([call.method isEqualToString:@"getMasterMeterValues"]) {
+        NSArray* arr = [JuceBridge getMasterMeterValuesObjC];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getMasterClipLatched"]) {
+        BOOL latched = [JuceBridge getMasterClipLatchedObjC];
+        result(@(latched));
+    }
+    else if ([call.method isEqualToString:@"clearMasterClipLatched"]) {
+        [JuceBridge clearMasterClipLatchedObjC];
+        result(nil);
+    }
+
+    // ===============================
+    // ROW METERS
+    // ===============================
+    else if ([call.method isEqualToString:@"setRowMetersEnabled"]) {
+        BOOL enabled = [call.arguments[@"enabled"] boolValue];
+        [JuceBridge setRowMetersEnabledObjC:enabled];
+        result(nil);
+    }
+    else if ([call.method isEqualToString:@"getRowMeterValues"]) {
+        NSInteger row = [call.arguments[@"row"] integerValue];
+        NSArray* arr = [JuceBridge getRowMeterValuesObjC:row];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getAllMeterValues"]) {
+        NSArray<NSNumber*>* arr = [JuceBridge getAllMeterValues];
+        result(arr);
+        return;
+    }
+
+    // ===============================
+    // COMPRESSOR METER STRIPS
+    // returns [inRmsL, inRmsR, grDb, outRmsL, outRmsR]
+    // ===============================
+    else if ([call.method isEqualToString:@"getClipCompressorMeter"]) {
+        NSInteger clip = [call.arguments[@"clip"] integerValue];
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSArray* arr = [JuceBridge getClipCompressorMeterObjC:clip effectIndex:effect];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getRowCompressorMeter"]) {
+        NSInteger row = [call.arguments[@"row"] integerValue];
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSArray* arr = [JuceBridge getRowCompressorMeterObjC:row effectIndex:effect];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getMasterCompressorMeter"]) {
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSArray* arr = [JuceBridge getMasterCompressorMeterObjC:effect];
+        result(arr);
+
+
     // ----------------------------------------
     // TRANSPORT / DEBUG
     // ----------------------------------------

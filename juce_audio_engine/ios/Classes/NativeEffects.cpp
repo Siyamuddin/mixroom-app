@@ -811,8 +811,7 @@ void CompressorAudioProcessor::prepareToPlay(double sr, int bs)
     compressor.setParameters(parameters);
 }
 
-void CompressorAudioProcessor::processBlock(
-    juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+void CompressorAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
 {
     juce::ScopedNoDenormals noDenormals;
 
@@ -820,9 +819,70 @@ void CompressorAudioProcessor::processBlock(
          ch < getTotalNumOutputChannels(); ++ch)
         buffer.clear(ch, 0, buffer.getNumSamples());
 
+    const int numCh = buffer.getNumChannels();
+    const int n = buffer.getNumSamples();
+
+    // ===== IN RMS (stereo) =====
+    if (numCh >= 2 && n > 0)
+    {
+        const float *L = buffer.getReadPointer(0);
+        const float *R = buffer.getReadPointer(1);
+
+        double ssL = 0.0, ssR = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            const double l = (double)L[i];
+            const double r = (double)R[i];
+            ssL += l * l;
+            ssR += r * r;
+        }
+
+        const float rmL = (float)std::sqrt(ssL / (double)n);
+        const float rmR = (float)std::sqrt(ssR / (double)n);
+
+        // smoothing (VU-ish)
+        constexpr float alpha = 0.12f;
+        auto smooth = [](float prev, float next)
+        { return prev + alpha * (next - prev); };
+
+        inRmsL.store(smooth(inRmsL.load(std::memory_order_relaxed), rmL), std::memory_order_relaxed);
+        inRmsR.store(smooth(inRmsR.load(std::memory_order_relaxed), rmR), std::memory_order_relaxed);
+    }
+
+    // ===== PROCESS =====
     compressor.setParameters(parameters);
     compressor.process(buffer);
-    gainReduction = compressor.getGainReduction();
+
+    // ===== GR =====
+    gainReduction = compressor.getGainReduction(); // keep your existing variable if you want
+    const float gr = juce::jmax(gainReduction[0], gainReduction[1]);
+    grDb.store(gr, std::memory_order_relaxed); // max between L/R, rather than an average
+
+    // ===== OUT RMS (stereo) =====
+    if (numCh >= 2 && n > 0)
+    {
+        const float *L = buffer.getReadPointer(0);
+        const float *R = buffer.getReadPointer(1);
+
+        double ssL = 0.0, ssR = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            const double l = (double)L[i];
+            const double r = (double)R[i];
+            ssL += l * l;
+            ssR += r * r;
+        }
+
+        const float rmL = (float)std::sqrt(ssL / (double)n);
+        const float rmR = (float)std::sqrt(ssR / (double)n);
+
+        constexpr float alpha = 0.12f;
+        auto smooth = [](float prev, float next)
+        { return prev + alpha * (next - prev); };
+
+        outRmsL.store(smooth(outRmsL.load(std::memory_order_relaxed), rmL), std::memory_order_relaxed);
+        outRmsR.store(smooth(outRmsR.load(std::memory_order_relaxed), rmR), std::memory_order_relaxed);
+    }
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations

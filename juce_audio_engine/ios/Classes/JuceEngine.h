@@ -93,6 +93,108 @@ public:
     juce::AudioParameterFloat *pan = nullptr;
 };
 
+class MeterTapProcessor : public juce::AudioProcessor
+{
+public:
+    explicit MeterTapProcessor(std::atomic<float> *pL,
+                               std::atomic<float> *pR,
+                               std::atomic<float> *rL,
+                               std::atomic<float> *rR,
+                               std::atomic<bool> *enabledFlag)
+        : juce::AudioProcessor(
+              BusesProperties()
+                  .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                  .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+          peakL(pL), peakR(pR), rmsL(rL), rmsR(rR), enabled(enabledFlag)
+    {
+    }
+
+    const juce::String getName() const override { return "MeterTapProcessor"; }
+    void prepareToPlay(double, int) override {}
+    void releaseResources() override {}
+
+    void processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &) override
+    {
+        if (enabled && !enabled->load(std::memory_order_relaxed))
+            return;
+
+        const int numCh = buffer.getNumChannels();
+        const int numSamples = buffer.getNumSamples();
+        if (numCh < 2 || numSamples <= 0)
+            return;
+
+        const float *L = buffer.getReadPointer(0);
+        const float *R = buffer.getReadPointer(1);
+
+        float pkL = 0.0f, pkR = 0.0f;
+        double ssL = 0.0, ssR = 0.0;
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float l = L[i];
+            const float r = R[i];
+            const float al = std::abs(l);
+            const float ar = std::abs(r);
+
+            if (al > pkL)
+                pkL = al;
+            if (ar > pkR)
+                pkR = ar;
+
+            ssL += (double)l * (double)l;
+            ssR += (double)r * (double)r;
+        }
+
+        const float rmL = (float)std::sqrt(ssL / (double)numSamples);
+        const float rmR = (float)std::sqrt(ssR / (double)numSamples);
+
+        // smoothing (slightly slower than your master, looks nicer in mini meters)
+        constexpr float alpha = 0.18f;
+        auto smooth = [](float prev, float next)
+        { return prev + alpha * (next - prev); };
+
+        if (peakL && peakR && rmsL && rmsR)
+        {
+            const float prevPkL = peakL->load(std::memory_order_relaxed);
+            const float prevPkR = peakR->load(std::memory_order_relaxed);
+            const float prevRmL = rmsL->load(std::memory_order_relaxed);
+            const float prevRmR = rmsR->load(std::memory_order_relaxed);
+
+            peakL->store(smooth(prevPkL, pkL), std::memory_order_relaxed);
+            peakR->store(smooth(prevPkR, pkR), std::memory_order_relaxed);
+            rmsL->store(smooth(prevRmL, rmL), std::memory_order_relaxed);
+            rmsR->store(smooth(prevRmR, rmR), std::memory_order_relaxed);
+        }
+    }
+
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override
+    {
+        const auto in = layouts.getMainInputChannelSet();
+        const auto out = layouts.getMainOutputChannelSet();
+        return in == out && (in == juce::AudioChannelSet::stereo());
+    }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    bool hasEditor() const override { return false; }
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    void getStateInformation(juce::MemoryBlock &) override {}
+    void setStateInformation(const void *, int) override {}
+
+private:
+    std::atomic<float> *peakL = nullptr;
+    std::atomic<float> *peakR = nullptr;
+    std::atomic<float> *rmsL = nullptr;
+    std::atomic<float> *rmsR = nullptr;
+    std::atomic<bool> *enabled = nullptr;
+};
+
 // ---------------------------
 // Helper: volume automation
 // ---------------------------
@@ -558,6 +660,26 @@ public:
                        int numSamples);
     double getRecordingPeak() const;
 
+    // Metering/Visualization
+    void setMasterMeterEnabled(bool enabled);
+    const std::array<float, 4> getMasterMeterValues();
+    void updateMasterMeterFromOutput(const float *const *out,
+                                     int numOutCh,
+                                     int numSamples) noexcept;
+    // Master clip indicator (latched)
+    bool getMasterClipLatched() const noexcept;
+    void clearMasterClipLatched() noexcept;
+    void setRowMetersEnabled(bool enabled);
+    const std::array<float, 4> getRowMeterValues(int row);
+
+    // Gets master + all row meters
+    std::vector<float> getAllMeterValues() const;
+
+    // Compressor meter strip (white-box only)
+    const std::array<float, 5> getClipCompressorMeter(int clipIndex, int effectIndex);
+    const std::array<float, 5> getRowCompressorMeter(int row, int effectIndex);
+    const std::array<float, 5> getMasterCompressorMeter(int effectIndex);
+
 private:
     JuceEngine();
     ~JuceEngine();
@@ -603,8 +725,8 @@ private:
     bool hasVideoAudio{false};
 
     // Basic limits
-    static constexpr int kNumTracks = 5; // row buses
-    static constexpr int kMaxClips = 20; // safety cap for simultaneous clips
+    static constexpr int kNumTracks = 5;  // row buses
+    static constexpr int kMaxClips = 500; // safety cap for simultaneous clips
 
     // CLIP-level panning & routing
     juce::Array<StereoPanProcessor *> clipPanProcessors; // per-clip pan
@@ -648,6 +770,25 @@ private:
     int recordChannelOffset = 0;
 
     juce::LinearSmoothedValue<float> recPeak; // optional amplitude meter
+
+    // METERING
+    struct StereoMeterState
+    {
+        std::atomic<float> peakL{0.0f};
+        std::atomic<float> peakR{0.0f};
+        std::atomic<float> rmsL{0.0f};
+        std::atomic<float> rmsR{0.0f};
+    };
+    StereoMeterState masterMeter;
+    std::atomic<bool> masterMeterEnabled{true};
+    std::atomic<bool> masterClipLatched{false};
+
+    // Row meters (post row-pan)
+    StereoMeterState rowMeters[kNumTracks];
+    std::atomic<bool> rowMetersEnabled{true};
+
+    MeterTapProcessor *rowMeterTaps[kNumTracks] = {nullptr};
+    juce::AudioProcessorGraph::Node::Ptr rowMeterTapNodes[kNumTracks];
 };
 
 class MetronomeAudioCallback : public juce::AudioIODeviceCallback
@@ -716,6 +857,12 @@ public:
             numOutputChannels,
             numSamples,
             context);
+
+        // ===============================
+        // MASTER METER TAP (POST-FX/GAIN/PAN)
+        // ===============================
+        // capture output (for metering purposes) before processing metronome
+        engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
 
         if (!enabled || !isPlaying)
             return;

@@ -59,6 +59,31 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="vnd.youtube" />
             </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+
+                <!-- For file:// URIs -->
+                <data android:scheme="file"/>
+                <!-- For content:// URIs -->
+                <data android:scheme="content"/>
+
+                <!-- Accept common types -->
+                <data android:mimeType="application/octet-stream"/>
+                <data android:mimeType="application/zip"/>
+                <data android:mimeType="*/*"/>
+
+                <!-- Match .mixroom -->
+                <data android:pathPattern=".*\\.mixroom"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+
+
         </activity>
 
         <!-- <activity

@@ -36,8 +36,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     double oldTrimEnd,
     double oldOffset, {
     double? newStartMs,
-  })
-  onTrimClipCommit;
+  }) onTrimClipCommit;
   final double playheadMs;
   final void Function(double ms) onScrubRequested;
   final bool isPlaying;
@@ -76,9 +75,12 @@ class AudioCanvasTimeline extends StatefulWidget {
   final void Function(int loopStartMs, int loopEndMs)? onLoopRegionChanged;
   final void Function(bool enabled)? onLoopToggle;
   final void Function(int row, int effectIndex, String paramId, dynamic oldValue, dynamic newValue)?
-  onPluginParamCommit;
+      onPluginParamCommit;
   final void Function(RowEffectsSnapshot before, RowEffectsSnapshot after)? onPresetCommit;
   final void Function(void Function(int row) refreshRowFx)? registerRowFxRefresher;
+
+  final MeterBus meters;
+  final Future<List<double>> Function(int row, int effectIndex) getRowCompressorMeter;
 
   final String mode; // "Basic" or "Pro"
 
@@ -142,6 +144,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onPluginParamCommit,
     this.onPresetCommit,
     this.registerRowFxRefresher,
+    required this.meters,
+    required this.getRowCompressorMeter,
   }) : super(key: key);
   @override
   State<AudioCanvasTimeline> createState() => _AudioCanvasTimelineState();
@@ -150,8 +154,7 @@ class AudioCanvasTimeline extends StatefulWidget {
 class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const int kNumRows = 5;
   static const double kRowHeight = 80.0;
-  static const double kExpandedRowHeight =
-      kRowHeight *
+  static const double kExpandedRowHeight = kRowHeight *
       3; // try to make this dynamic to fit in all the stuff in the expanded area (risk of vertical overflow if too small)
   final List<double> _effectsPanelHeights = List.filled(kNumRows, kExpandedRowHeight);
 
@@ -212,7 +215,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   bool _magnetEnabled = false;
   bool _loopEnabled = false;
   int?
-  _loopStartMs; // made ints because when dragging loop handles, can get sub-ms numbers, but audio_editor converts to int
+      _loopStartMs; // made ints because when dragging loop handles, can get sub-ms numbers, but audio_editor converts to int
   int? _loopEndMs;
   bool _draggingLoopStart = false;
   bool _draggingLoopEnd = false;
@@ -614,8 +617,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     // case for Restart to beginning button (must only execute once)
     int expectedRestartMs = (_loopEnabled && _loopStartMs != null) ? _loopStartMs! : 0;
 
-    final bool isRestart =
-        (!widget.isPlaying) &&
+    final bool isRestart = (!widget.isPlaying) &&
         (widget.playheadMs - expectedRestartMs).abs() < 0.01; // tiny epsilon, irrelevant cuz comparing with int
 
     if (isRestart) {
@@ -1055,6 +1057,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _rowEffectRefreshers[row] = refreshFn;
         },
         projectBpm: widget.bpm,
+        meters: widget.meters,
+        getRowCompressorMeter: widget.getRowCompressorMeter,
       ),
     );
   }
@@ -1607,7 +1611,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   Widget _buildHeaderTabs(int row) {
     return Container(
-      decoration: const BoxDecoration(color: Color.fromARGB(255, 30, 41, 65)),
+      decoration: const BoxDecoration(
+        color: Color.fromARGB(255, 30, 41, 65),
+        border: Border(bottom: BorderSide(color: Color(0xFF1A1F2E), width: 1)),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1657,6 +1664,21 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 const SizedBox(height: 6),
                 _buildTabButton(row, 1, "Effects"),
               ],
+            ),
+          ),
+
+          // === METERING ===
+          Align(
+            alignment: Alignment.center,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: AnimatedBuilder(
+                animation: widget.meters,
+                builder: (_, __) {
+                  final f = widget.meters.rows[row];
+                  return MiniStereoMeterPro(frame: f);
+                },
+              ),
             ),
           ),
         ],
@@ -2104,8 +2126,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final leftHandleHit =
         localX >= clipRect.left - kTrimHitboxPadding && localX <= clipRect.left + kTrimHandleWidth + kTrimHitboxPadding;
 
-    final rightHandleHit =
-        localX >= clipRect.right - kTrimHandleWidth - kTrimHitboxPadding &&
+    final rightHandleHit = localX >= clipRect.right - kTrimHandleWidth - kTrimHitboxPadding &&
         localX <= clipRect.right + kTrimHitboxPadding;
 
     if (leftHandleHit || rightHandleHit) {
@@ -2666,14 +2687,12 @@ class _TimelinePainter extends CustomPainter {
     const double labelHeight = 18.0;
     const double horizontalPadding = 6.0;
 
-    // --- Clip name ---
-    String filename = clip.originalFile.path.split('/').last.split('.').first;
-    filename = filename.isEmpty ? "Audio Clip" : filename;
+    String labelName = clip.label.isEmpty ? "Audio Clip" : clip.label;
 
     final tp = TextPainter(textDirection: TextDirection.ltr, maxLines: 1, ellipsis: "…");
 
     tp.text = TextSpan(
-      text: filename,
+      text: labelName,
       style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: Colors.white),
     );
 
@@ -2690,13 +2709,19 @@ class _TimelinePainter extends CustomPainter {
     // Background should fit exactly the rendered text
     double labelWidth = textWidth + horizontalPadding * 2;
 
+    // If the label would be forced to clamp into a near-zero range, hide it (prevents jitter)
+    if (rect.right <= labelWidth + 1.0) return;
+
+    // keep label visible: clamp to [0..clipRight-labelWidth]
+    final double labelLeft = rect.left.clamp(0.0, rect.right - labelWidth);
+
     // Clamp so we never exceed clip width
     labelWidth = labelWidth.clamp(0, rect.width);
 
     // Label background
     final bgRect = RRect.fromRectAndRadius(
       Rect.fromLTWH(
-        rect.left,
+        labelLeft, //rect.left,
         rect.top,
         labelWidth, // Clip label area as wide as text
         labelHeight,
@@ -2708,7 +2733,7 @@ class _TimelinePainter extends CustomPainter {
 
     canvas.drawRRect(bgRect, bgPaint);
     // Draw text centered vertically within the label area
-    tp.paint(canvas, Offset(rect.left + horizontalPadding, rect.top + (labelHeight - tp.height) / 2));
+    tp.paint(canvas, Offset(labelLeft + horizontalPadding, rect.top + (labelHeight - tp.height) / 2));
   }
 
   void _drawTrimHandles(Canvas canvas, RRect rect) {
@@ -3518,4 +3543,188 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
       ],
     );
   }
+}
+
+class MiniStereoMeter extends StatelessWidget {
+  final MeterFrame frame;
+  final double width;
+  final double height;
+
+  const MiniStereoMeter({
+    super.key,
+    required this.frame,
+    this.width = 10,
+    this.height = 46,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size(width, height),
+      painter: _MiniStereoMeterPainter(frame),
+    );
+  }
+}
+
+class _MiniStereoMeterPainter extends CustomPainter {
+  final MeterFrame f;
+  _MiniStereoMeterPainter(this.f);
+
+  @override
+  void paint(Canvas c, Size s) {
+    final bg = Paint()..color = const Color(0xFF0F1419).withOpacity(0.9);
+    final border = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.white.withOpacity(0.12);
+
+    final fill = Paint()..color = Colors.white.withOpacity(0.75);
+    final rms = Paint()..color = Colors.white.withOpacity(0.25);
+
+    final r = RRect.fromRectAndRadius(Offset.zero & s, const Radius.circular(3));
+    c.drawRRect(r, bg);
+    c.drawRRect(r, border);
+
+    final halfW = s.width / 2;
+
+    double barH(double v) => (v.clamp(0.0, 1.0) as double) * s.height;
+
+    // L
+    final rmsLH = barH(f.rmsL);
+    final peakLH = barH(f.peakL);
+    c.drawRect(Rect.fromLTWH(0, s.height - rmsLH, halfW, rmsLH), rms);
+    c.drawRect(Rect.fromLTWH(0, s.height - peakLH, halfW, peakLH), fill);
+
+    // R
+    final rmsRH = barH(f.rmsR);
+    final peakRH = barH(f.peakR);
+    c.drawRect(Rect.fromLTWH(halfW, s.height - rmsRH, halfW, rmsRH), rms);
+    c.drawRect(Rect.fromLTWH(halfW, s.height - peakRH, halfW, peakRH), fill);
+
+    // clip dot (latched)
+    // if (f.clip) {
+    //   final p = Paint()..color = const Color(0xFFFF4A4A);
+    //   c.drawCircle(Offset(s.width - 3.5, 3.5), 2.3, p);
+    // }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MiniStereoMeterPainter old) => old.f != f;
+}
+
+class MiniStereoMeterPro extends StatelessWidget {
+  final MeterFrame frame;
+  final double width;
+  final double height;
+
+  const MiniStereoMeterPro({
+    super.key,
+    required this.frame,
+    this.width = 12,
+    // NOTE: this height is only safe because parent expanded height is fixed
+    // Depends on kExpandedRowHeight being at least 240
+    this.height = 82,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size(width, height),
+      painter: _MiniStereoMeterProPainter(frame),
+    );
+  }
+}
+
+class _MiniStereoMeterProPainter extends CustomPainter {
+  final MeterFrame f;
+  _MiniStereoMeterProPainter(this.f);
+
+  @override
+  void paint(Canvas c, Size s) {
+    final r = RRect.fromRectAndRadius(
+      Offset.zero & s,
+      const Radius.circular(0), // const Radius.circular(5),
+    );
+
+    // --- Background slot (always visible) ---
+    final bg = Paint()..color = const Color(0xFF1A2230).withOpacity(0.95);
+
+    final border = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.white.withOpacity(0.10);
+
+    c.drawRRect(r, bg);
+    c.drawRRect(r, border);
+
+    // --- Tick lines (subtle scale) ---
+    final tick = Paint()
+      ..color = Colors.white.withOpacity(0.06)
+      ..strokeWidth = 1;
+
+    for (int i = 1; i <= 4; i++) {
+      final y = s.height * (i / 5.0);
+      c.drawLine(
+        Offset(1, y),
+        Offset(s.width - 1, y),
+        tick,
+      );
+    }
+
+    // --- Meter paints ---
+    final peakPaint = Paint()..color = Colors.white.withOpacity(0.80);
+    final rmsPaint = Paint()..color = Colors.white.withOpacity(0.25);
+
+    // --- Idle baseline (prevents “dead stick”) ---
+    const idleFloor = 0.02;
+
+    double barH(double v) => ((v + idleFloor).clamp(0.0, 1.0)) * s.height;
+
+    // --- Lane gap between L/R ---
+    const laneGap = 0.5;
+    final laneW = (s.width - laneGap) / 2;
+
+    // X positions
+    final leftX = 0.0;
+    final rightX = laneW + laneGap;
+
+    // --- Left channel ---
+    final rmsLH = barH(f.rmsL);
+    final peakLH = barH(f.peakL);
+
+    c.drawRect(
+      Rect.fromLTWH(leftX, s.height - rmsLH, laneW, rmsLH),
+      rmsPaint,
+    );
+    c.drawRect(
+      Rect.fromLTWH(leftX, s.height - peakLH, laneW, peakLH),
+      peakPaint,
+    );
+
+    // --- Right channel ---
+    final rmsRH = barH(f.rmsR);
+    final peakRH = barH(f.peakR);
+
+    c.drawRect(
+      Rect.fromLTWH(rightX, s.height - rmsRH, laneW, rmsRH),
+      rmsPaint,
+    );
+    c.drawRect(
+      Rect.fromLTWH(rightX, s.height - peakRH, laneW, peakRH),
+      peakPaint,
+    );
+
+    // --- Clip indicator ---
+    // if (f.clip) {
+    //   final clipPaint = Paint()..color = const Color(0xFFFF4A4A);
+    //   c.drawCircle(
+    //     Offset(s.width - 3.8, 3.8),
+    //     2.4,
+    //     clipPaint,
+    //   );
+    // }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MiniStereoMeterProPainter old) => old.f != f;
 }

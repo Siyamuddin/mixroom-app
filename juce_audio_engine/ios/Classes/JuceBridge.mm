@@ -855,4 +855,78 @@
     return JuceEngine::get().isRecording();
 }
 
+// ===============================
+// MASTER METER
+// ===============================
++ (void)setMasterMeterEnabledObjC:(BOOL)enabled
+{
+    JuceEngine::get().setMasterMeterEnabled((bool)enabled);
+}
+
+// [peakL, peakR, rmsL, rmsR]
++ (NSArray<NSNumber*>*)getMasterMeterValuesObjC
+{
+    auto v = JuceEngine::get().getMasterMeterValues();
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3])];
+}
+
++ (BOOL)getMasterClipLatchedObjC
+{
+    return (BOOL)JuceEngine::get().getMasterClipLatched();
+}
+
++ (void)clearMasterClipLatchedObjC
+{
+    JuceEngine::get().clearMasterClipLatched();
+}
+
+// ===============================
+// ROW METERS
+// ===============================
++ (void)setRowMetersEnabledObjC:(BOOL)enabled
+{
+    JuceEngine::get().setRowMetersEnabled((bool)enabled);
+}
+
+// [peakL, peakR, rmsL, rmsR]
++ (NSArray<NSNumber*>*)getRowMeterValuesObjC:(NSInteger)row
+{
+    auto v = JuceEngine::get().getRowMeterValues((int)row);
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3])];
+}
+
++ (NSArray<NSNumber*>*)getAllMeterValues
+{
+    const auto packed = JuceEngine::get().getAllMeterValues();
+
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:packed.size()];
+    for (float v : packed) {
+        [arr addObject:@(v)];
+    }
+    return arr;
+}
+
+// ===============================
+// COMPRESSOR METER STRIPS
+// [inRmsL, inRmsR, grDb, outRmsL, outRmsR]
+// ===============================
++ (NSArray<NSNumber*>*)getClipCompressorMeterObjC:(NSInteger)clipIndex effectIndex:(NSInteger)effectIndex
+{
+    auto v = JuceEngine::get().getClipCompressorMeter((int)clipIndex, (int)effectIndex);
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4])];
+}
+
++ (NSArray<NSNumber*>*)getRowCompressorMeterObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex
+{
+    auto v = JuceEngine::get().getRowCompressorMeter((int)row, (int)effectIndex);
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4])];
+}
+
++ (NSArray<NSNumber*>*)getMasterCompressorMeterObjC:(NSInteger)effectIndex
+{
+    auto v = JuceEngine::get().getMasterCompressorMeter((int)effectIndex);
+    return @[@(v[0]), @(v[1]), @(v[2]), @(v[3]), @(v[4])];
+}
+
+
 @end

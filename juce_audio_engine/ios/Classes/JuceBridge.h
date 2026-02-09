@@ -141,4 +141,28 @@
 + (void)stopRecordingObjC;
 + (BOOL)isRecordingObjC;
 
+// ===============================
+// MASTER METER
+// ===============================
++ (void)setMasterMeterEnabledObjC:(BOOL)enabled;
++ (NSArray<NSNumber *> *)getMasterMeterValuesObjC; // [peakL, peakR, rmsL, rmsR]
++ (BOOL)getMasterClipLatchedObjC;
++ (void)clearMasterClipLatchedObjC;
+
+// ===============================
+// ROW METERS
+// ===============================
++ (void)setRowMetersEnabledObjC:(BOOL)enabled;
++ (NSArray<NSNumber *> *)getRowMeterValuesObjC:(NSInteger)row; // [peakL, peakR, rmsL, rmsR]
+
++ (NSArray<NSNumber *> *)getAllMeterValues;
+
+// ===============================
+// COMPRESSOR METER STRIPS
+// [inRmsL, inRmsR, grDb, outRmsL, outRmsR]
+// ===============================
++ (NSArray<NSNumber *> *)getClipCompressorMeterObjC:(NSInteger)clipIndex effectIndex:(NSInteger)effectIndex;
++ (NSArray<NSNumber *> *)getRowCompressorMeterObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex;
++ (NSArray<NSNumber *> *)getMasterCompressorMeterObjC:(NSInteger)effectIndex;
+
 @end

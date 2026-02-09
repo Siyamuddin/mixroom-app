@@ -850,4 +850,125 @@ class JuceAudioEngine {
       return false;
     }
   }
+
+  // ===============================
+  // MASTER METER
+  // ===============================
+  static Future<void> setMasterMeterEnabled(bool enabled) async {
+    try {
+      await _ch.invokeMethod('setMasterMeterEnabled', {'enabled': enabled});
+    } on PlatformException catch (e) {
+      _logError('setMasterMeterEnabled', e);
+    }
+  }
+
+  // returns [peakL, peakR, rmsL, rmsR]
+  static Future<List<double>> getMasterMeterValues() async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>('getMasterMeterValues');
+      if (raw == null) return [0, 0, 0, 0];
+      return raw.map((e) => (e as num).toDouble()).toList();
+    } on PlatformException catch (e) {
+      _logError('getMasterMeterValues', e);
+      return [0, 0, 0, 0];
+    }
+  }
+
+  static Future<bool> getMasterClipLatched() async {
+    try {
+      final v = await _ch.invokeMethod<bool>('getMasterClipLatched');
+      return v ?? false;
+    } on PlatformException catch (e) {
+      _logError('getMasterClipLatched', e);
+      return false;
+    }
+  }
+
+  static Future<void> clearMasterClipLatched() async {
+    try {
+      await _ch.invokeMethod('clearMasterClipLatched');
+    } on PlatformException catch (e) {
+      _logError('clearMasterClipLatched', e);
+    }
+  }
+
+// ===============================
+// ROW METERS
+// ===============================
+  static Future<void> setRowMetersEnabled(bool enabled) async {
+    try {
+      await _ch.invokeMethod('setRowMetersEnabled', {'enabled': enabled});
+    } on PlatformException catch (e) {
+      _logError('setRowMetersEnabled', e);
+    }
+  }
+
+// returns [peakL, peakR, rmsL, rmsR]
+  static Future<List<double>> getRowMeterValues(int row) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>('getRowMeterValues', {'row': row});
+      if (raw == null) return [0, 0, 0, 0];
+      return raw.map((e) => (e as num).toDouble()).toList();
+    } on PlatformException catch (e) {
+      _logError('getRowMeterValues', e);
+      return [0, 0, 0, 0];
+    }
+  }
+
+  static Future<List<double>> getAllMeterValues() async {
+    final dynamic res = await _ch.invokeMethod('getAllMeterValues');
+
+    // Native should return List<num> (NSNumber in iOS)
+    if (res is List) {
+      return res.map((e) => (e as num).toDouble()).toList(growable: false);
+    }
+
+    return const <double>[];
+  }
+
+// ===============================
+// COMPRESSOR METER STRIPS
+// returns [inRmsL, inRmsR, grDb, outRmsL, outRmsR]
+// ===============================
+  static Future<List<double>> getClipCompressorMeter(int clip, int effect) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getClipCompressorMeter',
+        {'clip': clip, 'effect': effect},
+      );
+      if (raw == null) return [0, 0, 0, 0, 0];
+      return raw.map((e) => (e as num).toDouble()).toList();
+    } on PlatformException catch (e) {
+      _logError('getClipCompressorMeter', e);
+      return [0, 0, 0, 0, 0];
+    }
+  }
+
+  static Future<List<double>> getRowCompressorMeter(int row, int effect) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getRowCompressorMeter',
+        {'row': row, 'effect': effect},
+      );
+      if (raw == null) return [0, 0, 0, 0, 0];
+      return raw.map((e) => (e as num).toDouble()).toList();
+    } on PlatformException catch (e) {
+      _logError('getRowCompressorMeter', e);
+      return [0, 0, 0, 0, 0];
+    }
+  }
+
+  static Future<List<double>> getMasterCompressorMeter(int effect) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getMasterCompressorMeter',
+        {'effect': effect},
+      );
+      if (raw == null) return [0, 0, 0, 0, 0];
+      return raw.map((e) => (e as num).toDouble()).toList();
+    } on PlatformException catch (e) {
+      _logError('getMasterCompressorMeter', e);
+      return [0, 0, 0, 0, 0];
+    }
+  }
 }

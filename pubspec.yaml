@@ -63,7 +63,7 @@ dependencies:
   #     url: https://github.com/Sahad2701/ffmpeg_kit_flutter_full_gpl.git
   #     ref: flutter-upgrade/remove-v1-embedding
   flutter_file_dialog: ^3.0.2
-  audio_waveforms: ^1.3.0
+  audio_waveforms: ^2.0.2 #deprecated
   fftea: ^1.5.0+1
 
 
@@ -120,6 +120,7 @@ dependencies:
   flutter_onnxruntime: ^1.6.1
   uuid: ^4.5.2
   collection: ^1.19.1
+  archive: ^4.0.7
 
 
 flutter_localizations:

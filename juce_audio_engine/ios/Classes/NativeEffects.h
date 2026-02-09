@@ -1365,8 +1365,26 @@ public:
     juce::AudioProcessorValueTreeState parameters;
     std::array<float, numOutputs> gainReduction;
 
+    // Meter strip values
+    std::array<float, 5> getMeterStrip() const noexcept
+    {
+        return {
+            inRmsL.load(std::memory_order_relaxed),
+            inRmsR.load(std::memory_order_relaxed),
+            grDb.load(std::memory_order_relaxed),
+            outRmsL.load(std::memory_order_relaxed),
+            outRmsR.load(std::memory_order_relaxed),
+        };
+    }
+
 private:
     CompressorModule compressor;
+
+    std::atomic<float> inRmsL{0.0f};
+    std::atomic<float> inRmsR{0.0f};
+    std::atomic<float> outRmsL{0.0f};
+    std::atomic<float> outRmsR{0.0f};
+    std::atomic<float> grDb{0.0f};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CompressorAudioProcessor)
 };

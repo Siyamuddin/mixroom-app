@@ -2209,7 +2209,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
   Future<void> createWaveformData(AudioTrack track, double width) async {
     final sampleCount = PlayerWaveStyle().getSamplesForWidth(width);
-    final rawData = await track.waveformController.extractWaveformData(path: track.file.path, noOfSamples: sampleCount);
+    // TEMP TODO: deprecating waveformController
+    List<double> rawData =
+        []; // await track.waveformController.extractWaveformData(path: track.file.path, noOfSamples: sampleCount);
     setState(() {
       track.normWaveformData = normalizeWaveform(rawData);
     });
@@ -2263,18 +2265,20 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
           final samples = PlayerWaveStyle().getSamplesForWidth(boxWidth);
           // initialize it cuz on android it takes a long time to extract waveformdata
           track.normWaveformData = List<double>.filled(samples, 1.0, growable: false);
-          track.waveformController.extractWaveformData(path: track.file.path, noOfSamples: samples).then((raw) {
-            setState(() {
-              if (Platform.isAndroid) {
-                final shaped = resampleLinear(raw, samples);
-                track.normWaveformData = normalizeWaveform(shaped);
-              } else {
-                track.normWaveformData = normalizeWaveform(raw);
-              }
-            });
-          }).catchError((e) {
-            print("Waveform extraction failed: $e");
-          });
+
+          // TEMP TODO: DEPRECATING waveformController
+          // track.waveformController.extractWaveformData(path: track.file.path, noOfSamples: samples).then((raw) {
+          //   setState(() {
+          //     if (Platform.isAndroid) {
+          //       final shaped = resampleLinear(raw, samples);
+          //       track.normWaveformData = normalizeWaveform(shaped);
+          //     } else {
+          //       track.normWaveformData = normalizeWaveform(raw);
+          //     }
+          //   });
+          // }).catchError((e) {
+          //   print("Waveform extraction failed: $e");
+          // });
         }
 
         return ValueListenableBuilder<double>(

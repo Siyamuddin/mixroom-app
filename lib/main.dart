@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 // import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
@@ -6,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
+import 'package:mixroom/helpers/open_mixroom_service.dart';
+import 'package:mixroom/helpers/project_manager.dart';
 import 'package:path_provider/path_provider.dart';
 
 // import 'package:audio_service/audio_service.dart';
@@ -26,6 +29,8 @@ import 'package:mixroom/l10n/l10n.dart';
 import 'package:provider/provider.dart'; // Import Provider
 import 'package:mixroom/providers/locale_provider.dart'; // Import LocaleProvider
 
+final GlobalKey<NavigatorState> rootNavKey = GlobalKey<NavigatorState>();
+
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -40,6 +45,11 @@ class MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     _loadLocale();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
   }
 
   Future<void> _loadLocale() async {
@@ -67,6 +77,7 @@ class MyAppState extends State<MyApp> {
       // supportedLocales: L10n.supportedLocales,
       // localizationsDelegates: const <LocalizationsDelegate<dynamic>>[],
       debugShowCheckedModeBanner: false,
+      navigatorKey: rootNavKey,
       theme: ThemeData(
         fontFamily: 'Pretendard',
         brightness: Brightness.dark,
@@ -159,6 +170,8 @@ void main() async {
     // return true to prevent the error from propagating further
     return true;
   };
+
+  await OpenMixroomService.init();
 
   runApp(ChangeNotifierProvider(create: (context) => LocaleProvider(), child: const MyApp()));
 }
