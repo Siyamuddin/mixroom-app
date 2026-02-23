@@ -2,11 +2,65 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 
+enum ClipKind { audio, midi }
+
+extension ClipKindWire on ClipKind {
+  String get wireName => this == ClipKind.midi ? 'midi' : 'audio';
+
+  static ClipKind fromWire(String? raw) {
+    if ((raw ?? '').toLowerCase() == 'midi') return ClipKind.midi;
+    return ClipKind.audio;
+  }
+}
+
+class MidiNote {
+  String id;
+  int pitch; // MIDI note number (0..127)
+  double startBeat;
+  double lengthBeats;
+  double velocity; // 0..1
+
+  MidiNote({
+    required this.id,
+    required this.pitch,
+    required this.startBeat,
+    required this.lengthBeats,
+    required this.velocity,
+  });
+
+  MidiNote copy() => MidiNote(
+        id: id,
+        pitch: pitch,
+        startBeat: startBeat,
+        lengthBeats: lengthBeats,
+        velocity: velocity,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'pitch': pitch,
+        'startBeat': startBeat,
+        'lengthBeats': lengthBeats,
+        'velocity': velocity,
+      };
+
+  static MidiNote fromJson(Map<String, dynamic> json) {
+    return MidiNote(
+      id: (json['id'] as String?) ?? '',
+      pitch: (json['pitch'] as num?)?.toInt() ?? 60,
+      startBeat: (json['startBeat'] as num?)?.toDouble() ?? 0.0,
+      lengthBeats: (json['lengthBeats'] as num?)?.toDouble() ?? 1.0,
+      velocity: ((json['velocity'] as num?)?.toDouble() ?? 0.8).clamp(0.0, 1.0),
+    );
+  }
+}
+
 // TODO: rename to AudioClip, because 'Tracks' should be equivalent to 'Rows' in the project, rather than a single audio clip
 class AudioTrack {
   File file; // should be the saved file name in project/audio when persisted
   File originalFile; // might be deprecated
-  final Duration audioDuration; // consider storing these 3 duration fields in just ms? rather than duration object
+  Duration
+      audioDuration; // consider storing these 3 duration fields in just ms? rather than duration object
   Duration trimStart;
   Duration trimEnd;
   double offset;
@@ -17,12 +71,23 @@ class AudioTrack {
   Duration currentPosition; // I think deprecated/unused
   late List<double> normWaveformData;
   double gain;
+  double pitchSemitones; // clip pitch shift in semitones
+  double sourceTempoBpm; // detected/imported source BPM (<=0 means unknown)
+  bool stretchToProjectTempo; // clip follows project tempo when enabled
+  bool tempoStretchPreservePitch; // false=resample, true=stretch-preserve
   double reverb; // deprecated
   double echo; // deprecated
   bool didExtractWaveform;
   double y; // deprecated
   int rowIndex; // -1 = unassigned (shouldn't exist), can be 0-x where 0 is first row at top
+  int rowId; // stable JUCE row identifier
+  int engineClipId; // stable JUCE clip slot identifier
   String label; // UI name (renameable, non-unique)
+  ClipKind clipKind;
+  String instrumentId; // non-empty only for MIDI/instrument clips
+  String instrumentName;
+  Map<String, double> instrumentParams;
+  List<MidiNote> midiNotes;
 
   AudioTrack._({
     required this.file,
@@ -38,15 +103,31 @@ class AudioTrack {
     Duration? currentPosition,
     this.normWaveformData = const [],
     this.gain = 1.0,
+    this.pitchSemitones = 0.0,
+    this.sourceTempoBpm = 0.0,
+    this.stretchToProjectTempo = false,
+    this.tempoStretchPreservePitch = false,
     this.reverb = 0.0,
     this.echo = 0.0,
     this.didExtractWaveform = false,
     this.y = 0.0,
     this.rowIndex = -1,
+    this.rowId = -1,
+    this.engineClipId = -1,
     required this.label,
+    this.clipKind = ClipKind.audio,
+    this.instrumentId = '',
+    this.instrumentName = '',
+    Map<String, double>? instrumentParams,
+    List<MidiNote>? midiNotes,
   })  : currentPosition = currentPosition ?? Duration.zero,
-        volumeAutomation =
-            volumeAutomation ?? [AutomationPoint(x: 0.0, volume: 1.0), AutomationPoint(x: 1.0, volume: 1.0)];
+        instrumentParams = instrumentParams ?? const <String, double>{},
+        midiNotes = midiNotes ?? const <MidiNote>[],
+        volumeAutomation = volumeAutomation ??
+            [
+              AutomationPoint(x: 0.0, volume: 1.0),
+              AutomationPoint(x: 1.0, volume: 1.0)
+            ];
 
   static Future<AudioTrack> create({
     required File file,
@@ -61,12 +142,23 @@ class AudioTrack {
     List<AutomationPoint>? volumeAutomation,
     Duration? currentPosition,
     double gain = 1.0,
+    double pitchSemitones = 0.0,
+    double sourceTempoBpm = 0.0,
+    bool stretchToProjectTempo = false,
+    bool tempoStretchPreservePitch = false,
     double reverb = 0.0,
     double echo = 0.0,
     bool didExtractWaveform = false,
     double y = 0, // deprecated
     int rowIndex = -1,
+    int rowId = -1,
+    int engineClipId = -1,
     required String label,
+    ClipKind clipKind = ClipKind.audio,
+    String instrumentId = '',
+    String instrumentName = '',
+    Map<String, double>? instrumentParams,
+    List<MidiNote>? midiNotes,
   }) async {
     // Then create instance
     return AudioTrack._(
@@ -83,20 +175,46 @@ class AudioTrack {
       currentPosition: currentPosition,
       normWaveformData: const [],
       gain: gain,
+      pitchSemitones: pitchSemitones,
+      sourceTempoBpm: sourceTempoBpm,
+      stretchToProjectTempo: stretchToProjectTempo,
+      tempoStretchPreservePitch: tempoStretchPreservePitch,
       reverb: reverb,
       echo: echo,
       didExtractWaveform: didExtractWaveform,
       y: 0, // deprecated
       rowIndex: rowIndex,
+      rowId: rowId,
+      engineClipId: engineClipId,
       label: label,
+      clipKind: clipKind,
+      instrumentId: instrumentId,
+      instrumentName: instrumentName,
+      instrumentParams: instrumentParams,
+      midiNotes: midiNotes,
     );
   }
+
+  bool get isMidi => clipKind == ClipKind.midi;
+}
+
+class TimelineRow {
+  final int rowId;
+  String name;
+  int iconId;
+
+  TimelineRow({
+    required this.rowId,
+    required this.name,
+    required this.iconId,
+  });
 }
 
 // consider making extendable to general automation points, not just volume
 // so can change 'volume' to 'value' or something
 class AutomationPoint {
-  double x; // UPDATED: X = time in ms in the timeline.   OLD: normalized x (0.0 = left, 1.0 = right)
+  double
+      x; // UPDATED: X = time in ms in the timeline.   OLD: normalized x (0.0 = left, 1.0 = right)
   double volume; // normalized volume (0.0 = silent, 1.0 = full)
   AutomationPoint({required this.x, required this.volume});
   AutomationPoint copy() => AutomationPoint(x: x, volume: volume);
@@ -136,13 +254,24 @@ extension AudioTrackSerialization on AudioTrack {
   Map<String, dynamic> toJson(String fileName) {
     return {
       "fileName": fileName,
+      "label": label,
+      "clipType": clipKind.wireName,
       "trimStartMs": trimStart.inMilliseconds,
       "trimEndMs": trimEnd.inMilliseconds,
       "offset": offset,
       "crossfade": crossfade,
       "gain": gain,
+      "pitchSemitones": pitchSemitones,
+      "sourceTempoBpm": sourceTempoBpm,
+      "stretchToProjectTempo": stretchToProjectTempo,
+      "tempoStretchPreservePitch": tempoStretchPreservePitch,
       "rowIndex": rowIndex,
+      "rowId": rowId,
       "automation": volumeAutomation.map((e) => e.toJson()).toList(),
+      "instrumentId": instrumentId,
+      "instrumentName": instrumentName,
+      "instrumentParams": instrumentParams,
+      "midiNotes": midiNotes.map((n) => n.toJson()).toList(),
     };
   }
 }
@@ -177,7 +306,8 @@ class RowStateSnapshot {
       gain: ((json["gain"] as num?) ?? 1.0).toDouble(),
       pan: ((json["pan"] as num?) ?? 0.5).toDouble(),
       volumeAutomation: ((json["volumeAutomation"] as List?) ?? [])
-          .map((e) => AutomationPointJson.fromJson((e as Map).cast<String, dynamic>()))
+          .map((e) =>
+              AutomationPointJson.fromJson((e as Map).cast<String, dynamic>()))
           .toList(),
     );
   }
@@ -218,7 +348,10 @@ extension RowEffectsSnapshotJson on RowEffectsSnapshot {
   static RowEffectsSnapshot fromJson(Map<String, dynamic> json) {
     return RowEffectsSnapshot(
       json["row"] as int,
-      (json["effects"] as List).map((e) => EffectSnapshotJson.fromJson((e as Map).cast<String, dynamic>())).toList(),
+      (json["effects"] as List)
+          .map((e) =>
+              EffectSnapshotJson.fromJson((e as Map).cast<String, dynamic>()))
+          .toList(),
     );
   }
 }
@@ -230,7 +363,10 @@ extension MasterEffectsSnapshotJson on MasterEffectsSnapshot {
 
   static MasterEffectsSnapshot fromJson(Map<String, dynamic> json) {
     return MasterEffectsSnapshot(
-      (json["effects"] as List).map((e) => EffectSnapshotJson.fromJson((e as Map).cast<String, dynamic>())).toList(),
+      (json["effects"] as List)
+          .map((e) =>
+              EffectSnapshotJson.fromJson((e as Map).cast<String, dynamic>()))
+          .toList(),
     );
   }
 }
@@ -249,14 +385,16 @@ class MeterFrame {
     required this.clip,
   });
 
-  static const zero = MeterFrame(peakL: 0, peakR: 0, rmsL: 0, rmsR: 0, clip: false);
+  static const zero =
+      MeterFrame(peakL: 0, peakR: 0, rmsL: 0, rmsR: 0, clip: false);
 }
 
 class MeterBus extends ChangeNotifier {
   final int numRows;
 
   MeterFrame master = MeterFrame.zero;
-  late final List<MeterFrame> rows = List.filled(numRows, MeterFrame.zero, growable: false);
+  late final List<MeterFrame> rows =
+      List.filled(numRows, MeterFrame.zero, growable: false);
 
   MeterBus({required this.numRows});
 
@@ -307,7 +445,11 @@ class MeterBus extends ChangeNotifier {
 
   bool get isAllZero {
     bool frameIsZero(MeterFrame f) {
-      return f.peakL == 0.0 && f.peakR == 0.0 && f.rmsL == 0.0 && f.rmsR == 0.0 && f.clip == false;
+      return f.peakL == 0.0 &&
+          f.peakR == 0.0 &&
+          f.rmsL == 0.0 &&
+          f.rmsR == 0.0 &&
+          f.clip == false;
     }
 
     // master

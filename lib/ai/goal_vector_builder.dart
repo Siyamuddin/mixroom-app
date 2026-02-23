@@ -44,8 +44,13 @@ class GoalVectorBuilder {
     return GoalVector(
       type: 'mix_request',
       userText: text,
-      intents: intents.isEmpty ? [MixIntent(kind: 'balance', confidence: 0.5)] : intents,
-      target: MixTarget(role: role, confidence: role == null ? 0.3 : 0.7),
+      intents: intents.isEmpty
+          ? [MixIntent(kind: 'balance', confidence: 0.5)]
+          : intents,
+      target: MixTarget(
+          role: role,
+          scope: role == null ? 'auto' : 'row',
+          confidence: role == null ? 0.3 : 0.7),
       intensity: t.contains('slightly') ? 0.3 : 0.6,
     );
   }

@@ -178,6 +178,8 @@ void EQAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     equalizer.prepare(sampleRate, samplesPerBlock);
     equalizer.setParameters(parameters);
+    waveformRing.fill(0.0f);
+    waveformWritePos.store(0, std::memory_order_relaxed);
 }
 
 void EQAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
@@ -188,6 +190,48 @@ void EQAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::Midi
 
     equalizer.setParameters(parameters);
     equalizer.process(buffer);
+    pushWaveformSamples(buffer);
+}
+
+void EQAudioProcessor::pushWaveformSamples(const juce::AudioBuffer<float> &buffer) noexcept
+{
+    const int numSamples = buffer.getNumSamples();
+    const int channels = juce::jmin(buffer.getNumChannels(), 2);
+    if (numSamples <= 0 || channels <= 0)
+        return;
+
+    const float *left = buffer.getReadPointer(0);
+    const float *right = channels > 1 ? buffer.getReadPointer(1) : nullptr;
+
+    int writePos = waveformWritePos.load(std::memory_order_relaxed);
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float s = right != nullptr ? 0.5f * (left[i] + right[i]) : left[i];
+        waveformRing[(size_t)writePos] = juce::jlimit(-1.0f, 1.0f, s);
+        writePos = (writePos + 1) % kWaveformRingSize;
+    }
+
+    waveformWritePos.store(writePos, std::memory_order_release);
+}
+
+std::vector<float> EQAudioProcessor::getRecentWaveform(int sampleCount) const
+{
+    const int count = juce::jlimit(16, kWaveformRingSize, sampleCount);
+    std::vector<float> out((size_t)count, 0.0f);
+
+    const int writePos = waveformWritePos.load(std::memory_order_acquire);
+    int readPos = writePos - count;
+    while (readPos < 0)
+        readPos += kWaveformRingSize;
+
+    for (int i = 0; i < count; ++i)
+    {
+        out[(size_t)i] = waveformRing[(size_t)readPos];
+        readPos = (readPos + 1) % kWaveformRingSize;
+    }
+
+    return out;
 }
 
 void EQAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
@@ -702,6 +746,8 @@ void EQ3AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     eq3.prepare(sampleRate, samplesPerBlock);
     eq3.setParameters(parameters);
+    waveformRing.fill(0.0f);
+    waveformWritePos.store(0, std::memory_order_relaxed);
 }
 
 void EQ3AudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
@@ -713,6 +759,45 @@ void EQ3AudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::Mid
 
     eq3.setParameters(parameters);
     eq3.process(buffer);
+    pushWaveformSamples(buffer);
+}
+
+void EQ3AudioProcessor::pushWaveformSamples(const juce::AudioBuffer<float> &buffer) noexcept
+{
+    const int numSamples = buffer.getNumSamples();
+    const int channels = juce::jmin(buffer.getNumChannels(), 2);
+    if (numSamples <= 0 || channels <= 0)
+        return;
+
+    const float *left = buffer.getReadPointer(0);
+    const float *right = channels > 1 ? buffer.getReadPointer(1) : nullptr;
+
+    int writePos = waveformWritePos.load(std::memory_order_relaxed);
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float s = right != nullptr ? 0.5f * (left[i] + right[i]) : left[i];
+        waveformRing[(size_t)writePos] = juce::jlimit(-1.0f, 1.0f, s);
+        writePos = (writePos + 1) % kWaveformRingSize;
+    }
+    waveformWritePos.store(writePos, std::memory_order_release);
+}
+
+std::vector<float> EQ3AudioProcessor::getRecentWaveform(int sampleCount) const
+{
+    const int count = juce::jlimit(16, kWaveformRingSize, sampleCount);
+    std::vector<float> out((size_t)count, 0.0f);
+
+    const int writePos = waveformWritePos.load(std::memory_order_acquire);
+    int readPos = writePos - count;
+    while (readPos < 0)
+        readPos += kWaveformRingSize;
+
+    for (int i = 0; i < count; ++i)
+    {
+        out[(size_t)i] = waveformRing[(size_t)readPos];
+        readPos = (readPos + 1) % kWaveformRingSize;
+    }
+    return out;
 }
 
 void EQ3AudioProcessor::getStateInformation(juce::MemoryBlock &destData)
@@ -893,6 +978,449 @@ bool CompressorAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts
     return true;
 #else
     if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
+// =====================
+// **** LIMITER ****
+// =====================
+
+LimiterAudioProcessor::LimiterAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "threshold", "Threshold",
+            juce::NormalisableRange<float>(-40.0f, 0.0f, 0.1f),
+            0.0f, "dB"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "release", "Release",
+            juce::NormalisableRange<float>(0.1f, 200.0f, 0.1f, 0.35f),
+            1.0f, "ms"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "ceiling", "Ceiling",
+            juce::NormalisableRange<float>(-40.0f, 0.0f, 0.1f),
+            0.0f, "dB"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterBool>(
+            "stereo", "Stereo", true));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void LimiterAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    limiter.prepare(sampleRate, samplesPerBlock);
+    limiter.setParameters(parameters);
+}
+
+void LimiterAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    limiter.setParameters(parameters);
+    limiter.process(buffer);
+    gainReduction = limiter.getGainReduction();
+}
+
+void LimiterAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void LimiterAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool LimiterAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
+// =====================
+// **** CLIPPER ****
+// =====================
+
+ClipperAudioProcessor::ClipperAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "threshold", "Threshold",
+            juce::NormalisableRange<float>(-40.0f, 0.0f, 0.1f),
+            0.0f, "dB"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "ceiling", "Ceiling",
+            juce::NormalisableRange<float>(-40.0f, 0.0f, 0.1f),
+            0.0f, "dB"));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void ClipperAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    clipper.prepare(sampleRate, samplesPerBlock);
+    clipper.setParameters(parameters);
+    setLatencySamples(clipper.getOversamplerLatency());
+}
+
+void ClipperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    clipper.setParameters(parameters);
+    juce::dsp::AudioBlock<float> block(buffer);
+    juce::dsp::ProcessContextReplacing<float> ctx(block);
+    clipper.process(ctx);
+    gainReduction = clipper.getGainReduction();
+}
+
+void ClipperAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffer,
+                                                 juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    // Latency-reporting processors must override bypass processing.
+    clipper.reset();
+}
+
+void ClipperAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void ClipperAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool ClipperAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
+// =====================
+// **** PITCH SHIFT ****
+// =====================
+
+PitchShiftAudioProcessor::PitchShiftAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "semitones", "Semitones",
+            juce::NormalisableRange<float>(-12.0f, 12.0f, 0.1f),
+            0.0f, "st"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "mix", "Mix",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            100.0f, "%"));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void PitchShiftAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    pitchShift.prepare(sampleRate, samplesPerBlock);
+    pitchShift.setParameters(parameters);
+}
+
+void PitchShiftAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    pitchShift.setParameters(parameters);
+    pitchShift.process(buffer);
+}
+
+void PitchShiftAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void PitchShiftAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool PitchShiftAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
+// =================
+// **** CHORUS ****
+// =================
+
+ChorusAudioProcessor::ChorusAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "rate", "Rate",
+            juce::NormalisableRange<float>(0.05f, 8.0f, 0.01f),
+            0.8f, "Hz"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "depth", "Depth",
+            juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
+            0.35f));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "centreDelay", "Centre Delay",
+            juce::NormalisableRange<float>(1.0f, 30.0f, 0.1f),
+            7.0f, "ms"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "feedback", "Feedback",
+            juce::NormalisableRange<float>(-95.0f, 95.0f, 0.1f),
+            10.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "mix", "Mix",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            35.0f, "%"));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void ChorusAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    chorusFx.prepare(sampleRate, samplesPerBlock);
+    chorusFx.setParameters(parameters);
+}
+
+void ChorusAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    chorusFx.setParameters(parameters);
+    chorusFx.process(buffer);
+}
+
+void ChorusAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void ChorusAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool ChorusAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
+// ==================
+// **** VIBRATO ****
+// ==================
+
+VibratoAudioProcessor::VibratoAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "rate", "Rate",
+            juce::NormalisableRange<float>(0.1f, 12.0f, 0.01f),
+            4.5f, "Hz"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "depth", "Depth",
+            juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
+            0.6f));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "centreDelay", "Centre Delay",
+            juce::NormalisableRange<float>(1.0f, 15.0f, 0.1f),
+            7.0f, "ms"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "mix", "Mix",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            100.0f, "%"));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void VibratoAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    vibratoFx.prepare(sampleRate, samplesPerBlock);
+    vibratoFx.setParameters(parameters);
+}
+
+void VibratoAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    vibratoFx.setParameters(parameters);
+    vibratoFx.process(buffer);
+}
+
+void VibratoAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void VibratoAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool VibratoAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
         return false;
 #if !JucePlugin_IsSynth
     if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())

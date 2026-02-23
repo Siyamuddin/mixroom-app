@@ -5,8 +5,10 @@ class JuceAudioEngine {
   static const _ch = MethodChannel('juce_audio_engine');
   static const _eventCh = EventChannel('juce_audio_engine/events');
 
-  static Stream<Map<String, dynamic>> get _events =>
-      _eventCh.receiveBroadcastStream().cast<Map<dynamic, dynamic>>().map((e) => Map<String, dynamic>.from(e));
+  static Stream<Map<String, dynamic>> get _events => _eventCh
+      .receiveBroadcastStream()
+      .cast<Map<dynamic, dynamic>>()
+      .map((e) => Map<String, dynamic>.from(e));
 
   static void initialiseEventListeners() {
     _events.listen((event) {
@@ -113,6 +115,33 @@ class JuceAudioEngine {
       });
     } on PlatformException catch (e) {
       _logError('seek', e);
+    }
+  }
+
+  static Future<void> setTransportSeconds(double timeSeconds) async {
+    try {
+      await _ch
+          .invokeMethod('setTransportSeconds', {'timeSeconds': timeSeconds});
+    } on PlatformException catch (e) {
+      _logError('setTransportSeconds', e);
+    }
+  }
+
+  static Future<double> getTransportSeconds() async {
+    try {
+      final t = await _ch.invokeMethod<double>('getTransportSeconds');
+      return t ?? 0.0;
+    } on PlatformException catch (e) {
+      _logError('getTransportSeconds', e);
+      return 0.0;
+    }
+  }
+
+  static Future<void> seekTransport(double timeSeconds) async {
+    try {
+      await _ch.invokeMethod('seekTransport', {'timeSeconds': timeSeconds});
+    } on PlatformException catch (e) {
+      _logError('seekTransport', e);
     }
   }
 
@@ -248,7 +277,8 @@ class JuceAudioEngine {
   }
 
   // DEPRECATED – use setTrackEffect / setMasterEffect for new graph
-  static Future<void> setEffect(int track, int pluginIndex, String paramId, dynamic value) async {
+  static Future<void> setEffect(
+      int track, int pluginIndex, String paramId, dynamic value) async {
     try {
       await _ch.invokeMethod('setEffect', {
         'track': track,
@@ -261,7 +291,8 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> bypassPlugin(int track, int effect, bool shouldBypass) async {
+  static Future<void> bypassPlugin(
+      int track, int effect, bool shouldBypass) async {
     try {
       await _ch.invokeMethod('bypassPlugin', {
         'track': track,
@@ -303,7 +334,10 @@ class JuceAudioEngine {
   static Future<List<Map<String, String>>> scanPlugins() async {
     try {
       final result = await _ch.invokeMethod<List<dynamic>>('scanPlugins');
-      return result?.cast<Map<dynamic, dynamic>>().map((m) => Map<String, String>.from(m)).toList() ??
+      return result
+              ?.cast<Map<dynamic, dynamic>>()
+              .map((m) => Map<String, String>.from(m))
+              .toList() ??
           <Map<String, String>>[];
     } on PlatformException catch (e) {
       _logError('scanPlugins', e);
@@ -311,11 +345,25 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<String> exportMix(String outPath) async {
+  static Future<String> exportMix(
+    String outPath, {
+    String format = 'wav',
+    int sampleRate = 44100,
+    int wavBitDepth = 16,
+    bool wavDithering = true,
+    int mp3BitrateKbps = 192,
+  }) async {
     try {
       final result = await _ch.invokeMethod<String>(
         'exportMix',
-        {'outPath': outPath},
+        {
+          'outPath': outPath,
+          'format': format,
+          'sampleRate': sampleRate,
+          'wavBitDepth': wavBitDepth,
+          'wavDithering': wavDithering,
+          'mp3BitrateKbps': mp3BitrateKbps,
+        },
       );
       return result ?? '';
     } on PlatformException catch (e) {
@@ -324,15 +372,58 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<String> exportTrack(int track, String outPath) async {
+  static Future<String> exportTrack(
+    int track,
+    String outPath, {
+    String format = 'wav',
+    int sampleRate = 44100,
+    int wavBitDepth = 16,
+    bool wavDithering = true,
+    int mp3BitrateKbps = 192,
+  }) async {
     try {
       final result = await _ch.invokeMethod<String>(
         'exportTrack',
-        {'track': track, 'outPath': outPath},
+        {
+          'track': track,
+          'outPath': outPath,
+          'format': format,
+          'sampleRate': sampleRate,
+          'wavBitDepth': wavBitDepth,
+          'wavDithering': wavDithering,
+          'mp3BitrateKbps': mp3BitrateKbps,
+        },
       );
       return result ?? '';
     } on PlatformException catch (e) {
       _logError('exportTrack', e);
+      return '';
+    }
+  }
+
+  static Future<String> renderInstrumentClip({
+    required String outPath,
+    required String instrumentId,
+    required String instrumentName,
+    required double bpm,
+    required List<Map<String, dynamic>> notes,
+    required Map<String, double> params,
+  }) async {
+    try {
+      final result = await _ch.invokeMethod<String>(
+        'renderInstrumentClip',
+        {
+          'outPath': outPath,
+          'instrumentId': instrumentId,
+          'instrumentName': instrumentName,
+          'bpm': bpm,
+          'notes': notes,
+          'params': params,
+        },
+      );
+      return result ?? '';
+    } on PlatformException catch (e) {
+      _logError('renderInstrumentClip', e);
       return '';
     }
   }
@@ -372,18 +463,105 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<bool> supportsLiveMidiClipPlayback() async {
+    try {
+      final supported =
+          await _ch.invokeMethod<bool>('supportsLiveMidiClipPlayback');
+      return supported ?? false;
+    } on PlatformException catch (e) {
+      _logError('supportsLiveMidiClipPlayback', e);
+      return false;
+    }
+  }
+
+  static Future<bool> loadMidiClip(
+    int clipIndex,
+    int rowId, {
+    required String instrumentId,
+    required String instrumentName,
+    required List<Map<String, dynamic>> notes,
+    required Map<String, double> params,
+    required double sourceTempoBpm,
+    double startSec = 0.0,
+    double lengthSec = 0.0,
+    double inFileOffsetSec = 0.0,
+  }) async {
+    try {
+      final ok = await _ch.invokeMethod<bool>('loadMidiClip', {
+        'clip': clipIndex,
+        'rowId': rowId,
+        'row': rowId, // backward compatibility
+        'instrumentId': instrumentId,
+        'instrumentName': instrumentName,
+        'notes': notes,
+        'params': params,
+        'sourceTempoBpm': sourceTempoBpm,
+        'startSec': startSec,
+        'lengthSec': lengthSec,
+        'inFileOffsetSec': inFileOffsetSec,
+      });
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      _logError('loadMidiClip', e);
+      return false;
+    }
+  }
+
+  static Future<bool> updateMidiClipEvents(
+    int clipIndex, {
+    required String instrumentId,
+    required String instrumentName,
+    required List<Map<String, dynamic>> notes,
+    required Map<String, double> params,
+    required double sourceTempoBpm,
+  }) async {
+    try {
+      final ok = await _ch.invokeMethod<bool>('updateMidiClipEvents', {
+        'clip': clipIndex,
+        'instrumentId': instrumentId,
+        'instrumentName': instrumentName,
+        'notes': notes,
+        'params': params,
+        'sourceTempoBpm': sourceTempoBpm,
+      });
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      _logError('updateMidiClipEvents', e);
+      return false;
+    }
+  }
+
   // ===============================
   // NEW CLIP-LEVEL API
   // ===============================
-  static Future<void> loadClip(int clipIndex, int rowIndex, String path) async {
+  static Future<void> loadClip(
+    int clipIndex,
+    int rowId,
+    String path, {
+    double startSec = 0.0,
+    double lengthSec = 0.0,
+    double inFileOffsetSec = 0.0,
+  }) async {
     try {
       await _ch.invokeMethod('loadClip', {
         'clip': clipIndex,
-        'row': rowIndex,
+        'rowId': rowId,
+        'row': rowId, // backward compatibility
         'path': path,
+        'startSec': startSec,
+        'lengthSec': lengthSec,
+        'inFileOffsetSec': inFileOffsetSec,
       });
     } on PlatformException catch (e) {
       _logError('loadClip', e);
+    }
+  }
+
+  static Future<void> unloadClip(int clipIndex) async {
+    try {
+      await _ch.invokeMethod('unloadClip', {'clip': clipIndex});
+    } on PlatformException catch (e) {
+      _logError('unloadClip', e);
     }
   }
 
@@ -409,6 +587,33 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> setClipPitch(int clipIndex, double semitones) async {
+    try {
+      await _ch.invokeMethod('setClipPitch', {
+        'clip': clipIndex,
+        'semitones': semitones,
+      });
+    } on PlatformException catch (e) {
+      _logError('setClipPitch', e);
+    }
+  }
+
+  static Future<void> setClipStretchOptions(
+    int clipIndex, {
+    required double tempoRatio,
+    required bool preservePitch,
+  }) async {
+    try {
+      await _ch.invokeMethod('setClipStretchOptions', {
+        'clip': clipIndex,
+        'tempoRatio': tempoRatio,
+        'preservePitch': preservePitch,
+      });
+    } on PlatformException catch (e) {
+      _logError('setClipStretchOptions', e);
+    }
+  }
+
   static Future<void> muteClip(int clipIndex, bool mute) async {
     try {
       await _ch.invokeMethod('muteClip', {
@@ -420,14 +625,136 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> moveClipToRow(int clipIndex, int newRow) async {
+  static Future<void> moveClipToRow(int clipIndex, int newRowId) async {
     try {
       await _ch.invokeMethod('moveClipToRow', {
         'clip': clipIndex,
-        'row': newRow,
+        'rowId': newRowId,
+        'row': newRowId, // backward compatibility
       });
     } on PlatformException catch (e) {
       _logError('moveClipToRow', e);
+    }
+  }
+
+  static Future<void> setClipTime(
+    int clipIndex, {
+    required double startSec,
+    required double lengthSec,
+    double inFileOffsetSec = 0.0,
+  }) async {
+    try {
+      await _ch.invokeMethod('setClipTime', {
+        'clip': clipIndex,
+        'startSec': startSec,
+        'lengthSec': lengthSec,
+        'inFileOffsetSec': inFileOffsetSec,
+      });
+    } on PlatformException catch (e) {
+      _logError('setClipTime', e);
+    }
+  }
+
+  static Future<int> addRow(String name, {int iconId = 0}) async {
+    try {
+      final id = await _ch.invokeMethod<int>('addRow', {
+        'name': name,
+        'iconId': iconId,
+      });
+      return id ?? -1;
+    } on PlatformException catch (e) {
+      _logError('addRow', e);
+      return -1;
+    }
+  }
+
+  static Future<int> insertRowAbove(int referenceRowId, String name,
+      {int iconId = 0}) async {
+    try {
+      final id = await _ch.invokeMethod<int>('insertRowAbove', {
+        'referenceRowId': referenceRowId,
+        'name': name,
+        'iconId': iconId,
+      });
+      return id ?? -1;
+    } on PlatformException catch (e) {
+      _logError('insertRowAbove', e);
+      return -1;
+    }
+  }
+
+  static Future<int> insertRowBelow(int referenceRowId, String name,
+      {int iconId = 0}) async {
+    try {
+      final id = await _ch.invokeMethod<int>('insertRowBelow', {
+        'referenceRowId': referenceRowId,
+        'name': name,
+        'iconId': iconId,
+      });
+      return id ?? -1;
+    } on PlatformException catch (e) {
+      _logError('insertRowBelow', e);
+      return -1;
+    }
+  }
+
+  static Future<bool> removeRow(int rowId) async {
+    try {
+      final ok = await _ch.invokeMethod<bool>('removeRow', {'rowId': rowId});
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      _logError('removeRow', e);
+      return false;
+    }
+  }
+
+  static Future<bool> moveRowOrder(int fromIndex, int toIndex) async {
+    try {
+      final ok = await _ch.invokeMethod<bool>('moveRowOrder', {
+        'from': fromIndex,
+        'to': toIndex,
+      });
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      _logError('moveRowOrder', e);
+      return false;
+    }
+  }
+
+  static Future<bool> renameRow(int rowId, String name) async {
+    try {
+      final ok = await _ch.invokeMethod<bool>('renameRow', {
+        'rowId': rowId,
+        'name': name,
+      });
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      _logError('renameRow', e);
+      return false;
+    }
+  }
+
+  static Future<bool> setRowIcon(int rowId, int iconId) async {
+    try {
+      final ok = await _ch.invokeMethod<bool>('setRowIcon', {
+        'rowId': rowId,
+        'iconId': iconId,
+      });
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      _logError('setRowIcon', e);
+      return false;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getRows() async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>('getRows');
+      if (raw == null) return <Map<String, dynamic>>[];
+      return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } on PlatformException catch (e) {
+      _logError('getRows', e);
+      return <Map<String, dynamic>>[];
     }
   }
 
@@ -436,10 +763,17 @@ class JuceAudioEngine {
   // ===============================
   static Future<void> insertTrackEffect(int row, String path) async {
     try {
-      await _ch.invokeMethod('insertTrackEffect', {
+      final ok = await _ch.invokeMethod<bool>('insertTrackEffect', {
         'row': row,
         'path': path,
       });
+      if (ok == false) {
+        throw PlatformException(
+          code: 'insert_track_effect_failed',
+          message: 'Native insertTrackEffect returned false',
+          details: {'row': row, 'path': path},
+        );
+      }
     } on PlatformException catch (e) {
       _logError('insertTrackEffect', e);
     }
@@ -481,7 +815,21 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> setTrackEffect(int row, int effectIndex, String paramId, dynamic value) async {
+  static Future<List<String>> getTrackEffectIdsForRow(int row) async {
+    try {
+      final list = await _ch.invokeListMethod<String>(
+        'getTrackEffectIdsForRow',
+        {'row': row},
+      );
+      return list ?? <String>[];
+    } on PlatformException catch (e) {
+      _logError('getTrackEffectIdsForRow', e);
+      return <String>[];
+    }
+  }
+
+  static Future<void> setTrackEffect(
+      int row, int effectIndex, String paramId, dynamic value) async {
     try {
       await _ch.invokeMethod('setTrackEffect', {
         'row': row,
@@ -494,7 +842,8 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> bypassRowEffect(int row, int effectIndex, bool bypass) async {
+  static Future<void> bypassRowEffect(
+      int row, int effectIndex, bool bypass) async {
     try {
       await _ch.invokeMethod('bypassRowEffect', {
         'row': row,
@@ -524,7 +873,8 @@ class JuceAudioEngine {
 
   /// points: List<Map<String, double>> with keys like
   /// { "timeSeconds": double, "value": double }
-  static Future<void> setTrackAutomationPoints(int row, List<Map<String, dynamic>> points) async {
+  static Future<void> setTrackAutomationPoints(
+      int row, List<Map<String, dynamic>> points) async {
     try {
       await _ch.invokeMethod('setTrackAutomationPoints', {
         'row': row,
@@ -586,7 +936,15 @@ class JuceAudioEngine {
   // ===============================
   static Future<void> insertMasterEffect(String path) async {
     try {
-      await _ch.invokeMethod('insertMasterEffect', {'path': path});
+      final ok =
+          await _ch.invokeMethod<bool>('insertMasterEffect', {'path': path});
+      if (ok == false) {
+        throw PlatformException(
+          code: 'insert_master_effect_failed',
+          message: 'Native insertMasterEffect returned false',
+          details: {'path': path},
+        );
+      }
     } on PlatformException catch (e) {
       _logError('insertMasterEffect', e);
     }
@@ -623,7 +981,18 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> setMasterEffect(int effectIndex, String paramId, dynamic value) async {
+  static Future<List<String>> getMasterEffectIds() async {
+    try {
+      final list = await _ch.invokeListMethod<String>('getMasterEffectIds');
+      return list ?? <String>[];
+    } on PlatformException catch (e) {
+      _logError('getMasterEffectIds', e);
+      return <String>[];
+    }
+  }
+
+  static Future<void> setMasterEffect(
+      int effectIndex, String paramId, dynamic value) async {
     try {
       await _ch.invokeMethod('setMasterEffect', {
         'effect': effectIndex,
@@ -687,13 +1056,7 @@ class JuceAudioEngine {
   // TRANSPORT / DEBUG
   // ===============================
   static Future<void> setAutomationTransport(double timeSeconds) async {
-    try {
-      await _ch.invokeMethod('setAutomationTransport', {
-        'timeSeconds': timeSeconds,
-      });
-    } on PlatformException catch (e) {
-      _logError('setAutomationTransport', e);
-    }
+    await setTransportSeconds(timeSeconds);
   }
 
   static Future<void> debugPrintGraph(String title) async {
@@ -761,6 +1124,27 @@ class JuceAudioEngine {
     return Float32List.fromList(
       raw.map((e) => (e as num).toDouble()).toList(),
     );
+  }
+
+  static Future<Map<String, double>> analyzeAudioStereo16k(String path) async {
+    try {
+      final raw = await _ch.invokeMapMethod<String, dynamic>(
+        'analyzeAudioStereo16k',
+        {'path': path},
+      );
+      if (raw == null) return const {};
+      return raw.map((k, v) {
+        if (v is num) return MapEntry(k, v.toDouble());
+        return MapEntry(k, 0.0);
+      });
+    } on MissingPluginException {
+      return const {};
+    } on PlatformException catch (e) {
+      _logError('analyzeAudioStereo16k', e);
+      return const {};
+    } catch (_) {
+      return const {};
+    }
   }
 
   static Future<List<String>> getInputDevices() async {
@@ -906,7 +1290,8 @@ class JuceAudioEngine {
 // returns [peakL, peakR, rmsL, rmsR]
   static Future<List<double>> getRowMeterValues(int row) async {
     try {
-      final raw = await _ch.invokeMethod<List<dynamic>>('getRowMeterValues', {'row': row});
+      final raw = await _ch
+          .invokeMethod<List<dynamic>>('getRowMeterValues', {'row': row});
       if (raw == null) return [0, 0, 0, 0];
       return raw.map((e) => (e as num).toDouble()).toList();
     } on PlatformException catch (e) {
@@ -930,7 +1315,8 @@ class JuceAudioEngine {
 // COMPRESSOR METER STRIPS
 // returns [inRmsL, inRmsR, grDb, outRmsL, outRmsR]
 // ===============================
-  static Future<List<double>> getClipCompressorMeter(int clip, int effect) async {
+  static Future<List<double>> getClipCompressorMeter(
+      int clip, int effect) async {
     try {
       final raw = await _ch.invokeMethod<List<dynamic>>(
         'getClipCompressorMeter',
@@ -969,6 +1355,52 @@ class JuceAudioEngine {
     } on PlatformException catch (e) {
       _logError('getMasterCompressorMeter', e);
       return [0, 0, 0, 0, 0];
+    }
+  }
+
+  static Future<double> getHostSampleRate() async {
+    try {
+      final sr = await _ch.invokeMethod<double>('getHostSampleRate');
+      if (sr == null || sr <= 1000.0) return 44100.0;
+      return sr;
+    } on PlatformException catch (e) {
+      _logError('getHostSampleRate', e);
+      return 44100.0;
+    }
+  }
+
+  static Future<List<double>> getRowEqWaveform(
+    int row,
+    int effect, {
+    int sampleCount = 1024,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getRowEqWaveform',
+        {'row': row, 'effect': effect, 'sampleCount': sampleCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getRowEqWaveform', e);
+      return const <double>[];
+    }
+  }
+
+  static Future<List<double>> getMasterEqWaveform(
+    int effect, {
+    int sampleCount = 1024,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getMasterEqWaveform',
+        {'effect': effect, 'sampleCount': sampleCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getMasterEqWaveform', e);
+      return const <double>[];
     }
   }
 }

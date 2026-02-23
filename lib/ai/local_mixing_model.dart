@@ -15,17 +15,34 @@ class LocalMixingModel {
   // -----------------------------
   static const String fxReverb = 'Reverb';
   static const String fxEq = 'EQ 3-Band';
+  static const String fxEqParametric = 'EQ Parametric';
   static const String fxDelay = 'Delay';
   static const String fxDeEsserContains = 'De-Esser';
   static const String fxDistortionContains = 'Distortion';
   static const String fxCompressor = 'Compressor';
+  static const String fxLimiter = 'Limiter';
 
   // -----------------------------
   // UI-exposed param safety rail
   // -----------------------------
   static const Map<String, List<String>> exposedFxParams = {
     'Reverb': ['Mix', 'Room Size'],
-    'EQ Parametric': ['HPF Frequency', 'Band 1 Gain', 'Band 2 Gain', 'Band 3 Gain', 'Band 4 Gain', 'LPF Frequency'],
+    'EQ Parametric': [
+      'HPF Frequency',
+      'Band 1 Frequency',
+      'Band 1 Gain',
+      'Band 1 Q',
+      'Band 2 Frequency',
+      'Band 2 Gain',
+      'Band 2 Q',
+      'Band 3 Frequency',
+      'Band 3 Gain',
+      'Band 3 Q',
+      'Band 4 Frequency',
+      'Band 4 Gain',
+      'Band 4 Q',
+      'LPF Frequency',
+    ],
     'EQ 3-Band': ['Low Gain', 'Mid Gain', 'High Gain'],
     'Delay': ['Delay Time', 'Feedback', 'Mix'],
     // In case your distortion UI later exposes more, keep these permissive but still bounded
@@ -43,6 +60,7 @@ class LocalMixingModel {
     // substring-based
     'De-Esser': ['Threshold', 'Frequency'],
     'Compressor': ['Threshold', 'Attack', 'Release', 'Ratio', 'Makeup', 'Mix'],
+    'Limiter': ['Threshold', 'Release', 'Ceiling'],
   };
 
   static const bool preferLoudCleanOverConservative = true;
@@ -86,9 +104,19 @@ class LocalMixingModel {
       'distortion',
       'deesser',
       'compressor',
+      'limiter',
       'balance'
     };
-    final allowedDirs = <String>{'up', 'down', 'left', 'right', 'center', 'widen', 'narrow', 'remove'};
+    final allowedDirs = <String>{
+      'up',
+      'down',
+      'left',
+      'right',
+      'center',
+      'widen',
+      'narrow',
+      'remove'
+    };
     final allowedEqDesc = <String>{
       'mud_cut',
       'box_cut',
@@ -113,13 +141,18 @@ class LocalMixingModel {
       final dirOk = (dir == null) || allowedDirs.contains(dir);
 
       String? desc = it.descriptor?.trim().toLowerCase();
-      if (desc != null && kind != 'eq') desc = null; // descriptors only allowed for EQ
+      if (desc != null && kind != 'eq')
+        desc = null; // descriptors only allowed for EQ
       if (desc != null && !allowedEqDesc.contains(desc)) desc = null;
 
       final conf = it.confidence.clamp(0.0, 1.0);
       if (conf < 0.12) continue;
 
-      normIntents.add(MixIntent(kind: kind, direction: dirOk ? dir : null, descriptor: desc, confidence: conf));
+      normIntents.add(MixIntent(
+          kind: kind,
+          direction: dirOk ? dir : null,
+          descriptor: desc,
+          confidence: conf));
     }
 
     if (normIntents.isEmpty) {
@@ -142,13 +175,28 @@ class LocalMixingModel {
     final t = s.trim().toLowerCase();
     if (t.isEmpty) return '';
     if (_textAny(t, const ['balance', 'level', 'mix'])) return 'balance';
-    if (_textAny(t, const ['gain', 'volume', 'louder', 'quieter'])) return 'gain';
-    if (_textAny(t, const ['pan', 'stereo', 'width', 'widen', 'narrow'])) return 'pan';
+    if (_textAny(t, const ['gain', 'volume', 'louder', 'quieter']))
+      return 'gain';
+    if (_textAny(t, const ['pan', 'stereo', 'width', 'widen', 'narrow']))
+      return 'pan';
     if (_textAny(t, const ['reverb', 'verb', 'space', 'room'])) return 'reverb';
     if (_textAny(t, const ['delay', 'echo'])) return 'delay';
-    if (_textAny(t, const ['eq', 'tone', 'bright', 'dull', 'mud', 'harsh', 'thin', 'boomy'])) return 'eq';
-    if (_textAny(t, const ['deesser', 'de-esser', 'sibilance', 'ess'])) return 'de-esser';
-    if (_textAny(t, const ['distortion', 'drive', 'crunch', 'grit', 'saturat'])) return 'distortion';
+    if (_textAny(t, const [
+      'eq',
+      'tone',
+      'bright',
+      'dull',
+      'mud',
+      'harsh',
+      'thin',
+      'boomy'
+    ])) return 'eq';
+    if (_textAny(t, const ['deesser', 'de-esser', 'sibilance', 'ess']))
+      return 'de-esser';
+    if (_textAny(t, const ['distortion', 'drive', 'crunch', 'grit', 'saturat']))
+      return 'distortion';
+    if (_textAny(t, const ['limiter', 'limit', 'brickwall', 'ceiling']))
+      return 'limiter';
     return t;
   }
 
@@ -157,8 +205,11 @@ class LocalMixingModel {
     final t = s.trim().toLowerCase();
     if (t.isEmpty) return null;
 
-    if (_textAny(t, const ['up', 'more', 'add', 'increase', 'raise', 'boost'])) return 'up';
-    if (_textAny(t, const ['down', 'less', 'reduce', 'lower', 'decrease', 'remove'])) return 'down';
+    if (_textAny(t, const ['up', 'more', 'add', 'increase', 'raise', 'boost']))
+      return 'up';
+    if (_textAny(
+        t, const ['down', 'less', 'reduce', 'lower', 'decrease', 'remove']))
+      return 'down';
 
     if (_textAny(t, const ['left'])) return 'left';
     if (_textAny(t, const ['right'])) return 'right';
@@ -181,7 +232,10 @@ class LocalMixingModel {
         t.contains('too quiet') ||
         t.contains('more');
 
-    final wantsDown = t.contains('too loud') || t.contains('harsh') || t.contains('muddy') || t.contains('reduce');
+    final wantsDown = t.contains('too loud') ||
+        t.contains('harsh') ||
+        t.contains('muddy') ||
+        t.contains('reduce');
 
     if (kind == 'gain' || kind == 'balance') {
       if (wantsUp && !wantsDown) return 'up';
@@ -189,7 +243,9 @@ class LocalMixingModel {
     }
 
     if (kind == 'eq') {
-      if (t.contains('presence') || t.contains('cut through') || t.contains('stand out')) {
+      if (t.contains('presence') ||
+          t.contains('cut through') ||
+          t.contains('stand out')) {
         return 'up';
       }
     }
@@ -201,9 +257,15 @@ class LocalMixingModel {
     final t = text.toLowerCase();
     final out = <MixIntent>[];
 
-    if (t.contains('stand out') || t.contains('cut through') || t.contains('quiet')) {
+    if (t.contains('stand out') ||
+        t.contains('cut through') ||
+        t.contains('quiet')) {
       out.add(MixIntent(kind: 'gain', direction: 'up', confidence: 0.55));
-      out.add(MixIntent(kind: 'eq', direction: 'up', descriptor: 'presence', confidence: 0.45));
+      out.add(MixIntent(
+          kind: 'eq',
+          direction: 'up',
+          descriptor: 'presence',
+          confidence: 0.45));
     }
 
     return out;
@@ -215,9 +277,12 @@ class LocalMixingModel {
     if (t.isEmpty) return null;
 
     // Normalize common tone words
-    if (_textAny(t, const ['mud', 'muddy', 'box', 'boxy', 'boomy'])) return 'mud';
-    if (_textAny(t, const ['harsh', 'piercing', 'shrill', 'bright', 'icepick'])) return 'harsh';
-    if (_textAny(t, const ['air', 'presence', 'clarity', 'shine', 'open', 'sparkle'])) {
+    if (_textAny(t, const ['mud', 'muddy', 'box', 'boxy', 'boomy']))
+      return 'mud';
+    if (_textAny(t, const ['harsh', 'piercing', 'shrill', 'bright', 'icepick']))
+      return 'harsh';
+    if (_textAny(
+        t, const ['air', 'presence', 'clarity', 'shine', 'open', 'sparkle'])) {
       return 'air';
     }
 
@@ -239,14 +304,17 @@ class LocalMixingModel {
     var normGoal = normalizeGoal(goal);
 
     if (normGoal.type != 'mix_request') {
-      return const MixingResult(actions: [], summary: 'No mix changes requested.', isNoOp: true);
+      return const MixingResult(
+          actions: [], summary: 'No mix changes requested.', isNoOp: true);
     }
 
     final intents = [...normGoal.intents]
       ..removeWhere((i) => i.confidence < 0.20)
       ..sort((a, b) => b.confidence.compareTo(a.confidence));
 
-    final resolvedIntents = intents.isEmpty ? [MixIntent(kind: 'balance', confidence: 0.6)] : intents;
+    final resolvedIntents = intents.isEmpty
+        ? [MixIntent(kind: 'balance', confidence: 0.6)]
+        : intents;
 
     final ref = _mixReference(project);
 
@@ -271,7 +339,12 @@ class LocalMixingModel {
       type: normGoal.type,
       userText: normGoal.userText,
       intents: normGoal.intents,
-      target: MixTarget(role: role, rowIndex: rowIndex, confidence: normGoal.target.confidence),
+      target: MixTarget(
+        role: role,
+        rowIndex: rowIndex,
+        scope: normGoal.target.scope,
+        confidence: normGoal.target.confidence,
+      ),
       intensity: normGoal.intensity,
       resetFx: normGoal.resetFx,
     );
@@ -280,18 +353,25 @@ class LocalMixingModel {
     final targets = _resolveTargets(project, normGoal.target, roleOverrides);
 
     // 1.5) If user targets a role (vocals/guitar/etc) and multiple rows match:
-    if (normGoal.target.role != null && normGoal.target.rowIndex == null && targets.length >= 2) {
+    if (!_isMasterTarget(normGoal.target) &&
+        normGoal.target.role != null &&
+        normGoal.target.rowIndex == null &&
+        targets.length >= 2) {
       final overlaps = _anyOverlap(project, targets);
 
       // Interpretive: ask which one if they overlap (avoid making lead/backing wrong)
       if (!strict && overlaps) {
         final roleName = normGoal.target.role!;
-        final rowsStr = targets.map((r) => 'Track ${r.rowIndex + 1}').join(', ');
+        final rowsStr =
+            targets.map((r) => 'Track ${r.rowIndex + 1}').join(', ');
         return MixingResult(
           actions: const [],
-          summary: "I found multiple $roleName tracks ($rowsStr) that overlap. Which one is the *main* $roleName?",
+          summary:
+              "I found multiple $roleName tracks ($rowsStr) that overlap. Which one is the *main* $roleName?",
           isNoOp: true,
-          notes: const ["Tip: say “Track 2 is lead vocals” and “Track 4 is backing vocals”."],
+          notes: const [
+            "Tip: say “Track 2 is lead vocals” and “Track 4 is backing vocals”."
+          ],
         );
       }
 
@@ -311,19 +391,26 @@ class LocalMixingModel {
     }
 
     // 2) If role is known but confidence is low, ask to clarify (prevents wrong-row edits).
-    if (normGoal.target.role != null && normGoal.target.rowIndex == null && normGoal.target.confidence < 0.40) {
+    if (!_isMasterTarget(normGoal.target) &&
+        normGoal.target.role != null &&
+        normGoal.target.rowIndex == null &&
+        normGoal.target.confidence < 0.40) {
       return const MixingResult(
         actions: [],
-        summary: "I'm not confident which track you mean. Tell me “Track N is vocals/bass/drums/guitar/synth”.",
+        summary:
+            "I'm not confident which track you mean. Tell me “Track N is vocals/bass/drums/guitar/synth”.",
         isNoOp: true,
       );
     }
 
     // 3) If explicit target and we can't resolve, don't guess.
-    if (_isExplicitTarget(normGoal.target) && targets.isEmpty) {
+    if (_isExplicitTarget(normGoal.target) &&
+        !_isMasterTarget(normGoal.target) &&
+        targets.isEmpty) {
       return const MixingResult(
         actions: [],
-        summary: "I couldn't find that target. If you tell me “Track N is vocals”, I'll remember it.",
+        summary:
+            "I couldn't find that target. If you tell me “Track N is vocals”, I'll remember it.",
         isNoOp: true,
       );
     }
@@ -340,7 +427,9 @@ class LocalMixingModel {
     // Diagnostics: mixed-role rows (warn)
     for (final r in project.rows) {
       if (r.approxRms <= 0.001) continue;
-      if (r.roleConsistency < 0.65 && r.clipTopRoles.length >= 2 && _hasOverlappingMixedRoles(project, r.rowIndex)) {
+      if (r.roleConsistency < 0.65 &&
+          r.clipTopRoles.length >= 2 &&
+          _hasOverlappingMixedRoles(project, r.rowIndex)) {
         notes.add(
           "Track ${r.rowIndex + 1} looks mixed (${r.clipTopRoles.toSet().join(', ')} at different times). "
           "For best results, consider moving clips so each track is one role.",
@@ -348,24 +437,37 @@ class LocalMixingModel {
       }
     }
     // 0) Headroom safety (always ok)
-    final safetyRows = strict ? (targets.isNotEmpty ? targets : project.rows) : project.rows;
+    final safetyRows =
+        strict ? (targets.isNotEmpty ? targets : project.rows) : project.rows;
 
     // If user intent is to bring something forward, do NOT pre-attenuate it
-    final wantsUpFront = resolvedIntents.any((i) => (i.kind == 'gain' || i.kind == 'balance') && i.direction == 'up');
+    final wantsUpFront = resolvedIntents.any((i) =>
+        (i.kind == 'gain' || i.kind == 'balance') && i.direction == 'up');
 
-    final safetyLimit =
-        wantsUpFront && targets.isNotEmpty ? project.rows.where((r) => !targets.contains(r)).toList() : safetyRows;
-    actions.addAll(_planHeadroomSafety(project, intensity: normGoal.intensity, limitTo: safetyLimit));
+    final safetyLimit = wantsUpFront && targets.isNotEmpty
+        ? project.rows.where((r) => !targets.contains(r)).toList()
+        : safetyRows;
+    if (!_isMasterTarget(normGoal.target)) {
+      actions.addAll(_planHeadroomSafety(project,
+          intensity: normGoal.intensity, limitTo: safetyLimit));
+    }
 
     // 1) Apply intents
     for (final it in resolvedIntents) {
       final kind = it.kind.toLowerCase();
       final dir = it.direction?.toLowerCase();
       final desc = it.descriptor?.toLowerCase();
+      final shouldPlanMaster = _shouldPlanMasterForIntent(
+        target: normGoal.target,
+        kind: kind,
+        strict: strict,
+        userText: normGoal.userText,
+      );
 
       // rows to operate on
       // final rows = targets.isNotEmpty ? targets : _fallbackRows(project, kind, desc, roleOverrides);
-      final rows = _rowsForIntent(project: project, resolvedTargets: targets, target: normGoal.target);
+      final rows = _rowsForIntent(
+          project: project, resolvedTargets: targets, target: normGoal.target);
 
       if (kind == 'gain') {
         /*
@@ -373,31 +475,53 @@ class LocalMixingModel {
           final up = dir == 'up';
           final down = dir == 'down';
         */
-        final up = _dirAny(dir, const ['up', 'add', 'louder', 'raise', 'increase']);
-        final down = _dirAny(dir, const ['down', 'remove', 'quieter', 'lower', 'decrease']);
+        final up =
+            _dirAny(dir, const ['up', 'add', 'louder', 'raise', 'increase']);
+        final down = _dirAny(
+            dir, const ['down', 'remove', 'quieter', 'lower', 'decrease']);
 
         if (!up && !down) continue;
 
         for (final r in rows) {
-          actions.addAll(_planSmartGain(project, r, ref, intensity: normGoal.intensity, up: up, strict: strict));
+          actions.addAll(_planSmartGain(project, r, ref,
+              intensity: normGoal.intensity, up: up, strict: strict));
+        }
+        if (shouldPlanMaster) {
+          actions
+              .addAll(_planMasterGain(up: up, intensity: normGoal.intensity));
         }
         continue;
       }
 
       if (kind == 'pan') {
         actions.addAll(
-          _planPan(project, rows, dir ?? 'widen', intensity: normGoal.intensity, roleOverrides: roleOverrides),
+          _planPan(project, rows, dir ?? 'widen',
+              intensity: normGoal.intensity, roleOverrides: roleOverrides),
         );
+        if (shouldPlanMaster) {
+          actions.addAll(
+              _planMasterPan(dir ?? 'center', intensity: normGoal.intensity));
+        }
         continue;
       }
 
       if (kind == 'reverb') {
-        actions.addAll(_planReverb(rows, dir ?? 'up', intensity: normGoal.intensity));
+        actions.addAll(
+            _planReverb(rows, dir ?? 'up', intensity: normGoal.intensity));
+        if (shouldPlanMaster) {
+          actions.addAll(
+              _planMasterReverb(dir ?? 'up', intensity: normGoal.intensity));
+        }
         continue;
       }
 
       if (kind == 'delay') {
-        actions.addAll(_planDelay(project, rows, dir ?? 'up', intensity: normGoal.intensity));
+        actions.addAll(_planDelay(project, rows, dir ?? 'up',
+            intensity: normGoal.intensity));
+        if (shouldPlanMaster) {
+          actions.addAll(_planMasterDelay(project, dir ?? 'up',
+              intensity: normGoal.intensity));
+        }
         continue;
       }
 
@@ -413,16 +537,29 @@ class LocalMixingModel {
             notesOut: notes,
           ),
         );
+        if (shouldPlanMaster) {
+          actions.addAll(_planMasterEq(desc, intensity: normGoal.intensity));
+        }
         continue;
       }
 
       if (kind == 'deesser' || kind == 'de-esser') {
-        actions.addAll(_planDeEsser(project, rows, dir ?? 'up', intensity: normGoal.intensity, notesOut: notes));
+        actions.addAll(_planDeEsser(project, rows, dir ?? 'up',
+            intensity: normGoal.intensity, notesOut: notes));
+        if (shouldPlanMaster) {
+          actions.addAll(
+              _planMasterDeEsser(dir ?? 'up', intensity: normGoal.intensity));
+        }
         continue;
       }
 
       if (kind == 'distortion') {
-        actions.addAll(_planDistortion(rows, dir ?? 'up', intensity: normGoal.intensity));
+        actions.addAll(
+            _planDistortion(rows, dir ?? 'up', intensity: normGoal.intensity));
+        if (shouldPlanMaster) {
+          actions.addAll(_planMasterDistortion(dir ?? 'up',
+              intensity: normGoal.intensity));
+        }
         continue;
       }
 
@@ -437,19 +574,48 @@ class LocalMixingModel {
             notesOut: notes,
           ),
         );
+        if (shouldPlanMaster) {
+          actions.addAll(_planMasterCompressor(
+              intensity: normGoal.intensity, strict: strict));
+        }
+        continue;
+      }
+
+      if (kind == 'limiter') {
+        actions.addAll(
+            _planLimiter(rows, dir ?? 'up', intensity: normGoal.intensity));
+        if (shouldPlanMaster) {
+          actions.addAll(
+              _planMasterLimiter(dir ?? 'up', intensity: normGoal.intensity));
+        }
         continue;
       }
 
       if (kind == 'balance') {
-        actions.addAll(_planBalance(project, ref, intensity: normGoal.intensity));
+        if (!_isMasterTarget(normGoal.target)) {
+          actions.addAll(
+              _planBalance(project, ref, intensity: normGoal.intensity));
+        }
 
         // interpretive extras
         if (!strict) {
-          actions.addAll(_planGlueCompression(project, intensity: normGoal.intensity, roleOverrides: roleOverrides));
-          actions.addAll(_planMaskingFixes(project, intensity: normGoal.intensity, roleOverrides: roleOverrides));
-          actions.addAll(_planVocalDominance(project, intensity: normGoal.intensity, roleOverrides: roleOverrides));
-          actions.addAll(_planBassVsKick(project, intensity: normGoal.intensity, roleOverrides: roleOverrides));
-          actions.addAll(_planHarshnessFixes(project, intensity: normGoal.intensity, roleOverrides: roleOverrides));
+          if (!_isMasterTarget(normGoal.target)) {
+            actions.addAll(_planGlueCompression(project,
+                intensity: normGoal.intensity, roleOverrides: roleOverrides));
+            actions.addAll(_planMaskingFixes(project,
+                intensity: normGoal.intensity, roleOverrides: roleOverrides));
+            actions.addAll(_planVocalDominance(project,
+                intensity: normGoal.intensity, roleOverrides: roleOverrides));
+            actions.addAll(_planBassVsKick(project,
+                intensity: normGoal.intensity, roleOverrides: roleOverrides));
+            actions.addAll(_planHarshnessFixes(project,
+                intensity: normGoal.intensity, roleOverrides: roleOverrides));
+          }
+        }
+
+        if (shouldPlanMaster) {
+          actions.addAll(_planMasterFinishing(
+              intensity: normGoal.intensity, strict: strict));
         }
         continue;
       }
@@ -468,10 +634,12 @@ class LocalMixingModel {
     //   }
     // }
 
-    if (!strict) {
+    if (!strict && !_isMasterTarget(normGoal.target)) {
       for (final intent in resolvedIntents) {
-        final targets = _resolveTargets(project, normGoal.target, roleOverrides);
-        final reason = detectDisagreement(project: project, intent: intent, targets: targets, ref: ref);
+        final targets =
+            _resolveTargets(project, normGoal.target, roleOverrides);
+        final reason = detectDisagreement(
+            project: project, intent: intent, targets: targets, ref: ref);
 
         if (reason != null) {
           final label = _targetLabel(normGoal.target);
@@ -498,7 +666,11 @@ class LocalMixingModel {
 
     final summary = isGlobal ? _summarizeGlobal(actions) : _summarize(actions);
 
-    return MixingResult(actions: actions, summary: summary, isNoOp: actions.isEmpty, notes: notes);
+    return MixingResult(
+        actions: actions,
+        summary: summary,
+        isNoOp: actions.isEmpty,
+        notes: notes);
   }
 
   // NOT USED YET (need to think about more later)
@@ -942,11 +1114,20 @@ class LocalMixingModel {
     if (kinds.length == 1 && kinds.contains('set_row_gain')) {
       return 'Adjusted overall levels for the mix.';
     }
+    if (kinds.any(
+        (k) => k.startsWith('set_master_') || k.contains('master_effect'))) {
+      return 'Applied global mix and master-bus refinements.';
+    }
 
     return 'Applied global mix adjustments.';
   }
 
+  bool _isMasterTarget(MixTarget t) => t.scope == 'master';
+
   bool _isGlobalTarget(MixTarget t) {
+    if (t.scope == 'master') return false;
+    if (t.scope == 'row') return false;
+
     final role = t.role;
     final row = t.rowIndex;
 
@@ -956,11 +1137,46 @@ class LocalMixingModel {
     return roleUnset && rowUnset;
   }
 
+  bool _shouldPlanMasterForIntent({
+    required MixTarget target,
+    required String kind,
+    required bool strict,
+    required String userText,
+  }) {
+    if (target.scope == 'master') return true;
+    if (target.scope == 'row') return false;
+
+    final t = userText.toLowerCase();
+    final finishing = _textAny(t, const [
+      'master',
+      'master bus',
+      'mixbus',
+      'whole mix',
+      'overall',
+      'finish',
+      'final',
+      'commercial',
+      'publishable',
+      'polish',
+      'glue',
+      'release',
+      'loudness',
+    ]);
+
+    if (finishing) return true;
+    if (!strict && kind == 'balance') return true;
+    return false;
+  }
+
   List<RowState> _rowsForIntent({
     required ProjectState project,
     required List<RowState> resolvedTargets,
     required MixTarget target,
   }) {
+    if (_isMasterTarget(target)) {
+      return const [];
+    }
+
     if (resolvedTargets.isNotEmpty) {
       return resolvedTargets;
     }
@@ -978,15 +1194,20 @@ class LocalMixingModel {
   // Targeting
   // -----------------------------
   bool _isExplicitTarget(MixTarget t) {
+    if (t.scope == 'master' || t.scope == 'row') return true;
     final role = t.role;
     if (t.rowIndex != null) return true;
-    if (role != null && role.isNotEmpty && role != 'null' && t.confidence >= 0.45) {
+    if (role != null &&
+        role.isNotEmpty &&
+        role != 'null' &&
+        t.confidence >= 0.45) {
       return true;
     }
     return false;
   }
 
-  List<RowState> _resolveTargets(ProjectState p, MixTarget target, Map<int, String> roleOverrides) {
+  List<RowState> _resolveTargets(
+      ProjectState p, MixTarget target, Map<int, String> roleOverrides) {
     if (target.role == null && target.rowIndex == null) {
       return const [];
     }
@@ -1010,7 +1231,8 @@ class LocalMixingModel {
     return const [];
   }
 
-  List<RowState> _fallbackRows(ProjectState p, String kind, String? desc, Map<int, String> roleOverrides) {
+  List<RowState> _fallbackRows(ProjectState p, String kind, String? desc,
+      Map<int, String> roleOverrides) {
     final usable = p.rows.where(_rowUsable).toList();
     if (usable.isEmpty) return const [];
 
@@ -1044,7 +1266,10 @@ class LocalMixingModel {
         case 'harsh_cut':
         case 'presence_boost':
         case 'air_boost':
-          return {..._rowsForRole(p, 'vocals', roleOverrides), ..._rowsForRole(p, 'guitar', roleOverrides)}.toList();
+          return {
+            ..._rowsForRole(p, 'vocals', roleOverrides),
+            ..._rowsForRole(p, 'guitar', roleOverrides)
+          }.toList();
       }
     }
 
@@ -1058,7 +1283,8 @@ class LocalMixingModel {
     return loud == null ? const [] : [loud];
   }
 
-  List<RowState> _rowsForRole(ProjectState p, String role, Map<int, String> roleOverrides) {
+  List<RowState> _rowsForRole(
+      ProjectState p, String role, Map<int, String> roleOverrides) {
     return p.rows.where((r) {
       if (!_rowUsable(r)) return false;
       final ov = roleOverrides[r.rowIndex];
@@ -1081,7 +1307,8 @@ class LocalMixingModel {
     eff.sort();
     if (eff.isEmpty) return const _MixRef(medianEffRms: 0.1);
     final mid = eff.length ~/ 2;
-    final median = eff.length.isOdd ? eff[mid] : (eff[mid - 1] + eff[mid]) * 0.5;
+    final median =
+        eff.length.isOdd ? eff[mid] : (eff[mid - 1] + eff[mid]) * 0.5;
     return _MixRef(medianEffRms: median.clamp(0.02, 10.0));
   }
 
@@ -1105,7 +1332,8 @@ class LocalMixingModel {
   // -----------------------------
   // Safety: headroom protection
   // -----------------------------
-  List<MixAction> _planHeadroomSafety(ProjectState p, {required double intensity, required List<RowState> limitTo}) {
+  List<MixAction> _planHeadroomSafety(ProjectState p,
+      {required double intensity, required List<RowState> limitTo}) {
     final out = <MixAction>[];
     for (final r in limitTo) {
       final pk = _effPeak(r);
@@ -1184,11 +1412,13 @@ class LocalMixingModel {
     return 1.0;
   }
 
-  List<RowState> _topOverlapCompetitors(ProjectState p, int rowIndex, {required int maxCount}) {
+  List<RowState> _topOverlapCompetitors(ProjectState p, int rowIndex,
+      {required int maxCount}) {
     final out = <RowState>[];
     for (final r in p.rows) {
       if (r.rowIndex == rowIndex) continue;
-      if (p.overlapMatrix[rowIndex][r.rowIndex] == 1 && r.approxRms > 0.001) out.add(r);
+      if (p.overlapMatrix[rowIndex][r.rowIndex] == 1 && r.approxRms > 0.001)
+        out.add(r);
     }
     out.sort((a, b) => _effRms(b).compareTo(_effRms(a)));
     return out.take(maxCount).toList();
@@ -1288,7 +1518,8 @@ class LocalMixingModel {
         final target = targetForDirection(r);
         final delta = target - current;
         if (delta.abs() < 0.05) continue;
-        out.add(MixAction('set_row_pan', {'row': r.rowIndex, 'delta': delta.clamp(-0.125, 0.125)}));
+        out.add(MixAction('set_row_pan',
+            {'row': r.rowIndex, 'delta': delta.clamp(-0.125, 0.125)}));
       }
       return out;
     }
@@ -1306,7 +1537,9 @@ class LocalMixingModel {
     }
 
     // widen: spread up to 2 loud non-anchor rows
-    final candidates = p.rows.where((r) => !isAnchor(r) && r.approxRms > 0.001).toList()
+    final candidates = p.rows
+        .where((r) => !isAnchor(r) && r.approxRms > 0.001)
+        .toList()
       ..sort((a, b) => _effRms(b).compareTo(_effRms(a)));
     final chosen = candidates.take(2).toList();
     if (chosen.isEmpty) return out;
@@ -1319,8 +1552,10 @@ class LocalMixingModel {
     } else {
       final a = chosen[0];
       final b = chosen[1];
-      out.add(MixAction('set_row_pan', {'row': a.rowIndex, 'delta': (-amt) - a.pan0To1}));
-      out.add(MixAction('set_row_pan', {'row': b.rowIndex, 'delta': (amt) - b.pan0To1}));
+      out.add(MixAction(
+          'set_row_pan', {'row': a.rowIndex, 'delta': (-amt) - a.pan0To1}));
+      out.add(MixAction(
+          'set_row_pan', {'row': b.rowIndex, 'delta': (amt) - b.pan0To1}));
     }
     return out;
   }
@@ -1328,21 +1563,24 @@ class LocalMixingModel {
   // -----------------------------
   // FX planning (UI-bounded param matching)
   // -----------------------------
-  List<MixAction> _planReverb(List<RowState> rows, String direction, {required double intensity}) {
+  List<MixAction> _planReverb(List<RowState> rows, String direction,
+      {required double intensity}) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
 
     if (dir == 'remove' || dir == 'down') {
       if (dir == 'remove') {
         for (final r in rows) {
-          out.add(MixAction('delete_effect', {'row': r.rowIndex, 'effect_name_contains': fxReverb}));
+          out.add(MixAction('delete_effect',
+              {'row': r.rowIndex, 'effect_name_contains': fxReverb}));
         }
         return out;
       }
     }
 
     for (final r in rows) {
-      out.add(MixAction('ensure_effect', {'row': r.rowIndex, 'effect_name_contains': fxReverb}));
+      out.add(MixAction('ensure_effect',
+          {'row': r.rowIndex, 'effect_name_contains': fxReverb}));
       final sign = (dir == 'down') ? -1.0 : 1.0;
 
       // Mix
@@ -1379,13 +1617,16 @@ class LocalMixingModel {
     return out;
   }
 
-  List<MixAction> _planDelay(ProjectState p, List<RowState> rows, String direction, {required double intensity}) {
+  List<MixAction> _planDelay(
+      ProjectState p, List<RowState> rows, String direction,
+      {required double intensity}) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
 
     if (dir == 'remove') {
       for (final r in rows) {
-        out.add(MixAction('delete_effect', {'row': r.rowIndex, 'effect_name_contains': fxDelay}));
+        out.add(MixAction('delete_effect',
+            {'row': r.rowIndex, 'effect_name_contains': fxDelay}));
       }
       return out;
     }
@@ -1395,10 +1636,12 @@ class LocalMixingModel {
     final bpm = p.bpm <= 1 ? 120.0 : p.bpm;
     final eighthMs = 60000.0 / bpm / 2.0;
     final quarterMs = 60000.0 / bpm;
-    final timeMs = (dir.contains('big') || dir.contains('more')) ? quarterMs : eighthMs;
+    final timeMs =
+        (dir.contains('big') || dir.contains('more')) ? quarterMs : eighthMs;
 
     for (final r in rows) {
-      out.add(MixAction('ensure_effect', {'row': r.rowIndex, 'effect_name_contains': fxDelay}));
+      out.add(MixAction('ensure_effect',
+          {'row': r.rowIndex, 'effect_name_contains': fxDelay}));
 
       final pMix = ['Mix'];
       if (_isAllowedFxParam(fxDelay, pMix)) {
@@ -1446,6 +1689,434 @@ class LocalMixingModel {
     return out;
   }
 
+  List<MixAction> _planLimiter(List<RowState> rows, String direction,
+      {required double intensity}) {
+    final out = <MixAction>[];
+    final dir = direction.toLowerCase();
+
+    if (dir == 'remove') {
+      for (final r in rows) {
+        out.add(MixAction('delete_effect',
+            {'row': r.rowIndex, 'effect_name_contains': fxLimiter}));
+      }
+      return out;
+    }
+
+    final scale = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+    final thresholdDelta =
+        ((dir == 'down') ? 1.0 : -1.0) * (6.0 * scale).clamp(1.4, 7.5);
+    final releaseMs = (dir == 'down')
+        ? _lerp(90.0, 170.0, intensity)
+        : _lerp(100.0, 35.0, intensity);
+    final ceilingDb = (dir == 'down') ? -0.2 : (-0.8 - 0.6 * intensity);
+
+    for (final r in rows) {
+      out.add(MixAction('ensure_effect',
+          {'row': r.rowIndex, 'effect_name_contains': fxLimiter}));
+
+      if (_isAllowedFxParam(fxLimiter, const ['Threshold'])) {
+        out.add(MixAction('adjust_effect_param_by_name', {
+          'row': r.rowIndex,
+          'effect_name_contains': fxLimiter,
+          'param_name_contains_any': const ['Threshold'],
+          'mode': 'delta',
+          'delta': thresholdDelta,
+          'clamp_min': -40.0,
+          'clamp_max': 0.0,
+          'skip_if_missing_effect': false,
+        }));
+      }
+
+      if (_isAllowedFxParam(fxLimiter, const ['Release'])) {
+        out.add(MixAction('adjust_effect_param_by_name', {
+          'row': r.rowIndex,
+          'effect_name_contains': fxLimiter,
+          'param_name_contains_any': const ['Release'],
+          'mode': 'set',
+          'value': releaseMs.clamp(0.1, 200.0),
+          'skip_if_missing_effect': false,
+        }));
+      }
+
+      if (_isAllowedFxParam(fxLimiter, const ['Ceiling'])) {
+        out.add(MixAction('adjust_effect_param_by_name', {
+          'row': r.rowIndex,
+          'effect_name_contains': fxLimiter,
+          'param_name_contains_any': const ['Ceiling'],
+          'mode': 'set',
+          'value': ceilingDb.clamp(-40.0, 0.0),
+          'skip_if_missing_effect': false,
+        }));
+      }
+    }
+
+    return out;
+  }
+
+  List<MixAction> _planMasterGain(
+      {required bool up, required double intensity}) {
+    final mag = (0.04 + 0.10 * intensity).clamp(0.03, 0.16);
+    return [
+      MixAction('set_master_gain', {
+        'mode': 'delta',
+        'delta': up ? mag : -mag,
+      }),
+    ];
+  }
+
+  List<MixAction> _planMasterPan(String direction,
+      {required double intensity}) {
+    final dir = direction.toLowerCase();
+    if (dir == 'center') {
+      return [
+        MixAction('set_master_pan', {'mode': 'set', 'value': 0.5}),
+      ];
+    }
+    if (dir == 'left' || dir == 'right') {
+      final mag = (0.03 + 0.06 * intensity).clamp(0.02, 0.10);
+      return [
+        MixAction('set_master_pan',
+            {'mode': 'delta', 'delta': dir == 'left' ? -mag : mag}),
+      ];
+    }
+    return const [];
+  }
+
+  List<MixAction> _planMasterReverb(String direction,
+      {required double intensity}) {
+    final out = <MixAction>[];
+    final dir = direction.toLowerCase();
+    if (dir == 'remove') {
+      return [
+        MixAction('delete_master_effect', {'effect_name_contains': fxReverb})
+      ];
+    }
+
+    final sign = (dir == 'down') ? -1.0 : 1.0;
+    out.add(
+        MixAction('ensure_master_effect', {'effect_name_contains': fxReverb}));
+
+    out.add(MixAction('adjust_master_effect_param_by_name', {
+      'effect_name_contains': fxReverb,
+      'param_name_contains_any': const ['Mix'],
+      'mode': 'delta',
+      'delta_norm': sign * (0.04 * intensity).clamp(0.01, 0.06),
+      'clamp_0_1': true,
+      'skip_if_missing_effect': false,
+    }));
+    out.add(MixAction('adjust_master_effect_param_by_name', {
+      'effect_name_contains': fxReverb,
+      'param_name_contains_any': const ['Room Size', 'Room', 'Size'],
+      'mode': 'delta',
+      'delta_norm': sign * (0.02 * intensity).clamp(0.005, 0.04),
+      'clamp_0_1': true,
+      'skip_if_missing_effect': true,
+    }));
+    return out;
+  }
+
+  List<MixAction> _planMasterDelay(ProjectState p, String direction,
+      {required double intensity}) {
+    final out = <MixAction>[];
+    final dir = direction.toLowerCase();
+    if (dir == 'remove') {
+      return [
+        MixAction('delete_master_effect', {'effect_name_contains': fxDelay})
+      ];
+    }
+
+    final sign = (dir == 'down') ? -1.0 : 1.0;
+    final bpm = p.bpm <= 1 ? 120.0 : p.bpm;
+    final eighthMs = 60000.0 / bpm / 2.0;
+    final quarterMs = 60000.0 / bpm;
+    final timeMs =
+        (dir.contains('big') || dir.contains('more')) ? quarterMs : eighthMs;
+
+    out.add(
+        MixAction('ensure_master_effect', {'effect_name_contains': fxDelay}));
+    out.add(MixAction('adjust_master_effect_param_by_name', {
+      'effect_name_contains': fxDelay,
+      'param_name_contains_any': const ['Mix'],
+      'mode': 'delta',
+      'delta_norm': sign * (0.03 * intensity).clamp(0.01, 0.05),
+      'clamp_0_1': true,
+      'skip_if_missing_effect': true,
+    }));
+    out.add(MixAction('adjust_master_effect_param_by_name', {
+      'effect_name_contains': fxDelay,
+      'param_name_contains_any': const ['Feedback'],
+      'mode': 'delta',
+      'delta_norm': sign * (0.02 * intensity).clamp(0.005, 0.04),
+      'clamp_0_1': true,
+      'skip_if_missing_effect': true,
+    }));
+    out.add(MixAction('adjust_master_effect_param_by_name', {
+      'effect_name_contains': fxDelay,
+      'param_name_contains_any': const ['Delay Time', 'Time'],
+      'mode': 'set',
+      'value': timeMs,
+      'skip_if_missing_effect': true,
+    }));
+    return out;
+  }
+
+  List<MixAction> _planMasterEq(String? descriptor,
+      {required double intensity}) {
+    final out = <MixAction>[];
+    final d = descriptor?.toLowerCase().trim();
+
+    out.add(MixAction(
+        'ensure_master_effect', {'effect_name_contains': fxEqParametric}));
+
+    void addMasterEq(List<String> paramAny,
+        {required String mode,
+        double? delta,
+        double? deltaNorm,
+        double? value}) {
+      out.add(MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxEqParametric,
+        'param_name_contains_any': paramAny,
+        'mode': mode,
+        if (delta != null) 'delta': delta,
+        if (deltaNorm != null) 'delta_norm': deltaNorm,
+        if (value != null) 'value': value,
+        'skip_if_missing_effect': true,
+      }));
+    }
+
+    final amt = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+
+    switch (d) {
+      case 'mud_cut':
+      case 'box_cut':
+        addMasterEq(const ['Band 2 Gain'],
+            mode: 'delta', delta: (-2.2 * amt).clamp(-3.5, -0.8));
+        addMasterEq(const ['Band 2 Frequency'], mode: 'set', value: 350.0);
+        addMasterEq(const ['Band 2 Q'], mode: 'set', value: 1.2);
+        break;
+      case 'boom_cut':
+        addMasterEq(const ['Band 1 Gain'],
+            mode: 'delta', delta: (-2.0 * amt).clamp(-3.2, -0.8));
+        addMasterEq(const ['Band 1 Frequency'], mode: 'set', value: 120.0);
+        addMasterEq(const ['Band 1 Q'], mode: 'set', value: 1.3);
+        break;
+      case 'harsh_cut':
+        addMasterEq(const ['Band 3 Gain'],
+            mode: 'delta', delta: (-1.8 * amt).clamp(-3.0, -0.6));
+        addMasterEq(const ['Band 4 Gain'],
+            mode: 'delta', delta: (-1.2 * amt).clamp(-2.2, -0.4));
+        addMasterEq(const ['Band 3 Frequency'], mode: 'set', value: 3500.0);
+        addMasterEq(const ['Band 3 Q'], mode: 'set', value: 1.0);
+        break;
+      case 'presence_boost':
+        addMasterEq(const ['Band 3 Gain'],
+            mode: 'delta', delta: (1.6 * amt).clamp(0.5, 2.5));
+        addMasterEq(const ['Band 3 Frequency'], mode: 'set', value: 2600.0);
+        addMasterEq(const ['Band 3 Q'], mode: 'set', value: 1.0);
+        break;
+      case 'air_boost':
+        addMasterEq(const ['Band 4 Gain'],
+            mode: 'delta', delta: (1.6 * amt).clamp(0.5, 2.5));
+        addMasterEq(const ['Band 4 Frequency'], mode: 'set', value: 9500.0);
+        addMasterEq(const ['Band 4 Q'], mode: 'set', value: 0.8);
+        break;
+      case 'warmth_boost':
+      case 'thin_fix':
+        addMasterEq(const ['Band 1 Gain'],
+            mode: 'delta', delta: (1.5 * amt).clamp(0.4, 2.5));
+        addMasterEq(const ['Band 2 Gain'],
+            mode: 'delta', delta: (0.9 * amt).clamp(0.2, 1.8));
+        break;
+      case 'dull_fix':
+        addMasterEq(const ['Band 4 Gain'],
+            mode: 'delta', delta: (1.4 * amt).clamp(0.4, 2.4));
+        break;
+      case 'low_cut':
+        addMasterEq(
+          const ['HPF Frequency', 'HPF', 'High Pass', 'Low Cut'],
+          mode: 'delta_norm',
+          deltaNorm: (0.04 * intensity).clamp(0.01, 0.08),
+        );
+        break;
+      case 'high_cut':
+        addMasterEq(
+          const ['LPF Frequency', 'LPF', 'Low Pass', 'High Cut'],
+          mode: 'delta_norm',
+          deltaNorm: -(0.05 * intensity).clamp(0.01, 0.09),
+        );
+        break;
+      default:
+        break;
+    }
+
+    return out;
+  }
+
+  List<MixAction> _planMasterDeEsser(String direction,
+      {required double intensity}) {
+    final dir = direction.toLowerCase();
+    if (dir == 'remove') {
+      return [
+        MixAction(
+            'delete_master_effect', {'effect_name_contains': fxDeEsserContains})
+      ];
+    }
+
+    final more = dir != 'down';
+    final thresholdDelta = (more ? -4.0 : 4.0) * intensity.clamp(0.35, 1.0);
+    return [
+      MixAction(
+          'ensure_master_effect', {'effect_name_contains': fxDeEsserContains}),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxDeEsserContains,
+        'param_name_contains_any': const ['Threshold'],
+        'mode': 'delta',
+        'delta': thresholdDelta,
+        'skip_if_missing_effect': true,
+      }),
+    ];
+  }
+
+  List<MixAction> _planMasterDistortion(String direction,
+      {required double intensity}) {
+    final dir = direction.toLowerCase();
+    if (dir == 'remove') {
+      return [
+        MixAction('delete_master_effect',
+            {'effect_name_contains': fxDistortionContains})
+      ];
+    }
+
+    final sign = (dir == 'down') ? -1.0 : 1.0;
+    return [
+      MixAction('ensure_master_effect',
+          {'effect_name_contains': fxDistortionContains}),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxDistortionContains,
+        'param_name_contains_any': const ['Drive'],
+        'mode': 'delta_norm',
+        'delta_norm': sign * (0.08 * intensity).clamp(0.02, 0.14),
+        'clamp_min': 2.0,
+        'clamp_max': 45.0,
+        'skip_if_missing_effect': true,
+      }),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxDistortionContains,
+        'param_name_contains_any': const ['Mix'],
+        'mode': 'set',
+        'value': _lerp(4.0, 16.0, intensity),
+        'skip_if_missing_effect': true,
+      }),
+    ];
+  }
+
+  List<MixAction> _planMasterCompressor(
+      {required double intensity, required bool strict}) {
+    final thresholdDb = strict ? -10.0 : _lerp(-10.0, -16.0, intensity);
+    final ratio = strict ? 1.8 : _lerp(1.8, 2.8, intensity);
+    final attackMs = _lerp(20.0, 10.0, intensity);
+    final releaseMs = _lerp(180.0, 90.0, intensity);
+    final mixPct = strict ? 45.0 : _lerp(55.0, 75.0, intensity);
+
+    return [
+      MixAction('ensure_master_effect', {'effect_name_contains': fxCompressor}),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxCompressor,
+        'param_name_contains_any': const ['Threshold'],
+        'mode': 'set',
+        'value': thresholdDb,
+        'skip_if_missing_effect': true,
+      }),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxCompressor,
+        'param_name_contains_any': const ['Ratio'],
+        'mode': 'set',
+        'value': ratio,
+        'skip_if_missing_effect': true,
+      }),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxCompressor,
+        'param_name_contains_any': const ['Attack'],
+        'mode': 'set',
+        'value': attackMs,
+        'skip_if_missing_effect': true,
+      }),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxCompressor,
+        'param_name_contains_any': const ['Release'],
+        'mode': 'set',
+        'value': releaseMs,
+        'skip_if_missing_effect': true,
+      }),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxCompressor,
+        'param_name_contains_any': const ['Mix'],
+        'mode': 'set',
+        'value': mixPct,
+        'skip_if_missing_effect': true,
+      }),
+    ];
+  }
+
+  List<MixAction> _planMasterLimiter(String direction,
+      {required double intensity}) {
+    final dir = direction.toLowerCase();
+    if (dir == 'remove') {
+      return [
+        MixAction('delete_master_effect', {'effect_name_contains': fxLimiter})
+      ];
+    }
+
+    final scale = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+    final thresholdDelta =
+        ((dir == 'down') ? 1.0 : -1.0) * (4.0 * scale).clamp(1.0, 5.5);
+    final releaseMs = (dir == 'down')
+        ? _lerp(120.0, 180.0, intensity)
+        : _lerp(90.0, 45.0, intensity);
+    final ceilingDb = (dir == 'down') ? -0.2 : (-0.9 - 0.6 * intensity);
+
+    return [
+      MixAction('ensure_master_effect', {'effect_name_contains': fxLimiter}),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxLimiter,
+        'param_name_contains_any': const ['Threshold'],
+        'mode': 'delta',
+        'delta': thresholdDelta,
+        'clamp_min': -40.0,
+        'clamp_max': 0.0,
+        'skip_if_missing_effect': false,
+      }),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxLimiter,
+        'param_name_contains_any': const ['Release'],
+        'mode': 'set',
+        'value': releaseMs.clamp(0.1, 200.0),
+        'skip_if_missing_effect': true,
+      }),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxLimiter,
+        'param_name_contains_any': const ['Ceiling'],
+        'mode': 'set',
+        'value': ceilingDb.clamp(-40.0, 0.0),
+        'skip_if_missing_effect': true,
+      }),
+    ];
+  }
+
+  List<MixAction> _planMasterFinishing(
+      {required double intensity, required bool strict}) {
+    final out = <MixAction>[];
+    out.addAll(_planMasterCompressor(intensity: intensity, strict: strict));
+    out.addAll(_planMasterLimiter('up', intensity: intensity));
+
+    final gainDelta = strict ? 0.0 : (0.02 + 0.05 * intensity).clamp(0.0, 0.08);
+    if (gainDelta.abs() > 0.001) {
+      out.add(
+          MixAction('set_master_gain', {'mode': 'delta', 'delta': gainDelta}));
+    }
+    return out;
+  }
+
   List<MixAction> _planEq(
     ProjectState p,
     List<RowState> rows,
@@ -1461,7 +2132,8 @@ class LocalMixingModel {
         .trim(); // TODO: allow there to be multiple descriptors ("warmth_boost + air_boost") and execute all as long as they don't clash
 
     for (final r in rows) {
-      out.add(MixAction('ensure_effect', {'row': r.rowIndex, 'effect_name_contains': fxEq}));
+      out.add(MixAction(
+          'ensure_effect', {'row': r.rowIndex, 'effect_name_contains': fxEq}));
 
       final role = roleOverrides[r.rowIndex] ?? _topRole(r);
       switch (d) {
@@ -1590,7 +2262,11 @@ class LocalMixingModel {
   }
 
   MixAction _eqBandDelta(RowState r, {required int band, required double db}) {
-    final contains = <String>['Band $band Gain', 'Band$band Gain', 'B$band Gain'];
+    final contains = <String>[
+      'Band $band Gain',
+      'Band$band Gain',
+      'B$band Gain'
+    ];
 
     return MixAction('adjust_effect_param_by_name', {
       'row': r.rowIndex,
@@ -1656,7 +2332,12 @@ class LocalMixingModel {
       MixAction('adjust_effect_param_by_name', {
         'row': r.rowIndex,
         'effect_name_contains': fxEq,
-        'param_name_contains_any': ['HPF Frequency', 'HPF', 'High Pass', 'Low Cut'],
+        'param_name_contains_any': [
+          'HPF Frequency',
+          'HPF',
+          'High Pass',
+          'Low Cut'
+        ],
         'mode': 'set',
         'value': hz,
         'skip_if_missing_effect': false,
@@ -1669,7 +2350,12 @@ class LocalMixingModel {
       MixAction('adjust_effect_param_by_name', {
         'row': r.rowIndex,
         'effect_name_contains': fxEq,
-        'param_name_contains_any': ['LPF Frequency', 'LPF', 'Low Pass', 'High Cut'],
+        'param_name_contains_any': [
+          'LPF Frequency',
+          'LPF',
+          'Low Pass',
+          'High Cut'
+        ],
         'mode': 'delta_norm',
         // small but audible opening
         'delta_norm': 0.05, // ≈ +5% of LPF range
@@ -1690,7 +2376,8 @@ class LocalMixingModel {
 
     if (dir == 'remove') {
       for (final r in rows) {
-        out.add(MixAction('delete_effect', {'row': r.rowIndex, 'effect_name_contains': fxDeEsserContains}));
+        out.add(MixAction('delete_effect',
+            {'row': r.rowIndex, 'effect_name_contains': fxDeEsserContains}));
       }
       return out;
     }
@@ -1699,7 +2386,8 @@ class LocalMixingModel {
     final thresholdDelta = (more ? -7.0 : 7.0) * intensity.clamp(0.35, 1.0);
 
     for (final r in rows) {
-      out.add(MixAction('ensure_effect', {'row': r.rowIndex, 'effect_name_contains': fxDeEsserContains}));
+      out.add(MixAction('ensure_effect',
+          {'row': r.rowIndex, 'effect_name_contains': fxDeEsserContains}));
 
       final pThr = ['Threshold'];
       if (_isAllowedFxParam(fxDeEsserContains, pThr)) {
@@ -1729,7 +2417,8 @@ class LocalMixingModel {
           );
         } else {
           // fallback note if freq isn't exposed
-          notesOut.add("I can reduce sibilance (threshold), but frequency isn't exposed in UI for this de-esser.");
+          notesOut.add(
+              "I can reduce sibilance (threshold), but frequency isn't exposed in UI for this de-esser.");
         }
       }
     }
@@ -1737,24 +2426,28 @@ class LocalMixingModel {
     return out;
   }
 
-  List<MixAction> _planDistortion(List<RowState> rows, String direction, {required double intensity}) {
+  List<MixAction> _planDistortion(List<RowState> rows, String direction,
+      {required double intensity}) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
 
     if (dir == 'remove') {
       for (final r in rows) {
-        out.add(MixAction('delete_effect', {'row': r.rowIndex, 'effect_name_contains': fxDistortionContains}));
+        out.add(MixAction('delete_effect',
+            {'row': r.rowIndex, 'effect_name_contains': fxDistortionContains}));
       }
       return out;
     }
 
     for (final r in rows) {
-      out.add(MixAction('ensure_effect', {'row': r.rowIndex, 'effect_name_contains': fxDistortionContains}));
+      out.add(MixAction('ensure_effect',
+          {'row': r.rowIndex, 'effect_name_contains': fxDistortionContains}));
 
       final driveParams = ['Drive'];
 
       if (_isAllowedFxParam(fxDistortionContains, driveParams)) {
-        final delta = ((dir == 'down') ? -1.0 : 1.0) * (0.25 + 0.45 * intensity).clamp(0.15, 0.30);
+        final delta = ((dir == 'down') ? -1.0 : 1.0) *
+            (0.25 + 0.45 * intensity).clamp(0.15, 0.30);
 
         out.add(
           MixAction('adjust_effect_param_by_name', {
@@ -1783,7 +2476,8 @@ class LocalMixingModel {
             'mode': 'delta_norm',
             // Push anger above neutral (0.5) with intensity
             // Subtle at low intensity, aggressive at high
-            'delta_norm': ((dir == 'down') ? -1.0 : 1.0) * (0.10 + 0.45 * intensity).clamp(0.10, 0.34),
+            'delta_norm': ((dir == 'down') ? -1.0 : 1.0) *
+                (0.10 + 0.45 * intensity).clamp(0.10, 0.34),
             'clamp_0_1': true,
             'skip_if_missing_effect': true,
           }),
@@ -1796,7 +2490,8 @@ class LocalMixingModel {
   // -----------------------------
   // Balance core
   // -----------------------------
-  List<MixAction> _planBalance(ProjectState p, _MixRef ref, {required double intensity}) {
+  List<MixAction> _planBalance(ProjectState p, _MixRef ref,
+      {required double intensity}) {
     final out = <MixAction>[];
     final median = ref.medianEffRms;
 
@@ -1805,8 +2500,10 @@ class LocalMixingModel {
       if (!_rowUsable(r)) continue;
       final eff = _effRms(r);
       final ratio = eff / (median + 1e-6);
-      if (ratio > 1.7) out.addAll(_gainDbDelta(r, (-3.5 * intensity).clamp(-6.0, -1.4)));
-      if (ratio < 0.55 && _effPeak(r) < 0.98) out.addAll(_gainDbDelta(r, (3.5 * intensity).clamp(1.4, 6.0)));
+      if (ratio > 1.7)
+        out.addAll(_gainDbDelta(r, (-3.5 * intensity).clamp(-6.0, -1.4)));
+      if (ratio < 0.55 && _effPeak(r) < 0.98)
+        out.addAll(_gainDbDelta(r, (3.5 * intensity).clamp(1.4, 6.0)));
     }
 
     return out;
@@ -1830,7 +2527,8 @@ class LocalMixingModel {
 
       final role = roleOverrides[r.rowIndex] ?? _topRole(r);
       // prioritize vocals/guitar/synth (more “presence-critical”)
-      final presenceCritical = (role == 'vocals' || role == 'guitar' || role == 'synth');
+      final presenceCritical =
+          (role == 'vocals' || role == 'guitar' || role == 'synth');
       if (!presenceCritical) continue;
 
       final comps = _topOverlapCompetitors(p, r.rowIndex, maxCount: 2);
@@ -1874,7 +2572,9 @@ class LocalMixingModel {
 
     final out = <MixAction>[];
 
-    final vocals = _rowsForRole(p, 'vocals', roleOverrides).where((r) => r.approxRms > 0.001).toList();
+    final vocals = _rowsForRole(p, 'vocals', roleOverrides)
+        .where((r) => r.approxRms > 0.001)
+        .toList();
     if (vocals.isEmpty) return out;
 
     final overlaps = _anyOverlap(p, vocals);
@@ -1919,8 +2619,12 @@ class LocalMixingModel {
   }) {
     final out = <MixAction>[];
 
-    final bassRows = _rowsForRole(p, 'bass', roleOverrides).where((r) => r.approxRms > 0.001).toList();
-    final drumRows = _rowsForRole(p, 'drums', roleOverrides).where((r) => r.approxRms > 0.001).toList();
+    final bassRows = _rowsForRole(p, 'bass', roleOverrides)
+        .where((r) => r.approxRms > 0.001)
+        .toList();
+    final drumRows = _rowsForRole(p, 'drums', roleOverrides)
+        .where((r) => r.approxRms > 0.001)
+        .toList();
     if (bassRows.isEmpty || drumRows.isEmpty) return out;
 
     // Best candidate bass
@@ -1944,8 +2648,8 @@ class LocalMixingModel {
     final kickEff = _effRms(kick);
 
     // If both overlap heavily and bass is masking kick
-    final overlaps =
-        p.overlapMatrix[bass.rowIndex][kick.rowIndex] == 1 || p.overlapMatrix[kick.rowIndex][bass.rowIndex] == 1;
+    final overlaps = p.overlapMatrix[bass.rowIndex][kick.rowIndex] == 1 ||
+        p.overlapMatrix[kick.rowIndex][bass.rowIndex] == 1;
 
     if (overlaps && bassEff > kickEff * 1.6 && bassBassiness > 0.75) {
       out.addAll(_gainDbDelta(bass, (-2.0 * intensity).clamp(-3.5, -0.8)));
@@ -1967,9 +2671,11 @@ class LocalMixingModel {
     final centroid = _stat(r.audioStats, 'centroid_hz');
     final bassiness = _stat(r.audioStats, 'bassiness');
     // Kick tends to have: high crest, low-ish centroid, high bassiness
-    final lowCentroidScore = (1.0 - ((centroid - 500.0) / 2500.0).clamp(0.0, 1.0));
+    final lowCentroidScore =
+        (1.0 - ((centroid - 500.0) / 2500.0).clamp(0.0, 1.0));
     final crestScore = ((crest - 1.2) / 2.2).clamp(0.0, 1.0);
-    return (0.45 * bassiness + 0.35 * crestScore + 0.20 * lowCentroidScore).clamp(0.0, 1.0);
+    return (0.45 * bassiness + 0.35 * crestScore + 0.20 * lowCentroidScore)
+        .clamp(0.0, 1.0);
   }
 
   // -----------------------------
@@ -2000,7 +2706,8 @@ class LocalMixingModel {
       if (!harsh) continue;
 
       // Plan: ensure EQ and cut high band slightly
-      out.add(MixAction('ensure_effect', {'row': r.rowIndex, 'effect_name_contains': fxEq}));
+      out.add(MixAction(
+          'ensure_effect', {'row': r.rowIndex, 'effect_name_contains': fxEq}));
       // out.add(_eqBandDelta(r, band: 4, db: (-2.0 * intensity).clamp(-4.0, -0.8))); // THIS ONLY WORKED FOR PARAMETRIC EQ
       out.add(_eqHighDelta(r, db: (-6.5 * intensity).clamp(-8.0, -4.5)));
       out.add(_eqMidDelta(r, db: (-2.5 * intensity).clamp(-4.0, -1.5)));
@@ -2069,7 +2776,8 @@ class LocalMixingModel {
     final out = <MixAction>[];
 
     for (final r in rows) {
-      out.add(MixAction('ensure_effect', {'row': r.rowIndex, 'effect_name_contains': fxCompressor}));
+      out.add(MixAction('ensure_effect',
+          {'row': r.rowIndex, 'effect_name_contains': fxCompressor}));
 
       final role = roleOverrides[r.rowIndex] ?? _topRole(r);
       final crest = r.approxCrest.isFinite ? r.approxCrest : 1.0;
@@ -2174,7 +2882,8 @@ class LocalMixingModel {
   // -----------------------------
   // Disagreement logic (“already good”)
   // -----------------------------
-  bool _isAlreadyGood(ProjectState p, List<MixAction> planned, _MixRef ref, {required double intensity}) {
+  bool _isAlreadyGood(ProjectState p, List<MixAction> planned, _MixRef ref,
+      {required double intensity}) {
     // If the plan is only tiny nudges and overall spread is tight, say “already good”.
     if (planned.isEmpty) return true;
 
@@ -2188,7 +2897,9 @@ class LocalMixingModel {
     }
 
     // If we mostly planned FX steps but no actual strong justification, be conservative
-    final fxOps = planned.where((a) => a.type != 'set_row_gain' && a.type != 'set_row_pan').length;
+    final fxOps = planned
+        .where((a) => a.type != 'set_row_gain' && a.type != 'set_row_pan')
+        .length;
 
     // Compute spread ratio of effective rms
     final eff = <double>[];
@@ -2204,7 +2915,8 @@ class LocalMixingModel {
     final p10 = eff[(eff.length * 0.10).floor().clamp(0, eff.length - 1)];
     final spread = (p90 / (p10 + 1e-6)).clamp(1.0, 999.0);
 
-    final smallGain = gainOps == 0 || (totalGainDelta < (0.12 + 0.12 * intensity));
+    final smallGain =
+        gainOps == 0 || (totalGainDelta < (0.12 + 0.12 * intensity));
 
     final tight = spread < 3.2 && median > 0.03;
 
@@ -2241,6 +2953,8 @@ class LocalMixingModel {
   // -----------------------------
   // Utilities
   // -----------------------------
+  double _lerp(double a, double b, double t) => a + (b - a) * t.clamp(0.0, 1.0);
+
   double _stat(Map<String, dynamic> stats, String key) {
     final v = stats[key];
     if (v is num) return v.toDouble();
@@ -2249,7 +2963,8 @@ class LocalMixingModel {
 
   String _topRole(RowState r) {
     if (r.roleProbs.isEmpty) return 'other';
-    final e = r.roleProbs.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    final e = r.roleProbs.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
     return e.first.key;
   }
 
@@ -2273,6 +2988,10 @@ class LocalMixingModel {
     final panRows = <int>{};
     final fxAddByRow = <int, Set<String>>{};
     final fxRemoveByRow = <int, Set<String>>{};
+    var masterGain = false;
+    var masterPan = false;
+    final masterFxAdd = <String>{};
+    final masterFxRemove = <String>{};
 
     for (final a in actions) {
       switch (a.type) {
@@ -2280,8 +2999,16 @@ class LocalMixingModel {
           gainRows.add(a.data['row'] as int);
           break;
 
+        case 'set_master_gain':
+          masterGain = true;
+          break;
+
         case 'set_row_pan':
           panRows.add(a.data['row'] as int);
+          break;
+
+        case 'set_master_pan':
+          masterPan = true;
           break;
 
         case 'ensure_effect':
@@ -2292,6 +3019,10 @@ class LocalMixingModel {
             break;
           }
 
+        case 'ensure_master_effect':
+          masterFxAdd.add((a.data['effect_name_contains'] as String?) ?? 'FX');
+          break;
+
         case 'delete_effect':
           {
             final row = a.data['row'] as int;
@@ -2300,6 +3031,11 @@ class LocalMixingModel {
             break;
           }
 
+        case 'delete_master_effect':
+          masterFxRemove
+              .add((a.data['effect_name_contains'] as String?) ?? 'FX');
+          break;
+
         case 'adjust_effect_param_by_name':
           {
             final row = a.data['row'] as int;
@@ -2307,6 +3043,10 @@ class LocalMixingModel {
             fxAddByRow.putIfAbsent(row, () => <String>{}).add(fx);
             break;
           }
+
+        case 'adjust_master_effect_param_by_name':
+          masterFxAdd.add((a.data['effect_name_contains'] as String?) ?? 'FX');
+          break;
       }
     }
 
@@ -2320,6 +3060,9 @@ class LocalMixingModel {
         parts.add('Balanced the levels of ${gainRows.length} tracks');
       }
     }
+    if (masterGain) {
+      parts.add('Adjusted the master level');
+    }
 
     // ---- Pan ----
     if (panRows.isNotEmpty) {
@@ -2329,6 +3072,9 @@ class LocalMixingModel {
         parts.add('Improved stereo placement across the mix');
       }
     }
+    if (masterPan) {
+      parts.add('Adjusted master panning');
+    }
 
     // ---- FX ----
     final anyAddFx = fxAddByRow.isNotEmpty;
@@ -2336,7 +3082,10 @@ class LocalMixingModel {
 
     if (anyAddFx || anyRemoveFx) {
       // pick a descriptor based on what FX types are involved
-      final fxNames = {...fxAddByRow.values.expand((e) => e), ...fxRemoveByRow.values.expand((e) => e)}.toSet();
+      final fxNames = {
+        ...fxAddByRow.values.expand((e) => e),
+        ...fxRemoveByRow.values.expand((e) => e)
+      }.toSet();
 
       String fxKind;
       if (fxNames.any((f) => f.toLowerCase().contains('eq'))) {
@@ -2368,6 +3117,16 @@ class LocalMixingModel {
       }
     }
 
+    final anyAddMasterFx = masterFxAdd.isNotEmpty;
+    final anyRemoveMasterFx = masterFxRemove.isNotEmpty;
+    if (anyAddMasterFx || anyRemoveMasterFx) {
+      if (anyRemoveMasterFx && !anyAddMasterFx) {
+        parts.add('Removed effects on the master bus');
+      } else {
+        parts.add('Adjusted master-bus effects');
+      }
+    }
+
     if (parts.isEmpty) {
       return 'Made small refinements to the mix.';
     }
@@ -2379,7 +3138,14 @@ class LocalMixingModel {
     return '${parts.sublist(0, parts.length - 1).join(', ')}, and ${parts.last}.';
   }
 
-  static const Set<String> _knownRoles = {'vocals', 'drums', 'bass', 'guitar', 'synth', 'other'};
+  static const Set<String> _knownRoles = {
+    'vocals',
+    'drums',
+    'bass',
+    'guitar',
+    'synth',
+    'other'
+  };
 
   bool _isKnownRole(String? role) {
     if (role == null) return false;
@@ -2391,7 +3157,8 @@ class LocalMixingModel {
       for (int j = i + 1; j < rows.length; j++) {
         final a = rows[i].rowIndex;
         final b = rows[j].rowIndex;
-        if (p.overlapMatrix[a][b] == 1 || p.overlapMatrix[b][a] == 1) return true;
+        if (p.overlapMatrix[a][b] == 1 || p.overlapMatrix[b][a] == 1)
+          return true;
       }
     }
     return false;
@@ -2425,7 +3192,8 @@ class LocalMixingModel {
         break;
 
       case 'eq':
-        if (intent.descriptor == 'presence_boost' || intent.descriptor == 'air_boost') {
+        if (intent.descriptor == 'presence_boost' ||
+            intent.descriptor == 'air_boost') {
           for (final r in targets) {
             final hf = _hfRms(r.audioStats);
             if (hf < 0.55) return null; // actually dull
@@ -2449,7 +3217,8 @@ class LocalMixingModel {
     return null;
   }
 
-  String disagreementMessage(DisagreementReason reason, MixIntent intent, String targetLabel) {
+  String disagreementMessage(
+      DisagreementReason reason, MixIntent intent, String targetLabel) {
     switch (reason) {
       case DisagreementReason.alreadyLoudEnough:
         return "$targetLabel is already sitting forward in level relative to the mix.";
@@ -2469,6 +3238,10 @@ class LocalMixingModel {
   }
 
   String _targetLabel(MixTarget t) {
+    if (t.scope == 'master') {
+      return 'the master bus';
+    }
+
     if (t.rowIndex != null) {
       return 'Track ${t.rowIndex! + 1}';
     }
@@ -2485,6 +3258,16 @@ class LocalMixingModel {
 
   List<MixAction> _planHardReset(ProjectState project) {
     final out = <MixAction>[];
+
+    out.add(MixAction('hard_reset_master_fx', const {}));
+    out.add(MixAction('set_master_gain', {
+      'mode': 'set',
+      'value': 1.0,
+    }));
+    out.add(MixAction('set_master_pan', {
+      'mode': 'set',
+      'value': 0.5,
+    }));
 
     for (final r in project.rows) {
       if (!_rowUsable(r)) continue;
@@ -2517,7 +3300,13 @@ class _MixRef {
   const _MixRef({required this.medianEffRms});
 }
 
-enum DisagreementReason { alreadyLoudEnough, alreadyBrightEnough, alreadyCenteredEnough, alreadyBalanced, headroomRisk }
+enum DisagreementReason {
+  alreadyLoudEnough,
+  alreadyBrightEnough,
+  alreadyCenteredEnough,
+  alreadyBalanced,
+  headroomRisk
+}
 
 const Map<String, List<String>> fxResetGroups = {
   'eq': ['EQ'],

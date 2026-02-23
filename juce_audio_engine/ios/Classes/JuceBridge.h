@@ -6,7 +6,7 @@
 + (void)initializeMessageManager;
 + (void)shutdownEngineObjC;
 
-// DEPRECATED: use loadClipObjC:rowIndex:path: instead
+// DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
 + (void)loadTrackObjC:(NSInteger)idx path:(NSString *)path;
 
 + (void)playObjC;
@@ -31,8 +31,14 @@
 + (void)setTrackVolumeObjC:(NSInteger)track volume:(float)v;
 + (NSArray<NSDictionary *> *)getPluginParametersObjC:(NSInteger)track
                                          effectIndex:(NSInteger)effect;
-+ (NSString *)exportMixObjC:(NSString *)outPath;
-+ (NSString *)exportTrackObjC:(NSInteger)track outPath:(NSString *)outPath;
++ (NSString *)exportMixObjC:(NSString *)outPath settings:(NSDictionary *)settings;
++ (NSString *)exportTrackObjC:(NSInteger)track outPath:(NSString *)outPath settings:(NSDictionary *)settings;
++ (NSString *)renderInstrumentClipObjC:(NSString *)outPath
+                          instrumentId:(NSString *)instrumentId
+                        instrumentName:(NSString *)instrumentName
+                                   bpm:(double)bpm
+                                 notes:(NSArray<NSDictionary *> *)notes
+                                params:(NSDictionary<NSString *, NSNumber *> *)params;
 + (NSArray<NSDictionary *> *)scanPluginsObjC;
 + (void)bypassPluginObjC:(NSInteger)trackIndex
              effectIndex:(NSInteger)effectIndex
@@ -56,20 +62,64 @@
 
 // Clip-level control (per-clip)
 + (void)loadClipObjC:(NSInteger)clipIndex
-            rowIndex:(NSInteger)rowIndex
-                path:(NSString *)path;
+               rowId:(NSInteger)rowId
+                path:(NSString *)path
+            startSec:(double)startSec
+           lengthSec:(double)lengthSec
+     inFileOffsetSec:(double)inFileOffsetSec;
++ (BOOL)supportsLiveMidiClipPlaybackObjC;
++ (BOOL)loadMidiClipObjC:(NSInteger)clipIndex
+                   rowId:(NSInteger)rowId
+            instrumentId:(NSString *)instrumentId
+          instrumentName:(NSString *)instrumentName
+                   notes:(NSArray<NSDictionary *> *)notes
+                  params:(NSDictionary<NSString *, NSNumber *> *)params
+           sourceTempoBpm:(double)sourceTempoBpm
+                startSec:(double)startSec
+               lengthSec:(double)lengthSec
+         inFileOffsetSec:(double)inFileOffsetSec;
++ (BOOL)updateMidiClipObjC:(NSInteger)clipIndex
+              instrumentId:(NSString *)instrumentId
+            instrumentName:(NSString *)instrumentName
+                     notes:(NSArray<NSDictionary *> *)notes
+                    params:(NSDictionary<NSString *, NSNumber *> *)params
+             sourceTempoBpm:(double)sourceTempoBpm;
++ (void)unloadClipObjC:(NSInteger)clipIndex;
 + (void)setClipGainObjC:(NSInteger)clipIndex gain:(float)gain;
 + (void)muteClipObjC:(NSInteger)clipIndex shouldMute:(BOOL)shouldMute;
 + (void)setClipPanObjC:(NSInteger)clipIndex pan:(float)pan;
-+ (void)moveClipToRowObjC:(NSInteger)clipIndex newRow:(NSInteger)newRow;
++ (void)setClipPitchObjC:(NSInteger)clipIndex semitones:(float)semitones;
++ (void)setClipStretchOptionsObjC:(NSInteger)clipIndex
+                       tempoRatio:(double)tempoRatio
+                    preservePitch:(BOOL)preservePitch;
++ (void)moveClipToRowObjC:(NSInteger)clipIndex newRowId:(NSInteger)newRowId;
++ (void)setClipTimeObjC:(NSInteger)clipIndex
+               startSec:(double)startSec
+              lengthSec:(double)lengthSec
+        inFileOffsetSec:(double)inFileOffsetSec;
+
+// Row management
++ (NSNumber *)addRowObjC:(NSString *)name iconId:(NSInteger)iconId;
++ (NSNumber *)insertRowAboveObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId;
++ (NSNumber *)insertRowBelowObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId;
++ (BOOL)removeRowObjC:(NSInteger)rowId;
++ (BOOL)moveRowOrderObjC:(NSInteger)fromIndex toIndex:(NSInteger)toIndex;
++ (BOOL)renameRowObjC:(NSInteger)rowId name:(NSString *)name;
++ (BOOL)setRowIconObjC:(NSInteger)rowId iconId:(NSInteger)iconId;
++ (NSArray<NSDictionary *> *)getRowsObjC;
+
+// Transport source of truth
++ (void)setTransportSecondsObjC:(double)seconds;
++ (double)getTransportSecondsObjC;
 
 // Row (track bus) FX and controls
-+ (void)insertTrackEffectObjC:(NSInteger)trackRow path:(NSString *)pluginPath;
++ (BOOL)insertTrackEffectObjC:(NSInteger)trackRow path:(NSString *)pluginPath;
 + (void)removeTrackEffectObjC:(NSInteger)trackRow effectIndex:(NSInteger)effectIndex;
 + (void)reorderTrackEffectsObjC:(NSInteger)trackRow
                       fromIndex:(NSInteger)fromIdx
                         toIndex:(NSInteger)toIdx;
 + (NSArray<NSString *> *)getTrackEffectsForRowObjC:(NSInteger)trackRow;
++ (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow;
 + (NSArray<NSDictionary *> *)getTrackPluginParametersObjC:(NSInteger)row
                                               effectIndex:(NSInteger)effect;
 + (void)setTrackEffectObjC:(NSInteger)trackRow
@@ -87,11 +137,12 @@
 + (void)setRowPanObjC:(NSInteger)row pan:(float)pan;
 
 // Master bus FX and controls
-+ (void)insertMasterEffectObjC:(NSString *)pluginPath;
++ (BOOL)insertMasterEffectObjC:(NSString *)pluginPath;
 + (void)removeMasterEffectObjC:(NSInteger)effectIndex;
 + (void)reorderMasterEffectsObjC:(NSInteger)fromIndex
                          toIndex:(NSInteger)toIndex;
 + (NSArray<NSString *> *)getMasterEffectsObjC;
++ (NSArray<NSString *> *)getMasterEffectIdsObjC;
 + (NSArray<NSDictionary *> *)getMasterPluginParametersObjC:(NSInteger)effect;
 + (void)setMasterEffectObjC:(NSInteger)effectIndex
                     paramId:(NSString *)param
@@ -125,6 +176,7 @@
 + (void)setMetronomeTransportMsObjC:(double)ms;
 
 + (NSArray<NSNumber *> *)decodeAudioMono16kObjC:(NSString *)path;
++ (NSDictionary<NSString *, NSNumber *> *)analyzeAudioStereo16kObjC:(NSString *)path;
 
 + (NSArray<NSString *> *)getInputDevicesObjC;
 + (BOOL)selectInputDeviceObjC:(NSString *)name;
@@ -164,5 +216,8 @@
 + (NSArray<NSNumber *> *)getClipCompressorMeterObjC:(NSInteger)clipIndex effectIndex:(NSInteger)effectIndex;
 + (NSArray<NSNumber *> *)getRowCompressorMeterObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex;
 + (NSArray<NSNumber *> *)getMasterCompressorMeterObjC:(NSInteger)effectIndex;
++ (double)getHostSampleRateObjC;
++ (NSArray<NSNumber *> *)getRowEqWaveformObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex sampleCount:(NSInteger)sampleCount;
++ (NSArray<NSNumber *> *)getMasterEqWaveformObjC:(NSInteger)effectIndex sampleCount:(NSInteger)sampleCount;
 
 @end

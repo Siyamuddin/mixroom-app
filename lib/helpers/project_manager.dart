@@ -48,8 +48,10 @@ class ProjectManager {
     return root;
   }
 
-  static File _projectJsonFile(Directory dir) => File(p.join(dir.path, "project.json"));
-  static Directory _audioDir(Directory dir) => Directory(p.join(dir.path, "audio"));
+  static File _projectJsonFile(Directory dir) =>
+      File(p.join(dir.path, "project.json"));
+  static Directory _audioDir(Directory dir) =>
+      Directory(p.join(dir.path, "audio"));
 
   static String _sanitizeFolderName(String name) {
     final cleaned = name
@@ -60,7 +62,8 @@ class ProjectManager {
     return safe.length > 60 ? safe.substring(0, 60).trim() : safe;
   }
 
-  static Future<Directory> _nextAvailableProjectDirName(String preferredName) async {
+  static Future<Directory> _nextAvailableProjectDirName(
+      String preferredName) async {
     final root = await _rootDir();
     final base = _sanitizeFolderName(preferredName);
 
@@ -89,8 +92,10 @@ class ProjectManager {
           ProjectMeta(
             dir: d,
             name: (json["name"] ?? "Untitled") as String,
-            createdAt: DateTime.fromMillisecondsSinceEpoch((json["createdAt"] ?? 0) as int),
-            lastOpenedAt: DateTime.fromMillisecondsSinceEpoch((json["lastOpenedAt"] ?? 0) as int),
+            createdAt: DateTime.fromMillisecondsSinceEpoch(
+                (json["createdAt"] ?? 0) as int),
+            lastOpenedAt: DateTime.fromMillisecondsSinceEpoch(
+                (json["lastOpenedAt"] ?? 0) as int),
           ),
         );
       } catch (_) {}
@@ -105,7 +110,8 @@ class ProjectManager {
     return list.length < maxProjects;
   }
 
-  static Future<Directory> createNewProjectDir({String name = "Untitled Project"}) async {
+  static Future<Directory> createNewProjectDir(
+      {String name = "Untitled Project"}) async {
     final dir = await _nextAvailableProjectDirName(name);
     await dir.create(recursive: true);
 
@@ -122,6 +128,7 @@ class ProjectManager {
       "name": folderName,
       "createdAt": now,
       "lastOpenedAt": now,
+      "tempoBpm": 120,
       "tracks": [],
       "rowEffects": [],
       "masterEffects": {"effects": []},
@@ -141,7 +148,7 @@ class ProjectManager {
   static Future<Directory> renameProject(Directory dir, String newName) async {
     final trimmed = newName.trim();
     if (trimmed.isEmpty) {
-      throw const FormatException("Project name can’t be empty.");
+      throw const FormatException("Project name can't be empty.");
     }
 
     final jsonFileOld = _projectJsonFile(dir);
@@ -149,24 +156,52 @@ class ProjectManager {
       throw FileSystemException("project.json missing", jsonFileOld.path);
     }
 
-    // Find collision-safe folder name inside SAME parent
+    // Find collision-safe folder name inside SAME parent.
+    // Use both sibling folder names and sibling project.json names so we
+    // still resolve collisions for legacy projects where json/folder diverged.
     final parent = dir.parent;
     final base = _sanitizeFolderName(trimmed);
+    final selfPathNorm = p.normalize(dir.path);
+    final occupiedNamesLower = <String>{};
+    final siblings = parent.listSync().whereType<Directory>().toList();
+    for (final sibling in siblings) {
+      final siblingNorm = p.normalize(sibling.path);
+      if (siblingNorm == selfPathNorm) continue;
 
-    Directory desired = Directory(p.join(parent.path, base));
-    if (await desired.exists()) {
-      int i = 1;
-      while (true) {
-        desired = Directory(p.join(parent.path, "$base #$i"));
-        if (!await desired.exists()) break;
-        i++;
-      }
+      occupiedNamesLower.add(p.basename(sibling.path).toLowerCase());
+
+      final siblingJson = _projectJsonFile(sibling);
+      if (!siblingJson.existsSync()) continue;
+      try {
+        final json =
+            jsonDecode(siblingJson.readAsStringSync()) as Map<String, dynamic>;
+        final siblingName = (json["name"] as String?)?.trim() ?? '';
+        if (siblingName.isEmpty) continue;
+        occupiedNamesLower.add(_sanitizeFolderName(siblingName).toLowerCase());
+      } catch (_) {}
     }
+
+    String resolved = base;
+    int i = 1;
+    while (true) {
+      final desiredPath = p.join(parent.path, resolved);
+      final desiredNorm = p.normalize(desiredPath);
+      final desiredDir = Directory(desiredPath);
+      final desiredExists = await desiredDir.exists();
+      final takenByOtherDir = desiredExists && desiredNorm != selfPathNorm;
+      final takenByProjectName =
+          occupiedNamesLower.contains(resolved.toLowerCase());
+      if (!takenByOtherDir && !takenByProjectName) break;
+      resolved = "$base #$i";
+      i++;
+    }
+    final desired = Directory(p.join(parent.path, resolved));
 
     // 1) Rename folder FIRST (so folder+json will match)
     Directory finalDir = dir;
     if (p.normalize(dir.path) != p.normalize(desired.path)) {
-      finalDir = await dir.rename(desired.path); // IMPORTANT: capture returned Directory
+      finalDir = await dir
+          .rename(desired.path); // IMPORTANT: capture returned Directory
     }
 
     // 2) Update JSON name INSIDE the NEW folder.
@@ -174,7 +209,8 @@ class ProjectManager {
     final folderName = p.basename(finalDir.path);
 
     final jsonFileNew = _projectJsonFile(finalDir);
-    final json = jsonDecode(await jsonFileNew.readAsString()) as Map<String, dynamic>;
+    final json =
+        jsonDecode(await jsonFileNew.readAsString()) as Map<String, dynamic>;
     json["name"] = folderName; // guarantees match
     await jsonFileNew.writeAsString(jsonEncode(json));
 
@@ -189,7 +225,8 @@ class ProjectManager {
     return (jsonDecode(await f.readAsString()) as Map<String, dynamic>);
   }
 
-  static Future<void> writeProjectJson(Directory dir, Map<String, dynamic> json) async {
+  static Future<void> writeProjectJson(
+      Directory dir, Map<String, dynamic> json) async {
     final f = _projectJsonFile(dir);
     await f.writeAsString(jsonEncode(json));
   }
@@ -212,7 +249,8 @@ class ProjectBundle {
       throw Exception("Missing project.json in ${projectDir.path}");
     }
 
-    final jsonMap = jsonDecode(projectJson.readAsStringSync()) as Map<String, dynamic>;
+    final jsonMap =
+        jsonDecode(projectJson.readAsStringSync()) as Map<String, dynamic>;
     final projectName = (jsonMap["name"] as String?) ?? "Mixroom Project";
 
     final tmpDir = await getTemporaryDirectory();
@@ -220,16 +258,15 @@ class ProjectBundle {
     String bundlePath = p.join(tmpDir.path, "$base.mixroom");
 
     // staging folders
-    final staging = Directory(p.join(tmpDir.path, "mixroom_bundle_staging_${DateTime.now().millisecondsSinceEpoch}"));
+    final staging = Directory(p.join(tmpDir.path,
+        "mixroom_bundle_staging_${DateTime.now().millisecondsSinceEpoch}"));
     await staging.create(recursive: true);
-
-    // ensure project.json
-    await projectJson.copy(p.join(staging.path, "project.json"));
 
     // copy/convert audio
     final srcAudioDir = Directory(p.join(projectDir.path, "audio"));
     final dstAudioDir = Directory(p.join(staging.path, "audio"));
     await dstAudioDir.create(recursive: true);
+    final fileNameRemap = <String, String>{};
 
     if (await srcAudioDir.exists()) {
       final audioFiles = srcAudioDir.listSync().whereType<File>().toList();
@@ -238,7 +275,9 @@ class ProjectBundle {
         final ext = p.extension(f.path).toLowerCase();
 
         if (audioMode == BundleAudioMode.preserveAsIs) {
-          await f.copy(p.join(dstAudioDir.path, p.basename(f.path)));
+          final outName = p.basename(f.path);
+          await f.copy(p.join(dstAudioDir.path, outName));
+          fileNameRemap[p.basename(f.path)] = outName;
         } else {
           final outName = "${p.basenameWithoutExtension(f.path)}.flac";
           final outPath = p.join(dstAudioDir.path, outName);
@@ -248,9 +287,24 @@ class ProjectBundle {
           } else {
             await _convertToFlacLossless(inPath: f.path, outPath: outPath);
           }
+          fileNameRemap[p.basename(f.path)] = outName;
         }
       }
     }
+
+    final tracks = (jsonMap["tracks"] as List?) ?? const [];
+    for (final t in tracks) {
+      final track = (t as Map).cast<String, dynamic>();
+      final original = track["fileName"] as String?;
+      if (original == null) continue;
+      final remapped = fileNameRemap[original];
+      if (remapped != null) {
+        track["fileName"] = remapped;
+      }
+    }
+
+    await File(p.join(staging.path, "project.json"))
+        .writeAsString(jsonEncode(jsonMap));
 
     // meta.json
     final meta = {
@@ -258,7 +312,8 @@ class ProjectBundle {
       "audioMode": audioMode.name,
       "exportedAt": DateTime.now().toIso8601String(),
     };
-    await File(p.join(staging.path, "meta.json")).writeAsString(jsonEncode(meta));
+    await File(p.join(staging.path, "meta.json"))
+        .writeAsString(jsonEncode(meta));
 
     // --------------------------------------------
     // BUILD THE ZIP USING archive (no ZipFileEncoder)
@@ -293,7 +348,7 @@ class ProjectBundle {
 
     // Encode ZIP in memory
     final zipData = ZipEncoder().encode(archive);
-    if (zipData == null || zipData.isEmpty) {
+    if (zipData.isEmpty) {
       throw Exception("ZipEncoder produced empty archive");
     }
 
@@ -315,7 +370,8 @@ class ProjectBundle {
     return bundlePath;
   }
 
-  static Future<void> _convertToFlacLossless({required String inPath, required String outPath}) async {
+  static Future<void> _convertToFlacLossless(
+      {required String inPath, required String outPath}) async {
     // FLAC is lossless. This preserves audio quality; it just compresses storage.
     // You can add -ar 48000 if you WANT to standardize, but it’s not required.
     final cmd = '-y -i "${inPath}" -c:a flac "${outPath}"';
@@ -341,7 +397,8 @@ class ProjectBundleImport {
     if (!bundleFile.existsSync()) throw Exception("Bundle file missing");
 
     final tmpDir = await getTemporaryDirectory();
-    final unpackDir = Directory(p.join(tmpDir.path, "mixroom_unpacked_${DateTime.now().millisecondsSinceEpoch}"));
+    final unpackDir = Directory(p.join(tmpDir.path,
+        "mixroom_unpacked_${DateTime.now().millisecondsSinceEpoch}"));
     await unpackDir.create(recursive: true);
 
     // unzip into unpackDir
@@ -361,13 +418,16 @@ class ProjectBundleImport {
 
     // read incoming project.json
     final incomingJsonFile = File(p.join(unpackDir.path, "project.json"));
-    if (!incomingJsonFile.existsSync()) throw Exception("Bundle missing project.json");
+    if (!incomingJsonFile.existsSync())
+      throw Exception("Bundle missing project.json");
 
-    final jsonMap = jsonDecode(incomingJsonFile.readAsStringSync()) as Map<String, dynamic>;
+    final jsonMap =
+        jsonDecode(incomingJsonFile.readAsStringSync()) as Map<String, dynamic>;
     final incomingName = (jsonMap["name"] as String?) ?? "Imported Project";
 
     // create a new local project dir (handles name collision via #1)
-    final destProjectDir = await ProjectManager.createNewProjectDir(name: incomingName);
+    final destProjectDir =
+        await ProjectManager.createNewProjectDir(name: incomingName);
 
     // final project name MUST match the resolved folder name
     final resolvedName = p.basename(destProjectDir.path);
@@ -376,13 +436,11 @@ class ProjectBundleImport {
     jsonMap["name"] = resolvedName;
     jsonMap["lastOpenedAt"] = DateTime.now().millisecondsSinceEpoch;
 
-    // write once
-    await File(p.join(destProjectDir.path, "project.json")).writeAsString(jsonEncode(jsonMap));
-
     // import audio
     final srcAudioDir = Directory(p.join(unpackDir.path, "audio"));
     final dstAudioDir = Directory(p.join(destProjectDir.path, "audio"));
     await dstAudioDir.create(recursive: true);
+    final fileNameRemap = <String, String>{};
 
     if (await srcAudioDir.exists()) {
       final files = srcAudioDir.listSync().whereType<File>().toList();
@@ -390,15 +448,35 @@ class ProjectBundleImport {
         final ext = p.extension(f.path).toLowerCase();
         final base = p.basenameWithoutExtension(f.path);
 
-        if (audioStrategy == ImportAudioStrategy.convertFlacToWav48k && ext == ".flac") {
-          final outWav = File(p.join(dstAudioDir.path, "$base.wav"));
-          final cmd = '-y -i "${f.path}" -c:a pcm_s16le -ar 48000 "${outWav.path}"';
+        if (audioStrategy == ImportAudioStrategy.convertFlacToWav48k &&
+            ext == ".flac") {
+          final outName = "$base.wav";
+          final outWav = File(p.join(dstAudioDir.path, outName));
+          final cmd =
+              '-y -i "${f.path}" -c:a pcm_s16le -ar 48000 "${outWav.path}"';
           await FFmpegKit.execute(cmd);
+          fileNameRemap[p.basename(f.path)] = outName;
         } else {
-          await f.copy(p.join(dstAudioDir.path, p.basename(f.path)));
+          final outName = p.basename(f.path);
+          await f.copy(p.join(dstAudioDir.path, outName));
+          fileNameRemap[p.basename(f.path)] = outName;
         }
       }
     }
+
+    final tracks = (jsonMap["tracks"] as List?) ?? const [];
+    for (final t in tracks) {
+      final track = (t as Map).cast<String, dynamic>();
+      final original = track["fileName"] as String?;
+      if (original == null) continue;
+      final remapped = fileNameRemap[original];
+      if (remapped != null) {
+        track["fileName"] = remapped;
+      }
+    }
+
+    await File(p.join(destProjectDir.path, "project.json"))
+        .writeAsString(jsonEncode(jsonMap));
 
     // cleanup unpack dir
     try {

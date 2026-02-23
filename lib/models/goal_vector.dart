@@ -18,14 +18,21 @@ class GoalVector {
     this.resetFx = false,
   });
 
-  factory GoalVector.fromJson(Map<String, dynamic> j, {required String userText}) {
-    final intentsJson = (j['intents'] is List) ? (j['intents'] as List) : const [];
-    final targetJson = j['target'] is Map ? Map<String, dynamic>.from(j['target'] as Map) : <String, dynamic>{};
+  factory GoalVector.fromJson(Map<String, dynamic> j,
+      {required String userText}) {
+    final intentsJson =
+        (j['intents'] is List) ? (j['intents'] as List) : const [];
+    final targetJson = j['target'] is Map
+        ? Map<String, dynamic>.from(j['target'] as Map)
+        : <String, dynamic>{};
 
     return GoalVector(
       type: (j['type'] ?? 'mix_request').toString(),
       userText: userText,
-      intents: intentsJson.whereType<Map>().map((m) => MixIntent.fromJson(Map<String, dynamic>.from(m))).toList(),
+      intents: intentsJson
+          .whereType<Map>()
+          .map((m) => MixIntent.fromJson(Map<String, dynamic>.from(m)))
+          .toList(),
       target: MixTarget.fromJson(targetJson),
       intensity: ((j['intensity'] ?? 0.5) as num).toDouble().clamp(0.0, 1.0),
       resetFx: j['reset_fx'] == true,
@@ -73,19 +80,30 @@ class MixIntent {
 class MixTarget {
   final String? role;
   final int? rowIndex; // 0-based
+  final String scope; // auto | row | master
   final double confidence;
 
   MixTarget({
     this.role,
     this.rowIndex,
+    this.scope = 'auto',
     required this.confidence,
   });
 
-  factory MixTarget.fromJson(Map<String, dynamic> j) => MixTarget(
-        role: j['role']?.toString(),
-        rowIndex: j['row_index'] is int
-            ? j['row_index'] as int
-            : (j['row_index'] is num ? (j['row_index'] as num).toInt() : null),
-        confidence: ((j['confidence'] ?? 0.5) as num).toDouble().clamp(0.0, 1.0),
-      );
+  factory MixTarget.fromJson(Map<String, dynamic> j) {
+    final rawScope = j['scope']?.toString().trim().toLowerCase();
+    final scope =
+        (rawScope == 'row' || rawScope == 'master' || rawScope == 'auto')
+            ? rawScope!
+            : 'auto';
+
+    return MixTarget(
+      role: j['role']?.toString(),
+      rowIndex: j['row_index'] is int
+          ? j['row_index'] as int
+          : (j['row_index'] is num ? (j['row_index'] as num).toInt() : null),
+      scope: scope,
+      confidence: ((j['confidence'] ?? 0.5) as num).toDouble().clamp(0.0, 1.0),
+    );
+  }
 }

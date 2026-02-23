@@ -25,8 +25,8 @@ extern "C"
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertEffectJNI(JNIEnv *, jclass, jint, jstring);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setEffectJNI(JNIEnv *, jclass, jint, jint, jstring, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTrackVolumeJNI(JNIEnv *, jclass, jint, jfloat);
-    JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *, jclass, jstring);
-    JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportTrackJNI(JNIEnv *, jclass, jint, jstring);
+    JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *, jclass, jstring, jstring, jint, jint, jboolean, jint);
+    JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportTrackJNI(JNIEnv *, jclass, jint, jstring, jstring, jint, jint, jboolean, jint);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getPluginParametersJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_bypassPluginJNI(JNIEnv *, jclass, jint, jint, jboolean);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_bypassTrackJNI(JNIEnv *, jclass, jint, jboolean);

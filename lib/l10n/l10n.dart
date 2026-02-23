@@ -30,7 +30,8 @@ class L10n {
     return const Locale('en'); // TODO: TEMP FOR CES
     try {
       // Always use listen: false for utility functions
-      final providerLocale = Provider.of<LocaleProvider>(context, listen: false).locale;
+      final providerLocale =
+          Provider.of<LocaleProvider>(context, listen: false).locale;
       if (providerLocale != null) return providerLocale;
 
       final deviceLocale = Localizations.localeOf(context);
@@ -78,7 +79,8 @@ class L10n {
       'Export': 'Export',
       'EXPORT': 'EXPORT',
       'Exported file saved!': 'Exported file saved!',
-      'Your video was exported successfully!': 'Your video was exported successfully!',
+      'Your video was exported successfully!':
+          'Your video was exported successfully!',
       'Share directly to:': 'Share directly to:',
       'YouTube': 'YouTube',
       'Instagram': 'Instagram',
@@ -88,7 +90,8 @@ class L10n {
       'Audio Editor': 'Audio Editor',
       'SoundCloud': 'SoundCloud',
       'Export canceled or failed.': 'Export canceled or failed.',
-      'Your audio was exported successfully!': 'Your audio was exported successfully!',
+      'Your audio was exported successfully!':
+          'Your audio was exported successfully!',
       'Coming soon': 'Coming soon',
       'Coming Soon': 'Coming Soon',
       'Search feature coming soon!': 'Search feature coming soon!',
@@ -116,12 +119,14 @@ class L10n {
       'Offset cannot exceed 180 seconds.': 'Offset cannot exceed 180 seconds.',
       'Start from Now': 'Start from Now',
       'Delete track?': 'Delete track?',
-      'Are you sure you want to delete this audio track?': 'Are you sure you want to delete this audio track?',
+      'Are you sure you want to delete this audio track?':
+          'Are you sure you want to delete this audio track?',
       'Cancel': 'Cancel',
       'Delete': 'Delete',
       'Add Video Clip': 'Add Video Clip',
       'Pro Mode Feature': 'Pro Mode Feature',
-      'Upgrade to Pro mode to import more than 1 video.': 'Upgrade to Pro mode to import more than 1 video.',
+      'Upgrade to Pro mode to import more than 1 video.':
+          'Upgrade to Pro mode to import more than 1 video.',
       'Upgrade to Pro mode to import more than 3 audio tracks.':
           'Upgrade to Pro mode to import more than 3 audio tracks.',
       'Delete clip?': 'Delete clip?',
@@ -135,7 +140,8 @@ class L10n {
           'Automatically synchronizes all audio tracks to the video. Audio offset/trim may be adjusted.',
       'Audio Track Effects': 'Audio Track Effects',
       'Exporting...': 'Exporting...',
-      'Please don\'t close the app or lock your screen.': 'Please don\'t close the app or lock your screen.',
+      'Please don\'t close the app or lock your screen.':
+          'Please don\'t close the app or lock your screen.',
       'Track': 'Track',
       'Effects': 'Effects',
       'Concert Hall': 'Concert Hall',
@@ -144,20 +150,26 @@ class L10n {
       'Heavy Crunch': 'Heavy Crunch',
       'Applies wide reverb and subtle EQ to simulate a live concert space.':
           'Applies wide reverb and subtle EQ to simulate a live concert space.',
-      'Applies reverb and delay to give an echo effect.': 'Applies reverb and delay to give an echo effect.',
+      'Applies reverb and delay to give an echo effect.':
+          'Applies reverb and delay to give an echo effect.',
       'Applies filters and soft distortion for a vintage, relaxed vibe.':
           'Applies filters and soft distortion for a vintage, relaxed vibe.',
-      'Crushes sound with heavy distortion.': 'Crushes sound with heavy distortion.',
-      'This will replace your current effects with ': 'This will replace your current effects with ',
+      'Crushes sound with heavy distortion.':
+          'Crushes sound with heavy distortion.',
+      'This will replace your current effects with ':
+          'This will replace your current effects with ',
       'Add Effect': 'Add Effect',
       'Delete Effect?': 'Delete Effect?',
       'Parameters': 'Parameters',
       'Select ': 'Select ',
       'Close': 'Close',
-      'Export failed: Output file missing or too small.': 'Export failed: Output file missing or too small.',
+      'Export failed: Output file missing or too small.':
+          'Export failed: Output file missing or too small.',
       'Export failed! Check logs.': 'Export failed! Check logs.',
-      'AI Sync failed: Computed offset exceeds audio length.': 'AI Sync failed: Computed offset exceeds audio length.',
-      'AI Sync failed: Computed trim exceeds audio length.': 'AI Sync failed: Computed trim exceeds audio length.',
+      'AI Sync failed: Computed offset exceeds audio length.':
+          'AI Sync failed: Computed offset exceeds audio length.',
+      'AI Sync failed: Computed trim exceeds audio length.':
+          'AI Sync failed: Computed trim exceeds audio length.',
       'Done': 'Done',
       'Load Preset': 'Load Preset',
       'On Device': 'On Device',
@@ -236,15 +248,19 @@ class L10n {
       'Offset cannot exceed 180 seconds.': '오프셋은 180초를 초과할 수 없습니다.',
       'Start from Now': '지금부터 시작',
       'Delete track?': '트랙 삭제?',
-      'Are you sure you want to delete this audio track?': '이 오디오 트랙을 삭제하시겠습니까?',
+      'Are you sure you want to delete this audio track?':
+          '이 오디오 트랙을 삭제하시겠습니까?',
       'Cancel': '취소',
       'Delete': '삭제',
       'Add Video Clip': '비디오 클립 추가',
       'Pro Mode Feature': '프로 모드 기능',
-      'Upgrade to Pro mode to import more than 1 video.': '1개 이상의 비디오를 가져오려면 프로 모드로 업그레이드하세요.',
-      'Upgrade to Pro mode to import more than 3 audio tracks.': '3개 이상의 오디오 트랙을 가져오려면 프로 모드로 업그레이드하세요.',
+      'Upgrade to Pro mode to import more than 1 video.':
+          '1개 이상의 비디오를 가져오려면 프로 모드로 업그레이드하세요.',
+      'Upgrade to Pro mode to import more than 3 audio tracks.':
+          '3개 이상의 오디오 트랙을 가져오려면 프로 모드로 업그레이드하세요.',
       'Delete clip?': '클립을 삭제하시겠습니까?',
-      'Are you sure you want to remove this video clip from your timeline?': '타임라인에서 이 비디오 클립을 제거하시겠습니까?',
+      'Are you sure you want to remove this video clip from your timeline?':
+          '타임라인에서 이 비디오 클립을 제거하시겠습니까?',
       'Exit project?': '프로젝트를 종료하시겠습니까?',
       'All progress will be lost.': '모든 진행 내용이 사라집니다.',
       'Confirm': '확인',
@@ -253,7 +269,8 @@ class L10n {
           '모든 오디오 트랙을 비디오와 자동으로 동기화합니다. 오디오 오프셋/트림이 조정될 수 있습니다.',
       'Audio Track Effects': '오디오 트랙 이펙터',
       'Exporting...': '내보내는 중...',
-      'Please don\'t close the app or lock your screen.': '앱을 종료하거나 화면을 잠그지 마세요.',
+      'Please don\'t close the app or lock your screen.':
+          '앱을 종료하거나 화면을 잠그지 마세요.',
       'Track': '트랙',
       'Effects': '이펙터',
       'Concert Hall': '콘서트 홀',
@@ -262,8 +279,10 @@ class L10n {
       'Heavy Crunch': '헤비 크런치',
       'Applies wide reverb and subtle EQ to simulate a live concert space.':
           '라이브 콘서트 공간을 시뮬레이션하기 위해 넓은 리버브와 섬세한 EQ를 적용합니다.',
-      'Applies reverb and delay to give an echo effect.': '에코 효과를 위해 리버브와 딜레이를 적용합니다.',
-      'Applies filters and soft distortion for a vintage, relaxed vibe.': '빈티지하고 편안한 분위기를 위해 필터와 부드러운 디스토션을 적용합니다.',
+      'Applies reverb and delay to give an echo effect.':
+          '에코 효과를 위해 리버브와 딜레이를 적용합니다.',
+      'Applies filters and soft distortion for a vintage, relaxed vibe.':
+          '빈티지하고 편안한 분위기를 위해 필터와 부드러운 디스토션을 적용합니다.',
       'Crushes sound with heavy distortion.': '강한 디스토션으로 사운드를 뭉개줍니다.',
       'This will replace your current effects with ': '현재 효과가 다음으로 교체됩니다: ',
       'Add Effect': '효과 추가',
@@ -271,10 +290,13 @@ class L10n {
       'Parameters': '파라미터',
       'Select ': '선택 ',
       'Close': '닫기',
-      'Export failed: Output file missing or too small.': '내보내기 실패: 출력 파일이 없거나 너무 작습니다.',
+      'Export failed: Output file missing or too small.':
+          '내보내기 실패: 출력 파일이 없거나 너무 작습니다.',
       'Export failed! Check logs.': '내보내기 실패! 로그를 확인하세요.',
-      'AI Sync failed: Computed offset exceeds audio length.': 'AI 싱크 실패: 계산된 오프셋이 오디오 길이를 초과합니다.',
-      'AI Sync failed: Computed trim exceeds audio length.': 'AI 싱크 실패: 계산된 트림이 오디오 길이를 초과합니다.',
+      'AI Sync failed: Computed offset exceeds audio length.':
+          'AI 싱크 실패: 계산된 오프셋이 오디오 길이를 초과합니다.',
+      'AI Sync failed: Computed trim exceeds audio length.':
+          'AI 싱크 실패: 계산된 트림이 오디오 길이를 초과합니다.',
       'Done': '완료',
       'Load Preset': '프리셋 불러오기',
       'On Device': '기기 내',
@@ -359,9 +381,11 @@ class L10n {
       'Add Video Clip': '添加视频片段',
       'Pro Mode Feature': '专业模式功能',
       'Upgrade to Pro mode to import more than 1 video.': '升级到专业模式以导入超过1个视频。',
-      'Upgrade to Pro mode to import more than 3 audio tracks.': '升级到专业模式以导入超过3条音轨。',
+      'Upgrade to Pro mode to import more than 3 audio tracks.':
+          '升级到专业模式以导入超过3条音轨。',
       'Delete clip?': '删除片段？',
-      'Are you sure you want to remove this video clip from your timeline?': '确定要从时间轴中移除此视频片段吗？',
+      'Are you sure you want to remove this video clip from your timeline?':
+          '确定要从时间轴中移除此视频片段吗？',
       'Exit project?': '退出项目？',
       'All progress will be lost.': '所有进度将丢失。',
       'Confirm': '确认',
@@ -377,9 +401,11 @@ class L10n {
       'Echoes': '回声',
       'LoFi Effect': 'LoFi 效果',
       'Heavy Crunch': '重度失真',
-      'Applies wide reverb and subtle EQ to simulate a live concert space.': '应用宽广混响和细微均衡，模拟现场音乐会空间。',
+      'Applies wide reverb and subtle EQ to simulate a live concert space.':
+          '应用宽广混响和细微均衡，模拟现场音乐会空间。',
       'Applies reverb and delay to give an echo effect.': '应用混响和延迟以产生回声效果。',
-      'Applies filters and soft distortion for a vintage, relaxed vibe.': '应用滤波和轻微失真，营造复古、松弛的氛围。',
+      'Applies filters and soft distortion for a vintage, relaxed vibe.':
+          '应用滤波和轻微失真，营造复古、松弛的氛围。',
       'Crushes sound with heavy distortion.': '使用强烈失真压碎声音。',
       'This will replace your current effects with ': '这将把您当前的效果替换为 ',
       'Add Effect': '添加效果',
@@ -389,8 +415,10 @@ class L10n {
       'Close': '关闭',
       'Export failed: Output file missing or too small.': '导出失败：输出文件缺失或过小。',
       'Export failed! Check logs.': '导出失败！请检查日志。',
-      'AI Sync failed: Computed offset exceeds audio length.': 'AI 同步失败：计算的偏移超过音频长度。',
-      'AI Sync failed: Computed trim exceeds audio length.': 'AI 同步失败：计算的裁剪超过音频长度。',
+      'AI Sync failed: Computed offset exceeds audio length.':
+          'AI 同步失败：计算的偏移超过音频长度。',
+      'AI Sync failed: Computed trim exceeds audio length.':
+          'AI 同步失败：计算的裁剪超过音频长度。',
       'Done': '完成',
       'Load Preset': '加载预设',
       'On Device': '在设备上',
@@ -469,15 +497,19 @@ class L10n {
       'Offset cannot exceed 180 seconds.': 'オフセットは180秒を超えることはできません。',
       'Start from Now': '今から開始',
       'Delete track?': 'トラックを削除?',
-      'Are you sure you want to delete this audio track?': 'このオーディオトラックを削除してもよろしいですか？',
+      'Are you sure you want to delete this audio track?':
+          'このオーディオトラックを削除してもよろしいですか？',
       'Cancel': 'キャンセル',
       'Delete': '削除',
       'Add Video Clip': '動画クリップを追加',
       'Pro Mode Feature': 'プロモードの機能',
-      'Upgrade to Pro mode to import more than 1 video.': '1本以上の動画を取り込むにはプロモードにアップグレードしてください。',
-      'Upgrade to Pro mode to import more than 3 audio tracks.': '3本以上のオーディオトラックを取り込むにはプロモードにアップグレードしてください。',
+      'Upgrade to Pro mode to import more than 1 video.':
+          '1本以上の動画を取り込むにはプロモードにアップグレードしてください。',
+      'Upgrade to Pro mode to import more than 3 audio tracks.':
+          '3本以上のオーディオトラックを取り込むにはプロモードにアップグレードしてください。',
       'Delete clip?': 'クリップを削除しますか？',
-      'Are you sure you want to remove this video clip from your timeline?': 'タイムラインからこの動画クリップを削除してもよろしいですか？',
+      'Are you sure you want to remove this video clip from your timeline?':
+          'タイムラインからこの動画クリップを削除してもよろしいですか？',
       'Exit project?': 'プロジェクトを終了しますか？',
       'All progress will be lost.': '進行状況はすべて失われます。',
       'Confirm': '確認',
@@ -486,27 +518,35 @@ class L10n {
           'すべてのオーディオトラックを動画に自動同期します。オーディオのオフセット/トリムが調整される場合があります。',
       'Audio Track Effects': 'オーディオトラックのエフェクト',
       'Exporting...': '書き出し中...',
-      'Please don\'t close the app or lock your screen.': 'アプリを閉じたり画面をロックしないでください。',
+      'Please don\'t close the app or lock your screen.':
+          'アプリを閉じたり画面をロックしないでください。',
       'Track': 'トラック',
       'Effects': 'エフェクト',
       'Concert Hall': 'コンサートホール',
       'Echoes': 'エコー',
       'LoFi Effect': 'LoFi エフェクト',
       'Heavy Crunch': 'ヘビークランチ',
-      'Applies wide reverb and subtle EQ to simulate a live concert space.': '広がりのあるリバーブと繊細なEQでライブ会場の空間を再現します。',
-      'Applies reverb and delay to give an echo effect.': 'リバーブとディレイを適用してエコー効果を与えます。',
-      'Applies filters and soft distortion for a vintage, relaxed vibe.': 'フィルターと穏やかな歪みで、ヴィンテージでリラックスした雰囲気を演出します。',
+      'Applies wide reverb and subtle EQ to simulate a live concert space.':
+          '広がりのあるリバーブと繊細なEQでライブ会場の空間を再現します。',
+      'Applies reverb and delay to give an echo effect.':
+          'リバーブとディレイを適用してエコー効果を与えます。',
+      'Applies filters and soft distortion for a vintage, relaxed vibe.':
+          'フィルターと穏やかな歪みで、ヴィンテージでリラックスした雰囲気を演出します。',
       'Crushes sound with heavy distortion.': '強いディストーションでサウンドを潰します。',
-      'This will replace your current effects with ': '現在のエフェクトは次の内容に置き換えられます： ',
+      'This will replace your current effects with ':
+          '現在のエフェクトは次の内容に置き換えられます： ',
       'Add Effect': 'エフェクトを追加',
       'Delete Effect?': 'エフェクトを削除しますか？',
       'Parameters': 'パラメーター',
       'Select ': '選択 ',
       'Close': '閉じる',
-      'Export failed: Output file missing or too small.': '書き出し失敗：出力ファイルが見つからないか小さすぎます。',
+      'Export failed: Output file missing or too small.':
+          '書き出し失敗：出力ファイルが見つからないか小さすぎます。',
       'Export failed! Check logs.': '書き出し失敗！ログを確認してください。',
-      'AI Sync failed: Computed offset exceeds audio length.': 'AI同期に失敗:計算されたオフセットが音声の長さを超えています。',
-      'AI Sync failed: Computed trim exceeds audio length.': 'AI同期に失敗:計算されたトリムが音声の長さを超えています。',
+      'AI Sync failed: Computed offset exceeds audio length.':
+          'AI同期に失敗:計算されたオフセットが音声の長さを超えています。',
+      'AI Sync failed: Computed trim exceeds audio length.':
+          'AI同期に失敗:計算されたトリムが音声の長さを超えています。',
       'Done': '完了',
       'Load Preset': 'プリセットを読み込む',
       'On Device': 'このデバイス内',
@@ -519,12 +559,15 @@ class L10n {
   /// Get translated string
   static String translate(BuildContext context, String key) {
     final locale = getDeviceLocale(context);
-    return _translations[locale.languageCode]?[key] ?? _translations['en']![key]!; // Fallback to English
+    return _translations[locale.languageCode]?[key] ??
+        _translations['en']?[key] ??
+        key; // Final fallback: raw key (prevents null-crash on new strings)
   }
 
   static Future<void> setLocale(BuildContext context, Locale newLocale) async {
     // Save to provider and persistent storage
-    await Provider.of<LocaleProvider>(context, listen: false).setLocale(newLocale);
+    await Provider.of<LocaleProvider>(context, listen: false)
+        .setLocale(newLocale);
 
     // Directly access the state of MyApp and update the locale
     final appState = context.findAncestorStateOfType<MyAppState>();

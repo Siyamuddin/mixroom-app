@@ -85,6 +85,44 @@ import 'package:easy_video_editor/easy_video_editor.dart';
 
 Completer<void> _cancelSignal = Completer();
 
+enum _ExportAudioFormat { wav, mp3 }
+
+enum _ExportChannelMode { stereo, mono }
+
+enum _ExportResampleQuality { draft, good, best }
+
+enum _ExportMp3Mode { cbr, vbr }
+
+class _AudioExportSettings {
+  final _ExportAudioFormat format;
+  final int sampleRate;
+  final int wavBitDepth;
+  final bool wavDithering;
+  final int mp3BitrateKbps;
+  final _ExportMp3Mode mp3Mode;
+  final int mp3VbrQuality;
+  final _ExportChannelMode channelMode;
+  final bool normalize;
+  final double normalizeTargetDb;
+  final _ExportResampleQuality resampleQuality;
+
+  const _AudioExportSettings({
+    required this.format,
+    required this.sampleRate,
+    required this.wavBitDepth,
+    required this.wavDithering,
+    required this.mp3BitrateKbps,
+    required this.mp3Mode,
+    required this.mp3VbrQuality,
+    required this.channelMode,
+    required this.normalize,
+    required this.normalizeTargetDb,
+    required this.resampleQuality,
+  });
+
+  String get fileExtension => format == _ExportAudioFormat.wav ? 'wav' : 'mp3';
+}
+
 // ----------------- //
 // VIDEO EDITOR SCREEN //
 // ----------------- //
@@ -170,6 +208,27 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
   bool _audioOnly = true; // initially true as there is no video loaded
   Duration _audioOnlyOverallDuration = Duration.zero;
 
+  static const List<int> _kExportSampleRates = [44100, 48000, 88200, 96000];
+  static const List<int> _kExportWavBitDepths = [16, 24, 32];
+  static const List<int> _kExportMp3Bitrates = [128, 192, 256, 320];
+  static const List<int> _kExportMp3VbrQualities = [0, 2, 4, 6];
+  static const List<double> _kExportNormalizeTargetsDb = [-0.3, -1.0, -2.0];
+
+  _AudioExportSettings _audioExportSettings = const _AudioExportSettings(
+    format: _ExportAudioFormat.mp3,
+    sampleRate: 44100,
+    wavBitDepth: 16,
+    wavDithering: true,
+    mp3BitrateKbps: 192,
+    mp3Mode: _ExportMp3Mode.cbr,
+    mp3VbrQuality: 2,
+    channelMode: _ExportChannelMode.stereo,
+    normalize: false,
+    normalizeTargetDb: -1.0,
+    resampleQuality: _ExportResampleQuality.best,
+  );
+  _AudioExportSettings? _activeAudioExportSettings;
+
   final _timelineScroll = ScrollController();
 
   @override
@@ -185,14 +244,16 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       _updatePosition(interpolatedPosition);
     });
     if (defaultTargetPlatform == TargetPlatform.android) {
-      useBetterPlayer = false; //TODO: testing, maybe android doesn't need to use this anymore
+      useBetterPlayer =
+          false; //TODO: testing, maybe android doesn't need to use this anymore
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       setState(() => _isLoadingNextScreen = true);
       JuceAudioEngine.initialise(); // heavy blocking native call
       JuceAudioEngine.initialiseEventListeners();
-      await Future.delayed(const Duration(milliseconds: 300)); // so that juce.init doesn't block UI load
+      await Future.delayed(const Duration(
+          milliseconds: 300)); // so that juce.init doesn't block UI load
       setState(() => _isLoadingNextScreen = false);
     });
   }
@@ -232,13 +293,17 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     // });
 
     if (!_isScrubbing && mounted && _isPlaying) {
-      if (betterController?.isVideoInitialized() != null || _videoController!.value.isInitialized) {
-        double normalizedTime = position.inMilliseconds / duration.inMilliseconds;
+      if (betterController?.isVideoInitialized() != null ||
+          _videoController!.value.isInitialized) {
+        double normalizedTime =
+            position.inMilliseconds / duration.inMilliseconds;
         // Compute the volume using your video automation curve (which you store in a variable, e.g., videoAudioAutomation)
-        double automationVolume = getVolumeForAutomation(videoAudioAutomation, normalizedTime);
+        double automationVolume =
+            getVolumeForAutomation(videoAudioAutomation, normalizedTime);
 
         // Combine the crossfade factor and automation volume.
-        double finalVolume = min(1.0, (1.0 - _universalCrossfade) * 2) * automationVolume;
+        double finalVolume =
+            min(1.0, (1.0 - _universalCrossfade) * 2) * automationVolume;
 
         // Update video player volume.
         _updateVideoVolume(
@@ -269,7 +334,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         // and audio because the ticker is slightly off from the video
         // print("drift: ${((_videoPosition - track.currentPosition).inMilliseconds/10).round()/100}");
 
-        final offsetDuration = Duration(milliseconds: (track.offset * 1000).toInt());
+        final offsetDuration =
+            Duration(milliseconds: (track.offset * 1000).toInt());
         if (position >= offsetDuration) {
           // Calculate how far the audio has progressed relative to its trim range.
           final effectiveTime = position - offsetDuration;
@@ -280,14 +346,16 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
           normalizedTime = normalizedTime.clamp(0.0, 1.0);
 
           // Compute the new volume from the automation curve.
-          double newVolume = getVolumeForAutomation(track.volumeAutomation, normalizedTime);
+          double newVolume =
+              getVolumeForAutomation(track.volumeAutomation, normalizedTime);
 
           // Optionally, combine this with your universal crossfade if desired.
           // For example, multiply with _universalCrossfade:
           newVolume *= min(1.0, _universalCrossfade * 2);
 
           // COMMENT OUT BECAUSE WE DO MAKE A NEW MP3 TIME GAIN IS CHANGED
-          newVolume *= track.gain; // adjust for gain // this should not be above 1.0
+          newVolume *=
+              track.gain; // adjust for gain // this should not be above 1.0
 
           // SETVOLUME (1.0>) LEADS TO BUG IN THIS AUDIO PKG
           // Update the audio track volume.
@@ -331,7 +399,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         if (_videoFile != null) {
           _initializeVideo();
         }
-      } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      } else if (state == AppLifecycleState.paused ||
+          state == AppLifecycleState.inactive) {
         debugPrint("App Paused or Inactive on Android - Disposing video.");
         _pausePlayback();
         _stopTicker();
@@ -355,7 +424,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
     final minutes = twoDigits(duration.inMinutes.remainder(60));
     final seconds = twoDigits(duration.inSeconds.remainder(60));
-    final millisecondsFirstTwo = firstTwoMsDigits(duration.inMilliseconds.remainder(1000));
+    final millisecondsFirstTwo =
+        firstTwoMsDigits(duration.inMilliseconds.remainder(1000));
 
     return "$minutes:$seconds:$millisecondsFirstTwo";
   }
@@ -380,7 +450,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
   // using easy_video_editor package
   Future<Duration?> getVideoDuration(String filePath) async {
     try {
-      final metadata = await VideoEditorBuilder(videoPath: filePath).getVideoMetadata();
+      final metadata =
+          await VideoEditorBuilder(videoPath: filePath).getVideoMetadata();
       return Duration(milliseconds: metadata.duration);
     } catch (e) {
       print('Failed to get duration: $e');
@@ -440,7 +511,12 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       final outputPath = '${tempDir.path}/thumb_${filePath.hashCode}.jpg';
       final thumbnailPath = await VideoEditorBuilder(
         videoPath: filePath,
-      ).generateThumbnail(positionMs: 0, quality: 80, width: 640, height: 360, outputPath: outputPath);
+      ).generateThumbnail(
+          positionMs: 0,
+          quality: 80,
+          width: 640,
+          height: 360,
+          outputPath: outputPath);
       _segments.add(
         VideoSegment(
           path: filePath,
@@ -461,7 +537,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         final trimmedOutputPath = '${tempDir.path}/trimmed_$i.mp4';
 
         final trimmed = await VideoEditorBuilder(videoPath: _segments[i].path)
-            .trim(startTimeMs: _segments[i].start.inMilliseconds, endTimeMs: _segments[i].end.inMilliseconds)
+            .trim(
+                startTimeMs: _segments[i].start.inMilliseconds,
+                endTimeMs: _segments[i].end.inMilliseconds)
             .export(outputPath: trimmedOutputPath);
 
         trimmedPaths.add(trimmed!);
@@ -491,7 +569,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     } catch (e) {
       print("Error picking video file: $e");
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("${L10n.translate(context, 'Failed to pick video file')}: ${e.toString()}")),
+        SnackBar(
+            content: Text(
+                "${L10n.translate(context, 'Failed to pick video file')}: ${e.toString()}")),
       );
     } finally {
       // Reset the flag
@@ -552,7 +632,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     final baseName = _videoFile!.path.split('/').last;
     // final resampledPath = '${tmpDir.path}/$baseName';
 
-    final baseNameNoExt = baseName.contains('.') ? baseName.substring(0, baseName.lastIndexOf('.')) : baseName;
+    final baseNameNoExt = baseName.contains('.')
+        ? baseName.substring(0, baseName.lastIndexOf('.'))
+        : baseName;
     final resampledPath = '${tmpDir.path}/$baseNameNoExt.wav';
 
     // 1) Transcode to 48 kHz PCM WAV (fast, one‐time cost):
@@ -565,7 +647,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     ); // maybe put in mp3 instead of raw video, but should still work
 
     if (Platform.isAndroid) {
-      _updateVideoVolume(0.001); // ← Never zero (did this change because android vid play issue) TODO look into this
+      _updateVideoVolume(
+          0.001); // ← Never zero (did this change because android vid play issue) TODO look into this
     }
 
     setState(() {
@@ -632,7 +715,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
   Duration get duration {
     if (useBetterPlayer) {
-      return betterController!.videoPlayerController!.value.duration ?? Duration.zero;
+      return betterController!.videoPlayerController!.value.duration ??
+          Duration.zero;
     } else {
       return _videoController!.value.duration;
     }
@@ -655,8 +739,10 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
   }
 
   /// Calculate effective audio position for a given track based on video position.
-  Duration _calculateEffectiveAudioPositionForTrack(AudioTrack track, Duration videoPos) {
-    final offsetDuration = Duration(milliseconds: (track.offset * 1000).toInt());
+  Duration _calculateEffectiveAudioPositionForTrack(
+      AudioTrack track, Duration videoPos) {
+    final offsetDuration =
+        Duration(milliseconds: (track.offset * 1000).toInt());
     if (videoPos < offsetDuration) {
       return track.trimStart;
     } else {
@@ -674,7 +760,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       await _togglePlayPauseAudio(_audioEditorStateSetter!);
       return;
     }
-    if ((_videoController == null || !_videoController!.value.isInitialized) && betterController == null) return;
+    if ((_videoController == null || !_videoController!.value.isInitialized) &&
+        betterController == null) return;
 
     if (_videoPosition.inMilliseconds >= _videoDuration.inMilliseconds) {
       await _restartVideo();
@@ -719,9 +806,11 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       // For each track, if its offset has been reached, start (or resume) playback.
       for (int i = 0; i < _audioTracks.length; i++) {
         final track = _audioTracks[i];
-        final offsetDuration = Duration(milliseconds: (track.offset * 1000).round());
+        final offsetDuration =
+            Duration(milliseconds: (track.offset * 1000).round());
         if (_globalAudioClock >= offsetDuration) {
-          final effectivePos = _calculateEffectiveAudioPositionForTrack(track, _globalAudioClock);
+          final effectivePos = _calculateEffectiveAudioPositionForTrack(
+              track, _globalAudioClock);
           // await track.player.play(DeviceFileSource(track.file.path));
           // await track.player.seek(effectivePos);
           JuceAudioEngine.bypassTrack(i, false);
@@ -735,7 +824,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       }
       // Restart the automation timer
       _audioAutomationTimer?.cancel();
-      _audioAutomationTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) async {
+      _audioAutomationTimer =
+          Timer.periodic(const Duration(milliseconds: 50), (timer) async {
         setLocalState(() {
           _globalAudioClock += const Duration(milliseconds: 50);
         });
@@ -754,7 +844,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       _audioAutomationTimer?.cancel();
       for (var track in _audioTracks) {
         // await track.player.pause();
-        track.audioStarted = false; // Reset flag on pause so that resume triggers play.
+        track.audioStarted =
+            false; // Reset flag on pause so that resume triggers play.
       }
       JuceAudioEngine.pause();
     }
@@ -769,7 +860,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       final track = _audioTracks[i];
       track.audioStarted = false;
       track.audioStartTimer?.cancel();
-      final effectivePos = _calculateEffectiveAudioPositionForTrack(track, Duration.zero);
+      final effectivePos =
+          _calculateEffectiveAudioPositionForTrack(track, Duration.zero);
       JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
       track.currentPosition = Duration.zero;
     }
@@ -786,7 +878,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     for (int i = 0; i < _audioTracks.length; i++) {
       final track = _audioTracks[i];
       // Convert track.offset (in seconds) to a Duration.
-      final offsetDuration = Duration(milliseconds: (track.offset * 1000).round());
+      final offsetDuration =
+          Duration(milliseconds: (track.offset * 1000).round());
       Duration effectiveAudioPos;
       if (globalClock < offsetDuration) {
         // Global clock hasn’t reached the track's offset: use trimStart.
@@ -806,13 +899,17 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       // Calculate the effective duration of the trimmed portion.
       final effectiveDuration = track.trimEnd - track.trimStart;
       double normalizedTime = effectiveDuration.inMilliseconds > 0
-          ? (effectiveAudioPos.inMilliseconds - track.trimStart.inMilliseconds) / effectiveDuration.inMilliseconds
+          ? (effectiveAudioPos.inMilliseconds -
+                  track.trimStart.inMilliseconds) /
+              effectiveDuration.inMilliseconds
           : 0.0;
       normalizedTime = normalizedTime.clamp(0.0, 1.0);
 
       // Compute the volume from the automation curve.
-      final automationVolume = getVolumeForAutomation(track.volumeAutomation, normalizedTime);
-      final finalVolume = automationVolume * min(1.0, _universalCrossfade * 2) * track.gain;
+      final automationVolume =
+          getVolumeForAutomation(track.volumeAutomation, normalizedTime);
+      final finalVolume =
+          automationVolume * min(1.0, _universalCrossfade * 2) * track.gain;
       // track.player.setVolume(finalVolume);
       JuceAudioEngine.setTrackVolume(i, finalVolume);
 
@@ -821,7 +918,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         // track.player.seek(effectiveAudioPos);
         JuceAudioEngine.seek(i, effectiveAudioPos.inMicroseconds / 1e6);
         // track.player.play(DeviceFileSource(track.file.path));
-        JuceAudioEngine.bypassTrack(i, false); // TODO: verify that this resumes the track playback
+        JuceAudioEngine.bypassTrack(
+            i, false); // TODO: verify that this resumes the track playback
         track.audioStarted = true;
       }
       track.currentPosition = effectiveAudioPos;
@@ -830,7 +928,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
   // REWIND: reset video and audio to zero and clear _audioStarted.
   Future<void> _restartVideo() async {
-    if ((_videoController == null || !_videoController!.value.isInitialized) && betterController == null) return;
+    if ((_videoController == null || !_videoController!.value.isInitialized) &&
+        betterController == null) return;
 
     // Pause video and seek to the start
     await pause();
@@ -846,7 +945,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       track.audioStartTimer?.cancel();
       // Mark the track as not started
       track.audioStarted = false;
-      final effectivePos = _calculateEffectiveAudioPositionForTrack(track, Duration.zero);
+      final effectivePos =
+          _calculateEffectiveAudioPositionForTrack(track, Duration.zero);
       JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
       track.currentPosition = Duration.zero;
     }
@@ -868,7 +968,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     Duration overallDuration = Duration.zero;
     if (_audioTracks.isNotEmpty) {
       overallDuration = _audioTracks.map((track) {
-        final offsetDuration = Duration(milliseconds: (track.offset * 1000).round());
+        final offsetDuration =
+            Duration(milliseconds: (track.offset * 1000).round());
         final trackDuration = track.trimEnd - track.trimStart;
         return offsetDuration + trackDuration;
       }).reduce((a, b) => a > b ? a : b);
@@ -896,12 +997,18 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
             const SizedBox(width: 6),
             const Text(
               '/',
-              style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.normal),
+              style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 14,
+                  fontWeight: FontWeight.normal),
             ),
             const SizedBox(width: 6),
             Text(
               _formatDuration(_audioOnly ? overallDuration : duration),
-              style: const TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.normal),
+              style: const TextStyle(
+                  color: Colors.grey,
+                  fontSize: 14,
+                  fontWeight: FontWeight.normal),
             ),
           ],
         ),
@@ -985,7 +1092,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
     // Pause all audio tracks at precise position
     for (var track in _audioTracks) {
-      track.audioStartTimer?.cancel(); // NEED THIS IN CASE THERE WAS A TIMER STARTED
+      track.audioStartTimer
+          ?.cancel(); // NEED THIS IN CASE THERE WAS A TIMER STARTED
     }
     await JuceAudioEngine.pause();
   }
@@ -1007,7 +1115,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
   //     }
   //   }
   // }
-  Future<void> waitForBetterPlayerToStart(BetterPlayerController controller) async {
+  Future<void> waitForBetterPlayerToStart(
+      BetterPlayerController controller) async {
     final video = controller.videoPlayerController!;
     final Duration startPos = video.value.position;
 
@@ -1124,7 +1233,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     // 5) Sync all audio tracks (same logic; tiny timing/ordering fixes only)
     for (int i = 0; i < _audioTracks.length; i++) {
       final track = _audioTracks[i];
-      final offsetDuration = Duration(milliseconds: (track.offset * 1000).toInt());
+      final offsetDuration =
+          Duration(milliseconds: (track.offset * 1000).toInt());
 
       if (currentVideoPos >= offsetDuration) {
         // Start now
@@ -1162,7 +1272,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
           }
 
           // Order fix: seek first, then unbypass (same intended behavior)
-          await JuceAudioEngine.seek(i, eff.inMicroseconds > 0 ? eff.inMicroseconds / 1e6 : 0.0);
+          await JuceAudioEngine.seek(
+              i, eff.inMicroseconds > 0 ? eff.inMicroseconds / 1e6 : 0.0);
           JuceAudioEngine.bypassTrack(i, false);
           track.audioStarted = true;
         });
@@ -1224,7 +1335,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     // Sync all audio tracks
     for (int i = 0; i < _audioTracks.length; i++) {
       final track = _audioTracks[i];
-      final offsetDuration = Duration(milliseconds: (track.offset * 1000).toInt());
+      final offsetDuration =
+          Duration(milliseconds: (track.offset * 1000).toInt());
 
       if (currentVideoPos >= offsetDuration) {
         // NEW: Calculate precise compensation for playback latency
@@ -1244,7 +1356,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         JuceAudioEngine.bypassTrack(i, false);
         track.audioStarted = true;
       } else {
-        JuceAudioEngine.bypassTrack(i, true); // to prevent track from playback when it shouldn't be
+        JuceAudioEngine.bypassTrack(
+            i, true); // to prevent track from playback when it shouldn't be
         final delay = offsetDuration - currentVideoPos;
         final effectiveAudioPos = _calculateEffectiveAudioPositionForTrack(
           track,
@@ -1257,13 +1370,17 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
             JuceAudioEngine.bypassTrack(i, false); // SHOULD RESUME PLAYBACK
             JuceAudioEngine.seek(
               i,
-              effectiveAudioPos.inMicroseconds / 1e6 > 0.0 ? effectiveAudioPos.inMicroseconds / 1e6 : 0.0,
+              effectiveAudioPos.inMicroseconds / 1e6 > 0.0
+                  ? effectiveAudioPos.inMicroseconds / 1e6
+                  : 0.0,
             );
             track.currentPosition = effectiveAudioPos;
           } else {
             JuceAudioEngine.seek(
               i,
-              effectiveAudioPos.inMicroseconds / 1e6 > 0.0 ? effectiveAudioPos.inMicroseconds / 1e6 : 0.0,
+              effectiveAudioPos.inMicroseconds / 1e6 > 0.0
+                  ? effectiveAudioPos.inMicroseconds / 1e6
+                  : 0.0,
             );
             track.currentPosition = effectiveAudioPos;
             JuceAudioEngine.bypassTrack(i, false); // SHOULD RESUME PLAYBACK
@@ -1278,21 +1395,554 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
   // END OF PLAYBACK SYNC FIXES
 
+  Future<_AudioExportSettings?> _showAudioExportSettingsSheet() async {
+    _ExportAudioFormat selectedFormat = _audioExportSettings.format;
+    int selectedSampleRate = _audioExportSettings.sampleRate;
+    int selectedWavBitDepth = _audioExportSettings.wavBitDepth;
+    bool selectedWavDithering = _audioExportSettings.wavDithering;
+    int selectedMp3Bitrate = _audioExportSettings.mp3BitrateKbps;
+    _ExportMp3Mode selectedMp3Mode = _audioExportSettings.mp3Mode;
+    int selectedMp3VbrQuality = _audioExportSettings.mp3VbrQuality;
+    _ExportChannelMode selectedChannelMode = _audioExportSettings.channelMode;
+    bool selectedNormalize = _audioExportSettings.normalize;
+    double selectedNormalizeTargetDb = _audioExportSettings.normalizeTargetDb;
+    _ExportResampleQuality selectedResampleQuality =
+        _audioExportSettings.resampleQuality;
+    bool showAdvanced = false;
+    if (!_kExportSampleRates.contains(selectedSampleRate)) {
+      selectedSampleRate = _kExportSampleRates.first;
+    }
+    if (!_kExportWavBitDepths.contains(selectedWavBitDepth)) {
+      selectedWavBitDepth = _kExportWavBitDepths.first;
+    }
+    if (!_kExportMp3Bitrates.contains(selectedMp3Bitrate)) {
+      selectedMp3Bitrate = _kExportMp3Bitrates.first;
+    }
+    if (!_kExportMp3VbrQualities.contains(selectedMp3VbrQuality)) {
+      selectedMp3VbrQuality = _kExportMp3VbrQualities.first;
+    }
+    if (!_kExportNormalizeTargetsDb.contains(selectedNormalizeTargetDb)) {
+      selectedNormalizeTargetDb = _kExportNormalizeTargetsDb[1];
+    }
+    if (!_ExportChannelMode.values.contains(selectedChannelMode)) {
+      selectedChannelMode = _ExportChannelMode.stereo;
+    }
+    if (!_ExportResampleQuality.values.contains(selectedResampleQuality)) {
+      selectedResampleQuality = _ExportResampleQuality.best;
+    }
+    if (!_ExportMp3Mode.values.contains(selectedMp3Mode)) {
+      selectedMp3Mode = _ExportMp3Mode.cbr;
+    }
+
+    return showDialog<_AudioExportSettings>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            Widget buildFormatOption({
+              required _ExportAudioFormat format,
+              required String label,
+              required bool isLeft,
+            }) {
+              final bool isSelected = selectedFormat == format;
+              return Expanded(
+                child: Material(
+                  color: isSelected
+                      ? theme.colorScheme.primary.withOpacity(0.18)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.horizontal(
+                    left: isLeft ? const Radius.circular(12) : Radius.zero,
+                    right: isLeft ? Radius.zero : const Radius.circular(12),
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.horizontal(
+                      left: isLeft ? const Radius.circular(12) : Radius.zero,
+                      right: isLeft ? Radius.zero : const Radius.circular(12),
+                    ),
+                    onTap: () {
+                      setSheetState(() {
+                        selectedFormat = format;
+                      });
+                    },
+                    child: SizedBox(
+                      height: 50,
+                      child: Center(
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: isSelected
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.onSurface.withOpacity(0.9),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            Widget buildDropdownField<T>({
+              required String label,
+              required T value,
+              required List<T> options,
+              required ValueChanged<T?> onChanged,
+              required String Function(T) textBuilder,
+            }) {
+              return DropdownButtonFormField<T>(
+                value: value,
+                decoration: InputDecoration(
+                  labelText: label,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: options
+                    .map(
+                      (option) => DropdownMenuItem<T>(
+                        value: option,
+                        child: Text(textBuilder(option)),
+                      ),
+                    )
+                    .toList(),
+                onChanged: onChanged,
+              );
+            }
+
+            return AnimatedPadding(
+              duration: const Duration(milliseconds: 150),
+              curve: Curves.easeOut,
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 16,
+                bottom: MediaQuery.of(dialogContext).viewInsets.bottom + 16,
+              ),
+              child: Dialog(
+                insetPadding: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Export',
+                          style: theme.textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color:
+                                  theme.colorScheme.outline.withOpacity(0.35),
+                            ),
+                            color: theme.colorScheme.surfaceContainerHighest
+                                .withOpacity(0.22),
+                          ),
+                          child: Row(
+                            children: [
+                              buildFormatOption(
+                                format: _ExportAudioFormat.wav,
+                                label: 'WAV',
+                                isLeft: true,
+                              ),
+                              Container(
+                                width: 1,
+                                height: 50,
+                                color:
+                                    theme.colorScheme.outline.withOpacity(0.25),
+                              ),
+                              buildFormatOption(
+                                format: _ExportAudioFormat.mp3,
+                                label: 'MP3',
+                                isLeft: false,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () {
+                            setSheetState(() {
+                              showAdvanced = !showAdvanced;
+                            });
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 6,
+                            ),
+                            child: Row(
+                              children: [
+                                Text(
+                                  'Advanced options',
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const Spacer(),
+                                Icon(showAdvanced
+                                    ? Icons.keyboard_arrow_up
+                                    : Icons.keyboard_arrow_down),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (showAdvanced) ...[
+                          const SizedBox(height: 10),
+                          buildDropdownField(
+                            label: 'Sample rate',
+                            value: selectedSampleRate,
+                            options: _kExportSampleRates,
+                            textBuilder: (value) => '$value Hz',
+                            onChanged: (value) {
+                              if (value == null) return;
+                              setSheetState(() {
+                                selectedSampleRate = value;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          buildDropdownField(
+                            label: 'Channels',
+                            value: selectedChannelMode,
+                            options: _ExportChannelMode.values,
+                            textBuilder: (value) =>
+                                value == _ExportChannelMode.stereo
+                                    ? 'Stereo'
+                                    : 'Mono',
+                            onChanged: (value) {
+                              if (value == null) return;
+                              setSheetState(() {
+                                selectedChannelMode = value;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          buildDropdownField(
+                            label: 'Resample quality',
+                            value: selectedResampleQuality,
+                            options: _ExportResampleQuality.values,
+                            textBuilder: (value) {
+                              switch (value) {
+                                case _ExportResampleQuality.draft:
+                                  return 'Draft (fast)';
+                                case _ExportResampleQuality.good:
+                                  return 'Good';
+                                case _ExportResampleQuality.best:
+                                  return 'Best';
+                              }
+                            },
+                            onChanged: (value) {
+                              if (value == null) return;
+                              setSheetState(() {
+                                selectedResampleQuality = value;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 6),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Normalize loudness'),
+                            value: selectedNormalize,
+                            onChanged: (value) {
+                              setSheetState(() {
+                                selectedNormalize = value;
+                              });
+                            },
+                          ),
+                          if (selectedNormalize) ...[
+                            const SizedBox(height: 4),
+                            buildDropdownField(
+                              label: 'Limiter ceiling (dBTP)',
+                              value: selectedNormalizeTargetDb,
+                              options: _kExportNormalizeTargetsDb,
+                              textBuilder: (value) =>
+                                  '${value.toStringAsFixed(1)} dB',
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setSheetState(() {
+                                  selectedNormalizeTargetDb = value;
+                                });
+                              },
+                            ),
+                          ],
+                          const SizedBox(height: 10),
+                          if (selectedFormat == _ExportAudioFormat.wav) ...[
+                            buildDropdownField(
+                              label: 'Bit depth',
+                              value: selectedWavBitDepth,
+                              options: _kExportWavBitDepths,
+                              textBuilder: (value) => '$value-bit',
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setSheetState(() {
+                                  selectedWavBitDepth = value;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 6),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('Enable dithering'),
+                              value: selectedWavDithering,
+                              onChanged: (value) {
+                                setSheetState(() {
+                                  selectedWavDithering = value;
+                                });
+                              },
+                            ),
+                          ] else ...[
+                            buildDropdownField(
+                              label: 'Encoding mode',
+                              value: selectedMp3Mode,
+                              options: _ExportMp3Mode.values,
+                              textBuilder: (value) =>
+                                  value == _ExportMp3Mode.cbr ? 'CBR' : 'VBR',
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setSheetState(() {
+                                  selectedMp3Mode = value;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            if (selectedMp3Mode == _ExportMp3Mode.cbr)
+                              buildDropdownField(
+                                label: 'Bit rate',
+                                value: selectedMp3Bitrate,
+                                options: _kExportMp3Bitrates,
+                                textBuilder: (value) => '${value} kbps',
+                                onChanged: (value) {
+                                  if (value == null) return;
+                                  setSheetState(() {
+                                    selectedMp3Bitrate = value;
+                                  });
+                                },
+                              )
+                            else
+                              buildDropdownField(
+                                label: 'VBR quality',
+                                value: selectedMp3VbrQuality,
+                                options: _kExportMp3VbrQualities,
+                                textBuilder: (value) =>
+                                    'V$value (${value == 0 ? "highest" : "smaller file"})',
+                                onChanged: (value) {
+                                  if (value == null) return;
+                                  setSheetState(() {
+                                    selectedMp3VbrQuality = value;
+                                  });
+                                },
+                              ),
+                          ],
+                        ],
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 44,
+                          child: FilledButton(
+                            onPressed: () {
+                              Navigator.pop(
+                                dialogContext,
+                                _AudioExportSettings(
+                                  format: selectedFormat,
+                                  sampleRate: selectedSampleRate,
+                                  wavBitDepth: selectedWavBitDepth,
+                                  wavDithering: selectedWavDithering,
+                                  mp3BitrateKbps: selectedMp3Bitrate,
+                                  mp3Mode: selectedMp3Mode,
+                                  mp3VbrQuality: selectedMp3VbrQuality,
+                                  channelMode: selectedChannelMode,
+                                  normalize: selectedNormalize,
+                                  normalizeTargetDb: selectedNormalizeTargetDb,
+                                  resampleQuality: selectedResampleQuality,
+                                ),
+                              );
+                            },
+                            child: const Text('Start export'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _wavCodecForBitDepth(int bitDepth) {
+    switch (bitDepth) {
+      case 24:
+        return 'pcm_s24le';
+      case 32:
+        return 'pcm_f32le';
+      case 16:
+      default:
+        return 'pcm_s16le';
+    }
+  }
+
+  String _buildResampleFilter(_AudioExportSettings settings) {
+    final isWav = settings.format == _ExportAudioFormat.wav;
+    final ditherMethod = settings.wavDithering ? 'triangular' : 'none';
+    switch (settings.resampleQuality) {
+      case _ExportResampleQuality.draft:
+        return isWav
+            ? 'aresample=${settings.sampleRate}:resampler=swr:dither_method=$ditherMethod'
+            : 'aresample=${settings.sampleRate}:resampler=swr';
+      case _ExportResampleQuality.good:
+        return isWav
+            ? 'aresample=${settings.sampleRate}:resampler=soxr:precision=20:dither_method=$ditherMethod'
+            : 'aresample=${settings.sampleRate}:resampler=soxr:precision=20';
+      case _ExportResampleQuality.best:
+        return isWav
+            ? 'aresample=${settings.sampleRate}:resampler=soxr:precision=28:dither_method=$ditherMethod'
+            : 'aresample=${settings.sampleRate}:resampler=soxr:precision=28';
+    }
+  }
+
+  String _buildExportFilter(_AudioExportSettings settings) {
+    final List<String> filters = [_buildResampleFilter(settings)];
+    if (settings.channelMode == _ExportChannelMode.mono) {
+      filters.add('aformat=channel_layouts=mono');
+    } else {
+      filters.add('aformat=channel_layouts=stereo');
+    }
+    if (settings.normalize) {
+      filters.add(
+        'loudnorm=I=-14:LRA=11:TP=${settings.normalizeTargetDb.toStringAsFixed(1)}:linear=true',
+      );
+    }
+    return filters.join(',');
+  }
+
+  Future<String> _convertMixWithExportSettings({
+    required String inputPath,
+    required _AudioExportSettings settings,
+  }) async {
+    final tempDir = await getTemporaryDirectory();
+    final outPath =
+        '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.${settings.fileExtension}';
+
+    final filter = _buildExportFilter(settings);
+    final channelCount =
+        settings.channelMode == _ExportChannelMode.mono ? '1' : '2';
+    final List<String> ffmpegCmd;
+    if (settings.format == _ExportAudioFormat.wav) {
+      ffmpegCmd = [
+        '-i',
+        '"$inputPath"',
+        if (filter.isNotEmpty) ...['-af', filter],
+        '-c:a',
+        _wavCodecForBitDepth(settings.wavBitDepth),
+        '-ac',
+        channelCount,
+        '-ar',
+        '${settings.sampleRate}',
+        '-y',
+        '"$outPath"',
+      ];
+    } else {
+      ffmpegCmd = [
+        '-i',
+        '"$inputPath"',
+        if (filter.isNotEmpty) ...['-af', filter],
+        '-c:a',
+        'libmp3lame',
+        if (settings.mp3Mode == _ExportMp3Mode.cbr) ...[
+          '-b:a',
+          '${settings.mp3BitrateKbps}k',
+        ] else ...[
+          '-q:a',
+          '${settings.mp3VbrQuality}',
+        ],
+        '-ac',
+        channelCount,
+        '-ar',
+        '${settings.sampleRate}',
+        '-y',
+        '"$outPath"',
+      ];
+    }
+
+    try {
+      final Session session = await FFmpegKit.execute(ffmpegCmd.join(' '));
+      final returnCode = await session.getReturnCode();
+      if (!ReturnCode.isSuccess(returnCode)) {
+        final logs = await session.getLogs() ?? [];
+        final logLines = logs
+            .map((log) => log.getMessage())
+            .whereType<String>()
+            .where((line) => line.trim().isNotEmpty)
+            .toList();
+        final tail = logLines.length <= 6
+            ? logLines.join('\n')
+            : logLines.sublist(logLines.length - 6).join('\n');
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              tail.isNotEmpty
+                  ? tail
+                  : '${L10n.translate(context, "Export failed")} (RC: $returnCode)',
+            ),
+            duration: const Duration(seconds: 8),
+          ),
+        );
+        return "";
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}',
+          ),
+        ),
+      );
+      return "";
+    }
+
+    final outFile = File(outPath);
+    if (!await outFile.exists() || (await outFile.length()) < 1000) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            L10n.translate(
+                context, 'Export failed: Output file missing or too small.'),
+          ),
+        ),
+      );
+      return "";
+    }
+    return outPath;
+  }
+
   Future<String> _exportAudioOnly(ValueChanged<double> onProgress) async {
     if (_audioTracks.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(L10n.translate(context, 'No audio tracks selected'))), // TODO: FIX THIS WORDING
+        SnackBar(
+            content: Text(L10n.translate(context,
+                'No audio tracks selected'))), // TODO: FIX THIS WORDING
       );
       return "";
     }
 
     onProgress(0.0);
-
-    final overallDuration = _audioTracks.map((track) {
-      final offsetDuration = Duration(milliseconds: (track.offset * 1000).round());
-      final trackDuration = track.trimEnd - track.trimStart;
-      return offsetDuration + trackDuration;
-    }).reduce((a, b) => a > b ? a : b);
+    final settings = _activeAudioExportSettings ?? _audioExportSettings;
 
     // Build input arguments
     List<String> inputArgs = [];
@@ -1303,7 +1953,15 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     for (int i = 0; i < _audioTracks.length; i++) {
       final tempDir = await getTemporaryDirectory();
       final outPath = '${tempDir.path}/juce_track${i}_export.wav';
-      final outDir = await JuceAudioEngine.exportTrack(i, outPath);
+      final outDir = await JuceAudioEngine.exportTrack(
+        i,
+        outPath,
+        format: 'wav',
+        sampleRate: settings.sampleRate,
+        wavBitDepth: 32,
+        wavDithering: false,
+        mp3BitrateKbps: settings.mp3BitrateKbps,
+      );
       print("_exportAudioOnly: track ${i} exported at ${outDir}");
       inputArgs.add('-i "${outDir}"');
     }
@@ -1321,10 +1979,14 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
       String volumeFilter;
       if (track.volumeAutomation.isNotEmpty) {
-        final String volumeAutomationExpression = generateVolumeAutomationFilter(track, offsetMs, _universalCrossfade);
-        volumeFilter = 'volume=eval=frame:volume="${volumeAutomationExpression}"'; //*${track.gain}"';
+        final String volumeAutomationExpression =
+            generateVolumeAutomationFilter(
+                track, offsetMs, _universalCrossfade);
+        volumeFilter =
+            'volume=eval=frame:volume="${volumeAutomationExpression}"'; //*${track.gain}"';
       } else {
-        volumeFilter = 'volume=${min(1.0, _universalCrossfade * 2).toStringAsFixed(2)}'; //*${track.gain}';
+        volumeFilter =
+            'volume=${min(1.0, _universalCrossfade * 2).toStringAsFixed(2)}'; //*${track.gain}';
       }
 
       filterLines.add(
@@ -1339,8 +2001,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     onProgress(0.6);
 
     // Mix all tracks (matches video export's amix approach)
-    final String amixInputs =
-        trackLabels.join('') + 'amix=inputs=${_audioTracks.length}:duration=longest:normalize=0[aout]';
+    final String amixInputs = trackLabels.join('') +
+        'amix=inputs=${_audioTracks.length}:duration=longest:normalize=0[aout]';
     filterLines.add(amixInputs);
 
     final String filterComplex = filterLines.join('');
@@ -1357,28 +2019,24 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       '-map',
       '[aout]',
       '-c:a',
-      'libmp3lame',
-      '-b:a',
-      '192k',
+      'pcm_f32le',
       '-ar',
-      '44100',
+      '${settings.sampleRate}',
       '-loglevel',
       'verbose',
       '-y',
     ];
 
     final tempDir = await getTemporaryDirectory();
-    final outPath = '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.mp3';
-    ffmpegCmd.add('"$outPath"');
+    final mixedWavPath =
+        '${tempDir.path}/audio_export_mix_${DateTime.now().millisecondsSinceEpoch}.wav';
+    ffmpegCmd.add('"$mixedWavPath"');
 
     // print("FFmpeg command: ${ffmpegCmd.join(' ')}");
 
     try {
       final session = await FFmpegKit.execute(ffmpegCmd.join(' '));
-      onProgress(1.0);
       final returnCode = await session.getReturnCode();
-
-      final allLogs = await session.getAllLogs() ?? [];
       final errorLogs = await session.getLogs() ?? [];
 
       String getLogMessages(List<Log> logs) {
@@ -1386,14 +2044,15 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       }
 
       final lastErrorCount = min(10, errorLogs.length);
-      final lastErrors = errorLogs.sublist(max(0, errorLogs.length - lastErrorCount));
+      final lastErrors =
+          errorLogs.sublist(max(0, errorLogs.length - lastErrorCount));
       final lastErrorMessages = getLogMessages(lastErrors);
 
       print("═════════ LAST ERRORS ═════════");
       print(lastErrorMessages);
 
       if (ReturnCode.isSuccess(returnCode)) {
-        final outFile = File(outPath);
+        final outFile = File(mixedWavPath);
         int retries = 0;
         while (!await outFile.exists() && retries < 20) {
           await Future.delayed(const Duration(milliseconds: 250));
@@ -1403,14 +2062,21 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         if (!await outFile.exists() || (await outFile.length()) < 1000) {
           print("❌ ERROR: Output file is missing or too small!");
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(L10n.translate(context, 'Export failed: Output file missing or too small.'))),
+            SnackBar(
+                content: Text(L10n.translate(context,
+                    'Export failed: Output file missing or too small.'))),
           );
           return "";
         }
 
-        print("✅ File found: $outPath");
-
-        return outPath;
+        print("✅ File found: $mixedWavPath");
+        onProgress(0.75);
+        final convertedPath = await _convertMixWithExportSettings(
+          inputPath: mixedWavPath,
+          settings: settings,
+        );
+        onProgress(1.0);
+        return convertedPath;
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1425,7 +2091,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       print("Full export error: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
+          content: Text(
+              '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
           duration: Duration(seconds: 5),
         ),
       );
@@ -1435,7 +2102,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
   Future<String> _exportVideo(ValueChanged<double> onProgress) async {
     if (_videoFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L10n.translate(context, 'No video selected'))));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(L10n.translate(context, 'No video selected'))));
       return "";
     }
     // if (_audioTracks.isEmpty) {
@@ -1507,11 +2175,14 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     for (int i = 0; i < _audioTracks.length; i++) {
       final track = _audioTracks[i];
       final int offsetMs = (track.offset * 1000).round();
-      final double startSec = track.trimStart.inMilliseconds / 1000.0; //track.trimStart.inSeconds;
-      final double endSec = track.trimEnd.inMilliseconds / 1000.0; //track.trimEnd.inSeconds;
+      final double startSec =
+          track.trimStart.inMilliseconds / 1000.0; //track.trimStart.inSeconds;
+      final double endSec =
+          track.trimEnd.inMilliseconds / 1000.0; //track.trimEnd.inSeconds;
       final String label = 't${i + 2}'; //1}';
 
-      final String volumeAutomation = generateVolumeAutomationFilter(track, offsetMs, _universalCrossfade);
+      final String volumeAutomation =
+          generateVolumeAutomationFilter(track, offsetMs, _universalCrossfade);
 
       filterLines.add(
         '[${i + 2}:a]atrim=start=$startSec:end=$endSec,asetpts=PTS-STARTPTS,'
@@ -1526,7 +2197,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
     // Mix video audio and additional audio tracks.
     final int totalInputs = 1 + _audioTracks.length; //1 + _audioTracks.length;
-    final String amixInputs = '[vid]' + trackLabels.join('') + 'amix=inputs=$totalInputs:duration=first[aout]';
+    final String amixInputs = '[vid]' +
+        trackLabels.join('') +
+        'amix=inputs=$totalInputs:duration=first[aout]';
     filterLines.add(amixInputs);
 
     // print("🔹 FFmpeg Filter Complex:\n${filterLines.join('\n')}");
@@ -1572,7 +2245,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     if (_cancelSignal.isCompleted) return "";
 
     final tempDir2 = await getTemporaryDirectory();
-    final outPath = '${tempDir2.path}/export_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    final outPath =
+        '${tempDir2.path}/export_${DateTime.now().millisecondsSinceEpoch}.mp4';
     ffmpegCmd.add('"$outPath"');
 
     // print("🔹 Running FFmpeg command:\n${ffmpegCmd.join(' ')}");
@@ -1591,7 +2265,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       print("❌ FFmpeg export failed.");
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(L10n.translate(context, 'Export failed! Check logs.'))));
+      ).showSnackBar(SnackBar(
+          content:
+              Text(L10n.translate(context, 'Export failed! Check logs.'))));
       return "";
     }
 
@@ -1607,7 +2283,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       print("❌ ERROR: Output file is missing or too small!");
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Export failed: Output file missing or too small.')));
+      ).showSnackBar(const SnackBar(
+          content: Text('Export failed: Output file missing or too small.')));
       return "";
     }
 
@@ -1649,7 +2326,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     return sum;
   }
 
-  Future<int> findBestSyncOffset(String videoAudioPath, String trackAudioPath) async {
+  Future<int> findBestSyncOffset(
+      String videoAudioPath, String trackAudioPath) async {
     final ReceivePort receivePort = ReceivePort();
     final ReceivePort progressPort = ReceivePort(); // for reporting UI progress
 
@@ -1682,19 +2360,24 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     return result;
   }
 
-  Future<void> applyBestSyncOffset(AudioTrack track, String videoAudioPath) async {
+  Future<void> applyBestSyncOffset(
+      AudioTrack track, String videoAudioPath) async {
     int syncOffset = await findBestSyncOffset(videoAudioPath, track.file.path);
     final int audioLengthMs = track.audioDuration.inMilliseconds;
     final int offsetLimit = 180000; // 180 seconds
 
     if (syncOffset >= 0 && syncOffset > offsetLimit) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(L10n.translate(context, 'AI Sync failed: Computed offset exceeds audio length.'))),
+        SnackBar(
+            content: Text(L10n.translate(context,
+                'AI Sync failed: Computed offset exceeds audio length.'))),
       );
       return;
     } else if (syncOffset < 0 && syncOffset.abs() > audioLengthMs) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(L10n.translate(context, 'AI Sync failed: Computed trim exceeds audio length.'))),
+        SnackBar(
+            content: Text(L10n.translate(context,
+                'AI Sync failed: Computed trim exceeds audio length.'))),
       );
       return;
     }
@@ -1708,14 +2391,16 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       } else {
         // Trim the track (shift left)
         // double trimAdjustment = syncOffset.abs() / 1000.0;
-        track.trimStart = Duration(milliseconds: syncOffset.abs()); //trimAdjustment.toInt());
+        track.trimStart =
+            Duration(milliseconds: syncOffset.abs()); //trimAdjustment.toInt());
         track.offset = 0.0;
       }
     });
 
     // Refresh UI
     setState(() {});
-    print("✅ AI Sync applied. Adjusted Offset: ${track.offset}, Trim Start: ${track.trimStart}");
+    print(
+        "✅ AI Sync applied. Adjusted Offset: ${track.offset}, Trim Start: ${track.trimStart}");
   }
 
   // THINGS FOR AI SYNC END-----
@@ -1753,10 +2438,14 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     final track = _audioTracks[index];
     final Duration audioPos = track.currentPosition < track.trimStart
         ? track.trimStart
-        : (track.currentPosition > track.trimEnd ? track.trimEnd : track.currentPosition);
+        : (track.currentPosition > track.trimEnd
+            ? track.trimEnd
+            : track.currentPosition);
     final Duration effectiveDuration = track.trimEnd - track.trimStart;
     final double normalizedTime = effectiveDuration.inMilliseconds > 0
-        ? ((audioPos.inMilliseconds - track.trimStart.inMilliseconds) / effectiveDuration.inMilliseconds).clamp(
+        ? ((audioPos.inMilliseconds - track.trimStart.inMilliseconds) /
+                effectiveDuration.inMilliseconds)
+            .clamp(
             0.0,
             1.0,
           )
@@ -1765,7 +2454,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     return Card(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade400, width: _selectedTrackIndex == index ? 4 : 1.5),
+        side: BorderSide(
+            color: Colors.grey.shade400,
+            width: _selectedTrackIndex == index ? 4 : 1.5),
       ),
       color: const Color.fromARGB(255, 134, 135, 173),
       elevation: 4,
@@ -1789,14 +2480,16 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
               GestureDetector(
                 onTap: () {
                   if (!_expandedIndexMatches(index)) {
-                    _selectedTrackIndex = _selectedIndexMatches(index) ? -1 : index;
+                    _selectedTrackIndex =
+                        _selectedIndexMatches(index) ? -1 : index;
                   } else {
                     _selectedTrackIndex = index;
                   }
                 },
                 child: Row(
                   children: [
-                    const Icon(Icons.music_note, color: Color.fromARGB(255, 230, 230, 230)),
+                    const Icon(Icons.music_note,
+                        color: Color.fromARGB(255, 230, 230, 230)),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1821,7 +2514,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                         });
                       },
                       child: Icon(
-                        _expandedIndexMatches(index) ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                        _expandedIndexMatches(index)
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
                         color: Colors.grey,
                       ),
                     ),
@@ -1855,39 +2550,48 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                 ),
               ],
               if (_expandedIndexMatches(index)) ...[
-                const Divider(height: 20, color: Color.fromARGB(255, 221, 221, 221)),
+                const Divider(
+                    height: 20, color: Color.fromARGB(255, 221, 221, 221)),
                 // Offset
                 // Text('${L10n.translate(context, 'Offset')}: ${track.offset.toStringAsFixed(2)} s'),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('${L10n.translate(context, 'Offset')}: ${track.offset.toStringAsFixed(2)} s'),
+                    Text(
+                        '${L10n.translate(context, 'Offset')}: ${track.offset.toStringAsFixed(2)} s'),
                     TextButton.icon(
                       onPressed: () {
-                        final seconds =
-                            (_audioOnly ? _globalAudioClock.inMilliseconds : _videoPosition.inMilliseconds) ~/
-                                10 *
-                                0.01;
+                        final seconds = (_audioOnly
+                                ? _globalAudioClock.inMilliseconds
+                                : _videoPosition.inMilliseconds) ~/
+                            10 *
+                            0.01;
                         if (seconds > 180) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(L10n.translate(context, 'Offset cannot exceed 180 seconds.'))),
+                            SnackBar(
+                                content: Text(L10n.translate(context,
+                                    'Offset cannot exceed 180 seconds.'))),
                           );
                           return;
                         }
 
                         setState(() {
                           track.offset = seconds;
-                          final effectivePos = _calculateEffectiveAudioPositionForTrack(
+                          final effectivePos =
+                              _calculateEffectiveAudioPositionForTrack(
                             track,
                             _audioOnly ? _globalAudioClock : _videoPosition,
                           );
-                          JuceAudioEngine.seek(index, effectivePos.inMicroseconds / 1e6);
+                          JuceAudioEngine.seek(
+                              index, effectivePos.inMicroseconds / 1e6);
                           track.currentPosition = effectivePos;
                         });
                       },
                       icon: const Icon(Icons.flash_on, size: 16),
                       label: Text(L10n.translate(context, 'Start from Now')),
-                      style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.primary),
+                      style: TextButton.styleFrom(
+                          foregroundColor:
+                              Theme.of(context).colorScheme.primary),
                     ),
                   ],
                 ),
@@ -1896,15 +2600,19 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                   children: [
                     IconButton(
                       tooltip: "-0.10s",
-                      icon: const Icon(Icons.keyboard_double_arrow_left, size: 18),
+                      icon: const Icon(Icons.keyboard_double_arrow_left,
+                          size: 18),
                       onPressed: () {
                         setState(() {
-                          track.offset = (track.offset - 0.10).clamp(0.0, 180.0);
-                          final effectivePos = _calculateEffectiveAudioPositionForTrack(
+                          track.offset =
+                              (track.offset - 0.10).clamp(0.0, 180.0);
+                          final effectivePos =
+                              _calculateEffectiveAudioPositionForTrack(
                             track,
                             _audioOnly ? _globalAudioClock : _videoPosition,
                           );
-                          JuceAudioEngine.seek(index, effectivePos.inMicroseconds / 1e6);
+                          JuceAudioEngine.seek(
+                              index, effectivePos.inMicroseconds / 1e6);
                           track.currentPosition = effectivePos;
                         });
                       },
@@ -1914,12 +2622,15 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                       icon: const Icon(Icons.keyboard_arrow_left, size: 18),
                       onPressed: () {
                         setState(() {
-                          track.offset = (track.offset - 0.01).clamp(0.0, 180.0);
-                          final effectivePos = _calculateEffectiveAudioPositionForTrack(
+                          track.offset =
+                              (track.offset - 0.01).clamp(0.0, 180.0);
+                          final effectivePos =
+                              _calculateEffectiveAudioPositionForTrack(
                             track,
                             _audioOnly ? _globalAudioClock : _videoPosition,
                           );
-                          JuceAudioEngine.seek(index, effectivePos.inMicroseconds / 1e6);
+                          JuceAudioEngine.seek(
+                              index, effectivePos.inMicroseconds / 1e6);
                           track.currentPosition = effectivePos;
                         });
                       },
@@ -1929,27 +2640,34 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                       icon: const Icon(Icons.keyboard_arrow_right, size: 18),
                       onPressed: () {
                         setState(() {
-                          track.offset = (track.offset + 0.01).clamp(0.0, 180.0);
-                          final effectivePos = _calculateEffectiveAudioPositionForTrack(
+                          track.offset =
+                              (track.offset + 0.01).clamp(0.0, 180.0);
+                          final effectivePos =
+                              _calculateEffectiveAudioPositionForTrack(
                             track,
                             _audioOnly ? _globalAudioClock : _videoPosition,
                           );
-                          JuceAudioEngine.seek(index, effectivePos.inMicroseconds / 1e6);
+                          JuceAudioEngine.seek(
+                              index, effectivePos.inMicroseconds / 1e6);
                           track.currentPosition = effectivePos;
                         });
                       },
                     ),
                     IconButton(
                       tooltip: "+0.10s",
-                      icon: const Icon(Icons.keyboard_double_arrow_right, size: 18),
+                      icon: const Icon(Icons.keyboard_double_arrow_right,
+                          size: 18),
                       onPressed: () {
                         setState(() {
-                          track.offset = (track.offset + 0.10).clamp(0.0, 180.0);
-                          final effectivePos = _calculateEffectiveAudioPositionForTrack(
+                          track.offset =
+                              (track.offset + 0.10).clamp(0.0, 180.0);
+                          final effectivePos =
+                              _calculateEffectiveAudioPositionForTrack(
                             track,
                             _audioOnly ? _globalAudioClock : _videoPosition,
                           );
-                          JuceAudioEngine.seek(index, effectivePos.inMicroseconds / 1e6);
+                          JuceAudioEngine.seek(
+                              index, effectivePos.inMicroseconds / 1e6);
                           track.currentPosition = effectivePos;
                         });
                       },
@@ -1965,11 +2683,13 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                   onChanged: (value) {
                     setState(() {
                       track.offset = value;
-                      final effectivePos = _calculateEffectiveAudioPositionForTrack(
+                      final effectivePos =
+                          _calculateEffectiveAudioPositionForTrack(
                         track,
                         _audioOnly ? _globalAudioClock : _videoPosition,
                       );
-                      JuceAudioEngine.seek(index, effectivePos.inMicroseconds / 1e6);
+                      JuceAudioEngine.seek(
+                          index, effectivePos.inMicroseconds / 1e6);
                       track.currentPosition = effectivePos;
                     });
                   },
@@ -2008,7 +2728,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                 ),
 
                 const SizedBox(height: 10),
-                Text("${L10n.translate(context, 'Gain')}: ${track.gain.toStringAsFixed(2)}x"),
+                Text(
+                    "${L10n.translate(context, 'Gain')}: ${track.gain.toStringAsFixed(2)}x"),
                 Slider(
                   value: track.gain,
                   min: 0.0,
@@ -2060,7 +2781,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        disabledBackgroundColor: const Color.fromARGB(170, 44, 44, 44),
+                        disabledBackgroundColor:
+                            const Color.fromARGB(170, 44, 44, 44),
                         backgroundColor: const Color.fromARGB(
                           255,
                           79,
@@ -2073,14 +2795,16 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                         // )
                         // .toColor(),
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
                       ),
                       icon: Icon(Icons.tune, color: Colors.white),
                       label: Text(
                         L10n.translate(context, 'Audio Track Effects'),
                         style: TextStyle(color: Colors.white),
                       ),
-                      onPressed: () => _openEffectsDrawer(context, _selectedTrackIndex),
+                      onPressed: () =>
+                          _openEffectsDrawer(context, _selectedTrackIndex),
                     ),
                   ),
                 ),
@@ -2094,21 +2818,26 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                       final confirm = await showDialog<bool>(
                             context: context,
                             builder: (ctx) => AlertDialog(
-                              title: Text(L10n.translate(context, 'Delete track?')),
+                              title: Text(
+                                  L10n.translate(context, 'Delete track?')),
                               content: Text(
-                                L10n.translate(context, 'Are you sure you want to delete this audio track?'),
+                                L10n.translate(context,
+                                    'Are you sure you want to delete this audio track?'),
                               ),
                               actions: [
                                 TextButton(
                                   onPressed: () => Navigator.of(ctx).pop(false),
                                   child: Text(
                                     L10n.translate(context, 'Cancel'),
-                                    style: TextStyle(color: Color.fromARGB(255, 218, 218, 218)),
+                                    style: TextStyle(
+                                        color:
+                                            Color.fromARGB(255, 218, 218, 218)),
                                   ),
                                 ),
                                 TextButton(
                                   onPressed: () => Navigator.of(ctx).pop(true),
-                                  child: Text(L10n.translate(context, 'Delete'), style: TextStyle(color: Colors.red)),
+                                  child: Text(L10n.translate(context, 'Delete'),
+                                      style: TextStyle(color: Colors.red)),
                                 ),
                               ],
                             ),
@@ -2149,14 +2878,17 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color.fromARGB(116, 199, 199, 199), //const Color.fromARGB(255, 39, 46, 97),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      backgroundColor: const Color.fromARGB(
+          116, 199, 199, 199), //const Color.fromARGB(255, 39, 46, 97),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       barrierColor: Colors.black.withOpacity(0.3),
       // builder: (_) => EffectsDrawer(trackIndex: trackIndex),
       builder: (_) => ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0), // adjust for more/less blur
+          filter: ImageFilter.blur(
+              sigmaX: 10.0, sigmaY: 10.0), // adjust for more/less blur
           child: Container(
             decoration: BoxDecoration(
               color: const Color.fromARGB(
@@ -2165,7 +2897,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                 122,
                 122,
               ), //const Color.fromARGB(255, 124, 124, 124), // your semi-translucent color
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(16)),
             ),
             child: EffectsDrawer(trackIndex: trackIndex, mode: widget.mode),
           ),
@@ -2220,7 +2953,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
   List<double> normalizeWaveform(List<double> data) {
     if (data.isEmpty) return [];
 
-    final maxAmplitude = data.map((v) => v.abs()).reduce((a, b) => a > b ? a : b);
+    final maxAmplitude =
+        data.map((v) => v.abs()).reduce((a, b) => a > b ? a : b);
 
     if (maxAmplitude == 0) return List.filled(data.length, 0.0);
 
@@ -2242,7 +2976,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     });
   }
 
-  Widget _buildWaveformWithTrim(int index, AudioTrack track, Duration fullDuration) {
+  Widget _buildWaveformWithTrim(
+      int index, AudioTrack track, Duration fullDuration) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double boxWidth = constraints.maxWidth;
@@ -2254,8 +2989,10 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
           return SizedBox(width: boxWidth, height: 80.0);
         }
 
-        final ValueNotifier<double> trimStartNotifier = ValueNotifier(track.trimStart.inMilliseconds.toDouble());
-        final ValueNotifier<double> trimEndNotifier = ValueNotifier(track.trimEnd.inMilliseconds.toDouble());
+        final ValueNotifier<double> trimStartNotifier =
+            ValueNotifier(track.trimStart.inMilliseconds.toDouble());
+        final ValueNotifier<double> trimEndNotifier =
+            ValueNotifier(track.trimEnd.inMilliseconds.toDouble());
 
         // if(track.normWaveformData.isEmpty) {
         //   createWaveformData(track, boxWidth);
@@ -2264,7 +3001,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
           track.didExtractWaveform = true; // guard so we only ever do it once
           final samples = PlayerWaveStyle().getSamplesForWidth(boxWidth);
           // initialize it cuz on android it takes a long time to extract waveformdata
-          track.normWaveformData = List<double>.filled(samples, 1.0, growable: false);
+          track.normWaveformData =
+              List<double>.filled(samples, 1.0, growable: false);
 
           // TEMP TODO: DEPRECATING waveformController
           // track.waveformController.extractWaveformData(path: track.file.path, noOfSamples: samples).then((raw) {
@@ -2301,14 +3039,17 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                         // height: 80,
                         child: AudioFileWaveforms(
                           // key: ValueKey(track.file.path + String(track.normWaveformData.hashCode)),
-                          key: ValueKey('${track.file.path}_${track.normWaveformData.hashCode}'),
+                          key: ValueKey(
+                              '${track.file.path}_${track.normWaveformData.hashCode}'),
                           size: Size(effectiveWidth, 80),
                           waveformData: track.normWaveformData, // NEW CHANGE
                           playerController: track.waveformController,
                           continuousWaveform: false,
                           enableSeekGesture: false,
                           waveformType: WaveformType.fitWidth,
-                          playerWaveStyle: const PlayerWaveStyle(seekLineColor: Color(0xFF888888), showSeekLine: false),
+                          playerWaveStyle: const PlayerWaveStyle(
+                              seekLineColor: Color(0xFF888888),
+                              showSeekLine: false),
                         ),
                       ),
                       // seek line for waveform
@@ -2344,9 +3085,11 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
                       // ✅ Trim Start Handle
                       _buildTrimHandle(
-                        left: paddingH + (effectiveWidth * (trimStartMs / totalMs)),
+                        left: paddingH +
+                            (effectiveWidth * (trimStartMs / totalMs)),
                         onDragUpdate: (dx) {
-                          double newTrimStart = trimStartMs + (dx / effectiveWidth) * totalMs;
+                          double newTrimStart =
+                              trimStartMs + (dx / effectiveWidth) * totalMs;
                           newTrimStart = newTrimStart.clamp(0, trimEndMs - 100);
 
                           // // --- SNAP LOGIC START ---
@@ -2360,23 +3103,29 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                           // // --- SNAP LOGIC END ---
 
                           trimStartNotifier.value = newTrimStart;
-                          track.trimStart = Duration(milliseconds: newTrimStart.round());
+                          track.trimStart =
+                              Duration(milliseconds: newTrimStart.round());
 
-                          final effectivePos = _calculateEffectiveAudioPositionForTrack(
+                          final effectivePos =
+                              _calculateEffectiveAudioPositionForTrack(
                             track,
                             _audioOnly ? _globalAudioClock : _videoPosition,
                           );
-                          JuceAudioEngine.seek(index, effectivePos.inMicroseconds / 1e6);
+                          JuceAudioEngine.seek(
+                              index, effectivePos.inMicroseconds / 1e6);
                           track.currentPosition = effectivePos;
                         },
                       ),
 
                       // ✅ Trim End Handle
                       _buildTrimHandle(
-                        left: paddingH + (effectiveWidth * (trimEndMs / totalMs)),
+                        left:
+                            paddingH + (effectiveWidth * (trimEndMs / totalMs)),
                         onDragUpdate: (dx) {
-                          double newTrimEnd = trimEndMs + (dx / effectiveWidth) * totalMs;
-                          newTrimEnd = newTrimEnd.clamp(trimStartMs + 100, totalMs);
+                          double newTrimEnd =
+                              trimEndMs + (dx / effectiveWidth) * totalMs;
+                          newTrimEnd =
+                              newTrimEnd.clamp(trimStartMs + 100, totalMs);
 
                           // // --- SNAP LOGIC START ---
                           // final effectiveTimeMs = (_videoPosition.inMilliseconds - (track.offset * 1000)).clamp(0, trimmedDurationMs);
@@ -2389,13 +3138,16 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                           // // --- SNAP LOGIC END ---
 
                           trimEndNotifier.value = newTrimEnd;
-                          track.trimEnd = Duration(milliseconds: newTrimEnd.round());
+                          track.trimEnd =
+                              Duration(milliseconds: newTrimEnd.round());
 
-                          final effectivePos = _calculateEffectiveAudioPositionForTrack(
+                          final effectivePos =
+                              _calculateEffectiveAudioPositionForTrack(
                             track,
                             _audioOnly ? _globalAudioClock : _videoPosition,
                           );
-                          JuceAudioEngine.seek(index, effectivePos.inMicroseconds / 1e6);
+                          JuceAudioEngine.seek(
+                              index, effectivePos.inMicroseconds / 1e6);
                           track.currentPosition = effectivePos;
                         },
                       ),
@@ -2410,7 +3162,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     );
   }
 
-  Widget _buildTrimHandle({required double left, required Function(double) onDragUpdate}) {
+  Widget _buildTrimHandle(
+      {required double left, required Function(double) onDragUpdate}) {
     return Positioned(
       left: left - 10,
       top: 0,
@@ -2435,7 +3188,10 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: Text(
           L10n.translate(context, 'Add Audio Track'),
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(fontWeight: FontWeight.bold),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2480,7 +3236,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         if (totalBytes != null) {
           _downloadProgress = bytesReceived / totalBytes;
         }
-        _progressMessage = "Downloading... ${(_downloadProgress * 100).toStringAsFixed(1)}%";
+        _progressMessage =
+            "Downloading... ${(_downloadProgress * 100).toStringAsFixed(1)}%";
       });
     }
   }
@@ -2499,7 +3256,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     if (mounted) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 3)));
+      ).showSnackBar(SnackBar(
+          content: Text(message), duration: const Duration(seconds: 3)));
     }
     print("Error: $message");
   }
@@ -2511,9 +3269,12 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       context: context,
       builder: (context) => AlertDialog(
         title: Text("Bluetooth Required"),
-        content: Text("Please enable Bluetooth to connect to your Mixroom guitar"),
+        content:
+            Text("Please enable Bluetooth to connect to your Mixroom guitar"),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(L10n.translate(context, 'Cancel'))),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(L10n.translate(context, 'Cancel'))),
           // TextButton(
           //   onPressed: () {
           //     Navigator.pop(context);
@@ -2766,8 +3527,11 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
   // Instead of the deprecated single-audio _pickAudioFile, use _addAudioTrack.
   Future<void> _addAudioTrack() async {
     _pausePlayback();
-    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
-    if (result != null && result.files.isNotEmpty && result.files.single.path != null) {
+    FilePickerResult? result =
+        await FilePicker.platform.pickFiles(type: FileType.any);
+    if (result != null &&
+        result.files.isNotEmpty &&
+        result.files.single.path != null) {
       setState(() {
         _isLoadingAudio = true;
       });
@@ -2791,7 +3555,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       final baseName = newFile.path.split('/').last;
       // final resampledPath = '${tmpDir.path}/$baseName';
 
-      final baseNameNoExt = baseName.contains('.') ? baseName.substring(0, baseName.lastIndexOf('.')) : baseName;
+      final baseNameNoExt = baseName.contains('.')
+          ? baseName.substring(0, baseName.lastIndexOf('.'))
+          : baseName;
       final resampledPath = '${tmpDir.path}/$baseNameNoExt.wav';
 
       // 1) Transcode to 48 kHz PCM WAV (fast, one‐time cost):
@@ -2804,7 +3570,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       // final dur = await newPlayer.getDuration() ?? Duration.zero;
       await JuceAudioEngine.loadTrack(_audioTracks.length, newFile_48.path);
       // final dur = await JuceAudioEngine.getTrackDuration(0);
-      final durSeconds = await JuceAudioEngine.getTrackDuration(_audioTracks.length);
+      final durSeconds =
+          await JuceAudioEngine.getTrackDuration(_audioTracks.length);
       final dur = Duration(milliseconds: (durSeconds * 1000).round());
 
       final newController = PlayerController();
@@ -2847,7 +3614,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
   Widget _buildVideoAudioAutomationSection() {
     // Assume currentNormalizedTime is computed from video audio playback progress.
-    double videoAudioNormalizedTime = _videoPosition.inMilliseconds / duration.inMilliseconds;
+    double videoAudioNormalizedTime =
+        _videoPosition.inMilliseconds / duration.inMilliseconds;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2855,7 +3623,10 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         // Text("Video Audio Volume Automation"),
         Text(
           L10n.translate(context, 'Video Audio Volume Automation'),
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w400),
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(fontWeight: FontWeight.w400),
         ),
         Container(
           height: 100,
@@ -2875,11 +3646,58 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
   }
 
   Future<void> _exportAndNavigate() async {
+    if (_audioOnly) {
+      _AudioExportSettings? selectedSettings;
+      try {
+        selectedSettings = await _showAudioExportSettingsSheet();
+      } catch (e) {
+        debugPrint('Failed to open export dialog: $e');
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _audioExportSettings = const _AudioExportSettings(
+            format: _ExportAudioFormat.mp3,
+            sampleRate: 44100,
+            wavBitDepth: 16,
+            wavDithering: true,
+            mp3BitrateKbps: 192,
+            mp3Mode: _ExportMp3Mode.cbr,
+            mp3VbrQuality: 2,
+            channelMode: _ExportChannelMode.stereo,
+            normalize: false,
+            normalizeTargetDb: -1.0,
+            resampleQuality: _ExportResampleQuality.best,
+          );
+        });
+        try {
+          selectedSettings = await _showAudioExportSettingsSheet();
+        } catch (retryError) {
+          debugPrint('Retry open export dialog failed: $retryError');
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open export options.')),
+          );
+          return;
+        }
+      }
+      if (!mounted || selectedSettings == null) {
+        return;
+      }
+      final effectiveSettings = selectedSettings;
+      setState(() {
+        _audioExportSettings = effectiveSettings;
+        _activeAudioExportSettings = effectiveSettings;
+      });
+    }
+
     setState(() {
       _isLoadingNextScreen = true;
     });
     if (_isPlaying) {
-      _audioOnly ? await _togglePlayPauseAudio(_audioEditorStateSetter!) : await _togglePlayPause();
+      _audioOnly
+          ? await _togglePlayPauseAudio(_audioEditorStateSetter!)
+          : await _togglePlayPause();
     }
     // final exportPath = _audioOnly ? await _exportAudioOnly() : await _exportVideo();
     final exportPath = await Navigator.push<String>(
@@ -2891,15 +3709,28 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         ),
       ),
     );
-    if (!mounted) return;
+    if (!mounted) {
+      _activeAudioExportSettings = null;
+      return;
+    }
 
     setState(() {
+      _activeAudioExportSettings = null;
       _isLoadingNextScreen = false;
     });
 
+    if (exportPath == null || exportPath.isEmpty) {
+      final failStr = L10n.translate(context, 'Export canceled or failed.');
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failStr)));
+      return;
+    }
+
+    final exportExt = exportPath.split('.').last;
+
     final params = SaveFileDialogParams(
       sourceFilePath: exportPath,
-      fileName: 'export_file.${!_audioOnly ? 'mp4' : 'mp3'}',
+      fileName: 'export_file.$exportExt',
     );
     final savedPath = await FlutterFileDialog.saveFile(params: params);
 
@@ -2912,7 +3743,7 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         context,
         MaterialPageRoute(
           builder: (context) => ExportSuccessScreen(
-            filePath: exportPath!, // savedPath,
+            filePath: exportPath, // savedPath,
             isVideo: !_audioOnly,
           ),
         ),
@@ -2934,15 +3765,19 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
           context,
           PageRouteBuilder(
             pageBuilder: (_, __, ___) => HomeScreen(),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
               const beginScale = 0.96;
               const endScale = 1.0;
               const curve = Curves.easeOutCubic;
-              final tween = Tween<double>(begin: beginScale, end: endScale).chain(CurveTween(curve: curve));
-              final fadeTween = Tween<double>(begin: 0.0, end: 1.0).chain(CurveTween(curve: curve));
+              final tween = Tween<double>(begin: beginScale, end: endScale)
+                  .chain(CurveTween(curve: curve));
+              final fadeTween = Tween<double>(begin: 0.0, end: 1.0)
+                  .chain(CurveTween(curve: curve));
               return FadeTransition(
                 opacity: animation.drive(fadeTween),
-                child: ScaleTransition(scale: animation.drive(tween), child: child),
+                child: ScaleTransition(
+                    scale: animation.drive(tween), child: child),
               );
             },
             transitionDuration: const Duration(milliseconds: 300),
@@ -2952,23 +3787,27 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       }
     } else {
       final fail_str = L10n.translate(context, 'Export canceled or failed.');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(fail_str)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(fail_str)));
     }
   }
 
   Widget _buildFloatingTransportBar() {
     final theme = Theme.of(context);
 
-    final maxValue = _videoFile == null ? 0.0 : duration.inMilliseconds.toDouble();
-    double currentValue =
-        _isScrubbing ? _scrubPosition.inMilliseconds.toDouble() : _videoPosition.inMilliseconds.toDouble();
+    final maxValue =
+        _videoFile == null ? 0.0 : duration.inMilliseconds.toDouble();
+    double currentValue = _isScrubbing
+        ? _scrubPosition.inMilliseconds.toDouble()
+        : _videoPosition.inMilliseconds.toDouble();
     currentValue = currentValue.clamp(0.0, maxValue);
 
     // stuff for audio-only
     Duration overallDuration = Duration.zero;
     if (_audioTracks.isNotEmpty) {
       overallDuration = _audioTracks.map((track) {
-        final offsetDuration = Duration(milliseconds: (track.offset * 1000).round());
+        final offsetDuration =
+            Duration(milliseconds: (track.offset * 1000).round());
         final trackDuration = track.trimEnd - track.trimStart;
         return offsetDuration + trackDuration;
       }).reduce((a, b) => a > b ? a : b);
@@ -2993,7 +3832,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
             color: const Color.fromARGB(255, 32, 32, 32).withOpacity(0.75),
             borderRadius: BorderRadius.circular(35),
             border: Border.all(
-              color: const Color.fromARGB(255, 80, 80, 80), // Or adjust to your desired grey
+              color: const Color.fromARGB(
+                  255, 80, 80, 80), // Or adjust to your desired grey
               width: 1.5,
             ),
           ),
@@ -3001,7 +3841,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
             children: [
               // Play/Pause button
               IconButton(
-                icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
+                icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow,
+                    color: Colors.white),
                 onPressed: _togglePlayPause,
               ),
 
@@ -3021,17 +3862,19 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
               Expanded(
                 child: _audioOnly
                     ? Slider(
-                        value: _globalAudioClock.inMilliseconds.toDouble().clamp(
-                              0.0,
-                              overallDuration.inMilliseconds.toDouble(),
-                            ),
+                        value:
+                            _globalAudioClock.inMilliseconds.toDouble().clamp(
+                                  0.0,
+                                  overallDuration.inMilliseconds.toDouble(),
+                                ),
                         min: 0,
                         max: overallDuration.inMilliseconds.toDouble(),
                         onChangeStart: (value) async {
                           _audioAutomationTimer?.cancel();
                           for (var track in _audioTracks) {
                             // await track.player.pause();
-                            track.audioStarted = false; // Reset flag on pause so that resume triggers play.
+                            track.audioStarted =
+                                false; // Reset flag on pause so that resume triggers play.
                           }
                           JuceAudioEngine.pause();
                           _audioEditorStateSetter!(() {
@@ -3047,19 +3890,22 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                           // For each track, calculate the effective seek position:
                           for (int i = 0; i < _audioTracks.length; i++) {
                             final track = _audioTracks[i];
-                            final offsetDuration = Duration(milliseconds: (track.offset * 1000).round());
+                            final offsetDuration = Duration(
+                                milliseconds: (track.offset * 1000).round());
                             Duration effectivePos;
                             if (newPos < offsetDuration) {
                               effectivePos = track.trimStart;
                             } else {
-                              effectivePos = track.trimStart + (newPos - offsetDuration);
+                              effectivePos =
+                                  track.trimStart + (newPos - offsetDuration);
                               if (effectivePos > track.trimEnd) {
                                 effectivePos = track.trimEnd;
                               }
                             }
                             // Kick off the seek without awaiting:
                             // track.player.seek(effectivePos);
-                            JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
+                            JuceAudioEngine.seek(
+                                i, effectivePos.inMicroseconds / 1e6);
                           }
                           // Update automation (you can call this synchronously or asynchronously).
                           _updateAudioAutomation(newPos);
@@ -3068,7 +3914,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                           _audioAutomationTimer?.cancel();
                           for (var track in _audioTracks) {
                             // await track.player.pause();
-                            track.audioStarted = false; // Reset flag on pause so that resume triggers play.
+                            track.audioStarted =
+                                false; // Reset flag on pause so that resume triggers play.
                           }
                           JuceAudioEngine.pause();
                           _audioEditorStateSetter!(() {
@@ -3088,16 +3935,19 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                           _stopTicker();
                           setState(() {
                             _isScrubbing = true;
-                            _scrubPosition = Duration(milliseconds: value.toInt());
+                            _scrubPosition =
+                                Duration(milliseconds: value.toInt());
                           });
                         },
                         onChanged: (value) {
                           setState(() {
-                            _scrubPosition = Duration(milliseconds: value.toInt());
+                            _scrubPosition =
+                                Duration(milliseconds: value.toInt());
                           });
                         },
                         onChangeEnd: (value) async {
-                          final newPosition = Duration(milliseconds: value.toInt());
+                          final newPosition =
+                              Duration(milliseconds: value.toInt());
                           setState(() {
                             _isScrubbing = false;
                             _videoPosition = newPosition;
@@ -3105,13 +3955,17 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                           });
 
                           await seekTo(newPosition);
-                          await JuceAudioEngine.seekVideoAudio(newPosition.inMicroseconds / 1e6);
+                          await JuceAudioEngine.seekVideoAudio(
+                              newPosition.inMicroseconds / 1e6);
 
                           for (int i = 0; i < _audioTracks.length; i++) {
                             final track = _audioTracks[i];
-                            final effectivePos = _calculateEffectiveAudioPositionForTrack(track, newPosition);
+                            final effectivePos =
+                                _calculateEffectiveAudioPositionForTrack(
+                                    track, newPosition);
 
-                            await JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
+                            await JuceAudioEngine.seek(
+                                i, effectivePos.inMicroseconds / 1e6);
                             setState(() {
                               track.currentPosition = effectivePos;
                             });
@@ -3136,7 +3990,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       context: context,
       builder: (context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -3151,10 +4006,13 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                       context: context,
                       builder: (context) => AlertDialog(
                         backgroundColor: const Color(0xFF2C2C2C),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        title: Text(L10n.translate(context, 'Pro Mode Feature'), style: TextStyle(color: Colors.white)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        title: Text(L10n.translate(context, 'Pro Mode Feature'),
+                            style: TextStyle(color: Colors.white)),
                         content: Text(
-                          L10n.translate(context, 'Upgrade to Pro mode to import more than 1 video.'),
+                          L10n.translate(context,
+                              'Upgrade to Pro mode to import more than 1 video.'),
                           style: TextStyle(color: Colors.white70),
                         ),
                         actions: [
@@ -3185,10 +4043,13 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                       context: context,
                       builder: (context) => AlertDialog(
                         backgroundColor: const Color(0xFF2C2C2C),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        title: Text(L10n.translate(context, 'Pro Mode Feature'), style: TextStyle(color: Colors.white)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        title: Text(L10n.translate(context, 'Pro Mode Feature'),
+                            style: TextStyle(color: Colors.white)),
                         content: Text(
-                          L10n.translate(context, 'Upgrade to Pro mode to import more than 3 audio tracks.'),
+                          L10n.translate(context,
+                              'Upgrade to Pro mode to import more than 3 audio tracks.'),
                           style: TextStyle(color: Colors.white70),
                         ),
                         actions: [
@@ -3259,7 +4120,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
     for (int i = 0; i < _segments.length; i++) {
       final tempDir = await getTemporaryDirectory();
-      final trimmedOutputPath = '${tempDir.path}/trimmed_${i}_${DateTime.now().millisecondsSinceEpoch}.mp4';
+      final trimmedOutputPath =
+          '${tempDir.path}/trimmed_${i}_${DateTime.now().millisecondsSinceEpoch}.mp4';
 
       final builder = VideoEditorBuilder(videoPath: _segments[i].path).trim(
         startTimeMs: _segments[i].start.inMilliseconds,
@@ -3296,7 +4158,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
   }
 
   Future<double?> getVideoDurationSeconds(String path) async {
-    final session = await FFprobeKit.execute('-v quiet -print_format json -show_format "$path"');
+    final session = await FFprobeKit.execute(
+        '-v quiet -print_format json -show_format "$path"');
 
     final rc = await session.getReturnCode();
     if (ReturnCode.isSuccess(rc)) {
@@ -3320,7 +4183,10 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     final streams = allProperties!['streams'] as List<dynamic>;
     for (final stream in streams) {
       if (stream['codec_type'] == 'video') {
-        return {'width': stream['width'] as int, 'height': stream['height'] as int};
+        return {
+          'width': stream['width'] as int,
+          'height': stream['height'] as int
+        };
       }
     }
     return {'width': 1920, 'height': 1080}; // fallback
@@ -3342,7 +4208,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
       // 2) Compose output path
       final tmp = await getTemporaryDirectory();
-      final outPath = '${tmp.path}/gs_${DateTime.now().millisecondsSinceEpoch}.mp4';
+      final outPath =
+          '${tmp.path}/gs_${DateTime.now().millisecondsSinceEpoch}.mp4';
 
       // Tweak these if your greens aren’t pure #00FF00:
       //   keyColor:   0x00FF00 (pure green)
@@ -3411,9 +4278,12 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
           _segments[i] = VideoSegment(
             path: outPath,
             start: original.start, // Duration.zero,
-            end: original.end > newDuration! ? newDuration : original.end, //original.totalDuration,
+            end: original.end > newDuration!
+                ? newDuration
+                : original.end, //original.totalDuration,
             totalDuration: newDuration, //original.totalDuration,
-            thumbnailPath: original.thumbnailPath, // optional: regenerate if needed
+            thumbnailPath:
+                original.thumbnailPath, // optional: regenerate if needed
 
             gain: original.gain,
             original: foregroundPath,
@@ -3426,10 +4296,12 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         await _exportMergedVideo();
       } else {
         final logs = await session.getAllLogsAsString();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Green screen compose failed.\n$logs')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Green screen compose failed.\n$logs')));
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) setState(() => _isExporting = false);
     }
@@ -3459,12 +4331,15 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                       Expanded(
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(6),
-                          child: Image.file(File(_segments[i].thumbnailPath), height: 60, fit: BoxFit.cover),
+                          child: Image.file(File(_segments[i].thumbnailPath),
+                              height: 60, fit: BoxFit.cover),
                         ),
                       ),
                       const SizedBox(width: 8),
                       IconButton(
-                        icon: Icon(_expandedSegments.contains(i) ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+                        icon: Icon(_expandedSegments.contains(i)
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down),
                         onPressed: () {
                           setState(() {
                             if (_expandedSegments.contains(i)) {
@@ -3511,7 +4386,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text("${L10n.translate(context, 'Gain')}: ${_segments[i].gain.toStringAsFixed(2)}x"),
+                        Text(
+                            "${L10n.translate(context, 'Gain')}: ${_segments[i].gain.toStringAsFixed(2)}x"),
                         Slider(
                           value: _segments[i].gain,
                           min: 0.0,
@@ -3546,7 +4422,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                             min: 0.0,
                             max: _segments[i].greenScreenDuration,
                             divisions: 500,
-                            label: _segments[i].greenScreenStart.toStringAsFixed(2),
+                            label: _segments[i]
+                                .greenScreenStart
+                                .toStringAsFixed(2),
                             onChanged: (value) async {
                               setState(() {
                                 _segments[i].greenScreenStart = value;
@@ -3604,7 +4482,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                             setState(() => _isExporting = true);
                             final original = _segments[i];
                             final tempDir = await getTemporaryDirectory();
-                            final rotatedPath = '${tempDir.path}/rotated_${DateTime.now().millisecondsSinceEpoch}.mp4';
+                            final rotatedPath =
+                                '${tempDir.path}/rotated_${DateTime.now().millisecondsSinceEpoch}.mp4';
 
                             String? output;
 
@@ -3627,16 +4506,20 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                               final rc = await session.getReturnCode();
 
                               if (ReturnCode.isSuccess(rc)) {
-                                print('✅ Video rotated successfully -> $rotatedPath');
+                                print(
+                                    '✅ Video rotated successfully -> $rotatedPath');
                               } else {
-                                print('❌ Failed to rotate video. Return code: $rc');
+                                print(
+                                    '❌ Failed to rotate video. Return code: $rc');
                               }
                               output = rotatedPath;
                             } else {
                               // Rotate original path (or current if previously rotated)
                               output = await VideoEditorBuilder(
                                 videoPath: original.path,
-                              ).rotate(degree: RotationDegree.degree90).export(outputPath: rotatedPath);
+                              )
+                                  .rotate(degree: RotationDegree.degree90)
+                                  .export(outputPath: rotatedPath);
                             }
 
                             final newDuration = await getVideoDuration(output!);
@@ -3645,15 +4528,20 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                               _segments[i] = VideoSegment(
                                 path: output!,
                                 start: original.start, //Duration.zero,
-                                end: original.end > newDuration! ? newDuration : original.end, //original.totalDuration,
-                                totalDuration: newDuration, //original.totalDuration,
-                                thumbnailPath: original.thumbnailPath, // optional: regenerate if needed
+                                end: original.end > newDuration!
+                                    ? newDuration
+                                    : original.end, //original.totalDuration,
+                                totalDuration:
+                                    newDuration, //original.totalDuration,
+                                thumbnailPath: original
+                                    .thumbnailPath, // optional: regenerate if needed
 
                                 gain: original.gain,
                                 original: original.original,
                                 greenScreen: original.greenScreen,
                                 greenScreenStart: original.greenScreenStart,
-                                greenScreenDuration: original.greenScreenDuration,
+                                greenScreenDuration:
+                                    original.greenScreenDuration,
                               );
                             });
                             await _exportMergedVideo();
@@ -3664,33 +4552,40 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                         // ADD ICONBUTTON HERE FOR ADD GREENSCREEN VIDEO
                         IconButton(
                           tooltip: 'Add Green Screen Background',
-                          icon: const Icon(Icons.image), // or Icons.video_library
+                          icon:
+                              const Icon(Icons.image), // or Icons.video_library
                           onPressed: () async {
                             // 0) Guard: segment must exist
                             if (i < 0 || i >= _segments.length) return;
 
                             final foregroundPath = _segments[i].original != ''
                                 ? _segments[i].original
-                                : _segments[i].path; // this is the clip that has green screen
+                                : _segments[i]
+                                    .path; // this is the clip that has green screen
                             if (foregroundPath.isEmpty) return;
 
                             // 1) Pick a background video
                             String? bgPath;
                             if (Platform.isIOS) {
-                              final XFile? pickedFile = await ImagePicker().pickVideo(
-                                source: ImageSource.gallery, // Direct Photos app access
-                                maxDuration: Duration(minutes: 15), // LIMIT OF VIDEO DURATION
+                              final XFile? pickedFile =
+                                  await ImagePicker().pickVideo(
+                                source: ImageSource
+                                    .gallery, // Direct Photos app access
+                                maxDuration: Duration(
+                                    minutes: 15), // LIMIT OF VIDEO DURATION
                               );
 
                               if (pickedFile == null) return;
 
                               bgPath = pickedFile.path;
                             } else {
-                              final picked = await FilePicker.platform.pickFiles(
+                              final picked =
+                                  await FilePicker.platform.pickFiles(
                                 type: FileType.video,
                                 allowMultiple: false,
                               );
-                              if (picked == null || picked.files.isEmpty) return;
+                              if (picked == null || picked.files.isEmpty)
+                                return;
 
                               bgPath = picked.files.single.path;
                               if (bgPath == null) return;
@@ -3712,7 +4607,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                             final confirm = await showDialog<bool>(
                                   context: context,
                                   builder: (context) => AlertDialog(
-                                    title: Text(L10n.translate(context, 'Delete clip?')),
+                                    title: Text(L10n.translate(
+                                        context, 'Delete clip?')),
                                     content: Text(
                                       L10n.translate(
                                         context,
@@ -3721,14 +4617,18 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                     ),
                                     actions: [
                                       TextButton(
-                                        onPressed: () => Navigator.of(context).pop(false),
+                                        onPressed: () =>
+                                            Navigator.of(context).pop(false),
                                         child: Text(
                                           L10n.translate(context, 'Cancel'),
-                                          style: TextStyle(color: Color.fromARGB(255, 218, 218, 218)),
+                                          style: TextStyle(
+                                              color: Color.fromARGB(
+                                                  255, 218, 218, 218)),
                                         ),
                                       ),
                                       TextButton(
-                                        onPressed: () => Navigator.of(context).pop(true),
+                                        onPressed: () =>
+                                            Navigator.of(context).pop(true),
                                         child: Text(
                                           L10n.translate(context, 'Delete'),
                                           style: TextStyle(color: Colors.red),
@@ -3782,7 +4682,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                 children: [
                   SafeArea(
                     child: StatefulBuilder(
-                      builder: (BuildContext context, StateSetter setLocalState) {
+                      builder:
+                          (BuildContext context, StateSetter setLocalState) {
                         _audioEditorStateSetter = setLocalState;
                         return SingleChildScrollView(
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 64),
@@ -3792,7 +4693,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 12.0),
                                 child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     // LEFT SIDE: Home + Help
                                     Row(
@@ -3872,10 +4774,13 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                         // _audioOnly ? SizedBox.shrink() :
                                         ElevatedButton.icon(
                                           onPressed: () async {
-                                            final shouldSync = await showDialog<bool>(
+                                            final shouldSync = await showDialog<
+                                                    bool>(
                                                   context: context,
-                                                  builder: (context) => AlertDialog(
-                                                    title: Text(L10n.translate(context, 'AI Sync')),
+                                                  builder: (context) =>
+                                                      AlertDialog(
+                                                    title: Text(L10n.translate(
+                                                        context, 'AI Sync')),
                                                     content: Text(
                                                       L10n.translate(
                                                         context,
@@ -3885,10 +4790,21 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                                     ),
                                                     actions: [
                                                       TextButton(
-                                                        onPressed: () => Navigator.of(context).pop(false),
+                                                        onPressed: () =>
+                                                            Navigator.of(
+                                                                    context)
+                                                                .pop(false),
                                                         child: Text(
-                                                          L10n.translate(context, 'Cancel'),
-                                                          style: TextStyle(color: Color.fromARGB(255, 218, 218, 218)),
+                                                          L10n.translate(
+                                                              context,
+                                                              'Cancel'),
+                                                          style: TextStyle(
+                                                              color: Color
+                                                                  .fromARGB(
+                                                                      255,
+                                                                      218,
+                                                                      218,
+                                                                      218)),
                                                         ),
                                                       ),
                                                       // ElevatedButton(
@@ -3896,9 +4812,12 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                                       //   child: const Text("Sync"),
                                                       // ),
                                                       TextButton(
-                                                        onPressed: () => Navigator.pop(context, true),
+                                                        onPressed: () =>
+                                                            Navigator.pop(
+                                                                context, true),
                                                         child: Text(
-                                                          L10n.translate(context, 'Sync'),
+                                                          L10n.translate(
+                                                              context, 'Sync'),
                                                         ), //, style: TextStyle(color: Color(0xFF2F44FF))),
                                                       ),
                                                     ],
@@ -3911,9 +4830,11 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                             }
 
                                             if (_audioOnly) {
-                                              if (_audioTracks.length < 2) return;
+                                              if (_audioTracks.length < 2)
+                                                return;
                                               if (_isPlaying) {
-                                                await _togglePlayPauseAudio(_audioEditorStateSetter!);
+                                                await _togglePlayPauseAudio(
+                                                    _audioEditorStateSetter!);
                                               }
 
                                               setState(() {
@@ -3921,9 +4842,14 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                                 _syncProgress = 0.0;
                                               });
 
-                                              var firstTrack = _audioTracks.first;
-                                              for (var i = 1; i < _audioTracks.length; i++) {
-                                                await applyBestSyncOffset(_audioTracks[i], firstTrack.file.path);
+                                              var firstTrack =
+                                                  _audioTracks.first;
+                                              for (var i = 1;
+                                                  i < _audioTracks.length;
+                                                  i++) {
+                                                await applyBestSyncOffset(
+                                                    _audioTracks[i],
+                                                    firstTrack.file.path);
                                               }
 
                                               setState(() {
@@ -3931,21 +4857,26 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                                 _syncProgress = 0.0;
                                               });
 
-                                              _restartAudio(_audioEditorStateSetter!);
-                                              ScaffoldMessenger.of(context).showSnackBar(
+                                              _restartAudio(
+                                                  _audioEditorStateSetter!);
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
                                                 SnackBar(
                                                   content: Text(
-                                                    L10n.translate(context, 'AI Sync applied successfully!'),
+                                                    L10n.translate(context,
+                                                        'AI Sync applied successfully!'),
                                                   ),
                                                 ),
                                               );
-                                              _restartAudio(_audioEditorStateSetter!);
+                                              _restartAudio(
+                                                  _audioEditorStateSetter!);
 
                                               return;
                                             }
 
                                             // Ensure both video and at least one audio track are available.
-                                            if (_videoFile == null || _audioTracks.isEmpty) return;
+                                            if (_videoFile == null ||
+                                                _audioTracks.isEmpty) return;
 
                                             setState(() {
                                               _isPlaying = false;
@@ -3959,7 +4890,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                             });
 
                                             for (var track in _audioTracks) {
-                                              await applyBestSyncOffset(track, _videoFile!.path);
+                                              await applyBestSyncOffset(
+                                                  track, _videoFile!.path);
                                             }
                                             setState(() {
                                               _isSyncing = false;
@@ -3968,24 +4900,36 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
                                             _restartVideo();
 
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
                                               SnackBar(
-                                                content: Text(L10n.translate(context, 'AI Sync applied successfully!')),
+                                                content: Text(L10n.translate(
+                                                    context,
+                                                    'AI Sync applied successfully!')),
                                               ),
                                             );
                                             _restartVideo();
                                           },
                                           icon: const Icon(Icons.sync),
-                                          label: Text(L10n.translate(context, 'SYNC'), style: TextStyle(fontSize: 12)),
+                                          label: Text(
+                                              L10n.translate(context, 'SYNC'),
+                                              style: TextStyle(fontSize: 12)),
                                           style: ElevatedButton.styleFrom(
-                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 12, vertical: 8),
                                             shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(24), // makes it more pill-like
+                                              borderRadius: BorderRadius.circular(
+                                                  24), // makes it more pill-like
                                             ),
                                             elevation: 2,
-                                            backgroundColor: const Color.fromARGB(255, 230, 230, 230),
-                                            foregroundColor: const Color.fromARGB(255, 0, 0, 0),
-                                            iconColor: const Color.fromARGB(255, 0, 0, 0),
+                                            backgroundColor:
+                                                const Color.fromARGB(
+                                                    255, 230, 230, 230),
+                                            foregroundColor:
+                                                const Color.fromARGB(
+                                                    255, 0, 0, 0),
+                                            iconColor: const Color.fromARGB(
+                                                255, 0, 0, 0),
                                           ),
                                         ),
                                         const SizedBox(width: 8),
@@ -4006,16 +4950,25 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                         // ),
                                         IconButton(
                                           onPressed: _exportAndNavigate,
-                                          icon: const Icon(Icons.ios_share_sharp, size: 18),
+                                          icon: const Icon(
+                                              Icons.ios_share_sharp,
+                                              size: 18),
                                           style: ElevatedButton.styleFrom(
-                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 12, vertical: 8),
                                             shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(24), // makes it more pill-like
+                                              borderRadius: BorderRadius.circular(
+                                                  24), // makes it more pill-like
                                             ),
                                             elevation: 2,
-                                            backgroundColor: const Color.fromARGB(255, 230, 230, 230),
-                                            foregroundColor: const Color.fromARGB(255, 0, 0, 0),
-                                            iconColor: const Color.fromARGB(255, 0, 0, 0),
+                                            backgroundColor:
+                                                const Color.fromARGB(
+                                                    255, 230, 230, 230),
+                                            foregroundColor:
+                                                const Color.fromARGB(
+                                                    255, 0, 0, 0),
+                                            iconColor: const Color.fromARGB(
+                                                255, 0, 0, 0),
                                           ),
                                         ),
                                       ],
@@ -4032,26 +4985,34 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                 children: [
                                   GestureDetector(
                                     onTap: () {
-                                      if (widget.mode == "Basic" && _segments.length == 1) {
+                                      if (widget.mode == "Basic" &&
+                                          _segments.length == 1) {
                                         showDialog(
                                           context: context,
                                           builder: (context) => AlertDialog(
-                                            backgroundColor: const Color(0xFF2C2C2C),
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                            backgroundColor:
+                                                const Color(0xFF2C2C2C),
+                                            shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(16)),
                                             title: Text(
-                                              L10n.translate(context, 'Pro Mode Feature'),
-                                              style: TextStyle(color: Colors.white),
+                                              L10n.translate(
+                                                  context, 'Pro Mode Feature'),
+                                              style: TextStyle(
+                                                  color: Colors.white),
                                             ),
                                             content: Text(
                                               L10n.translate(
                                                 context,
                                                 'Upgrade to Pro mode to import more than 1 video.',
                                               ),
-                                              style: TextStyle(color: Colors.white70),
+                                              style: TextStyle(
+                                                  color: Colors.white70),
                                             ),
                                             actions: [
                                               TextButton(
-                                                onPressed: () => Navigator.pop(context),
+                                                onPressed: () =>
+                                                    Navigator.pop(context),
                                                 child: const Text(
                                                   "OK",
                                                   // style: TextStyle(color: Color(0xFF2F44FF)),
@@ -4065,9 +5026,12 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                       _pickVideoFile();
                                     },
                                     key: const ValueKey('video_player'),
-                                    child: _audioOnly || (_videoController == null && betterController == null)
+                                    child: _audioOnly ||
+                                            (_videoController == null &&
+                                                betterController == null)
                                         ? ClipRRect(
-                                            borderRadius: BorderRadius.circular(12), // Adjust radius as needed
+                                            borderRadius: BorderRadius.circular(
+                                                12), // Adjust radius as needed
                                             child: AspectRatio(
                                               aspectRatio: 16 / 9,
                                               child: Container(
@@ -4087,12 +5051,16 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                         //   child:VideoPlayer(_videoController!)
                                         // ),
                                         ClipRRect(
-                                            borderRadius: BorderRadius.circular(12),
+                                            borderRadius:
+                                                BorderRadius.circular(12),
                                             child: useBetterPlayer
-                                                ? BetterPlayer(controller: betterController!)
+                                                ? BetterPlayer(
+                                                    controller:
+                                                        betterController!)
                                                 : AspectRatio(
                                                     aspectRatio: aspectRatio,
-                                                    child: VideoPlayer(_videoController!),
+                                                    child: VideoPlayer(
+                                                        _videoController!),
                                                   ),
                                           ),
                                   ),
@@ -4104,22 +5072,29 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                           ? SizedBox.shrink()
                                           : IconButton(
                                               icon: Icon(
-                                                Icons.video_settings, // speaker with lines icon
+                                                Icons
+                                                    .video_settings, // speaker with lines icon
                                                 color: _showAutomationSection
                                                     ? Colors.white
-                                                    : const Color.fromARGB(255, 230, 230, 230),
+                                                    : const Color.fromARGB(
+                                                        255, 230, 230, 230),
                                               ),
                                               onPressed: () {
                                                 setState(() {
-                                                  _showAutomationSection = !_showAutomationSection;
+                                                  _showAutomationSection =
+                                                      !_showAutomationSection;
                                                 });
                                               },
                                             ),
-                                      _audioOnly ? Container() : const SizedBox(width: 8),
+                                      _audioOnly
+                                          ? Container()
+                                          : const SizedBox(width: 8),
                                       Expanded(child: _buildTimeDisplay()),
                                       _audioOnly
                                           ? Container()
-                                          : const SizedBox(width: 48), // balance space taken by IconButton
+                                          : const SizedBox(
+                                              width:
+                                                  48), // balance space taken by IconButton
                                     ],
                                   ),
                                   const SizedBox(height: 10),
@@ -4129,34 +5104,53 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                   MiniTimelinePro<VideoSegment, AudioTrack>(
                                     // your data
                                     video: _segments, // List<VideoSegment>
-                                    audio: _audioTracks.map((t) => [t]).toList(), // List<List<AudioTrack>>
+                                    audio: _audioTracks
+                                        .map((t) => [t])
+                                        .toList(), // List<List<AudioTrack>>
                                     // map fields from YOUR models (adjust names if needed)
-                                    getVideoStartMs: (v) => v.start.inMilliseconds.toDouble(),
-                                    getVideoDurationMs: (v) => (v.end - v.start).inMilliseconds.toDouble(),
-                                    getVideoThumbPath: (v) => v.thumbnailPath, // tiled across the block
-                                    getVideoLabel: (v) => v.path.split('/').last,
+                                    getVideoStartMs: (v) =>
+                                        v.start.inMilliseconds.toDouble(),
+                                    getVideoDurationMs: (v) => (v.end - v.start)
+                                        .inMilliseconds
+                                        .toDouble(),
+                                    getVideoThumbPath: (v) => v
+                                        .thumbnailPath, // tiled across the block
+                                    getVideoLabel: (v) =>
+                                        v.path.split('/').last,
 
-                                    getAudioStartMs: (a) => a.offset * 1000.0, // seconds → ms
-                                    getAudioDurationMs: (a) => (a.trimEnd - a.trimStart).inMilliseconds.toDouble(),
-                                    getAudioPeaks: (a) => a.normWaveformData, // List<double> [-1..1]
+                                    getAudioStartMs: (a) =>
+                                        a.offset * 1000.0, // seconds → ms
+                                    getAudioDurationMs: (a) =>
+                                        (a.trimEnd - a.trimStart)
+                                            .inMilliseconds
+                                            .toDouble(),
+                                    getAudioPeaks: (a) => a
+                                        .normWaveformData, // List<double> [-1..1]
                                     // playhead binding (keeps the red line in sync)
                                     playheadMs: _audioOnly
-                                        ? _globalAudioClock.inMilliseconds.toDouble()
-                                        : _videoPosition.inMilliseconds.toDouble(),
+                                        ? _globalAudioClock.inMilliseconds
+                                            .toDouble()
+                                        : _videoPosition.inMilliseconds
+                                            .toDouble(),
 
                                     // scrub anywhere on the ruler or timeline to seek
                                     onScrubRequested: (ms) {
-                                      final t = Duration(milliseconds: ms.round());
+                                      final t =
+                                          Duration(milliseconds: ms.round());
                                       // Replace these with your actual seek calls:
-                                      _videoController?.seekTo(t); // or better_player on Android
-                                      setState(() => _videoPosition = t); // keep your state in sync
+                                      _videoController?.seekTo(
+                                          t); // or better_player on Android
+                                      setState(() => _videoPosition =
+                                          t); // keep your state in sync
                                       // If you sync audio tracks too, call your JUCE/engine seek here.
                                     },
 
                                     scrollController: _timelineScroll,
-                                    autoFollow: true, // edge follow while playing/scrubbing
+                                    autoFollow:
+                                        true, // edge follow while playing/scrubbing
                                     followEdgePadding: 60,
-                                    fixedPlayhead: true, // set true to pin the line in the viewport
+                                    fixedPlayhead:
+                                        true, // set true to pin the line in the viewport
                                     playheadAnchorFraction: 0.5,
 
                                     // optional tuning
@@ -4172,7 +5166,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                     GestureDetector(
                                       onVerticalDragDown: (_) {},
                                       behavior: HitTestBehavior.translucent,
-                                      child: _buildVideoAudioAutomationSection(),
+                                      child:
+                                          _buildVideoAudioAutomationSection(),
                                     ),
                                     const SizedBox(height: 10),
                                   ],
@@ -4187,7 +5182,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                               //       ? Container()
                               //       : _buildMultiTrackAudioSection())
                               //   : Container(),//_buildAudioControls(),
-                              _audioTracks.isEmpty ? Container() : _buildMultiTrackAudioSection(),
+                              _audioTracks.isEmpty
+                                  ? Container()
+                                  : _buildMultiTrackAudioSection(),
                               //_buildAudioControls(),
                               // const SizedBox(height: 10),
                               // const SizedBox(height: 60),
@@ -4244,7 +5241,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                 child: LinearProgressIndicator(
                                   value: _syncProgress,
                                   backgroundColor: Colors.white30,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.lightBlueAccent),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.lightBlueAccent),
                                 ),
                               ),
                               const SizedBox(height: 8),
@@ -4260,14 +5258,16 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                 ],
               ),
               bottomNavigationBar: Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, Platform.isAndroid ? 54 : 36),
+                padding: EdgeInsets.fromLTRB(
+                    16, 0, 16, Platform.isAndroid ? 54 : 36),
                 child: SizedBox(
                   height: 64, // or any height you want for the floating bar
                   child: _buildFloatingTransportBar(),
                 ),
               ),
               floatingActionButton: Padding(
-                padding: const EdgeInsets.only(bottom: 0.0, right: 0.0), // above bottom nav
+                padding: const EdgeInsets.only(
+                    bottom: 0.0, right: 0.0), // above bottom nav
                 child: FloatingActionButton(
                   onPressed: () => _showAddMediaOptions(),
                   backgroundColor: const Color.fromARGB(255, 230, 230, 230),
@@ -4342,7 +5342,8 @@ class _VideoTrimSliderState extends State<VideoTrimSlider> {
   @override
   void initState() {
     super.initState();
-    _range = RangeValues(widget.initialStart.inMilliseconds.toDouble(), widget.initialEnd.inMilliseconds.toDouble());
+    _range = RangeValues(widget.initialStart.inMilliseconds.toDouble(),
+        widget.initialEnd.inMilliseconds.toDouble());
   }
 
   @override
@@ -4383,11 +5384,13 @@ class _VideoTrimSliderState extends State<VideoTrimSlider> {
               }
 
               setState(() {
-                _range = RangeValues(start.clamp(0, maxMs), end.clamp(0, maxMs));
+                _range =
+                    RangeValues(start.clamp(0, maxMs), end.clamp(0, maxMs));
               });
             },
             onChangeEnd: (values) {
-              widget.onChangeStart(Duration(milliseconds: _range.start.toInt()));
+              widget
+                  .onChangeStart(Duration(milliseconds: _range.start.toInt()));
               widget.onChangeEnd(Duration(milliseconds: _range.end.toInt()));
             },
           ),
@@ -4412,7 +5415,8 @@ class _VideoTrimSliderState extends State<VideoTrimSlider> {
 
     final minutes = twoDigits(duration.inMinutes.remainder(60));
     final seconds = twoDigits(duration.inSeconds.remainder(60));
-    final millisecondsFirstTwo = firstTwoMsDigits(duration.inMilliseconds.remainder(1000));
+    final millisecondsFirstTwo =
+        firstTwoMsDigits(duration.inMilliseconds.remainder(1000));
 
     return "$minutes:$seconds:$millisecondsFirstTwo";
   }
@@ -4420,7 +5424,8 @@ class _VideoTrimSliderState extends State<VideoTrimSlider> {
 
 class CustomSelectVideoWidget extends StatelessWidget {
   final VoidCallback onTap;
-  const CustomSelectVideoWidget({Key? key, required this.onTap}) : super(key: key);
+  const CustomSelectVideoWidget({Key? key, required this.onTap})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -4441,11 +5446,15 @@ class CustomSelectVideoWidget extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.videocam, size: 48, color: const Color(0xFF2E61A5)),
+                      Icon(Icons.videocam,
+                          size: 48, color: const Color(0xFF2E61A5)),
                       const SizedBox(height: 8),
                       Text(
                         L10n.translate(context, 'Select Video'),
-                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.w400, color: Color(0xFF2E61A5)),
+                        style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w400,
+                            color: Color(0xFF2E61A5)),
                       ),
                     ],
                   ),
@@ -4453,7 +5462,10 @@ class CustomSelectVideoWidget extends StatelessWidget {
               ),
               Positioned.fill(
                 child: CustomPaint(
-                  painter: CornerPainter(cornerLength: 20, strokeWidth: 3, color: const Color(0xFF2E61A5)),
+                  painter: CornerPainter(
+                      cornerLength: 20,
+                      strokeWidth: 3,
+                      color: const Color(0xFF2E61A5)),
                 ),
               ),
             ],
@@ -4469,7 +5481,8 @@ class CustomSelectModeWidget extends StatelessWidget {
   final IconData icon;
   final String text;
 
-  const CustomSelectModeWidget({Key? key, required this.onTap, required this.icon, required this.text})
+  const CustomSelectModeWidget(
+      {Key? key, required this.onTap, required this.icon, required this.text})
       : super(key: key);
 
   @override
@@ -4495,7 +5508,10 @@ class CustomSelectModeWidget extends StatelessWidget {
                       const SizedBox(height: 8),
                       Text(
                         text,
-                        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w400, color: Color(0xFF2E61A5)),
+                        style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w400,
+                            color: Color(0xFF2E61A5)),
                       ),
                     ],
                   ),
@@ -4503,7 +5519,10 @@ class CustomSelectModeWidget extends StatelessWidget {
               ),
               Positioned.fill(
                 child: CustomPaint(
-                  painter: CornerPainter(cornerLength: 20, strokeWidth: 3, color: const Color(0xFF2E61A5)),
+                  painter: CornerPainter(
+                      cornerLength: 20,
+                      strokeWidth: 3,
+                      color: const Color(0xFF2E61A5)),
                 ),
               ),
             ],
@@ -4537,16 +5556,22 @@ class CornerPainter extends CustomPainter {
     canvas.drawLine(Offset(0, 0), Offset(0, cornerLength), paint);
 
     // Top right corner
-    canvas.drawLine(Offset(size.width, 0), Offset(size.width - cornerLength, 0), paint);
-    canvas.drawLine(Offset(size.width, 0), Offset(size.width, cornerLength), paint);
+    canvas.drawLine(
+        Offset(size.width, 0), Offset(size.width - cornerLength, 0), paint);
+    canvas.drawLine(
+        Offset(size.width, 0), Offset(size.width, cornerLength), paint);
 
     // Bottom left corner
-    canvas.drawLine(Offset(0, size.height), Offset(0, size.height - cornerLength), paint);
-    canvas.drawLine(Offset(0, size.height), Offset(cornerLength, size.height), paint);
+    canvas.drawLine(
+        Offset(0, size.height), Offset(0, size.height - cornerLength), paint);
+    canvas.drawLine(
+        Offset(0, size.height), Offset(cornerLength, size.height), paint);
 
     // Bottom right corner
-    canvas.drawLine(Offset(size.width, size.height), Offset(size.width - cornerLength, size.height), paint);
-    canvas.drawLine(Offset(size.width, size.height), Offset(size.width, size.height - cornerLength), paint);
+    canvas.drawLine(Offset(size.width, size.height),
+        Offset(size.width - cornerLength, size.height), paint);
+    canvas.drawLine(Offset(size.width, size.height),
+        Offset(size.width, size.height - cornerLength), paint);
   }
 
   @override
@@ -4560,14 +5585,17 @@ class DotsLoader extends StatefulWidget {
   State<DotsLoader> createState() => _DotsLoaderState();
 }
 
-class _DotsLoaderState extends State<DotsLoader> with SingleTickerProviderStateMixin {
+class _DotsLoaderState extends State<DotsLoader>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<int> _dotCount;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(duration: const Duration(seconds: 1), vsync: this)..repeat();
+    _controller =
+        AnimationController(duration: const Duration(seconds: 1), vsync: this)
+          ..repeat();
     _dotCount = StepTween(begin: 0, end: 4).animate(_controller);
   }
 
@@ -4586,14 +5614,16 @@ class _DotsLoaderState extends State<DotsLoader> with SingleTickerProviderStateM
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text('${L10n.translate(context, 'Syncing Audio')}', style: TextStyle(color: Colors.white, fontSize: 20)),
+        Text('${L10n.translate(context, 'Syncing Audio')}',
+            style: TextStyle(color: Colors.white, fontSize: 20)),
         const SizedBox(width: 2),
         SizedBox(
           width: totalDotSpace,
           child: AnimatedBuilder(
             animation: _dotCount,
             builder: (context, _) {
-              return Text('.' * _dotCount.value, style: const TextStyle(color: Colors.white, fontSize: 20));
+              return Text('.' * _dotCount.value,
+                  style: const TextStyle(color: Colors.white, fontSize: 20));
             },
           ),
         ),
@@ -4631,11 +5661,14 @@ class _WaveformSeekLinePainter extends CustomPainter {
 
     // Map [trimStart .. trimEnd] → [0.0 .. 1.0]
     final trimmedDuration = trimEnd - trimStart;
-    final normalized = (audioPosition - trimStart).inMilliseconds / trimmedDuration.inMilliseconds;
+    final normalized = (audioPosition - trimStart).inMilliseconds /
+        trimmedDuration.inMilliseconds;
 
     // Compute X in the total waveform:
-    final trimStartRatio = trimStart.inMilliseconds / totalAudioDuration.inMilliseconds;
-    final trimEndRatio = trimEnd.inMilliseconds / totalAudioDuration.inMilliseconds;
+    final trimStartRatio =
+        trimStart.inMilliseconds / totalAudioDuration.inMilliseconds;
+    final trimEndRatio =
+        trimEnd.inMilliseconds / totalAudioDuration.inMilliseconds;
 
     final waveformStartX = size.width * trimStartRatio;
     final waveformEndX = size.width * trimEndRatio;
@@ -4695,8 +5728,11 @@ class AudioTrack {
     this.echo = 0.0,
     this.didExtractWaveform = false,
   })  : currentPosition = currentPosition ?? Duration.zero,
-        volumeAutomation =
-            volumeAutomation ?? [AutomationPoint(x: 0.0, volume: 1.0), AutomationPoint(x: 1.0, volume: 1.0)];
+        volumeAutomation = volumeAutomation ??
+            [
+              AutomationPoint(x: 0.0, volume: 1.0),
+              AutomationPoint(x: 1.0, volume: 1.0)
+            ];
 
   static Future<AudioTrack> create({
     required File file,
@@ -4741,13 +5777,15 @@ class AudioTrack {
   }
 }
 
-double getVolumeForAutomation(List<AutomationPoint> points, double normalizedTime) {
+double getVolumeForAutomation(
+    List<AutomationPoint> points, double normalizedTime) {
   if (points.isEmpty) return 1.0;
   if (normalizedTime <= points.first.x) return points.first.volume;
   if (normalizedTime >= points.last.x) return points.last.volume;
   for (int i = 0; i < points.length - 1; i++) {
     if (normalizedTime >= points[i].x && normalizedTime <= points[i + 1].x) {
-      double t = (normalizedTime - points[i].x) / (points[i + 1].x - points[i].x);
+      double t =
+          (normalizedTime - points[i].x) / (points[i + 1].x - points[i].x);
       return points[i].volume + t * (points[i + 1].volume - points[i].volume);
     }
   }
@@ -4762,7 +5800,8 @@ class AutomationPoint {
 
 class VolumeAutomationWidget extends StatefulWidget {
   final List<AutomationPoint> automationPoints;
-  final double currentNormalizedTime; // normalized current playback time (0.0 to 1.0)
+  final double
+      currentNormalizedTime; // normalized current playback time (0.0 to 1.0)
   final ValueChanged<List<AutomationPoint>> onAutomationChanged;
 
   const VolumeAutomationWidget({
@@ -4813,17 +5852,20 @@ class _VolumeAutomationWidgetState extends State<VolumeAutomationWidget> {
     for (int i = 0; i < _points.length - 1; i++) {
       if (x >= _points[i].x && x <= _points[i + 1].x) {
         double t = (x - _points[i].x) / (_points[i + 1].x - _points[i].x);
-        return _points[i].volume + t * (_points[i + 1].volume - _points[i].volume);
+        return _points[i].volume +
+            t * (_points[i + 1].volume - _points[i].volume);
       }
     }
     return 1.0;
   }
 
-  Widget _buildDraggableHandle(AutomationPoint point, double width, double height) {
+  Widget _buildDraggableHandle(
+      AutomationPoint point, double width, double height) {
     const double visibleHandleSize = 24;
     const double hitBoxSize = 48;
 
-    const double edgeExtension = 16; // How much extra space to provide at the edges
+    const double edgeExtension =
+        16; // How much extra space to provide at the edges
 
     double hitBoxLeft = point.x * width - hitBoxSize / 2;
     double hitBoxTop = (1 - point.volume) * height - hitBoxSize / 2;
@@ -4905,9 +5947,12 @@ class _VolumeAutomationWidgetState extends State<VolumeAutomationWidget> {
             children: [
               CustomPaint(
                 size: Size(width, height),
-                painter: _AutomationPainter(points: _points, currentNormalizedTime: widget.currentNormalizedTime),
+                painter: _AutomationPainter(
+                    points: _points,
+                    currentNormalizedTime: widget.currentNormalizedTime),
               ),
-              for (var point in _points) _buildDraggableHandle(point, width, height),
+              for (var point in _points)
+                _buildDraggableHandle(point, width, height),
             ],
           ),
         );
@@ -4919,7 +5964,8 @@ class _VolumeAutomationWidgetState extends State<VolumeAutomationWidget> {
 class _AutomationPainter extends CustomPainter {
   final List<AutomationPoint> points;
   final double currentNormalizedTime;
-  _AutomationPainter({required this.points, required this.currentNormalizedTime});
+  _AutomationPainter(
+      {required this.points, required this.currentNormalizedTime});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -4948,7 +5994,9 @@ class _AutomationPainter extends CustomPainter {
     canvas.drawPath(fillPath, fillPaint);
 
     // Draw the seek line (non-interactive).
-    double seekX = currentNormalizedTime.isFinite ? currentNormalizedTime * size.width : 0.0;
+    double seekX = currentNormalizedTime.isFinite
+        ? currentNormalizedTime * size.width
+        : 0.0;
     Paint seekPaint = Paint()
       ..color = Color(0xFF888888)
       ..strokeWidth = 2;
@@ -4957,7 +6005,8 @@ class _AutomationPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _AutomationPainter oldDelegate) {
-    return oldDelegate.points != points || oldDelegate.currentNormalizedTime != currentNormalizedTime;
+    return oldDelegate.points != points ||
+        oldDelegate.currentNormalizedTime != currentNormalizedTime;
   }
 }
 
@@ -4972,7 +6021,8 @@ void _findSyncOffsetInBackground(List<Object?> args) {
     List<double> videoSamples = await loadAudioSamplesAsync(videoAudioPath);
     List<double> trackSamples = await loadAudioSamplesAsync(convertedTrackPath);
 
-    int bestOffset = findOffsetFFT(videoSamples, trackSamples, sampleRate, progressPort);
+    int bestOffset =
+        findOffsetFFT(videoSamples, trackSamples, sampleRate, progressPort);
     sendPort.send(bestOffset);
   }
 
@@ -4996,7 +6046,8 @@ List<double> loadAudioSamples(String filePath, {int numChannels = 2}) {
   return samples;
 }
 
-Future<List<double>> loadAudioSamplesAsync(String filePath, {int numChannels = 2}) async {
+Future<List<double>> loadAudioSamplesAsync(String filePath,
+    {int numChannels = 2}) async {
   final file = File(filePath);
   final bytes = await file.readAsBytes();
 
@@ -5017,7 +6068,8 @@ Future<List<double>> loadAudioSamplesAsync(String filePath, {int numChannels = 2
   return samples;
 }
 
-int findOffsetFFT(List<double> videoSamples, List<double> trackSamples, double sampleRate, SendPort progressPort) {
+int findOffsetFFT(List<double> videoSamples, List<double> trackSamples,
+    double sampleRate, SendPort progressPort) {
   // 1. Downsample first (Key optimization)
   const int targetSampleRate = 8000; // Adequate for sync
   final double ratio = sampleRate / targetSampleRate;
@@ -5108,8 +6160,9 @@ int _findPeakIndex(List<double> data) {
 double _refinePeak(List<double> data, int index, int fftSize) {
   if (index <= 0 || index >= data.length - 1) return index.toDouble();
 
-  final double delta =
-      0.5 * (data[index - 1] - data[index + 1]) / (data[index - 1] - 2 * data[index] + data[index + 1]);
+  final double delta = 0.5 *
+      (data[index - 1] - data[index + 1]) /
+      (data[index - 1] - 2 * data[index] + data[index + 1]);
 
   final refined = index + delta;
   return refined < fftSize / 2 ? refined : refined - fftSize;
@@ -5336,10 +6389,12 @@ class VideoAudioAutomationWidget extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  _VideoAudioAutomationWidgetState createState() => _VideoAudioAutomationWidgetState();
+  _VideoAudioAutomationWidgetState createState() =>
+      _VideoAudioAutomationWidgetState();
 }
 
-class _VideoAudioAutomationWidgetState extends State<VideoAudioAutomationWidget> {
+class _VideoAudioAutomationWidgetState
+    extends State<VideoAudioAutomationWidget> {
   late List<AutomationPoint> _points;
   static const double _autoSnapNorm = 0.02;
   @override
@@ -5376,17 +6431,20 @@ class _VideoAudioAutomationWidgetState extends State<VideoAudioAutomationWidget>
     for (int i = 0; i < _points.length - 1; i++) {
       if (x >= _points[i].x && x <= _points[i + 1].x) {
         double t = (x - _points[i].x) / (_points[i + 1].x - _points[i].x);
-        return _points[i].volume + t * (_points[i + 1].volume - _points[i].volume);
+        return _points[i].volume +
+            t * (_points[i + 1].volume - _points[i].volume);
       }
     }
     return 1.0;
   }
 
-  Widget _buildDraggableHandle(AutomationPoint point, double width, double height) {
+  Widget _buildDraggableHandle(
+      AutomationPoint point, double width, double height) {
     const double visibleHandleSize = 24;
     const double hitBoxSize = 48;
 
-    const double edgeExtension = 16; // How much extra space to provide at the edges
+    const double edgeExtension =
+        16; // How much extra space to provide at the edges
 
     double hitBoxLeft = point.x * width - hitBoxSize / 2;
     double hitBoxTop = (1 - point.volume) * height - hitBoxSize / 2;
@@ -5469,9 +6527,12 @@ class _VideoAudioAutomationWidgetState extends State<VideoAudioAutomationWidget>
               CustomPaint(
                 // TODO: Offset argument contained a NaN value.
                 size: Size(width, height),
-                painter: _AutomationPainter(points: _points, currentNormalizedTime: widget.currentNormalizedTime),
+                painter: _AutomationPainter(
+                    points: _points,
+                    currentNormalizedTime: widget.currentNormalizedTime),
               ),
-              for (var point in _points) _buildDraggableHandle(point, width, height),
+              for (var point in _points)
+                _buildDraggableHandle(point, width, height),
             ],
           ),
         );
@@ -5481,9 +6542,11 @@ class _VideoAudioAutomationWidgetState extends State<VideoAudioAutomationWidget>
 }
 // VIDEO AUDIO AUTOMATION CURVE END
 
-String generateVolumeAutomationFilter(AudioTrack track, int offsetMs, double universalCrossfade) {
+String generateVolumeAutomationFilter(
+    AudioTrack track, int offsetMs, double universalCrossfade) {
   // If no automation points, default to universal crossfade value.
-  if (track.volumeAutomation.isEmpty) return min(1.0, universalCrossfade * 2).toStringAsFixed(2);
+  if (track.volumeAutomation.isEmpty)
+    return min(1.0, universalCrossfade * 2).toStringAsFixed(2);
 
   List<String> conditions = [];
   double trackOffsetSec = offsetMs / 1000.0;
@@ -5557,7 +6620,8 @@ class ExportProgressPage extends StatefulWidget {
   final Future<String> Function(ValueChanged<double>) exportFn;
   final String videoFile;
 
-  const ExportProgressPage({required this.exportFn, required this.videoFile, super.key});
+  const ExportProgressPage(
+      {required this.exportFn, required this.videoFile, super.key});
 
   @override
   State<ExportProgressPage> createState() => _ExportProgressPageState();
@@ -5624,11 +6688,15 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
             const SizedBox(height: 24),
             Text(
               L10n.translate(context, 'Exporting...'),
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+              style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white),
             ),
             const SizedBox(height: 8),
             Text(
-              L10n.translate(context, "Please don't close the app or lock your screen."),
+              L10n.translate(
+                  context, "Please don't close the app or lock your screen."),
               style: TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 24),
@@ -5701,11 +6769,13 @@ class ExportSuccessScreen extends StatelessWidget {
   final String filePath;
   final bool isVideo;
 
-  const ExportSuccessScreen({super.key, required this.filePath, required this.isVideo});
+  const ExportSuccessScreen(
+      {super.key, required this.filePath, required this.isVideo});
 
   Future<void> _shareFile(BuildContext context) async {
     try {
-      await Share.shareXFiles([XFile(filePath)]); // doesn't work on android (only iOS)
+      await Share.shareXFiles(
+          [XFile(filePath)]); // doesn't work on android (only iOS)
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to share.')), // ${e.toString()}')),
@@ -5727,7 +6797,8 @@ class ExportSuccessScreen extends StatelessWidget {
 
   Future<Map<String, String>?> showUploadDialog(BuildContext context) {
     final titleController = TextEditingController(text: 'My Mixroom Video');
-    final descController = TextEditingController(text: 'Made with Mixroom 🎸🎬');
+    final descController =
+        TextEditingController(text: 'Made with Mixroom 🎸🎬');
 
     return showDialog<Map<String, String>>(
       context: context,
@@ -5749,14 +6820,19 @@ class ExportSuccessScreen extends StatelessWidget {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(context), child: Text('Cancel')),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: const Color.fromARGB(255, 255, 255, 255), // or onPrimary
+                foregroundColor:
+                    const Color.fromARGB(255, 255, 255, 255), // or onPrimary
               ),
               onPressed: () {
-                Navigator.pop(context, {'title': titleController.text, 'description': descController.text});
+                Navigator.pop(context, {
+                  'title': titleController.text,
+                  'description': descController.text
+                });
               },
               child: Text('Upload'),
             ),
@@ -5794,7 +6870,8 @@ class ExportSuccessScreen extends StatelessWidget {
       emptyColor: const Color(0xFFFFFFFF),
       gapless: true,
     );
-    final qrImageData = await painter.toImageData(300, format: ImageByteFormat.png);
+    final qrImageData =
+        await painter.toImageData(300, format: ImageByteFormat.png);
 
     final qrBytes = qrImageData!.buffer.asUint8List();
 
@@ -5805,7 +6882,8 @@ class ExportSuccessScreen extends StatelessWidget {
     final thumbnail = img.decodeImage(await frameFile.readAsBytes());
     final qr = img.decodeImage(qrBytes);
 
-    if (thumbnail == null || qr == null) throw Exception("Failed to process images");
+    if (thumbnail == null || qr == null)
+      throw Exception("Failed to process images");
 
     // 3. Overlay QR on top-left
     final qrSize = (thumbnail.width * 0.25).toInt(); // ~25% width
@@ -5832,7 +6910,8 @@ class ExportSuccessScreen extends StatelessWidget {
               SizedBox(height: 12),
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.file(qrImage, width: 280, height: 158, fit: BoxFit.cover),
+                child: Image.file(qrImage,
+                    width: 280, height: 158, fit: BoxFit.cover),
               ),
               const SizedBox(height: 16),
               ElevatedButton.icon(
@@ -5842,7 +6921,10 @@ class ExportSuccessScreen extends StatelessWidget {
                   final result = await ImageGallerySaver.saveFile(qrImage.path);
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(result['isSuccess'] == true ? '✅ Saved to gallery!' : '❌ Failed to save')),
+                    SnackBar(
+                        content: Text(result['isSuccess'] == true
+                            ? '✅ Saved to gallery!'
+                            : '❌ Failed to save')),
                   );
                 },
               ),
@@ -5892,7 +6974,8 @@ class ExportSuccessScreen extends StatelessWidget {
                   // );
                   Navigator.pop(context, true);
                 },
-                child: Text(L10n.translate(context, 'Done'), style: TextStyle(fontSize: 16, color: Colors.white)),
+                child: Text(L10n.translate(context, 'Done'),
+                    style: TextStyle(fontSize: 16, color: Colors.white)),
               ),
             ],
           ), //title: Text(L10n.translate(context, 'Export Successful'))),
@@ -5916,12 +6999,14 @@ class ExportSuccessScreen extends StatelessWidget {
                       // ),
                       isVideo
                           ? Text(
-                              L10n.translate(context, 'Your video was exported successfully!'),
+                              L10n.translate(context,
+                                  'Your video was exported successfully!'),
                               style: Theme.of(context).textTheme.headlineSmall,
                               textAlign: TextAlign.center,
                             )
                           : Text(
-                              L10n.translate(context, 'Your audio was exported successfully!'),
+                              L10n.translate(context,
+                                  'Your audio was exported successfully!'),
                               style: Theme.of(context).textTheme.headlineSmall,
                               textAlign: TextAlign.center,
                             ),
@@ -5934,7 +7019,8 @@ class ExportSuccessScreen extends StatelessWidget {
                       Text(L10n.translate(context, 'Share directly to:')),
                       const SizedBox(height: 20),
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
                         child: Wrap(
                           spacing: 32,
                           runSpacing: 24,
@@ -5942,14 +7028,17 @@ class ExportSuccessScreen extends StatelessWidget {
                           children: [
                             if (isVideo)
                               _SocialButton(
-                                iconWidget: Image.asset('assets/youtube_icon.png', width: 56),
+                                iconWidget: Image.asset(
+                                    'assets/youtube_icon.png',
+                                    width: 56),
                                 label: 'YouTube',
                                 onTap: () async {
                                   final info = await showUploadDialog(context);
                                   if (info == null) return;
 
                                   try {
-                                    final videoId = await YoutubeService.uploadVideo(
+                                    final videoId =
+                                        await YoutubeService.uploadVideo(
                                       file: File(filePath),
                                       title: info['title']!,
                                       description: info['description']!,
@@ -5960,14 +7049,17 @@ class ExportSuccessScreen extends StatelessWidget {
                                       return;
                                     }
 
-                                    final qrThumb = await generateThumbnailWithQR(videoId);
-                                    await YoutubeService.uploadThumbnail(videoId, qrThumb);
+                                    final qrThumb =
+                                        await generateThumbnailWithQR(videoId);
+                                    await YoutubeService.uploadThumbnail(
+                                        videoId, qrThumb);
                                     showQRPopup(context, qrThumb);
                                   } catch (e) {
                                     print("❌ Upload failed: $e");
                                     ScaffoldMessenger.of(
                                       context,
-                                    ).showSnackBar(SnackBar(content: Text('❌ Upload failed')));
+                                    ).showSnackBar(SnackBar(
+                                        content: Text('❌ Upload failed')));
                                   }
 
                                   // try {
@@ -5994,21 +7086,32 @@ class ExportSuccessScreen extends StatelessWidget {
                               ),
                             if (isVideo)
                               _SocialButton(
-                                iconWidget: Image.asset('assets/ig_icon.png', width: 56),
+                                iconWidget: Image.asset('assets/ig_icon.png',
+                                    width: 56),
                                 label: 'Instagram',
-                                onTap: () => _openSocialMedia('instagram://library', 'https://www.instagram.com/'),
+                                onTap: () => _openSocialMedia(
+                                    'instagram://library',
+                                    'https://www.instagram.com/'),
                               ),
                             if (isVideo)
                               _SocialButton(
-                                iconWidget: Image.asset('assets/tiktok_icon.png', width: 56),
+                                iconWidget: Image.asset(
+                                    'assets/tiktok_icon.png',
+                                    width: 56),
                                 label: 'TikTok',
-                                onTap: () => _openSocialMedia('snssdk1233://upload', 'https://www.tiktok.com/upload'),
+                                onTap: () => _openSocialMedia(
+                                    'snssdk1233://upload',
+                                    'https://www.tiktok.com/upload'),
                               ),
                             if (!isVideo)
                               _SocialButton(
-                                iconWidget: Image.asset('assets/soundcloud_icon.png', width: 56),
+                                iconWidget: Image.asset(
+                                    'assets/soundcloud_icon.png',
+                                    width: 56),
                                 label: 'SoundCloud',
-                                onTap: () => _openSocialMedia('soundcloud://upload', 'https://soundcloud.com/upload'),
+                                onTap: () => _openSocialMedia(
+                                    'soundcloud://upload',
+                                    'https://soundcloud.com/upload'),
                               ),
                           ],
                         ),
@@ -6044,7 +7147,8 @@ class QRThumbnailScreen extends StatelessWidget {
     final paint = Paint()..color = Colors.black;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
 
-    final qrPainter = QrPainter(data: videoUrl, version: QrVersions.auto, gapless: true);
+    final qrPainter =
+        QrPainter(data: videoUrl, version: QrVersions.auto, gapless: true);
 
     final qrImage = await qrPainter.toImage(100);
     final qrBytes = await qrImage.toByteData(format: ui.ImageByteFormat.png);
@@ -6060,7 +7164,8 @@ class QRThumbnailScreen extends StatelessWidget {
     final file = File('${tempDir.path}/youtube_qr_thumb.png');
     await file.writeAsBytes(byteData!.buffer.asUint8List());
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Thumbnail saved to ${file.path}')));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Thumbnail saved to ${file.path}')));
   }
 
   @override
@@ -6075,7 +7180,9 @@ class QRThumbnailScreen extends StatelessWidget {
             const SizedBox(height: 20),
             QrImageView(data: videoUrl, size: 200),
             const SizedBox(height: 20),
-            ElevatedButton(onPressed: () => _saveThumbnailWithQR(context), child: const Text('Download QR Thumbnail')),
+            ElevatedButton(
+                onPressed: () => _saveThumbnailWithQR(context),
+                child: const Text('Download QR Thumbnail')),
           ],
         ),
       ),
@@ -6089,7 +7196,8 @@ class _SocialButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _SocialButton({this.icon, this.iconWidget, required this.label, required this.onTap});
+  const _SocialButton(
+      {this.icon, this.iconWidget, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -6102,13 +7210,20 @@ class _SocialButton extends StatelessWidget {
           Container(
             width: 56,
             height: 56,
-            decoration: const BoxDecoration(color: Colors.white12, shape: BoxShape.circle),
+            decoration: const BoxDecoration(
+                color: Colors.white12, shape: BoxShape.circle),
             child: ClipOval(
-              child: Center(child: iconWidget ?? Icon(icon, size: 26, color: Colors.white)),
+              child: Center(
+                  child:
+                      iconWidget ?? Icon(icon, size: 26, color: Colors.white)),
             ),
           ),
           const SizedBox(height: 6),
-          Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white)),
+          Text(label,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: Colors.white)),
         ],
       ),
     );
@@ -6122,7 +7237,8 @@ class _SocialButton extends StatelessWidget {
 class EffectsDrawer extends StatefulWidget {
   final int trackIndex;
   final String mode;
-  const EffectsDrawer({Key? key, required this.trackIndex, this.mode = "Basic"}) : super(key: key);
+  const EffectsDrawer({Key? key, required this.trackIndex, this.mode = "Basic"})
+      : super(key: key);
 
   @override
   _EffectsDrawerState createState() => _EffectsDrawerState();
@@ -6143,7 +7259,8 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
     final names = await JuceAudioEngine.getTrackEffects(widget.trackIndex);
     final bypassStates = await Future.wait(
       List.generate(names.length, (index) async {
-        return await JuceAudioEngine.getPluginBypassState(widget.trackIndex, index);
+        return await JuceAudioEngine.getPluginBypassState(
+            widget.trackIndex, index);
       }),
     );
     setState(() {
@@ -6185,7 +7302,9 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                   child: Container(
                     width: 40,
                     height: 4,
-                    decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
+                    decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -6198,7 +7317,8 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                 ),
                 const Divider(height: 24),
 
-                Text(L10n.translate(context, 'Presets'), style: Theme.of(context).textTheme.headlineSmall),
+                Text(L10n.translate(context, 'Presets'),
+                    style: Theme.of(context).textTheme.headlineSmall),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
@@ -6219,17 +7339,23 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: EdgeInsets.zero,
 
-                  children: [for (int i = 0; i < _effects.length; i++) _buildEffectTile(i)],
+                  children: [
+                    for (int i = 0; i < _effects.length; i++)
+                      _buildEffectTile(i)
+                  ],
 
-                  proxyDecorator: (child, index, animation) =>
-                      Material(elevation: 6, color: const Color.fromARGB(154, 130, 130, 130), child: child),
+                  proxyDecorator: (child, index, animation) => Material(
+                      elevation: 6,
+                      color: const Color.fromARGB(154, 130, 130, 130),
+                      child: child),
 
                   onReorder: (oldIndex, newIndex) async {
                     if (oldIndex < 0 || oldIndex >= _effects.length) return;
                     if (newIndex > oldIndex) newIndex--;
                     newIndex = newIndex.clamp(0, _effects.length - 1);
 
-                    await JuceAudioEngine.reorderEffects(widget.trackIndex, oldIndex, newIndex);
+                    await JuceAudioEngine.reorderEffects(
+                        widget.trackIndex, oldIndex, newIndex);
                     setState(() {
                       final name = _effects.removeAt(oldIndex);
                       final bypass = _bypassed.removeAt(oldIndex);
@@ -6239,7 +7365,10 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                   },
                 ),
 
-                if (_effects.length < 5) Padding(padding: const EdgeInsets.only(top: 8), child: _buildAddTile()),
+                if (_effects.length < 5)
+                  Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: _buildAddTile()),
               ],
             ),
           ),
@@ -6262,13 +7391,16 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
           Text(
             L10n.translate(context, name),
             style: TextStyle(
-              color: isLocked ? const Color.fromARGB(255, 122, 122, 122) : const Color.fromARGB(255, 255, 255, 255),
+              color: isLocked
+                  ? const Color.fromARGB(255, 122, 122, 122)
+                  : const Color.fromARGB(255, 255, 255, 255),
             ),
           ),
           if (isLocked)
             const Padding(
               padding: EdgeInsets.only(left: 6),
-              child: Icon(Icons.lock, size: 16, color: Color.fromARGB(255, 122, 122, 122)),
+              child: Icon(Icons.lock,
+                  size: 16, color: Color.fromARGB(255, 122, 122, 122)),
             ),
         ],
       ),
@@ -6280,13 +7412,17 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
     final description = () {
       switch (presetName) {
         case 'Concert Hall':
-          return L10n.translate(context, 'Applies wide reverb and subtle EQ to simulate a live concert space.');
+          return L10n.translate(context,
+              'Applies wide reverb and subtle EQ to simulate a live concert space.');
         case 'Echoes':
-          return L10n.translate(context, 'Applies reverb and delay to give an echo effect.');
+          return L10n.translate(
+              context, 'Applies reverb and delay to give an echo effect.');
         case 'LoFi Effect':
-          return L10n.translate(context, 'Applies filters and soft distortion for a vintage, relaxed vibe.');
+          return L10n.translate(context,
+              'Applies filters and soft distortion for a vintage, relaxed vibe.');
         case 'Heavy Crunch':
-          return L10n.translate(context, 'Crushes sound with heavy distortion.');
+          return L10n.translate(
+              context, 'Crushes sound with heavy distortion.');
         default:
           return "${L10n.translate(context, 'This will replace your current effects with ')}'$presetName'.";
       }
@@ -6300,7 +7436,8 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text(L10n.translate(context, 'Cancel'), style: TextStyle(color: Color.fromARGB(255, 218, 218, 218))),
+            child: Text(L10n.translate(context, 'Cancel'),
+                style: TextStyle(color: Color.fromARGB(255, 218, 218, 218))),
           ),
           TextButton(
             onPressed: () async {
@@ -6308,7 +7445,8 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
               showDialog(
                 context: context,
                 barrierDismissible: false,
-                builder: (_) => const Center(child: CircularProgressIndicator()),
+                builder: (_) =>
+                    const Center(child: CircularProgressIndicator()),
               );
 
               // 1. Remove all effects (if any) on the current track
@@ -6323,40 +7461,65 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
               // 2. have a switch case thing to do "stuff" for each preset name
               switch (presetName) {
                 case 'Concert Hall':
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom Reverb');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Room Size', 53);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Mix', 20);
+                  await JuceAudioEngine.insertEffect(
+                      widget.trackIndex, 'Mixroom Reverb');
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'Room Size', 53);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'Mix', 20);
                   break;
 
                 case 'Echoes':
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom Reverb');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Room Size', 40);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Mix', 20);
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom Delay');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Delay Time', 400);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Feedback', 30);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Mix', 30);
+                  await JuceAudioEngine.insertEffect(
+                      widget.trackIndex, 'Mixroom Reverb');
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'Room Size', 40);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'Mix', 20);
+                  await JuceAudioEngine.insertEffect(
+                      widget.trackIndex, 'Mixroom Delay');
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 1, 'Delay Time', 400);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 1, 'Feedback', 30);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 1, 'Mix', 30);
                   break;
 
                 case 'LoFi Effect':
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom EQ');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'LPF Frequency', 2600.0);
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom Distortion');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Drive', 50);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Mix', 85);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Anger', 1);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'LPF Frequency', 2800.0);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 1, 'Distortion Type', "Mode 3");
+                  await JuceAudioEngine.insertEffect(
+                      widget.trackIndex, 'Mixroom EQ');
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'LPF Frequency', 2600.0);
+                  await JuceAudioEngine.insertEffect(
+                      widget.trackIndex, 'Mixroom Distortion');
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 1, 'Drive', 50);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 1, 'Mix', 85);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 1, 'Anger', 1);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 1, 'LPF Frequency', 2800.0);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 1, 'Distortion Type', "Mode 3");
                   break;
 
                 case 'Heavy Crunch':
-                  await JuceAudioEngine.insertEffect(widget.trackIndex, 'Mixroom Distortion');
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Drive', 100);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Mix', 100);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Anger', 1);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Volume', 12);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Pre Shape', 3.0);
-                  await JuceAudioEngine.setEffect(widget.trackIndex, 0, 'Distortion Type', "Mode 3");
+                  await JuceAudioEngine.insertEffect(
+                      widget.trackIndex, 'Mixroom Distortion');
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'Drive', 100);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'Mix', 100);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'Anger', 1);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'Volume', 12);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'Pre Shape', 3.0);
+                  await JuceAudioEngine.setEffect(
+                      widget.trackIndex, 0, 'Distortion Type', "Mode 3");
                   break;
 
                 default:
@@ -6395,17 +7558,23 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
               value: !_bypassed[idx],
               onChanged: (active) {
                 final shouldBypass = !active;
-                JuceAudioEngine.bypassPlugin(widget.trackIndex, idx, shouldBypass);
+                JuceAudioEngine.bypassPlugin(
+                    widget.trackIndex, idx, shouldBypass);
                 setState(() => _bypassed[idx] = shouldBypass);
               },
-              activeColor: const Color.fromARGB(255, 231, 231, 231), // thumb color when ON
-              inactiveThumbColor: const Color.fromARGB(255, 186, 186, 186), // thumb color when OFF
-              inactiveTrackColor: const Color.fromARGB(255, 235, 235, 235), // track color when OFF
-              activeTrackColor: const Color.fromARGB(255, 54, 54, 54), // track color when ON
+              activeColor: const Color.fromARGB(
+                  255, 231, 231, 231), // thumb color when ON
+              inactiveThumbColor: const Color.fromARGB(
+                  255, 186, 186, 186), // thumb color when OFF
+              inactiveTrackColor: const Color.fromARGB(
+                  255, 235, 235, 235), // track color when OFF
+              activeTrackColor:
+                  const Color.fromARGB(255, 54, 54, 54), // track color when ON
             ),
             // Delete button
             IconButton(
-              icon: const Icon(Icons.delete_outline, color: Color.fromARGB(255, 255, 164, 164)),
+              icon: const Icon(Icons.delete_outline,
+                  color: Color.fromARGB(255, 255, 164, 164)),
               onPressed: () => _confirmRemove(idx),
             ),
           ],
@@ -6461,11 +7630,13 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text(L10n.translate(context, 'Cancel'), style: TextStyle(color: Color.fromARGB(255, 218, 218, 218))),
+            child: Text(L10n.translate(context, 'Cancel'),
+                style: TextStyle(color: Color.fromARGB(255, 218, 218, 218))),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(L10n.translate(context, 'Delete'), style: TextStyle(color: Colors.red)),
+            child: Text(L10n.translate(context, 'Delete'),
+                style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -6509,7 +7680,14 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
   // }
   Future<void> _showAddEffectModal() async {
     final plugins = await JuceAudioEngine.scanPlugins();
-    const allowedInBasic = ['Mixroom Reverb', 'Mixroom EQ', 'Mixroom Delay', 'Mixroom Distortion', 'Mixroom De-Esser'];
+    const allowedInBasic = [
+      'Mixroom Reverb',
+      'Mixroom EQ',
+      'Mixroom Delay',
+      'Mixroom Distortion',
+      'Mixroom De-Esser',
+      'Mixroom Clipper'
+    ];
 
     showDialog(
       context: context,
@@ -6518,9 +7696,11 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
           length: 2,
           child: AlertDialog(
             backgroundColor: const Color.fromARGB(255, 79, 79, 79),
-            titlePadding: const EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 16),
+            titlePadding:
+                const EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 16),
             contentPadding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             title: TabBar(
               labelColor: Color.fromARGB(255, 255, 255, 255),
               unselectedLabelColor: Colors.grey,
@@ -6542,14 +7722,17 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                       'Mixroom EQ',
                       'Mixroom Delay',
                       'Mixroom Distortion',
-                      'Mixroom De-Esser'
+                      'Mixroom De-Esser',
+                      'Mixroom Clipper'
                     ].map((name) {
-                      final isAllowed = widget.mode == 'Pro' || allowedInBasic.contains(name);
+                      final isAllowed =
+                          widget.mode == 'Pro' || allowedInBasic.contains(name);
                       return GestureDetector(
                         onTap: isAllowed
                             ? () async {
                                 Navigator.pop(context);
-                                await JuceAudioEngine.insertEffect(widget.trackIndex, name);
+                                await JuceAudioEngine.insertEffect(
+                                    widget.trackIndex, name);
                                 await _loadEffects();
                               }
                             : null,
@@ -6557,7 +7740,10 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                           opacity: isAllowed ? 1.0 : 0.4,
                           child: ListTile(
                             title: Text(name),
-                            trailing: isAllowed ? null : const Icon(Icons.lock, size: 18, color: Colors.white70),
+                            trailing: isAllowed
+                                ? null
+                                : const Icon(Icons.lock,
+                                    size: 18, color: Colors.white70),
                           ),
                         ),
                       );
@@ -6571,7 +7757,8 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                         title: Text(name),
                         onTap: () async {
                           Navigator.pop(context); // close dialog
-                          await JuceAudioEngine.insertEffect(widget.trackIndex, path);
+                          await JuceAudioEngine.insertEffect(
+                              widget.trackIndex, path);
                           await _loadEffects();
                         },
                       );
@@ -6587,7 +7774,8 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
   }
 
   Future<void> _openPluginParams(int idx) async {
-    var params = await JuceAudioEngine.getPluginParameters(widget.trackIndex, idx);
+    var params =
+        await JuceAudioEngine.getPluginParameters(widget.trackIndex, idx);
 
     // Limit what parameters are shown if it's basic mode
     if (widget.mode == "Basic") {
@@ -6609,7 +7797,8 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
               'Band 3 Gain',
               'Band 4 Gain',
               'LPF Frequency',
-            ].contains(name); //['HPF Frequency', 'HPF Slope', 'LPF Frequency', 'LPF Slope'].contains(name);
+            ].contains(
+                name); //['HPF Frequency', 'HPF Slope', 'LPF Frequency', 'LPF Slope'].contains(name);
           }).toList();
           break;
 
@@ -6617,6 +7806,13 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
           params = params.where((param) {
             final name = param['name']?.toString() ?? '';
             return ['Delay Time', 'Feedback', 'Mix'].contains(name);
+          }).toList();
+          break;
+
+        case 'Mixroom Clipper':
+          params = params.where((param) {
+            final name = param['name']?.toString() ?? '';
+            return ['Threshold', 'Ceiling'].contains(name);
           }).toList();
           break;
       }
@@ -6630,7 +7826,8 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
       ),
       isScrollControlled: true,
       backgroundColor: const Color.fromARGB(255, 74, 74, 74),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
@@ -6660,10 +7857,12 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
               final bandFreqs = [60.0, 400.0, 2000.0, 8000.0]; // your defaults
 
               return Padding(
-                padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+                padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(ctx).viewInsets.bottom),
                 child: SingleChildScrollView(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16.0, vertical: 12.0),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -6671,15 +7870,23 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                         Container(
                           width: 40,
                           height: 4,
-                          decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
+                          decoration: BoxDecoration(
+                              color: Colors.grey[300],
+                              borderRadius: BorderRadius.circular(2)),
                         ),
                         const SizedBox(height: 16),
-                        Text('Mixroom EQ', style: Theme.of(ctx).textTheme.titleLarge),
+                        Text('Mixroom EQ',
+                            style: Theme.of(ctx).textTheme.titleLarge),
                         const SizedBox(height: 8),
-                        const Divider(color: Color.fromARGB(213, 104, 104, 104)),
+                        const Divider(
+                            color: Color.fromARGB(213, 104, 104, 104)),
 
                         // Preview with bands
-                        _EqPreviewFull(hpfHz: hpfHz, lpfHz: lpfHz, bandGains: bandGains, bandFreqs: bandFreqs),
+                        _EqPreviewFull(
+                            hpfHz: hpfHz,
+                            lpfHz: lpfHz,
+                            bandGains: bandGains,
+                            bandFreqs: bandFreqs),
                         const SizedBox(height: 16),
 
                         // Sliders row
@@ -6700,7 +7907,11 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                                     unit: 'Hz',
                                     onChanged: (v) {
                                       setModalState(() => pHPF['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pHPF['name'] as String, v);
+                                      JuceAudioEngine.setEffect(
+                                          widget.trackIndex,
+                                          idx,
+                                          pHPF['name'] as String,
+                                          v);
                                     },
                                   ),
                                 ),
@@ -6715,7 +7926,11 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                                     unit: 'dB',
                                     onChanged: (v) {
                                       setModalState(() => pB1['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pB1['name'] as String, v);
+                                      JuceAudioEngine.setEffect(
+                                          widget.trackIndex,
+                                          idx,
+                                          pB1['name'] as String,
+                                          v);
                                     },
                                   ),
                                 ),
@@ -6730,7 +7945,11 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                                     unit: 'dB',
                                     onChanged: (v) {
                                       setModalState(() => pB2['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pB2['name'] as String, v);
+                                      JuceAudioEngine.setEffect(
+                                          widget.trackIndex,
+                                          idx,
+                                          pB2['name'] as String,
+                                          v);
                                     },
                                   ),
                                 ),
@@ -6745,7 +7964,11 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                                     unit: 'dB',
                                     onChanged: (v) {
                                       setModalState(() => pB3['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pB3['name'] as String, v);
+                                      JuceAudioEngine.setEffect(
+                                          widget.trackIndex,
+                                          idx,
+                                          pB3['name'] as String,
+                                          v);
                                     },
                                   ),
                                 ),
@@ -6760,7 +7983,11 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                                     unit: 'dB',
                                     onChanged: (v) {
                                       setModalState(() => pB4['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pB4['name'] as String, v);
+                                      JuceAudioEngine.setEffect(
+                                          widget.trackIndex,
+                                          idx,
+                                          pB4['name'] as String,
+                                          v);
                                     },
                                   ),
                                 ),
@@ -6776,7 +8003,11 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                                     unit: 'Hz',
                                     onChanged: (v) {
                                       setModalState(() => pLPF['value'] = v);
-                                      JuceAudioEngine.setEffect(widget.trackIndex, idx, pLPF['name'] as String, v);
+                                      JuceAudioEngine.setEffect(
+                                          widget.trackIndex,
+                                          idx,
+                                          pLPF['name'] as String,
+                                          v);
                                     },
                                   ),
                                 ),
@@ -6784,12 +8015,16 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                           ),
                         ),
 
-                        const Divider(color: Color.fromARGB(213, 104, 104, 104)),
+                        const Divider(
+                            color: Color.fromARGB(213, 104, 104, 104)),
                         const SizedBox(height: 16),
                         TextButton(
                           child: Text(
                             'Close',
-                            style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                            style: Theme.of(ctx)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                           onPressed: () => Navigator.pop(ctx),
                         ),
@@ -6803,10 +8038,12 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
 
             // END HERE
             return Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              padding:
+                  EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
               child: SingleChildScrollView(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16.0, vertical: 12.0),
                   child: Column(
                     // crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -6814,7 +8051,9 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                       Container(
                         width: 40,
                         height: 4,
-                        decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
+                        decoration: BoxDecoration(
+                            color: Colors.grey[300],
+                            borderRadius: BorderRadius.circular(2)),
                       ),
                       const SizedBox(height: 16),
                       Text(
@@ -6832,14 +8071,19 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(param['name'] as String, style: Theme.of(context).textTheme.bodyLarge),
+                                Text(param['name'] as String,
+                                    style:
+                                        Theme.of(context).textTheme.bodyLarge),
                                 const SizedBox(height: 4),
                                 Row(
                                   children: [
                                     // 1) min label
                                     Text(
-                                      (param['min'] as num).toDouble().toStringAsFixed(2),
-                                      style: Theme.of(context).textTheme.bodySmall,
+                                      (param['min'] as num)
+                                          .toDouble()
+                                          .toStringAsFixed(2),
+                                      style:
+                                          Theme.of(context).textTheme.bodySmall,
                                     ),
                                     const SizedBox(width: 8),
 
@@ -6847,23 +8091,33 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                                     Expanded(
                                       child: SliderTheme(
                                         data: SliderTheme.of(context).copyWith(
-                                          showValueIndicator: ShowValueIndicator.always,
+                                          showValueIndicator:
+                                              ShowValueIndicator.always,
                                           valueIndicatorTextStyle: TextStyle(
-                                            color: const Color.fromARGB(255, 0, 0, 0),
+                                            color: const Color.fromARGB(
+                                                255, 0, 0, 0),
                                             fontSize: 12,
                                           ),
                                         ),
                                         child: Slider(
-                                          value: (param['value'] as num).toDouble().clamp(
-                                                (param['min'] as num).toDouble(),
-                                                (param['max'] as num).toDouble(),
+                                          value: (param['value'] as num)
+                                              .toDouble()
+                                              .clamp(
+                                                (param['min'] as num)
+                                                    .toDouble(),
+                                                (param['max'] as num)
+                                                    .toDouble(),
                                               ),
                                           min: (param['min'] as num).toDouble(),
                                           max: (param['max'] as num).toDouble(),
-                                          divisions: 100, // or compute a sensible number
-                                          label: (param['value'] as num).toDouble().toStringAsFixed(2),
+                                          divisions:
+                                              100, // or compute a sensible number
+                                          label: (param['value'] as num)
+                                              .toDouble()
+                                              .toStringAsFixed(2),
                                           onChanged: (v) {
-                                            setModalState(() => param['value'] = v);
+                                            setModalState(
+                                                () => param['value'] = v);
                                             // final min = (param['min'] as num).toDouble();
                                             // final max = (param['max'] as num).toDouble();
                                             // final normalized = ((v - min) / (max - min)).clamp(0.0, 1.0);
@@ -6875,7 +8129,8 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                                               v, //normalized, //v,
                                             );
                                           },
-                                          onChangeEnd: (v) => {}, // originally put JuceAudioEngine.setEffect here
+                                          onChangeEnd: (v) =>
+                                              {}, // originally put JuceAudioEngine.setEffect here
                                         ),
                                       ),
                                     ),
@@ -6883,8 +8138,11 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
 
                                     // 3) max label
                                     Text(
-                                      (param['max'] as num).toDouble().toStringAsFixed(2),
-                                      style: Theme.of(context).textTheme.bodySmall,
+                                      (param['max'] as num)
+                                          .toDouble()
+                                          .toStringAsFixed(2),
+                                      style:
+                                          Theme.of(context).textTheme.bodySmall,
                                     ),
                                   ],
                                 ),
@@ -6897,52 +8155,65 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                             value: param['value'] as bool,
                             onChanged: (v) => setModalState(() {
                               param['value'] = v;
-                              JuceAudioEngine.setEffect(widget.trackIndex, idx, param['name'] as String, v);
+                              JuceAudioEngine.setEffect(widget.trackIndex, idx,
+                                  param['name'] as String, v);
                             }),
                           ),
                         ] else if (param['type'] == 'choice') ...[
                           (() {
-                            final keys = param.keys.where((k) => k.startsWith('choice_')).toList()
+                            final keys = param.keys
+                                .where((k) => k.startsWith('choice_'))
+                                .toList()
                               ..sort((a, b) {
                                 final ai = int.parse(a.split('_')[1]);
                                 final bi = int.parse(b.split('_')[1]);
                                 return ai.compareTo(bi);
                               });
                             // 2) build the labels
-                            final choices = keys.map((k) => param[k] as String).toList();
+                            final choices =
+                                keys.map((k) => param[k] as String).toList();
                             // 3) current
                             final current = param['value'] as String;
                             // 4) render a ListTile that pops a dialog
                             return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8.0),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 8.0),
                               child: ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 title: Text(param['name'] as String),
-                                trailing: Text(current, style: Theme.of(context).textTheme.bodyLarge),
+                                trailing: Text(current,
+                                    style:
+                                        Theme.of(context).textTheme.bodyLarge),
                                 onTap: () async {
                                   final picked = await showDialog<String>(
                                     context: context,
                                     useRootNavigator: true,
                                     builder: (ctx) => SimpleDialog(
-                                      title: Text("${L10n.translate(context, 'Select ')}${param['name']}"),
+                                      title: Text(
+                                          "${L10n.translate(context, 'Select ')}${param['name']}"),
                                       children: choices.map((c) {
                                         return SimpleDialogOption(
                                           child: Text(c),
-                                          onPressed: () => Navigator.pop(ctx, c),
+                                          onPressed: () =>
+                                              Navigator.pop(ctx, c),
                                         );
                                       }).toList(),
                                     ),
                                   );
                                   if (picked != null) {
-                                    setModalState(() => param['value'] = picked);
-                                    JuceAudioEngine.setEffect(widget.trackIndex, idx, param['name'] as String, picked);
+                                    setModalState(
+                                        () => param['value'] = picked);
+                                    JuceAudioEngine.setEffect(widget.trackIndex,
+                                        idx, param['name'] as String, picked);
                                   }
                                 },
                               ),
                             );
                           })(),
                         ] else ...[
-                          ListTile(title: Text(param['name'] as String), trailing: Text("${param['value']}")),
+                          ListTile(
+                              title: Text(param['name'] as String),
+                              trailing: Text("${param['value']}")),
                         ],
                       ],
 
@@ -6951,7 +8222,10 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                       TextButton(
                         child: Text(
                           L10n.translate(context, 'Close'),
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                         onPressed: () => Navigator.pop(ctx),
                       ),
@@ -6967,7 +8241,8 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
     );
   }
 
-  Widget _buildGenericParamsSheet(BuildContext ctx, StateSetter setModalState, List params, int idx) {
+  Widget _buildGenericParamsSheet(
+      BuildContext ctx, StateSetter setModalState, List params, int idx) {
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
       child: SingleChildScrollView(
@@ -6979,10 +8254,13 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
               Container(
                 width: 40,
                 height: 4,
-                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2)),
               ),
               const SizedBox(height: 16),
-              Text(L10n.translate(context, 'Parameters'), style: Theme.of(ctx).textTheme.titleLarge),
+              Text(L10n.translate(context, 'Parameters'),
+                  style: Theme.of(ctx).textTheme.titleLarge),
               const SizedBox(height: 8),
               const Divider(color: Color.fromARGB(213, 104, 104, 104)),
               // 🔁 your existing loop:
@@ -6993,12 +8271,15 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(param['name'] as String, style: Theme.of(ctx).textTheme.bodyLarge),
+                        Text(param['name'] as String,
+                            style: Theme.of(ctx).textTheme.bodyLarge),
                         const SizedBox(height: 4),
                         Row(
                           children: [
                             Text(
-                              (param['min'] as num).toDouble().toStringAsFixed(2),
+                              (param['min'] as num)
+                                  .toDouble()
+                                  .toStringAsFixed(2),
                               style: Theme.of(ctx).textTheme.bodySmall,
                             ),
                             const SizedBox(width: 8),
@@ -7006,27 +8287,34 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                               child: SliderTheme(
                                 data: SliderTheme.of(ctx).copyWith(
                                   showValueIndicator: ShowValueIndicator.always,
-                                  valueIndicatorTextStyle: const TextStyle(color: Colors.black, fontSize: 12),
+                                  valueIndicatorTextStyle: const TextStyle(
+                                      color: Colors.black, fontSize: 12),
                                 ),
                                 child: Slider(
-                                  value: (param['value'] as num).toDouble().clamp(
-                                        (param['min'] as num).toDouble(),
-                                        (param['max'] as num).toDouble(),
-                                      ),
+                                  value:
+                                      (param['value'] as num).toDouble().clamp(
+                                            (param['min'] as num).toDouble(),
+                                            (param['max'] as num).toDouble(),
+                                          ),
                                   min: (param['min'] as num).toDouble(),
                                   max: (param['max'] as num).toDouble(),
                                   divisions: 100,
-                                  label: (param['value'] as num).toDouble().toStringAsFixed(2),
+                                  label: (param['value'] as num)
+                                      .toDouble()
+                                      .toStringAsFixed(2),
                                   onChanged: (v) {
                                     setModalState(() => param['value'] = v);
-                                    JuceAudioEngine.setEffect(widget.trackIndex, idx, param['name'] as String, v);
+                                    JuceAudioEngine.setEffect(widget.trackIndex,
+                                        idx, param['name'] as String, v);
                                   },
                                 ),
                               ),
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              (param['max'] as num).toDouble().toStringAsFixed(2),
+                              (param['max'] as num)
+                                  .toDouble()
+                                  .toStringAsFixed(2),
                               style: Theme.of(ctx).textTheme.bodySmall,
                             ),
                           ],
@@ -7040,42 +8328,54 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                     value: param['value'] as bool,
                     onChanged: (v) {
                       setModalState(() => param['value'] = v);
-                      JuceAudioEngine.setEffect(widget.trackIndex, idx, param['name'] as String, v);
+                      JuceAudioEngine.setEffect(
+                          widget.trackIndex, idx, param['name'] as String, v);
                     },
                   ),
                 ] else if (param['type'] == 'choice') ...[
                   (() {
-                    final keys = param.keys.where((k) => k.startsWith('choice_')).toList()
-                      ..sort((a, b) => int.parse(a.split('_')[1]).compareTo(int.parse(b.split('_')[1])));
-                    final choices = keys.map((k) => param[k] as String).toList();
+                    final keys = param.keys
+                        .where((k) => k.startsWith('choice_'))
+                        .toList()
+                      ..sort((a, b) => int.parse(a.split('_')[1])
+                          .compareTo(int.parse(b.split('_')[1])));
+                    final choices =
+                        keys.map((k) => param[k] as String).toList();
                     final current = param['value'] as String;
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8.0),
                       child: ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Text(param['name'] as String),
-                        trailing: Text(current, style: Theme.of(ctx).textTheme.bodyLarge),
+                        trailing: Text(current,
+                            style: Theme.of(ctx).textTheme.bodyLarge),
                         onTap: () async {
                           final picked = await showDialog<String>(
                             context: ctx,
                             useRootNavigator: true,
                             builder: (dCtx) => SimpleDialog(
-                              title: Text("${L10n.translate(context, 'Select ')}${param['name']}"),
+                              title: Text(
+                                  "${L10n.translate(context, 'Select ')}${param['name']}"),
                               children: choices.map((c) {
-                                return SimpleDialogOption(child: Text(c), onPressed: () => Navigator.pop(dCtx, c));
+                                return SimpleDialogOption(
+                                    child: Text(c),
+                                    onPressed: () => Navigator.pop(dCtx, c));
                               }).toList(),
                             ),
                           );
                           if (picked != null) {
                             setModalState(() => param['value'] = picked);
-                            JuceAudioEngine.setEffect(widget.trackIndex, idx, param['name'] as String, picked);
+                            JuceAudioEngine.setEffect(widget.trackIndex, idx,
+                                param['name'] as String, picked);
                           }
                         },
                       ),
                     );
                   })(),
                 ] else ...[
-                  ListTile(title: Text(param['name'] as String), trailing: Text("${param['value']}")),
+                  ListTile(
+                      title: Text(param['name'] as String),
+                      trailing: Text("${param['value']}")),
                 ],
               ],
               const Divider(color: Color.fromARGB(213, 104, 104, 104)),
@@ -7083,7 +8383,10 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
               TextButton(
                 child: Text(
                   L10n.translate(context, 'Close'),
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                  style: Theme.of(ctx)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 onPressed: () => Navigator.pop(ctx),
               ),
@@ -7151,7 +8454,9 @@ Widget _slopePicker({
         DropdownButton<String>(
           isExpanded: true,
           value: current.isNotEmpty ? current : choices.first,
-          items: choices.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+          items: choices
+              .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+              .toList(),
           onChanged: (v) {
             if (v != null) onPick(v);
           },
@@ -7171,7 +8476,10 @@ Widget _slopePicker({
         alignment: WrapAlignment.center,
         children: choices.map((label) {
           final selected = label == current;
-          return ChoiceChip(label: Text(label), selected: selected, onSelected: (_) => onPick(label));
+          return ChoiceChip(
+              label: Text(label),
+              selected: selected,
+              onSelected: (_) => onPick(label));
         }).toList(),
       ),
     ],
@@ -7190,18 +8498,24 @@ Widget _verticalFader({
   bool logarithmic = false,
   double width = 56, // 👈 new
 }) {
-  final pos = logarithmic ? _toLogPos(value, min, max) : ((value.clamp(min, max) - min) / (max - min));
+  final pos = logarithmic
+      ? _toLogPos(value, min, max)
+      : ((value.clamp(min, max) - min) / (max - min));
 
   final labelText = (unit == 'Hz')
       ? '${_fmtHz(value)} Hz'
-      : (unit == null ? value.toStringAsFixed(0) : '${value.toStringAsFixed(0)} $unit');
+      : (unit == null
+          ? value.toStringAsFixed(0)
+          : '${value.toStringAsFixed(0)} $unit');
 
   return SizedBox(
     width: width, // 👈 respect caller width
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(labelText, style: Theme.of(context).textTheme.labelMedium, overflow: TextOverflow.ellipsis),
+        Text(labelText,
+            style: Theme.of(context).textTheme.labelMedium,
+            overflow: TextOverflow.ellipsis),
         const SizedBox(height: 6),
         SizedBox(
           height: _eqFaderHeight,
@@ -7219,7 +8533,9 @@ Widget _verticalFader({
                 max: 1.0,
                 divisions: divisions ?? 200,
                 onChanged: (p) {
-                  final v = logarithmic ? _fromLogPos(p, min, max) : (min + (max - min) * p);
+                  final v = logarithmic
+                      ? _fromLogPos(p, min, max)
+                      : (min + (max - min) * p);
                   onChanged(v);
                 },
               ),
@@ -7227,7 +8543,10 @@ Widget _verticalFader({
           ),
         ),
         const SizedBox(height: 6),
-        Text(label, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall, maxLines: 2),
+        Text(label,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+            maxLines: 2),
       ],
     ),
   );
@@ -7261,7 +8580,11 @@ class _EqPreview extends StatelessWidget {
       // Ensure the CustomPaint always has width/height
       child: SizedBox.expand(
         child: CustomPaint(
-          painter: _EqPreviewPainter(hpfHz: hpfHz, lpfHz: lpfHz, hpfSlope: hpfSlope, lpfSlope: lpfSlope),
+          painter: _EqPreviewPainter(
+              hpfHz: hpfHz,
+              lpfHz: lpfHz,
+              hpfSlope: hpfSlope,
+              lpfSlope: lpfSlope),
         ),
       ),
     );
@@ -7272,7 +8595,11 @@ class _EqPreviewPainter extends CustomPainter {
   final double hpfHz, lpfHz;
   final int hpfSlope, lpfSlope;
 
-  _EqPreviewPainter({required this.hpfHz, required this.lpfHz, required this.hpfSlope, required this.lpfSlope});
+  _EqPreviewPainter(
+      {required this.hpfHz,
+      required this.lpfHz,
+      required this.hpfSlope,
+      required this.lpfSlope});
 
   static const double _minF = 20.0;
   static const double _maxF = 20000.0;
@@ -7292,7 +8619,8 @@ class _EqPreviewPainter extends CustomPainter {
   // x-position for a frequency (log scale across the width)
   double _xForHz(double hz, double w) {
     final f = hz.clamp(_minF, _maxF).toDouble();
-    final t = (math.log(f) - math.log(_minF)) / (math.log(_maxF) - math.log(_minF));
+    final t =
+        (math.log(f) - math.log(_minF)) / (math.log(_maxF) - math.log(_minF));
     return (t.clamp(0.0, 1.0) as double) * w;
   }
 
@@ -7365,11 +8693,13 @@ class _EqPreviewPainter extends CustomPainter {
       ..moveTo(0, floorY)
       ..lineTo(xHPF0, floorY)
       // HPF cubic: floor → knee near cutoff
-      ..cubicTo(xHPF0 + (wHPFpx * 0.35), floorY, xHPF - (wHPFpx * 0.15), kneeY, xHPF, passbandY)
+      ..cubicTo(xHPF0 + (wHPFpx * 0.35), floorY, xHPF - (wHPFpx * 0.15), kneeY,
+          xHPF, passbandY)
       // Flat passband to LPF cutoff
       ..lineTo(xLPF, passbandY)
       // LPF cubic: passband → floor
-      ..cubicTo(xLPF + (wLPFpx * 0.15), passbandY, xLPF1 - (wLPFpx * 0.35), floorY, xLPF1, floorY)
+      ..cubicTo(xLPF + (wLPFpx * 0.15), passbandY, xLPF1 - (wLPFpx * 0.35),
+          floorY, xLPF1, floorY)
       ..lineTo(w, floorY)
       ..lineTo(w, h)
       ..lineTo(0, h)
@@ -7385,9 +8715,11 @@ class _EqPreviewPainter extends CustomPainter {
     final stroke = Path()
       ..moveTo(0, floorY)
       ..lineTo(xHPF0, floorY)
-      ..cubicTo(xHPF0 + (wHPFpx * 0.35), floorY, xHPF - (wHPFpx * 0.15), kneeY, xHPF, passbandY)
+      ..cubicTo(xHPF0 + (wHPFpx * 0.35), floorY, xHPF - (wHPFpx * 0.15), kneeY,
+          xHPF, passbandY)
       ..lineTo(xLPF, passbandY)
-      ..cubicTo(xLPF + (wLPFpx * 0.15), passbandY, xLPF1 - (wLPFpx * 0.35), floorY, xLPF1, floorY)
+      ..cubicTo(xLPF + (wLPFpx * 0.15), passbandY, xLPF1 - (wLPFpx * 0.35),
+          floorY, xLPF1, floorY)
       ..lineTo(w, floorY);
 
     final strokePaint = Paint()
@@ -7441,7 +8773,11 @@ class _EqPreviewFull extends StatelessWidget {
       padding: const EdgeInsets.all(8),
       child: SizedBox.expand(
         child: CustomPaint(
-          painter: _EqPreviewFullPainter(hpfHz: hpfHz, lpfHz: lpfHz, bandGains: bandGains, bandFreqs: bandFreqs),
+          painter: _EqPreviewFullPainter(
+              hpfHz: hpfHz,
+              lpfHz: lpfHz,
+              bandGains: bandGains,
+              bandFreqs: bandFreqs),
         ),
       ),
     );
@@ -7453,7 +8789,11 @@ class _EqPreviewFullPainter extends CustomPainter {
   final List<double> bandGains;
   final List<double> bandFreqs;
 
-  _EqPreviewFullPainter({required this.hpfHz, required this.lpfHz, required this.bandGains, required this.bandFreqs});
+  _EqPreviewFullPainter(
+      {required this.hpfHz,
+      required this.lpfHz,
+      required this.bandGains,
+      required this.bandFreqs});
 
   static const double _minF = 20.0;
   static const double _maxF = 20000.0;
@@ -7463,7 +8803,8 @@ class _EqPreviewFullPainter extends CustomPainter {
   // map Hz → log X position
   double _xForHz(double hz, double w) {
     final f = hz.clamp(_minF, _maxF);
-    final t = (math.log(f) - math.log(_minF)) / (math.log(_maxF) - math.log(_minF));
+    final t =
+        (math.log(f) - math.log(_minF)) / (math.log(_maxF) - math.log(_minF));
     return (t.clamp(0.0, 1.0)) * w;
   }
 
@@ -7563,7 +8904,9 @@ class _EqPreviewFullPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _EqPreviewFullPainter old) {
-    return old.hpfHz != hpfHz || old.lpfHz != lpfHz || old.bandGains != bandGains;
+    return old.hpfHz != hpfHz ||
+        old.lpfHz != lpfHz ||
+        old.bandGains != bandGains;
   }
 }
 

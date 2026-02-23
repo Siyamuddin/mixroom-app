@@ -132,6 +132,97 @@ class JuceAudioEnginePlugin: FlutterPlugin, MethodChannel.MethodCallHandler {
           JuceBridge.seekJNI(args["track"] as Int, args["position"] as Double)
           result.success(null)
         }
+        "setTransportSeconds" -> {
+          val args = call.arguments as Map<String, Any>
+          JuceBridge.seekJNI(0, args["timeSeconds"] as Double)
+          result.success(null)
+        }
+        "seekTransport" -> {
+          val args = call.arguments as Map<String, Any>
+          JuceBridge.seekJNI(0, args["timeSeconds"] as Double)
+          result.success(null)
+        }
+        "supportsLiveMidiClipPlayback" -> {
+          result.success(false)
+        }
+        "loadMidiClip" -> {
+          // Android legacy bridge does not support timeline MIDI clips yet.
+          result.success(false)
+        }
+        "updateMidiClipEvents" -> {
+          // Android legacy bridge does not support timeline MIDI clips yet.
+          result.success(false)
+        }
+        "getTransportSeconds" -> {
+          result.success(JuceBridge.getCurrentPositionJNI(0))
+        }
+        "getHostSampleRate" -> {
+          result.success(JuceBridge.getHostSampleRateJNI())
+        }
+        "setAutomationTransport" -> {
+          val args = call.arguments as Map<String, Any>
+          JuceBridge.seekJNI(0, args["timeSeconds"] as Double)
+          result.success(null)
+        }
+        "loadClip" -> {
+          val args = call.arguments as Map<String, Any>
+          val clip = args["clip"] as Int
+          val path = args["path"] as String
+          JuceBridge.loadTrackJNI(clip, path)
+          result.success(null)
+        }
+        "unloadClip" -> {
+          val args = call.arguments as Map<String, Any>
+          JuceBridge.removeTrackJNI(args["clip"] as Int)
+          result.success(null)
+        }
+        "setClipGain" -> {
+          val args = call.arguments as Map<String, Any>
+          val clip = args["clip"] as Int
+          val gain = (args["gain"] as Double).toFloat()
+          JuceBridge.setTrackVolumeJNI(clip, gain)
+          result.success(null)
+        }
+        "setClipPitch" -> {
+          // Legacy Android engine does not support independent clip pitch yet.
+          result.success(null)
+        }
+        "setClipStretchOptions" -> {
+          // Legacy Android engine does not support native clip stretch mode yet.
+          result.success(null)
+        }
+        "setClipTime" -> {
+          // Android legacy bridge has no timeline-clip API yet.
+          result.success(null)
+        }
+        "moveClipToRow" -> {
+          // Android legacy bridge has no dynamic row routing API yet.
+          result.success(null)
+        }
+        "addRow" -> {
+          result.success(-1)
+        }
+        "insertRowAbove" -> {
+          result.success(-1)
+        }
+        "insertRowBelow" -> {
+          result.success(-1)
+        }
+        "removeRow", "deleteRow" -> {
+          result.success(false)
+        }
+        "moveRowOrder" -> {
+          result.success(false)
+        }
+        "renameRow" -> {
+          result.success(false)
+        }
+        "setRowIcon" -> {
+          result.success(false)
+        }
+        "getRows", "getRowList" -> {
+          result.success(listOf<Map<String, Any>>())
+        }
         "insertEffect" -> {
           val args = call.arguments as Map<String, Any>
           JuceBridge.insertEffectJNI(args["track"] as Int, args["path"] as String)
@@ -176,13 +267,32 @@ class JuceAudioEnginePlugin: FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "exportMix" -> {
           val args = call.arguments as Map<String, Any>
-          val output = JuceBridge.exportMixJNI(args["outPath"] as String)
+          val output = JuceBridge.exportMixJNI(
+            args["outPath"] as String,
+            (args["format"] as? String) ?: "wav",
+            (args["sampleRate"] as? Int) ?: 44100,
+            (args["wavBitDepth"] as? Int) ?: 16,
+            (args["wavDithering"] as? Boolean) ?: true,
+            (args["mp3BitrateKbps"] as? Int) ?: 192
+          )
           result.success(output)
         }
         "exportTrack" -> {
           val args = call.arguments as Map<String, Any>
-          val output = JuceBridge.exportTrackJNI(args["track"] as Int, args["outPath"] as String)
+          val output = JuceBridge.exportTrackJNI(
+            args["track"] as Int,
+            args["outPath"] as String,
+            (args["format"] as? String) ?: "wav",
+            (args["sampleRate"] as? Int) ?: 44100,
+            (args["wavBitDepth"] as? Int) ?: 16,
+            (args["wavDithering"] as? Boolean) ?: true,
+            (args["mp3BitrateKbps"] as? Int) ?: 192
+          )
           result.success(output)
+        }
+        "renderInstrumentClip" -> {
+          // Android bridge currently uses Dart fallback synth rendering.
+          result.success("")
         }
         "loadVideoAudio" -> {
           val args = call.arguments as Map<String, Any>

@@ -1,10 +1,23 @@
 import 'dart:async';
+import 'package:fftea/fftea.dart';
 
 import 'package:flutter/material.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'dart:math' as math;
 
 import 'package:mixroom/models/models.dart';
+import 'package:juce_audio_engine/juce_audio_engine.dart';
+
+List<String> _buildStableEffectKeys(List<String> effectIds) {
+  final counts = <String, int>{};
+  final keys = <String>[];
+  for (final id in effectIds) {
+    final n = (counts[id] ?? 0) + 1;
+    counts[id] = n;
+    keys.add('$id#$n');
+  }
+  return keys;
+}
 
 class RowEffectsPanel extends StatefulWidget {
   final int rowIndex;
@@ -12,30 +25,42 @@ class RowEffectsPanel extends StatefulWidget {
 
   // Callbacks from AudioEditor → JUCE
   final Future<List<String>> Function(int row) getEffectsForRow;
+  final Future<List<String>> Function(int row) getEffectIdsForRow;
   final Future<bool> Function(int row, int effectIndex) getBypassStateForRow;
-  final Future<void> Function(int row, int effectIndex, bool bypass) setBypassForRow;
+  final Future<void> Function(int row, int effectIndex, bool bypass)
+      setBypassForRow;
   final Future<void> Function(int row, int from, int to) reorderEffectsForRow;
-  final Future<void> Function(int row, int effectIndex, String name, bool applyingPreset) removeEffectFromRow;
+  final Future<void> Function(
+          int row, int effectIndex, String name, bool applyingPreset)
+      removeEffectFromRow;
   final Future<void> Function(int row, String path) insertEffectOnRow;
-  final Future<List<Map<String, dynamic>>> Function(int row, int effectIndex) getTrackPluginParameters;
+  final Future<List<Map<String, dynamic>>> Function(int row, int effectIndex)
+      getTrackPluginParameters;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
-  final Future<void> Function(int row, int effectIndex, String paramId, dynamic value) setTrackEffectParam;
-  final void Function(RowEffectsSnapshot before, RowEffectsSnapshot after)? onPresetCommit;
+  final Future<void> Function(
+          int row, int effectIndex, String paramId, dynamic value)
+      setTrackEffectParam;
+  final void Function(RowEffectsSnapshot before, RowEffectsSnapshot after)?
+      onPresetCommit;
   final void Function(double height) onHeightChanged;
   final void Function(VoidCallback refresh)? registerRefresh;
   final double projectBpm;
 
-  final void Function(int row, int effectIndex, String paramId, dynamic oldValue, dynamic newValue)?
-      onPluginParamCommit;
+  final void Function(int row, int effectIndex, String paramId,
+      dynamic oldValue, dynamic newValue)? onPluginParamCommit;
 
   final MeterBus meters;
-  final Future<List<double>> Function(int row, int effectIndex) getRowCompressorMeter;
+  final Future<List<double>> Function(int row, int effectIndex)
+      getRowCompressorMeter;
+  final Future<List<double>> Function(int row, int effectIndex, int sampleCount)
+      getRowEqWaveform;
 
   const RowEffectsPanel({
     Key? key,
     required this.rowIndex,
     required this.mode,
     required this.getEffectsForRow,
+    required this.getEffectIdsForRow,
     required this.getBypassStateForRow,
     required this.setBypassForRow,
     required this.reorderEffectsForRow,
@@ -51,6 +76,7 @@ class RowEffectsPanel extends StatefulWidget {
     required this.projectBpm,
     required this.meters,
     required this.getRowCompressorMeter,
+    required this.getRowEqWaveform,
   }) : super(key: key);
 
   @override
@@ -59,6 +85,7 @@ class RowEffectsPanel extends StatefulWidget {
 
 class _RowEffectsPanelState extends State<RowEffectsPanel> {
   List<String> _effects = [];
+  List<String> _effectKeys = [];
   List<bool> _bypassed = [];
   bool _loading = true;
 
@@ -78,6 +105,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   CompressorStripFrame _compFrame = CompressorStripFrame.zero;
   CompressorStripFrame _compFrameSmoothed = CompressorStripFrame.zero;
   bool _compMeterRunning = false;
+  Timer? _eqWaveformTimer;
+  bool _eqWaveformRunning = false;
+  List<double> _eqWaveform = const <double>[];
+  List<double> _eqSpectrumDb = const <double>[];
+  double _eqAnalyzerSampleRate = 44100.0;
+  int _eqParametricTabIndex = 0;
 
   @override
   void initState() {
@@ -88,18 +121,44 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   }
 
   @override
+  void didUpdateWidget(covariant RowEffectsPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.rowIndex != widget.rowIndex) {
+      _refetchAll();
+    }
+  }
+
+  @override
   void dispose() {
     _stopCompressorMetering();
+    _stopEqWaveformPolling();
     super.dispose();
   }
 
-  Future<void> _loadEffects() async {
-    setState(() {
-      _loading = true;
-      _selectedEffectIndex = null;
-      _currentParams = [];
-    });
+  Future<void> _loadEffects(
+      {bool forceCloseParams = false, bool showLoading = true}) async {
+    final hadSelection = _selectedEffectIndex != null;
+    if (forceCloseParams) {
+      setState(() {
+        _loading = showLoading;
+        _selectedEffectIndex = null;
+        _currentParams = [];
+      });
+      _stopEqWaveformPolling();
+    } else if (!hadSelection) {
+      if (showLoading) {
+        setState(() {
+          _loading = true;
+        });
+      }
+      _stopEqWaveformPolling();
+    }
     final names = await widget.getEffectsForRow(widget.rowIndex);
+    var ids = await widget.getEffectIdsForRow(widget.rowIndex);
+    if (ids.length != names.length) {
+      ids = List<String>.from(names);
+    }
+    final keys = _buildStableEffectKeys(ids);
     final bypassStates = <bool>[];
 
     for (int i = 0; i < names.length; i++) {
@@ -110,9 +169,76 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     if (!mounted) return;
     setState(() {
       _effects = List<String>.from(names);
+      _effectKeys = List<String>.from(keys);
       _bypassed = List<bool>.from(bypassStates);
       _loading = false;
+      if (_selectedEffectIndex != null &&
+          _selectedEffectIndex! >= _effects.length) {
+        _selectedEffectIndex = null;
+        _currentParams = [];
+        _stopEqWaveformPolling();
+      }
     });
+  }
+
+  void _moveDelayDivisionState(int from, int to) {
+    if (from == to) return;
+
+    final moved = _delayDivisionByEffect.remove(from);
+    final next = <int, int>{};
+
+    _delayDivisionByEffect.forEach((key, value) {
+      var newKey = key;
+      if (from < to) {
+        if (key > from && key <= to) newKey = key - 1;
+      } else {
+        if (key >= to && key < from) newKey = key + 1;
+      }
+      next[newKey] = value;
+    });
+
+    if (moved != null) next[to] = moved;
+
+    _delayDivisionByEffect
+      ..clear()
+      ..addAll(next);
+  }
+
+  void _applyLocalReorder(int oldIndex, int newIndex) {
+    final movedName = _effects.removeAt(oldIndex);
+    final movedKey = _effectKeys.removeAt(oldIndex);
+    final movedBypass = _bypassed.removeAt(oldIndex);
+    _effects.insert(newIndex, movedName);
+    _effectKeys.insert(newIndex, movedKey);
+    _bypassed.insert(newIndex, movedBypass);
+
+    final selected = _selectedEffectIndex;
+    if (selected != null) {
+      if (selected == oldIndex) {
+        _selectedEffectIndex = newIndex;
+      } else if (oldIndex < newIndex &&
+          selected > oldIndex &&
+          selected <= newIndex) {
+        _selectedEffectIndex = selected - 1;
+      } else if (newIndex < oldIndex &&
+          selected >= newIndex &&
+          selected < oldIndex) {
+        _selectedEffectIndex = selected + 1;
+      }
+    }
+
+    _moveDelayDivisionState(oldIndex, newIndex);
+  }
+
+  Future<int> _resolveLiveEffectIndex(int uiIndex) async {
+    if (uiIndex < 0 || uiIndex >= _effects.length) return -1;
+
+    final liveNames = await widget.getEffectsForRow(widget.rowIndex);
+    if (uiIndex >= 0 && uiIndex < liveNames.length) return uiIndex;
+
+    await _loadEffects(showLoading: false);
+    if (uiIndex < 0 || uiIndex >= _effects.length) return -1;
+    return uiIndex;
   }
 
   int _delayDivisionIndex(int effectIndex) {
@@ -139,7 +265,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   }) {
     final msValue = (param['value'] as num).toDouble();
     final detectedIdx = _detectDelayDivision(msValue, bpm);
-    final presetLabel = detectedIdx == null ? 'Custom' : kDelayDivisions[detectedIdx].label;
+    final presetLabel =
+        detectedIdx == null ? 'Custom' : kDelayDivisions[detectedIdx].label;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
@@ -149,7 +276,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           // ---- Header row ----
           Row(
             children: [
-              Text(param['name'] as String, style: Theme.of(context).textTheme.bodyLarge),
+              Text(param['name'] as String,
+                  style: Theme.of(context).textTheme.bodyLarge),
               const Spacer(),
 
               // ---- PRESET DROPDOWN ----
@@ -157,13 +285,16 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 value: presetLabel,
                 underline: const SizedBox(),
                 items: [
-                  const DropdownMenuItem(value: 'Custom', child: Text('Custom')),
-                  ...kDelayDivisions.map((d) => DropdownMenuItem(value: d.label, child: Text(d.label))),
+                  const DropdownMenuItem(
+                      value: 'Custom', child: Text('Custom')),
+                  ...kDelayDivisions.map((d) =>
+                      DropdownMenuItem(value: d.label, child: Text(d.label))),
                 ],
                 onChanged: (label) {
                   if (label == null || label == 'Custom') return;
 
-                  final division = kDelayDivisions.firstWhere((d) => d.label == label);
+                  final division =
+                      kDelayDivisions.firstWhere((d) => d.label == label);
                   final newMs = beatsToMs(division.beats, bpm);
 
                   _paramDragStartValue = msValue;
@@ -172,7 +303,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     param['value'] = newMs;
                   });
 
-                  widget.setTrackEffectParam(widget.rowIndex, effectIndex, param['name'] as String, newMs);
+                  widget.setTrackEffectParam(widget.rowIndex, effectIndex,
+                      param['name'] as String, newMs);
 
                   widget.onPluginParamCommit?.call(
                     widget.rowIndex,
@@ -191,36 +323,59 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           // ---- MS SLIDER (ALWAYS SHOWN) ----
           Row(
             children: [
-              Text((param['min'] as num).toDouble().toStringAsFixed(0), style: Theme.of(context).textTheme.bodySmall),
+              Text((param['min'] as num).toDouble().toStringAsFixed(0),
+                  style: Theme.of(context).textTheme.bodySmall),
               Expanded(
-                child: Slider(
-                  value: msValue.clamp((param['min'] as num).toDouble(), (param['max'] as num).toDouble()),
-                  min: (param['min'] as num).toDouble(),
-                  max: (param['max'] as num).toDouble(),
-                  divisions: 200,
-                  label: '${msValue.toStringAsFixed(0)} ms',
-                  onChangeStart: (_) {
-                    _paramDragStartValue = msValue;
-                  },
-                  onChanged: (v) {
-                    setState(() => param['value'] = v);
-                    widget.setTrackEffectParam(widget.rowIndex, effectIndex, param['name'] as String, v);
-                  },
-                  onChangeEnd: (v) {
-                    if (_paramDragStartValue == null) return;
-
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onDoubleTap: () {
+                    final defaultValue = _paramDefaultAsDouble(param);
+                    if (defaultValue == null) return;
+                    final oldValue = (param['value'] as num).toDouble();
+                    if ((oldValue - defaultValue).abs() < 1.0e-6) return;
+                    setState(() => param['value'] = defaultValue);
+                    widget.setTrackEffectParam(widget.rowIndex, effectIndex,
+                        param['name'] as String, defaultValue);
                     widget.onPluginParamCommit?.call(
                       widget.rowIndex,
                       effectIndex,
                       param['name'] as String,
-                      _paramDragStartValue!,
-                      v,
+                      oldValue,
+                      defaultValue,
                     );
-                    _paramDragStartValue = null;
                   },
+                  child: Slider(
+                    value: msValue.clamp((param['min'] as num).toDouble(),
+                        (param['max'] as num).toDouble()),
+                    min: (param['min'] as num).toDouble(),
+                    max: (param['max'] as num).toDouble(),
+                    divisions: 200,
+                    label: '${msValue.toStringAsFixed(0)} ms',
+                    onChangeStart: (_) {
+                      _paramDragStartValue = msValue;
+                    },
+                    onChanged: (v) {
+                      setState(() => param['value'] = v);
+                      widget.setTrackEffectParam(widget.rowIndex, effectIndex,
+                          param['name'] as String, v);
+                    },
+                    onChangeEnd: (v) {
+                      if (_paramDragStartValue == null) return;
+
+                      widget.onPluginParamCommit?.call(
+                        widget.rowIndex,
+                        effectIndex,
+                        param['name'] as String,
+                        _paramDragStartValue!,
+                        v,
+                      );
+                      _paramDragStartValue = null;
+                    },
+                  ),
                 ),
               ),
-              Text((param['max'] as num).toDouble().toStringAsFixed(0), style: Theme.of(context).textTheme.bodySmall),
+              Text((param['max'] as num).toDouble().toStringAsFixed(0),
+                  style: Theme.of(context).textTheme.bodySmall),
             ],
           ),
         ],
@@ -233,11 +388,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     _compMeterRunning = true;
 
     // ~30fps is plenty; 60fps if you want (16ms)
-    _compMeterTimer = Timer.periodic(const Duration(milliseconds: 33), (_) async {
+    _compMeterTimer =
+        Timer.periodic(const Duration(milliseconds: 33), (_) async {
       if (!mounted || !_compMeterRunning) return;
 
       try {
-        final arr = await widget.getRowCompressorMeter(widget.rowIndex, effectIndex);
+        final arr =
+            await widget.getRowCompressorMeter(widget.rowIndex, effectIndex);
         if (!mounted || !_compMeterRunning) return;
         // arr = [inL, inR, grDb, outL, outR]
         final next = CompressorStripFrame(
@@ -253,7 +410,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         const t = 0.25;
         setState(() {
           _compFrame = next;
-          _compFrameSmoothed = CompressorStripFrame.lerp(_compFrameSmoothed, next, t);
+          _compFrameSmoothed =
+              CompressorStripFrame.lerp(_compFrameSmoothed, next, t);
         });
       } catch (_) {
         // ignore polling errors (plugin might not be ready)
@@ -269,27 +427,80 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     _compFrameSmoothed = CompressorStripFrame.zero;
   }
 
+  void _startEqWaveformPolling({required int effectIndex}) {
+    _stopEqWaveformPolling();
+    _eqWaveformRunning = true;
+    _refreshEqAnalyzerSampleRate();
+
+    _eqWaveformTimer =
+        Timer.periodic(const Duration(milliseconds: 33), (_) async {
+      if (!mounted || !_eqWaveformRunning) return;
+
+      try {
+        final arr =
+            await widget.getRowEqWaveform(widget.rowIndex, effectIndex, 1024);
+        if (!mounted || !_eqWaveformRunning) return;
+        final spectrum = _EqSpectrumAnalyzer.computeSpectrumDb(arr);
+        setState(() {
+          _eqWaveform = arr;
+          _eqSpectrumDb = spectrum;
+        });
+      } catch (_) {
+        // ignore transient bridge errors while polling
+      }
+    });
+  }
+
+  void _stopEqWaveformPolling() {
+    _eqWaveformRunning = false;
+    _eqWaveformTimer?.cancel();
+    _eqWaveformTimer = null;
+    _eqWaveform = const <double>[];
+    _eqSpectrumDb = const <double>[];
+  }
+
+  Future<void> _refreshEqAnalyzerSampleRate() async {
+    try {
+      final sr = await JuceAudioEngine.getHostSampleRate();
+      if (!mounted || !_eqWaveformRunning) return;
+      if ((sr - _eqAnalyzerSampleRate).abs() > 1.0) {
+        setState(() {
+          _eqAnalyzerSampleRate = sr;
+        });
+      }
+    } catch (_) {
+      // keep default if host SR is unavailable on this platform
+    }
+  }
+
   // used from above when the UI needs to be updated after JUCE state changed from above (undo actions, AI mixer)
   Future<void> _refetchAll() async {
     if (!mounted) return;
 
     // Case 1: effect list page
     if (_selectedEffectIndex == null) {
-      await _loadEffects();
+      // Keep list page stable during external refreshes (undo/AI/etc).
+      await _loadEffects(showLoading: false);
       return;
     }
 
     // Case 2: parameter page
     final idx = _selectedEffectIndex!;
-    setState(() {
-      _paramsLoading = true;
-    });
+    final liveIdx = await _resolveLiveEffectIndex(idx);
+    if (liveIdx < 0) {
+      await _loadEffects(showLoading: false);
+      return;
+    }
 
-    var params = await widget.getTrackPluginParameters(widget.rowIndex, idx);
+    var params =
+        await widget.getTrackPluginParameters(widget.rowIndex, liveIdx);
+
+    final effectName = (liveIdx >= 0 && liveIdx < _effects.length)
+        ? _effects[liveIdx]
+        : (idx >= 0 && idx < _effects.length ? _effects[idx] : '');
 
     // Re-apply the same filtering logic used in _openPluginParams
     if (widget.mode == "Basic" || widget.mode == "Pro") {
-      final effectName = _effects[idx];
       switch (effectName) {
         case 'Reverb':
           params = params.where((p) {
@@ -301,7 +512,22 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         case 'Compressor':
           params = params.where((p) {
             final n = p['name']?.toString() ?? '';
-            return ['Threshold', 'Attack', 'Release', 'Ratio', 'Makeup', 'Mix'].contains(n);
+            return ['Threshold', 'Attack', 'Release', 'Ratio', 'Makeup', 'Mix']
+                .contains(n);
+          }).toList();
+          break;
+
+        case 'Limiter':
+          params = params.where((p) {
+            final n = p['name']?.toString() ?? '';
+            return ['Threshold', 'Release', 'Ceiling'].contains(n);
+          }).toList();
+          break;
+
+        case 'Clipper':
+          params = params.where((p) {
+            final n = p['name']?.toString() ?? '';
+            return ['Threshold', 'Ceiling'].contains(n);
           }).toList();
           break;
 
@@ -310,10 +536,20 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             final n = p['name']?.toString() ?? '';
             return [
               'HPF Frequency',
+              'HPF Slope',
+              'Band 1 Frequency',
               'Band 1 Gain',
+              'Band 1 Q',
+              'Band 2 Frequency',
               'Band 2 Gain',
+              'Band 2 Q',
+              'Band 3 Frequency',
               'Band 3 Gain',
+              'Band 3 Q',
+              'Band 4 Frequency',
               'Band 4 Gain',
+              'Band 4 Q',
+              'LPF Slope',
               'LPF Frequency',
             ].contains(n);
           }).toList();
@@ -336,10 +572,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     }
 
     if (!mounted) return;
+    if (_selectedEffectIndex == null) return;
 
     setState(() {
       _currentParams = params;
-      _paramsLoading = false;
+      // Keep parameter page invariant during external refreshes.
+      // If index shifted due live reorder, stay on the same effect slot.
+      _selectedEffectIndex = liveIdx;
     });
   }
 
@@ -347,7 +586,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     if (_loading) {
       return SizedBox(
         height: 160,
-        child: Center(child: CircularProgressIndicator(color: Theme.of(context).primaryColor)),
+        child: Center(
+            child: CircularProgressIndicator(
+                color: Theme.of(context).primaryColor)),
       );
     }
 
@@ -387,26 +628,34 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 padding: EdgeInsets.zero,
-                children: [for (int i = 0; i < _effects.length; i++) _buildEffectTile(i)],
+                children: [
+                  for (int i = 0; i < _effects.length; i++) _buildEffectTile(i)
+                ],
                 onReorder: (oldIndex, newIndex) async {
                   if (oldIndex < 0 || oldIndex >= _effects.length) return;
                   if (newIndex > oldIndex) newIndex--;
                   newIndex = newIndex.clamp(0, _effects.length - 1);
-
-                  await widget.reorderEffectsForRow(widget.rowIndex, oldIndex, newIndex);
+                  if (oldIndex == newIndex) return;
 
                   setState(() {
-                    final name = _effects.removeAt(oldIndex);
-                    final bypass = _bypassed.removeAt(oldIndex);
-                    _effects.insert(newIndex, name);
-                    _bypassed.insert(newIndex, bypass);
+                    _applyLocalReorder(oldIndex, newIndex);
                   });
+
+                  try {
+                    await widget.reorderEffectsForRow(
+                        widget.rowIndex, oldIndex, newIndex);
+                  } catch (_) {
+                    await _loadEffects(showLoading: false);
+                  }
                 },
               ),
             ),
 
           // --- Add FX Button ---
-          if (_effects.length < 5) Padding(padding: const EdgeInsets.only(top: 0.0, left: 0.0), child: _buildAddTile()),
+          if (_effects.length < 5)
+            Padding(
+                padding: const EdgeInsets.only(top: 0.0, left: 0.0),
+                child: _buildAddTile()),
         ],
       ),
     );
@@ -425,7 +674,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         final h = box.size.height;
 
         // Only notify if height changed by a meaningful amount
-        if (_lastReportedHeight == null || (h - _lastReportedHeight!).abs() > 0.5) {
+        if (_lastReportedHeight == null ||
+            (h - _lastReportedHeight!).abs() > 0.5) {
           _lastReportedHeight = h;
           widget.onHeightChanged(h);
         }
@@ -448,10 +698,15 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     final isLocked = widget.mode == 'Basic' && lockedPresets.contains(name);
 
     return ActionChip(
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, // ← smaller hitbox
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4), // ← shrink chip
-      visualDensity: const VisualDensity(horizontal: -2, vertical: -2), // ← reduce height
-      backgroundColor: isLocked ? const Color.fromARGB(255, 61, 61, 61) : const Color.fromARGB(255, 88, 107, 200),
+      materialTapTargetSize:
+          MaterialTapTargetSize.shrinkWrap, // ← smaller hitbox
+      padding: const EdgeInsets.symmetric(
+          horizontal: 4, vertical: 4), // ← shrink chip
+      visualDensity:
+          const VisualDensity(horizontal: -2, vertical: -2), // ← reduce height
+      backgroundColor: isLocked
+          ? const Color.fromARGB(255, 61, 61, 61)
+          : const Color.fromARGB(255, 88, 107, 200),
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -459,13 +714,16 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             L10n.translate(context, name),
             style: TextStyle(
               fontSize: 12,
-              color: isLocked ? const Color.fromARGB(255, 122, 122, 122) : const Color.fromARGB(255, 255, 255, 255),
+              color: isLocked
+                  ? const Color.fromARGB(255, 122, 122, 122)
+                  : const Color.fromARGB(255, 255, 255, 255),
             ),
           ),
           if (isLocked)
             const Padding(
               padding: EdgeInsets.only(left: 6),
-              child: Icon(Icons.lock, size: 16, color: Color.fromARGB(255, 122, 122, 122)),
+              child: Icon(Icons.lock,
+                  size: 16, color: Color.fromARGB(255, 122, 122, 122)),
             ),
         ],
       ),
@@ -473,17 +731,22 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     );
   }
 
-  Future<void> _handlePresetLoading(BuildContext context, String presetName) async {
+  Future<void> _handlePresetLoading(
+      BuildContext context, String presetName) async {
     final description = () {
       switch (presetName) {
         case 'Concert Hall':
-          return L10n.translate(context, 'Applies wide reverb and subtle EQ to simulate a live concert space.');
+          return L10n.translate(context,
+              'Applies wide reverb and subtle EQ to simulate a live concert space.');
         case 'Echoes':
-          return L10n.translate(context, 'Applies reverb and delay to give an echo effect.');
+          return L10n.translate(
+              context, 'Applies reverb and delay to give an echo effect.');
         case 'LoFi Effect':
-          return L10n.translate(context, 'Applies filters and soft distortion for a vintage, relaxed vibe.');
+          return L10n.translate(context,
+              'Applies filters and soft distortion for a vintage, relaxed vibe.');
         case 'Heavy Crunch':
-          return L10n.translate(context, 'Crushes sound with heavy distortion.');
+          return L10n.translate(
+              context, 'Crushes sound with heavy distortion.');
         default:
           return "${L10n.translate(context, 'This will replace your current effects with ')}'$presetName'.";
       }
@@ -524,7 +787,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     for (int i = 0; i < _effects.length; i++) {
       final params = await widget.getTrackPluginParameters(widget.rowIndex, i);
       final isBypassed = await widget.getBypassStateForRow(widget.rowIndex, i);
-      beforeSnapshots.add(EffectSnapshot(_effects[i], isBypassed, {for (final p in params) p['name']: p['value']}));
+      beforeSnapshots.add(EffectSnapshot(_effects[i], isBypassed,
+          {for (final p in params) p['name']: p['value']}));
     }
     final before = RowEffectsSnapshot(widget.rowIndex, beforeSnapshots);
 
@@ -557,13 +821,16 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
 
       case 'LoFi Effect':
         await widget.insertEffectOnRow(widget.rowIndex, 'EQ Parametric');
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'LPF Frequency', 2600.0);
+        await widget.setTrackEffectParam(
+            widget.rowIndex, 0, 'LPF Frequency', 2600.0);
         await widget.insertEffectOnRow(widget.rowIndex, 'Distortion');
         await widget.setTrackEffectParam(widget.rowIndex, 1, 'Drive', 50);
         await widget.setTrackEffectParam(widget.rowIndex, 1, 'Mix', 85);
         await widget.setTrackEffectParam(widget.rowIndex, 1, 'Anger', 1);
-        await widget.setTrackEffectParam(widget.rowIndex, 1, 'LPF Frequency', 2800.0);
-        await widget.setTrackEffectParam(widget.rowIndex, 1, 'Distortion Type', "Mode 3");
+        await widget.setTrackEffectParam(
+            widget.rowIndex, 1, 'LPF Frequency', 2800.0);
+        await widget.setTrackEffectParam(
+            widget.rowIndex, 1, 'Distortion Type', "Mode 3");
         break;
 
       case 'Heavy Crunch':
@@ -573,7 +840,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         await widget.setTrackEffectParam(widget.rowIndex, 0, 'Anger', 1);
         await widget.setTrackEffectParam(widget.rowIndex, 0, 'Volume', 12);
         await widget.setTrackEffectParam(widget.rowIndex, 0, 'Pre Shape', 3.0);
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'Distortion Type', "Mode 3");
+        await widget.setTrackEffectParam(
+            widget.rowIndex, 0, 'Distortion Type', "Mode 3");
         break;
 
       default:
@@ -587,7 +855,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     for (int i = 0; i < _effects.length; i++) {
       final params = await widget.getTrackPluginParameters(widget.rowIndex, i);
       final isBypassed = await widget.getBypassStateForRow(widget.rowIndex, i);
-      afterSnapshots.add(EffectSnapshot(_effects[i], isBypassed, {for (final p in params) p['name']: p['value']}));
+      afterSnapshots.add(EffectSnapshot(_effects[i], isBypassed,
+          {for (final p in params) p['name']: p['value']}));
     }
     final after = RowEffectsSnapshot(widget.rowIndex, afterSnapshots);
     widget.onPresetCommit?.call(before, after);
@@ -600,7 +869,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
 
   Widget _buildEffectTile(int idx) {
     return ListTile(
-      key: ValueKey("effect_$idx"), // key must be on the tile itself
+      key: ValueKey("effect_${_effectKeys[idx]}"),
       contentPadding: EdgeInsets.zero,
 
       // only this area starts the reorder gesture
@@ -624,8 +893,16 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             value: !_bypassed[idx],
             onChanged: (active) async {
               final shouldBypass = !active;
-              await widget.setBypassForRow(widget.rowIndex, idx, shouldBypass);
+              final previous = _bypassed[idx];
+
               setState(() => _bypassed[idx] = shouldBypass);
+              try {
+                await widget.setBypassForRow(
+                    widget.rowIndex, idx, shouldBypass);
+              } catch (_) {
+                if (!mounted) return;
+                setState(() => _bypassed[idx] = previous);
+              }
             },
             activeColor: const Color.fromARGB(255, 231, 231, 231),
             inactiveThumbColor: const Color.fromARGB(255, 186, 186, 186),
@@ -633,13 +910,18 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             activeTrackColor: const Color.fromARGB(255, 54, 54, 54),
           ),
           IconButton(
-            icon: const Icon(Icons.delete_outline, color: Color.fromARGB(255, 255, 164, 164)),
+            icon: const Icon(Icons.delete_outline,
+                color: Color.fromARGB(255, 255, 164, 164)),
             onPressed: () => _confirmRemove(idx),
           ),
         ],
       ),
 
-      onTap: () => _openPluginParams(idx),
+      onTap: () async {
+        final liveIdx = await _resolveLiveEffectIndex(idx);
+        final targetIdx = liveIdx >= 0 ? liveIdx : idx;
+        await _openPluginParams(targetIdx);
+      },
     );
   }
 
@@ -671,20 +953,20 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(L10n.translate(context, 'Delete'), style: const TextStyle(color: Colors.red)),
+            child: Text(L10n.translate(context, 'Delete'),
+                style: const TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
 
     if (yes == true) {
-      await widget.removeEffectFromRow(widget.rowIndex, idx, _effects[idx], false);
-      _delayDivisionByEffect.remove(idx);
-
-      setState(() {
-        _effects.removeAt(idx);
-        _bypassed.removeAt(idx);
-      });
+      final liveIdx = await _resolveLiveEffectIndex(idx);
+      final targetIdx = liveIdx >= 0 ? liveIdx : idx;
+      await widget.removeEffectFromRow(
+          widget.rowIndex, targetIdx, _effects[idx], false);
+      _delayDivisionByEffect.remove(targetIdx);
+      await _loadEffects();
     }
   }
 
@@ -695,7 +977,34 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   Future<void> _showAddEffectModal() async {
     final plugins = await widget.scanPlugins();
     // const allowedInBasic = ['Reverb', 'EQ Parametric', 'EQ 3-Band', 'Delay', 'Distortion', 'De-Esser', 'Compressor'];
-    const allowedInBasic = ["EQ 3-Band", "Compressor", "De-Esser", "Distortion", "Delay", "Reverb", "EQ Parametric"];
+    const allowedInBasic = [
+      "EQ 3-Band",
+      "Compressor",
+      "Limiter",
+      "Clipper",
+      "De-Esser",
+      "Distortion",
+      "Delay",
+      "Reverb",
+      "EQ Parametric",
+      "Pitch Shift",
+      "Chorus",
+      "Vibrato",
+    ];
+    const fxChoices = [
+      "EQ 3-Band",
+      "Compressor",
+      "Limiter",
+      "Clipper",
+      "De-Esser",
+      "Distortion",
+      "Delay",
+      "Reverb",
+      "EQ Parametric",
+      "Pitch Shift",
+      "Chorus",
+      "Vibrato",
+    ];
 
     // Dialog can use scrolling; this is outside the row panel layout.
     showDialog(
@@ -704,60 +1013,118 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         return DefaultTabController(
           length: 2,
           child: AlertDialog(
-            backgroundColor: const Color.fromARGB(255, 79, 79, 79),
-            titlePadding: const EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 16),
-            contentPadding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: TabBar(
-              labelColor: const Color.fromARGB(255, 255, 255, 255),
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: const Color.fromARGB(255, 255, 255, 255),
-              indicatorWeight: 2,
-              tabs: [
-                const Tab(text: 'FX'),
-                Tab(text: L10n.translate(context, 'On Device')),
-              ],
+            backgroundColor: const Color(0xFF1A2233),
+            surfaceTintColor: Colors.transparent,
+            titlePadding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            contentPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: Colors.white.withOpacity(0.12)),
+            ),
+            title: Container(
+              height: 36,
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF121927),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white.withOpacity(0.10)),
+              ),
+              child: TabBar(
+                dividerColor: Colors.transparent,
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicatorPadding: EdgeInsets.zero,
+                indicator: BoxDecoration(
+                  color: const Color(0xFF2D3F5D),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white70,
+                labelStyle: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                ),
+                unselectedLabelStyle: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                ),
+                tabs: [
+                  const Tab(text: 'FX'),
+                  Tab(text: L10n.translate(context, 'On Device')),
+                ],
+              ),
             ),
             content: SizedBox(
               width: double.maxFinite,
-              height: 400,
+              height: 390,
               child: TabBarView(
                 children: [
-                  ListView(
-                    children: ["EQ 3-Band", "Compressor", "De-Esser", "Distortion", "Delay", "Reverb", "EQ Parametric"]
-                        .map((name) {
-                      final isAllowed = widget.mode == 'Pro' || allowedInBasic.contains(name);
+                  ListView.separated(
+                    itemCount: fxChoices.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 1,
+                      thickness: 1,
+                      color: Colors.white.withOpacity(0.07),
+                    ),
+                    itemBuilder: (context, i) {
+                      final name = fxChoices[i];
+                      final isAllowed =
+                          widget.mode == 'Pro' || allowedInBasic.contains(name);
                       return GestureDetector(
                         onTap: isAllowed
                             ? () async {
                                 Navigator.pop(context);
-                                await widget.insertEffectOnRow(widget.rowIndex, name);
+                                await widget.insertEffectOnRow(
+                                    widget.rowIndex, name);
                                 await _loadEffects();
                               }
                             : null,
                         child: Opacity(
                           opacity: isAllowed ? 1.0 : 0.4,
                           child: ListTile(
-                            title: Text(name),
-                            trailing: isAllowed ? null : const Icon(Icons.lock, size: 18, color: Colors.white70),
+                            dense: true,
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 10),
+                            title: Text(
+                              name,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 13.2),
+                            ),
+                            trailing: isAllowed
+                                ? null
+                                : const Icon(Icons.lock,
+                                    size: 18, color: Colors.white70),
                           ),
                         ),
                       );
-                    }).toList(),
+                    },
                   ),
-                  ListView(
-                    children: plugins.map((meta) {
+                  ListView.separated(
+                    itemCount: plugins.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 1,
+                      thickness: 1,
+                      color: Colors.white.withOpacity(0.07),
+                    ),
+                    itemBuilder: (context, i) {
+                      final meta = plugins[i];
                       final name = meta['name'] ?? meta['id'] ?? '';
                       final path = meta['id'] ?? '';
                       return ListTile(
-                        title: Text(name),
+                        dense: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 10),
+                        title: Text(
+                          name,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 13.2),
+                        ),
                         onTap: () async {
                           Navigator.pop(context);
                           await widget.insertEffectOnRow(widget.rowIndex, path);
                           await _loadEffects();
                         },
                       );
-                    }).toList(),
+                    },
                   ),
                 ],
               ),
@@ -773,6 +1140,11 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   // =========================
 
   Future<void> _openPluginParams(int idx) async {
+    if (idx < 0 || idx >= _effects.length) {
+      await _loadEffects();
+      if (idx < 0 || idx >= _effects.length) return;
+    }
+
     setState(() {
       _selectedEffectIndex = idx;
       _paramsLoading = true;
@@ -785,8 +1157,20 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     } else {
       _stopCompressorMetering();
     }
+    if (_effects[idx] == 'EQ Parametric' || _effects[idx] == 'EQ 3-Band') {
+      _startEqWaveformPolling(effectIndex: idx);
+    } else {
+      _stopEqWaveformPolling();
+    }
 
     var params = await widget.getTrackPluginParameters(widget.rowIndex, idx);
+    if (params.isEmpty) {
+      for (int i = 0; i < 6; i++) {
+        await Future.delayed(const Duration(milliseconds: 120));
+        params = await widget.getTrackPluginParameters(widget.rowIndex, idx);
+        if (params.isNotEmpty) break;
+      }
+    }
 
     // Basic-mode param filtering
     //TODO: TEMP limit plugin parameters no matter what "mode"
@@ -802,7 +1186,22 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         case 'Compressor':
           params = params.where((p) {
             final n = p['name']?.toString() ?? '';
-            return ['Threshold', 'Attack', 'Release', 'Ratio', 'Makeup', 'Mix'].contains(n);
+            return ['Threshold', 'Attack', 'Release', 'Ratio', 'Makeup', 'Mix']
+                .contains(n);
+          }).toList();
+          break;
+
+        case 'Limiter':
+          params = params.where((p) {
+            final n = p['name']?.toString() ?? '';
+            return ['Threshold', 'Release', 'Ceiling'].contains(n);
+          }).toList();
+          break;
+
+        case 'Clipper':
+          params = params.where((p) {
+            final n = p['name']?.toString() ?? '';
+            return ['Threshold', 'Ceiling'].contains(n);
           }).toList();
           break;
 
@@ -811,10 +1210,20 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             final name = param['name']?.toString() ?? '';
             return [
               'HPF Frequency',
+              'HPF Slope',
+              'Band 1 Frequency',
               'Band 1 Gain',
+              'Band 1 Q',
+              'Band 2 Frequency',
               'Band 2 Gain',
+              'Band 2 Q',
+              'Band 3 Frequency',
               'Band 3 Gain',
+              'Band 3 Q',
+              'Band 4 Frequency',
               'Band 4 Gain',
+              'Band 4 Q',
+              'LPF Slope',
               'LPF Frequency',
             ].contains(name);
           }).toList();
@@ -847,7 +1256,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     if (_paramsLoading) {
       return SizedBox(
         height: 180,
-        child: Center(child: CircularProgressIndicator(color: Theme.of(context).primaryColor)),
+        child: Center(
+            child: CircularProgressIndicator(
+                color: Theme.of(context).primaryColor)),
       );
     }
 
@@ -856,14 +1267,26 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     // Special layout for EQ Parametric
     if (effectName == 'EQ Parametric' && _currentParams.isNotEmpty) {
       final pHPF = _paramByName(_currentParams, 'HPF Frequency');
+      final pHPFSlope = _paramByName(_currentParams, 'HPF Slope');
       final pLPF = _paramByName(_currentParams, 'LPF Frequency');
+      final pLPFSlope = _paramByName(_currentParams, 'LPF Slope');
+      final pB1Freq = _paramByName(_currentParams, 'Band 1 Frequency');
       final pB1 = _paramByName(_currentParams, 'Band 1 Gain');
+      final pB1Q = _paramByName(_currentParams, 'Band 1 Q');
+      final pB2Freq = _paramByName(_currentParams, 'Band 2 Frequency');
       final pB2 = _paramByName(_currentParams, 'Band 2 Gain');
+      final pB2Q = _paramByName(_currentParams, 'Band 2 Q');
+      final pB3Freq = _paramByName(_currentParams, 'Band 3 Frequency');
       final pB3 = _paramByName(_currentParams, 'Band 3 Gain');
+      final pB3Q = _paramByName(_currentParams, 'Band 3 Q');
+      final pB4Freq = _paramByName(_currentParams, 'Band 4 Frequency');
       final pB4 = _paramByName(_currentParams, 'Band 4 Gain');
+      final pB4Q = _paramByName(_currentParams, 'Band 4 Q');
 
       final hpfHz = (pHPF?['value'] as num?)?.toDouble() ?? 80.0;
       final lpfHz = (pLPF?['value'] as num?)?.toDouble() ?? 12000.0;
+      final hpfSlopeDbOct = _parseSlopeDbPerOct(pHPFSlope?['value']);
+      final lpfSlopeDbOct = _parseSlopeDbPerOct(pLPFSlope?['value']);
 
       final bandGains = [
         (pB1?['value'] as num?)?.toDouble() ?? 0,
@@ -871,10 +1294,267 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         (pB3?['value'] as num?)?.toDouble() ?? 0,
         (pB4?['value'] as num?)?.toDouble() ?? 0,
       ];
-      final bandFreqs = [60.0, 400.0, 2000.0, 8000.0];
+      final bandFreqs = [
+        (pB1Freq?['value'] as num?)?.toDouble() ?? 60.0,
+        (pB2Freq?['value'] as num?)?.toDouble() ?? 400.0,
+        (pB3Freq?['value'] as num?)?.toDouble() ?? 2000.0,
+        (pB4Freq?['value'] as num?)?.toDouble() ?? 8000.0,
+      ];
+      final bandQs = [
+        (pB1Q?['value'] as num?)?.toDouble() ?? 1.0,
+        (pB2Q?['value'] as num?)?.toDouble() ?? 1.0,
+        (pB3Q?['value'] as num?)?.toDouble() ?? 1.0,
+        (pB4Q?['value'] as num?)?.toDouble() ?? 1.0,
+      ];
+
+      _EqFaderSpec? buildEqFader(
+        Map<String, dynamic>? param, {
+        required String label,
+        required String unit,
+        bool logarithmic = false,
+      }) {
+        if (param == null) return null;
+        final name = param['name'] as String;
+        return _EqFaderSpec(
+          label: label,
+          value: (param['value'] as num).toDouble(),
+          min: (param['min'] as num).toDouble(),
+          max: (param['max'] as num).toDouble(),
+          defaultValue: _paramDefaultAsDouble(param),
+          logarithmic: logarithmic,
+          unit: unit,
+          onChangeStart: (_) {
+            _EQParamStartValue = (param['value'] as num).toDouble();
+          },
+          onChanged: (v) {
+            setState(() => param['value'] = v);
+            widget.setTrackEffectParam(widget.rowIndex, idx, name, v);
+          },
+          onChangeEnd: (v) {
+            final startValue = _EQParamStartValue;
+            if (startValue == null) return;
+            widget.onPluginParamCommit?.call(
+              widget.rowIndex,
+              idx,
+              name,
+              startValue,
+              v,
+            );
+            _EQParamStartValue = null;
+          },
+          onReset: () {
+            final defaultValue = _paramDefaultAsDouble(param);
+            if (defaultValue == null) return;
+            final oldValue = (param['value'] as num).toDouble();
+            if ((oldValue - defaultValue).abs() < 1.0e-6) return;
+            setState(() => param['value'] = defaultValue);
+            widget.setTrackEffectParam(
+                widget.rowIndex, idx, name, defaultValue);
+            widget.onPluginParamCommit?.call(
+              widget.rowIndex,
+              idx,
+              name,
+              oldValue,
+              defaultValue,
+            );
+          },
+        );
+      }
+
+      final gainFaders = <_EqFaderSpec>[
+        if (pB1 != null) buildEqFader(pB1, label: 'Band 1', unit: 'dB')!,
+        if (pB2 != null) buildEqFader(pB2, label: 'Band 2', unit: 'dB')!,
+        if (pB3 != null) buildEqFader(pB3, label: 'Band 3', unit: 'dB')!,
+        if (pB4 != null) buildEqFader(pB4, label: 'Band 4', unit: 'dB')!,
+      ];
+      final frequencyFaders = <_EqFaderSpec>[
+        if (pB1Freq != null)
+          buildEqFader(
+            pB1Freq,
+            label: 'Band 1',
+            unit: 'Hz',
+            logarithmic: true,
+          )!,
+        if (pB2Freq != null)
+          buildEqFader(
+            pB2Freq,
+            label: 'Band 2',
+            unit: 'Hz',
+            logarithmic: true,
+          )!,
+        if (pB3Freq != null)
+          buildEqFader(
+            pB3Freq,
+            label: 'Band 3',
+            unit: 'Hz',
+            logarithmic: true,
+          )!,
+        if (pB4Freq != null)
+          buildEqFader(
+            pB4Freq,
+            label: 'Band 4',
+            unit: 'Hz',
+            logarithmic: true,
+          )!,
+      ];
+      final qFaders = <_EqFaderSpec>[
+        if (pB1Q != null) buildEqFader(pB1Q, label: 'Band 1', unit: 'Q')!,
+        if (pB2Q != null) buildEqFader(pB2Q, label: 'Band 2', unit: 'Q')!,
+        if (pB3Q != null) buildEqFader(pB3Q, label: 'Band 3', unit: 'Q')!,
+        if (pB4Q != null) buildEqFader(pB4Q, label: 'Band 4', unit: 'Q')!,
+      ];
+      final hpfSlopeChoices =
+          (pHPFSlope != null && pHPFSlope['type'] == 'choice')
+              ? _extractChoiceValues(pHPFSlope)
+              : const <String>[];
+      final lpfSlopeChoices =
+          (pLPFSlope != null && pLPFSlope['type'] == 'choice')
+              ? _extractChoiceValues(pLPFSlope)
+              : const <String>[];
+      final hpfSlopeCurrent = hpfSlopeChoices.isEmpty
+          ? null
+          : (hpfSlopeChoices.contains(pHPFSlope?['value']?.toString())
+              ? pHPFSlope!['value'].toString()
+              : hpfSlopeChoices.first);
+      final lpfSlopeCurrent = lpfSlopeChoices.isEmpty
+          ? null
+          : (lpfSlopeChoices.contains(pLPFSlope?['value']?.toString())
+              ? pLPFSlope!['value'].toString()
+              : lpfSlopeChoices.first);
+      final frequencyExtraControls = <Widget>[
+        if (pHPF != null)
+          _buildEqFilterControlRow(
+            context: context,
+            label: 'HPF',
+            value: (pHPF['value'] as num).toDouble(),
+            min: (pHPF['min'] as num).toDouble(),
+            max: (pHPF['max'] as num).toDouble(),
+            logarithmic: true,
+            onChangeStart: (_) {
+              _EQParamStartValue = (pHPF['value'] as num).toDouble();
+            },
+            onChanged: (v) {
+              setState(() => pHPF['value'] = v);
+              widget.setTrackEffectParam(
+                  widget.rowIndex, idx, pHPF['name'] as String, v);
+            },
+            onChangeEnd: (v) {
+              final startValue = _EQParamStartValue;
+              if (startValue == null) return;
+              widget.onPluginParamCommit?.call(
+                widget.rowIndex,
+                idx,
+                pHPF['name'] as String,
+                startValue,
+                v,
+              );
+              _EQParamStartValue = null;
+            },
+            onDoubleTapReset: () {
+              final defaultValue = _paramDefaultAsDouble(pHPF);
+              if (defaultValue == null) return;
+              final oldValue = (pHPF['value'] as num).toDouble();
+              if ((oldValue - defaultValue).abs() < 1.0e-6) return;
+              setState(() => pHPF['value'] = defaultValue);
+              widget.setTrackEffectParam(
+                  widget.rowIndex, idx, pHPF['name'] as String, defaultValue);
+              widget.onPluginParamCommit?.call(
+                widget.rowIndex,
+                idx,
+                pHPF['name'] as String,
+                oldValue,
+                defaultValue,
+              );
+            },
+            slopeChoices: hpfSlopeChoices,
+            selectedSlope: hpfSlopeCurrent,
+            onSlopeChanged: (picked) {
+              if (pHPFSlope == null) return;
+              final oldVal = pHPFSlope['value'];
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                setState(() => pHPFSlope['value'] = picked);
+              });
+              widget.setTrackEffectParam(
+                  widget.rowIndex, idx, pHPFSlope['name'] as String, picked);
+              widget.onPluginParamCommit?.call(
+                widget.rowIndex,
+                idx,
+                pHPFSlope['name'] as String,
+                oldVal,
+                picked,
+              );
+            },
+          ),
+        if (pHPF != null && pLPF != null) const SizedBox(height: 6),
+        if (pLPF != null)
+          _buildEqFilterControlRow(
+            context: context,
+            label: 'LPF',
+            value: (pLPF['value'] as num).toDouble(),
+            min: (pLPF['min'] as num).toDouble(),
+            max: (pLPF['max'] as num).toDouble(),
+            logarithmic: true,
+            onChangeStart: (_) {
+              _EQParamStartValue = (pLPF['value'] as num).toDouble();
+            },
+            onChanged: (v) {
+              setState(() => pLPF['value'] = v);
+              widget.setTrackEffectParam(
+                  widget.rowIndex, idx, pLPF['name'] as String, v);
+            },
+            onChangeEnd: (v) {
+              final startValue = _EQParamStartValue;
+              if (startValue == null) return;
+              widget.onPluginParamCommit?.call(
+                widget.rowIndex,
+                idx,
+                pLPF['name'] as String,
+                startValue,
+                v,
+              );
+              _EQParamStartValue = null;
+            },
+            onDoubleTapReset: () {
+              final defaultValue = _paramDefaultAsDouble(pLPF);
+              if (defaultValue == null) return;
+              final oldValue = (pLPF['value'] as num).toDouble();
+              if ((oldValue - defaultValue).abs() < 1.0e-6) return;
+              setState(() => pLPF['value'] = defaultValue);
+              widget.setTrackEffectParam(
+                  widget.rowIndex, idx, pLPF['name'] as String, defaultValue);
+              widget.onPluginParamCommit?.call(
+                widget.rowIndex,
+                idx,
+                pLPF['name'] as String,
+                oldValue,
+                defaultValue,
+              );
+            },
+            slopeChoices: lpfSlopeChoices,
+            selectedSlope: lpfSlopeCurrent,
+            onSlopeChanged: (picked) {
+              if (pLPFSlope == null) return;
+              final oldVal = pLPFSlope['value'];
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                setState(() => pLPFSlope['value'] = picked);
+              });
+              widget.setTrackEffectParam(
+                  widget.rowIndex, idx, pLPFSlope['name'] as String, picked);
+              widget.onPluginParamCommit?.call(
+                widget.rowIndex,
+                idx,
+                pLPFSlope['name'] as String,
+                oldVal,
+                picked,
+              );
+            },
+          ),
+      ];
 
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -882,24 +1562,90 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back),
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  constraints:
+                      const BoxConstraints.tightFor(width: 26, height: 26),
+                  splashRadius: 14,
+                  icon: const Icon(Icons.arrow_back, size: 18),
                   onPressed: () {
+                    _stopEqWaveformPolling();
                     setState(() {
                       _selectedEffectIndex = null;
                       _currentParams = [];
                     });
                   },
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  effectName,
-                  style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 16, fontWeight: FontWeight.w600),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    effectName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(1.00),
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () async {
+                    final changes = <Map<String, dynamic>>[];
+                    for (final p in _currentParams) {
+                      final next = _paramDefaultValue(p);
+                      if (next == null) continue;
+                      final old = p['value'];
+                      if (_paramValuesEqual(old, next)) continue;
+                      changes.add({
+                        'param': p,
+                        'old': old,
+                        'next': next,
+                      });
+                    }
+                    if (changes.isEmpty) return;
+
+                    setState(() {
+                      for (final c in changes) {
+                        (c['param'] as Map<String, dynamic>)['value'] =
+                            c['next'];
+                      }
+                    });
+
+                    for (final c in changes) {
+                      final p = c['param'] as Map<String, dynamic>;
+                      final oldVal = c['old'];
+                      final newVal = c['next'];
+                      final name = p['name'] as String;
+                      await widget.setTrackEffectParam(
+                          widget.rowIndex, idx, name, newVal);
+                      widget.onPluginParamCommit?.call(
+                        widget.rowIndex,
+                        idx,
+                        name,
+                        oldVal,
+                        newVal,
+                      );
+                    }
+                  },
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                    minimumSize: const Size(0, 28),
+                  ),
+                  icon: const Icon(Icons.restart_alt, size: 16),
+                  label: const Text('Reset', style: TextStyle(fontSize: 12)),
                 ),
               ],
             ),
-            // const SizedBox(height: 8),
-            const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
+            const Divider(
+              height: 1,
+              thickness: 0.9,
+              color: Color.fromARGB(213, 104, 104, 104),
+            ),
+            const SizedBox(height: 6),
 
             LayoutBuilder(
               builder: (context, constraints) {
@@ -910,179 +1656,29 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                   child: Column(
                     children: [
                       // EQ Preview
-                      _EqPreviewFull(hpfHz: hpfHz, lpfHz: lpfHz, bandGains: bandGains, bandFreqs: bandFreqs),
+                      _EqPreviewFull(
+                          hpfHz: hpfHz,
+                          lpfHz: lpfHz,
+                          hpfSlopeDbOct: hpfSlopeDbOct,
+                          lpfSlopeDbOct: lpfSlopeDbOct,
+                          bandGains: bandGains,
+                          bandFreqs: bandFreqs,
+                          bandQs: bandQs,
+                          waveformSamples: _eqWaveform,
+                          spectrumDb: _eqSpectrumDb,
+                          analyzerSampleRate: _eqAnalyzerSampleRate),
                       const SizedBox(height: 16),
-
-                      // Vertical faders row
-                      SizedBox(
-                        height: _eqRowHeight,
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown, // solves horizontal overflow
-                          alignment: Alignment.topCenter,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              if (pHPF != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'HPF\nFreq',
-                                  value: (pHPF['value'] as num).toDouble(),
-                                  min: (pHPF['min'] as num).toDouble(),
-                                  max: (pHPF['max'] as num).toDouble(),
-                                  logarithmic: true,
-                                  unit: 'Hz',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pHPF['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onPluginParamCommit?.call(
-                                      widget.rowIndex,
-                                      idx,
-                                      pHPF['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pHPF['value'] = v);
-                                    widget.setTrackEffectParam(widget.rowIndex, idx, pHPF['name'] as String, v);
-                                  },
-                                ),
-                              if (pB1 != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'Band1\nGain',
-                                  value: (pB1['value'] as num).toDouble(),
-                                  min: (pB1['min'] as num).toDouble(),
-                                  max: (pB1['max'] as num).toDouble(),
-                                  unit: 'dB',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pB1['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onPluginParamCommit?.call(
-                                      widget.rowIndex,
-                                      idx,
-                                      pB1['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pB1['value'] = v);
-                                    widget.setTrackEffectParam(widget.rowIndex, idx, pB1['name'] as String, v);
-                                  },
-                                ),
-                              if (pB2 != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'Band2\nGain',
-                                  value: (pB2['value'] as num).toDouble(),
-                                  min: (pB2['min'] as num).toDouble(),
-                                  max: (pB2['max'] as num).toDouble(),
-                                  unit: 'dB',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pB2['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onPluginParamCommit?.call(
-                                      widget.rowIndex,
-                                      idx,
-                                      pB2['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pB2['value'] = v);
-                                    widget.setTrackEffectParam(widget.rowIndex, idx, pB2['name'] as String, v);
-                                  },
-                                ),
-                              if (pB3 != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'Band3\nGain',
-                                  value: (pB3['value'] as num).toDouble(),
-                                  min: (pB3['min'] as num).toDouble(),
-                                  max: (pB3['max'] as num).toDouble(),
-                                  unit: 'dB',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pB3['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onPluginParamCommit?.call(
-                                      widget.rowIndex,
-                                      idx,
-                                      pB3['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pB3['value'] = v);
-                                    widget.setTrackEffectParam(widget.rowIndex, idx, pB3['name'] as String, v);
-                                  },
-                                ),
-                              if (pB4 != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'Band4\nGain',
-                                  value: (pB4['value'] as num).toDouble(),
-                                  min: (pB4['min'] as num).toDouble(),
-                                  max: (pB4['max'] as num).toDouble(),
-                                  unit: 'dB',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pB4['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onPluginParamCommit?.call(
-                                      widget.rowIndex,
-                                      idx,
-                                      pB4['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pB4['value'] = v);
-                                    widget.setTrackEffectParam(widget.rowIndex, idx, pB4['name'] as String, v);
-                                  },
-                                ),
-                              if (pLPF != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'LPF\nFreq',
-                                  value: (pLPF['value'] as num).toDouble(),
-                                  min: (pLPF['min'] as num).toDouble(),
-                                  max: (pLPF['max'] as num).toDouble(),
-                                  logarithmic: true,
-                                  unit: 'Hz',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pLPF['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onPluginParamCommit?.call(
-                                      widget.rowIndex,
-                                      idx,
-                                      pLPF['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pLPF['value'] = v);
-                                    widget.setTrackEffectParam(widget.rowIndex, idx, pLPF['name'] as String, v);
-                                  },
-                                ),
-                            ],
-                          ),
-                        ),
+                      _buildEqParametricTabs(
+                        context: context,
+                        gainFaders: gainFaders,
+                        frequencyFaders: frequencyFaders,
+                        qFaders: qFaders,
+                        frequencyExtraControls: frequencyExtraControls,
+                        selectedTabIndex: _eqParametricTabIndex,
+                        onTabChanged: (index) {
+                          if (_eqParametricTabIndex == index) return;
+                          setState(() => _eqParametricTabIndex = index);
+                        },
                       ),
                     ],
                   ),
@@ -1109,37 +1705,61 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       final freqs = [140.0, 1200.0, 8000.0];
 
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back),
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  constraints:
+                      const BoxConstraints.tightFor(width: 26, height: 26),
+                  splashRadius: 14,
+                  icon: const Icon(Icons.arrow_back, size: 18),
                   onPressed: () {
+                    _stopEqWaveformPolling();
                     setState(() {
                       _selectedEffectIndex = null;
                       _currentParams = [];
                     });
                   },
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  effectName,
-                  style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 16, fontWeight: FontWeight.w600),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    effectName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(1.00),
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600),
+                  ),
                 ),
               ],
             ),
-            const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
+            const Divider(
+              height: 1,
+              thickness: 0.9,
+              color: Color.fromARGB(213, 104, 104, 104),
+            ),
+            const SizedBox(height: 6),
             LayoutBuilder(
               builder: (context, constraints) {
                 return ConstrainedBox(
                   constraints: BoxConstraints(maxWidth: constraints.maxWidth),
                   child: Column(
                     children: [
-                      _Eq3Preview(bandGains: gains, bandFreqs: freqs),
+                      _Eq3Preview(
+                        bandGains: gains,
+                        bandFreqs: freqs,
+                        waveformSamples: _eqWaveform,
+                        spectrumDb: _eqSpectrumDb,
+                        analyzerSampleRate: _eqAnalyzerSampleRate,
+                      ),
                       const SizedBox(height: 16),
                       SizedBox(
                         height: _eqRowHeight,
@@ -1152,13 +1772,40 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                               if (pLow != null)
                                 _verticalFader(
                                   context: context,
-                                  label: 'Low\nGain',
+                                  label: 'Low',
                                   value: (pLow['value'] as num).toDouble(),
                                   min: (pLow['min'] as num).toDouble(),
                                   max: (pLow['max'] as num).toDouble(),
+                                  defaultValue: _paramDefaultAsDouble(pLow),
                                   unit: 'dB',
+                                  onDoubleTapReset: () {
+                                    final defaultValue =
+                                        _paramDefaultAsDouble(pLow);
+                                    if (defaultValue == null) return;
+                                    final oldValue =
+                                        (pLow['value'] as num).toDouble();
+                                    if ((oldValue - defaultValue).abs() <
+                                        1.0e-6) {
+                                      return;
+                                    }
+                                    setState(
+                                        () => pLow['value'] = defaultValue);
+                                    widget.setTrackEffectParam(
+                                        widget.rowIndex,
+                                        idx,
+                                        pLow['name'] as String,
+                                        defaultValue);
+                                    widget.onPluginParamCommit?.call(
+                                      widget.rowIndex,
+                                      idx,
+                                      pLow['name'] as String,
+                                      oldValue,
+                                      defaultValue,
+                                    );
+                                  },
                                   onChangeStart: (v) {
-                                    _EQParamStartValue = (pLow['value'] as num).toDouble();
+                                    _EQParamStartValue =
+                                        (pLow['value'] as num).toDouble();
                                   },
                                   onChangeEnd: (v) {
                                     widget.onPluginParamCommit?.call(
@@ -1172,19 +1819,47 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                   },
                                   onChanged: (v) {
                                     setState(() => pLow['value'] = v);
-                                    widget.setTrackEffectParam(widget.rowIndex, idx, pLow['name'] as String, v);
+                                    widget.setTrackEffectParam(widget.rowIndex,
+                                        idx, pLow['name'] as String, v);
                                   },
                                 ),
                               if (pMid != null)
                                 _verticalFader(
                                   context: context,
-                                  label: 'Mid\nGain',
+                                  label: 'Mid',
                                   value: (pMid['value'] as num).toDouble(),
                                   min: (pMid['min'] as num).toDouble(),
                                   max: (pMid['max'] as num).toDouble(),
+                                  defaultValue: _paramDefaultAsDouble(pMid),
                                   unit: 'dB',
+                                  onDoubleTapReset: () {
+                                    final defaultValue =
+                                        _paramDefaultAsDouble(pMid);
+                                    if (defaultValue == null) return;
+                                    final oldValue =
+                                        (pMid['value'] as num).toDouble();
+                                    if ((oldValue - defaultValue).abs() <
+                                        1.0e-6) {
+                                      return;
+                                    }
+                                    setState(
+                                        () => pMid['value'] = defaultValue);
+                                    widget.setTrackEffectParam(
+                                        widget.rowIndex,
+                                        idx,
+                                        pMid['name'] as String,
+                                        defaultValue);
+                                    widget.onPluginParamCommit?.call(
+                                      widget.rowIndex,
+                                      idx,
+                                      pMid['name'] as String,
+                                      oldValue,
+                                      defaultValue,
+                                    );
+                                  },
                                   onChangeStart: (v) {
-                                    _EQParamStartValue = (pMid['value'] as num).toDouble();
+                                    _EQParamStartValue =
+                                        (pMid['value'] as num).toDouble();
                                   },
                                   onChangeEnd: (v) {
                                     widget.onPluginParamCommit?.call(
@@ -1198,19 +1873,47 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                   },
                                   onChanged: (v) {
                                     setState(() => pMid['value'] = v);
-                                    widget.setTrackEffectParam(widget.rowIndex, idx, pMid['name'] as String, v);
+                                    widget.setTrackEffectParam(widget.rowIndex,
+                                        idx, pMid['name'] as String, v);
                                   },
                                 ),
                               if (pHigh != null)
                                 _verticalFader(
                                   context: context,
-                                  label: 'High\nGain',
+                                  label: 'High',
                                   value: (pHigh['value'] as num).toDouble(),
                                   min: (pHigh['min'] as num).toDouble(),
                                   max: (pHigh['max'] as num).toDouble(),
+                                  defaultValue: _paramDefaultAsDouble(pHigh),
                                   unit: 'dB',
+                                  onDoubleTapReset: () {
+                                    final defaultValue =
+                                        _paramDefaultAsDouble(pHigh);
+                                    if (defaultValue == null) return;
+                                    final oldValue =
+                                        (pHigh['value'] as num).toDouble();
+                                    if ((oldValue - defaultValue).abs() <
+                                        1.0e-6) {
+                                      return;
+                                    }
+                                    setState(
+                                        () => pHigh['value'] = defaultValue);
+                                    widget.setTrackEffectParam(
+                                        widget.rowIndex,
+                                        idx,
+                                        pHigh['name'] as String,
+                                        defaultValue);
+                                    widget.onPluginParamCommit?.call(
+                                      widget.rowIndex,
+                                      idx,
+                                      pHigh['name'] as String,
+                                      oldValue,
+                                      defaultValue,
+                                    );
+                                  },
                                   onChangeStart: (v) {
-                                    _EQParamStartValue = (pHigh['value'] as num).toDouble();
+                                    _EQParamStartValue =
+                                        (pHigh['value'] as num).toDouble();
                                   },
                                   onChangeEnd: (v) {
                                     widget.onPluginParamCommit?.call(
@@ -1224,7 +1927,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                   },
                                   onChanged: (v) {
                                     setState(() => pHigh['value'] = v);
-                                    widget.setTrackEffectParam(widget.rowIndex, idx, pHigh['name'] as String, v);
+                                    widget.setTrackEffectParam(widget.rowIndex,
+                                        idx, pHigh['name'] as String, v);
                                   },
                                 ),
                             ],
@@ -1243,32 +1947,48 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
 
     // Generic parameter page (no scroll, full height in row)
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_back),
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                splashRadius: 14,
+                icon: const Icon(Icons.arrow_back, size: 18),
                 onPressed: () {
                   _stopCompressorMetering();
+                  _stopEqWaveformPolling();
                   setState(() {
                     _selectedEffectIndex = null;
                     _currentParams = [];
                   });
                 },
               ),
-              const SizedBox(width: 4),
-              Text(
-                effectName,
-                style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 16, fontWeight: FontWeight.w600),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  effectName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(1.00),
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600),
+                ),
               ),
             ],
           ),
-          // const SizedBox(height: 8),
-          const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-          // const SizedBox(height: 8),
+          const SizedBox(height: 4),
+          const Divider(
+            height: 1,
+            thickness: 0.9,
+            color: Color.fromARGB(213, 104, 104, 104),
+          ),
+          const SizedBox(height: 6),
 
           if (effectName == 'Compressor') ...[
             // _buildCompressorMeterStrip(),
@@ -1283,14 +2003,19 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           // Params straight in Column
           for (var param in _currentParams) ...[
             if (_effects[idx] == 'Delay' && param['name'] == 'Delay Time') ...[
-              _buildDelayTimeParam(context: context, param: param, effectIndex: idx, bpm: widget.projectBpm),
+              _buildDelayTimeParam(
+                  context: context,
+                  param: param,
+                  effectIndex: idx,
+                  bpm: widget.projectBpm),
             ] else if (param['type'] == 'float') ...[
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(param['name'] as String, style: Theme.of(context).textTheme.bodyLarge),
+                    Text(param['name'] as String,
+                        style: Theme.of(context).textTheme.bodyLarge),
                     // const SizedBox(height: 4),
                     Row(
                       children: [
@@ -1314,54 +2039,93 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
 
                               final minV = (param['min'] as num).toDouble();
                               final maxV = (param['max'] as num).toDouble();
-                              final rawV = (param['value'] as num).toDouble().clamp(minV, maxV);
+                              final rawV = (param['value'] as num)
+                                  .toDouble()
+                                  .clamp(minV, maxV);
 
-                              final skew = _getParamSkew(effectName, paramName); // null = linear
+                              final skew = _getParamSkew(
+                                  effectName, paramName); // null = linear
 
                               // value -> 0..1
-                              double toNorm(double v) => ((v - minV) / (maxV - minV)).clamp(0.0, 1.0);
+                              double toNorm(double v) =>
+                                  ((v - minV) / (maxV - minV)).clamp(0.0, 1.0);
 
                               // 0..1 -> value
-                              double fromNorm(double t) => minV + (maxV - minV) * t.clamp(0.0, 1.0);
+                              double fromNorm(double t) =>
+                                  minV + (maxV - minV) * t.clamp(0.0, 1.0);
 
                               // if skew exists: position uses norm^skew, and inverse uses ^(1/skew)
                               final norm = toNorm(rawV);
-                              final sliderPos = (skew == null) ? norm : math.pow(norm, skew).toDouble();
+                              final sliderPos = (skew == null)
+                                  ? norm
+                                  : math.pow(norm, skew).toDouble();
 
-                              return Slider(
-                                value: sliderPos,
-                                min: 0.0,
-                                max: 1.0,
-                                divisions: 200,
-                                label: rawV.toStringAsFixed(2),
-                                onChangeStart: (_) {
-                                  _paramDragStartValue = rawV;
-                                },
-                                onChanged: (p) {
-                                  final t = p.clamp(0.0, 1.0);
-                                  final newNorm = (skew == null) ? t : math.pow(t, 1.0 / skew!).toDouble();
-                                  final v = fromNorm(newNorm);
-
-                                  setState(() => param['value'] = v);
-                                  widget.setTrackEffectParam(widget.rowIndex, idx, paramName, v);
-                                },
-                                onChangeEnd: (p) {
-                                  if (_paramDragStartValue == null) return;
-
-                                  final t = p.clamp(0.0, 1.0);
-                                  final newNorm = (skew == null) ? t : math.pow(t, 1.0 / skew!).toDouble();
-                                  final v = fromNorm(newNorm);
-
+                              return GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                onDoubleTap: () {
+                                  final defaultValue =
+                                      _paramDefaultAsDouble(param);
+                                  if (defaultValue == null) return;
+                                  final clampedDefault =
+                                      defaultValue.clamp(minV, maxV).toDouble();
+                                  final oldValue =
+                                      (param['value'] as num).toDouble();
+                                  if ((oldValue - clampedDefault).abs() <
+                                      1.0e-6) {
+                                    return;
+                                  }
+                                  setState(
+                                      () => param['value'] = clampedDefault);
+                                  widget.setTrackEffectParam(widget.rowIndex,
+                                      idx, paramName, clampedDefault);
                                   widget.onPluginParamCommit?.call(
                                     widget.rowIndex,
                                     idx,
                                     paramName,
-                                    _paramDragStartValue!,
-                                    v,
+                                    oldValue,
+                                    clampedDefault,
                                   );
-
-                                  _paramDragStartValue = null;
                                 },
+                                child: Slider(
+                                  value: sliderPos,
+                                  min: 0.0,
+                                  max: 1.0,
+                                  divisions: 200,
+                                  label: rawV.toStringAsFixed(2),
+                                  onChangeStart: (_) {
+                                    _paramDragStartValue = rawV;
+                                  },
+                                  onChanged: (p) {
+                                    final t = p.clamp(0.0, 1.0);
+                                    final newNorm = (skew == null)
+                                        ? t
+                                        : math.pow(t, 1.0 / skew!).toDouble();
+                                    final v = fromNorm(newNorm);
+
+                                    setState(() => param['value'] = v);
+                                    widget.setTrackEffectParam(
+                                        widget.rowIndex, idx, paramName, v);
+                                  },
+                                  onChangeEnd: (p) {
+                                    if (_paramDragStartValue == null) return;
+
+                                    final t = p.clamp(0.0, 1.0);
+                                    final newNorm = (skew == null)
+                                        ? t
+                                        : math.pow(t, 1.0 / skew!).toDouble();
+                                    final v = fromNorm(newNorm);
+
+                                    widget.onPluginParamCommit?.call(
+                                      widget.rowIndex,
+                                      idx,
+                                      paramName,
+                                      _paramDragStartValue!,
+                                      v,
+                                    );
+
+                                    _paramDragStartValue = null;
+                                  },
+                                ),
                               );
                             })(),
                           ),
@@ -1383,43 +2147,53 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 value: param['value'] as bool,
                 onChanged: (v) {
                   setState(() => param['value'] = v);
-                  widget.setTrackEffectParam(widget.rowIndex, idx, param['name'] as String, v);
-                  widget.onPluginParamCommit?.call(widget.rowIndex, idx, param['name'] as String, !v, v);
+                  widget.setTrackEffectParam(
+                      widget.rowIndex, idx, param['name'] as String, v);
+                  widget.onPluginParamCommit?.call(
+                      widget.rowIndex, idx, param['name'] as String, !v, v);
                 },
               ),
             ] else if (param['type'] == 'choice') ...[
               (() {
-                final keys = param.keys.where((k) => k.startsWith('choice_')).toList()
-                  ..sort((a, b) {
-                    final ai = int.parse(a.split('_')[1]);
-                    final bi = int.parse(b.split('_')[1]);
-                    return ai.compareTo(bi);
-                  });
+                final keys =
+                    param.keys.where((k) => k.startsWith('choice_')).toList()
+                      ..sort((a, b) {
+                        final ai = int.parse(a.split('_')[1]);
+                        final bi = int.parse(b.split('_')[1]);
+                        return ai.compareTo(bi);
+                      });
                 final choices = keys.map((k) => param[k] as String).toList();
                 final current = param['value'] as String;
 
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(param['name'] as String),
-                    trailing: Text(current, style: Theme.of(context).textTheme.bodyLarge),
+                    trailing: Text(current,
+                        style: Theme.of(context).textTheme.bodyLarge),
                     onTap: () async {
                       final picked = await showDialog<String>(
                         context: context,
                         useRootNavigator: true,
                         builder: (ctx) => SimpleDialog(
-                          title: Text("${L10n.translate(context, 'Select ')}${param['name']}"),
+                          title: Text(
+                              "${L10n.translate(context, 'Select ')}${param['name']}"),
                           children: choices.map((c) {
-                            return SimpleDialogOption(child: Text(c), onPressed: () => Navigator.pop(ctx, c));
+                            return SimpleDialogOption(
+                                child: Text(c),
+                                onPressed: () => Navigator.pop(ctx, c));
                           }).toList(),
                         ),
                       );
                       if (picked != null) {
                         final oldVal = param['value'];
                         setState(() => param['value'] = picked);
-                        widget.setTrackEffectParam(widget.rowIndex, idx, param['name'] as String, picked);
-                        widget.onPluginParamCommit?.call(widget.rowIndex, idx, param['name'] as String, oldVal, picked);
+                        widget.setTrackEffectParam(widget.rowIndex, idx,
+                            param['name'] as String, picked);
+                        widget.onPluginParamCommit?.call(widget.rowIndex, idx,
+                            param['name'] as String, oldVal, picked);
                       }
                     },
                   ),
@@ -1427,7 +2201,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               })(),
             ] else ...[
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(param['name'] as String),
@@ -1447,27 +2222,38 @@ class MasterEffectsPanel extends StatefulWidget {
 
   // Master FX callbacks (to be wired in audio_editor)
   final Future<List<String>> Function() getMasterEffects;
+  final Future<List<String>> Function() getMasterEffectIds;
   final Future<bool> Function(int effectIndex) getMasterEffectBypassState;
   final Future<void> Function(int effectIndex, bool bypass) bypassMasterEffect;
   final Future<void> Function(int from, int to) reorderMasterEffects;
-  final Future<void> Function(int effectIndex, String name, bool applyingPreset) removeMasterEffect;
+  final Future<void> Function(int effectIndex, String name, bool applyingPreset)
+      removeMasterEffect;
   final Future<void> Function(String effectNameOrPath) insertMasterEffect;
-  final Future<List<Map<String, dynamic>>> Function(int effectIndex) getMasterPluginParameters;
-  final Future<void> Function(int effectIndex, String paramId, dynamic value) setMasterEffectParam;
+  final Future<List<Map<String, dynamic>>> Function(int effectIndex)
+      getMasterPluginParameters;
+  final Future<void> Function(int effectIndex, String paramId, dynamic value)
+      setMasterEffectParam;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
-  final void Function(int effectIndex, String paramId, dynamic oldValue, dynamic newValue)? onMasterPluginParamCommit;
-  final void Function(MasterEffectsSnapshot before, MasterEffectsSnapshot after)? onMasterPresetCommit;
+  final void Function(
+          int effectIndex, String paramId, dynamic oldValue, dynamic newValue)?
+      onMasterPluginParamCommit;
+  final void Function(
+          MasterEffectsSnapshot before, MasterEffectsSnapshot after)?
+      onMasterPresetCommit;
 
   final void Function(double height)? onHeightChanged;
   final double projectBpm;
 
   final MeterBus meters;
   final Future<List<double>> Function(int effectIndex) getMasterCompressorMeter;
+  final Future<List<double>> Function(int effectIndex, int sampleCount)
+      getMasterEqWaveform;
 
   const MasterEffectsPanel({
     Key? key,
     required this.mode,
     required this.getMasterEffects,
+    required this.getMasterEffectIds,
     required this.getMasterEffectBypassState,
     required this.bypassMasterEffect,
     required this.reorderMasterEffects,
@@ -1482,6 +2268,7 @@ class MasterEffectsPanel extends StatefulWidget {
     required this.projectBpm,
     required this.meters,
     required this.getMasterCompressorMeter,
+    required this.getMasterEqWaveform,
   }) : super(key: key);
 
   @override
@@ -1490,6 +2277,7 @@ class MasterEffectsPanel extends StatefulWidget {
 
 class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   List<String> _effects = [];
+  List<String> _effectKeys = [];
   List<bool> _bypassed = [];
   double _panelHeight = 220;
 
@@ -1508,6 +2296,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   CompressorStripFrame _compFrame = CompressorStripFrame.zero;
   CompressorStripFrame _compFrameSmoothed = CompressorStripFrame.zero;
   bool _compMeterRunning = false;
+  Timer? _eqWaveformTimer;
+  bool _eqWaveformRunning = false;
+  List<double> _eqWaveform = const <double>[];
+  List<double> _eqSpectrumDb = const <double>[];
+  double _eqAnalyzerSampleRate = 44100.0;
+  int _eqParametricTabIndex = 0;
 
   @override
   void initState() {
@@ -1518,11 +2312,18 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   @override
   void dispose() {
     _stopCompressorMetering();
+    _stopEqWaveformPolling();
     super.dispose();
   }
 
   Future<void> _loadEffects() async {
+    _stopEqWaveformPolling();
     final names = await widget.getMasterEffects();
+    var ids = await widget.getMasterEffectIds();
+    if (ids.length != names.length) {
+      ids = List<String>.from(names);
+    }
+    final keys = _buildStableEffectKeys(ids);
     final bypass = <bool>[];
 
     for (int i = 0; i < names.length; i++) {
@@ -1530,10 +2331,60 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     }
 
     setState(() {
-      _effects = names;
-      _bypassed = bypass;
+      _effects = List<String>.from(names);
+      _effectKeys = List<String>.from(keys);
+      _bypassed = List<bool>.from(bypass);
     });
     widget.onHeightChanged?.call(_panelHeight);
+  }
+
+  void _moveDelayDivisionState(int from, int to) {
+    if (from == to) return;
+
+    final moved = _delayDivisionByEffect.remove(from);
+    final next = <int, int>{};
+
+    _delayDivisionByEffect.forEach((key, value) {
+      var newKey = key;
+      if (from < to) {
+        if (key > from && key <= to) newKey = key - 1;
+      } else {
+        if (key >= to && key < from) newKey = key + 1;
+      }
+      next[newKey] = value;
+    });
+
+    if (moved != null) next[to] = moved;
+
+    _delayDivisionByEffect
+      ..clear()
+      ..addAll(next);
+  }
+
+  void _applyLocalReorder(int oldIndex, int newIndex) {
+    final movedName = _effects.removeAt(oldIndex);
+    final movedKey = _effectKeys.removeAt(oldIndex);
+    final movedBypass = _bypassed.removeAt(oldIndex);
+    _effects.insert(newIndex, movedName);
+    _effectKeys.insert(newIndex, movedKey);
+    _bypassed.insert(newIndex, movedBypass);
+
+    final selected = _selectedEffectIndex;
+    if (selected != null) {
+      if (selected == oldIndex) {
+        _selectedEffectIndex = newIndex;
+      } else if (oldIndex < newIndex &&
+          selected > oldIndex &&
+          selected <= newIndex) {
+        _selectedEffectIndex = selected - 1;
+      } else if (newIndex < oldIndex &&
+          selected >= newIndex &&
+          selected < oldIndex) {
+        _selectedEffectIndex = selected + 1;
+      }
+    }
+
+    _moveDelayDivisionState(oldIndex, newIndex);
   }
 
   int? _detectDelayDivision(double ms, double bpm) {
@@ -1556,7 +2407,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   }) {
     final msValue = (param['value'] as num).toDouble();
     final detectedIdx = _detectDelayDivision(msValue, bpm);
-    final presetLabel = detectedIdx == null ? 'Custom' : kDelayDivisions[detectedIdx].label;
+    final presetLabel =
+        detectedIdx == null ? 'Custom' : kDelayDivisions[detectedIdx].label;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
@@ -1566,7 +2418,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           // ---- Header row ----
           Row(
             children: [
-              Text(param['name'] as String, style: Theme.of(context).textTheme.bodyLarge),
+              Text(param['name'] as String,
+                  style: Theme.of(context).textTheme.bodyLarge),
               const Spacer(),
 
               // ---- PRESET DROPDOWN ----
@@ -1574,13 +2427,16 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                 value: presetLabel,
                 underline: const SizedBox(),
                 items: [
-                  const DropdownMenuItem(value: 'Custom', child: Text('Custom')),
-                  ...kDelayDivisions.map((d) => DropdownMenuItem(value: d.label, child: Text(d.label))),
+                  const DropdownMenuItem(
+                      value: 'Custom', child: Text('Custom')),
+                  ...kDelayDivisions.map((d) =>
+                      DropdownMenuItem(value: d.label, child: Text(d.label))),
                 ],
                 onChanged: (label) {
                   if (label == null || label == 'Custom') return;
 
-                  final division = kDelayDivisions.firstWhere((d) => d.label == label);
+                  final division =
+                      kDelayDivisions.firstWhere((d) => d.label == label);
                   final newMs = beatsToMs(division.beats, bpm);
 
                   _paramDragStartValue = msValue;
@@ -1589,7 +2445,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                     param['value'] = newMs;
                   });
 
-                  widget.setMasterEffectParam(effectIndex, param['name'] as String, newMs);
+                  widget.setMasterEffectParam(
+                      effectIndex, param['name'] as String, newMs);
 
                   widget.onMasterPluginParamCommit?.call(
                     effectIndex,
@@ -1607,35 +2464,57 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           // ---- MS SLIDER (ALWAYS SHOWN) ----
           Row(
             children: [
-              Text((param['min'] as num).toDouble().toStringAsFixed(0), style: Theme.of(context).textTheme.bodySmall),
+              Text((param['min'] as num).toDouble().toStringAsFixed(0),
+                  style: Theme.of(context).textTheme.bodySmall),
               Expanded(
-                child: Slider(
-                  value: msValue.clamp((param['min'] as num).toDouble(), (param['max'] as num).toDouble()),
-                  min: (param['min'] as num).toDouble(),
-                  max: (param['max'] as num).toDouble(),
-                  divisions: 200,
-                  label: '${msValue.toStringAsFixed(0)} ms',
-                  onChangeStart: (_) {
-                    _paramDragStartValue = msValue;
-                  },
-                  onChanged: (v) {
-                    setState(() => param['value'] = v);
-                    widget.setMasterEffectParam(effectIndex, param['name'] as String, v);
-                  },
-                  onChangeEnd: (v) {
-                    if (_paramDragStartValue == null) return;
-
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onDoubleTap: () {
+                    final defaultValue = _paramDefaultAsDouble(param);
+                    if (defaultValue == null) return;
+                    final oldValue = (param['value'] as num).toDouble();
+                    if ((oldValue - defaultValue).abs() < 1.0e-6) return;
+                    setState(() => param['value'] = defaultValue);
+                    widget.setMasterEffectParam(
+                        effectIndex, param['name'] as String, defaultValue);
                     widget.onMasterPluginParamCommit?.call(
                       effectIndex,
                       param['name'] as String,
-                      _paramDragStartValue!,
-                      v,
+                      oldValue,
+                      defaultValue,
                     );
-                    _paramDragStartValue = null;
                   },
+                  child: Slider(
+                    value: msValue.clamp((param['min'] as num).toDouble(),
+                        (param['max'] as num).toDouble()),
+                    min: (param['min'] as num).toDouble(),
+                    max: (param['max'] as num).toDouble(),
+                    divisions: 200,
+                    label: '${msValue.toStringAsFixed(0)} ms',
+                    onChangeStart: (_) {
+                      _paramDragStartValue = msValue;
+                    },
+                    onChanged: (v) {
+                      setState(() => param['value'] = v);
+                      widget.setMasterEffectParam(
+                          effectIndex, param['name'] as String, v);
+                    },
+                    onChangeEnd: (v) {
+                      if (_paramDragStartValue == null) return;
+
+                      widget.onMasterPluginParamCommit?.call(
+                        effectIndex,
+                        param['name'] as String,
+                        _paramDragStartValue!,
+                        v,
+                      );
+                      _paramDragStartValue = null;
+                    },
+                  ),
                 ),
               ),
-              Text((param['max'] as num).toDouble().toStringAsFixed(0), style: Theme.of(context).textTheme.bodySmall),
+              Text((param['max'] as num).toDouble().toStringAsFixed(0),
+                  style: Theme.of(context).textTheme.bodySmall),
             ],
           ),
         ],
@@ -1647,7 +2526,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     _stopCompressorMetering();
     _compMeterRunning = true;
 
-    _compMeterTimer = Timer.periodic(const Duration(milliseconds: 33), (_) async {
+    _compMeterTimer =
+        Timer.periodic(const Duration(milliseconds: 33), (_) async {
       if (!mounted || !_compMeterRunning) return;
 
       try {
@@ -1668,7 +2548,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 
         setState(() {
           _compFrame = next;
-          _compFrameSmoothed = CompressorStripFrame.lerp(_compFrameSmoothed, next, t);
+          _compFrameSmoothed =
+              CompressorStripFrame.lerp(_compFrameSmoothed, next, t);
         });
       } catch (_) {
         // swallow polling errors
@@ -1683,6 +2564,51 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 
     _compFrame = CompressorStripFrame.zero;
     _compFrameSmoothed = CompressorStripFrame.zero;
+  }
+
+  void _startEqWaveformPolling({required int effectIndex}) {
+    _stopEqWaveformPolling();
+    _eqWaveformRunning = true;
+    _refreshEqAnalyzerSampleRate();
+
+    _eqWaveformTimer =
+        Timer.periodic(const Duration(milliseconds: 33), (_) async {
+      if (!mounted || !_eqWaveformRunning) return;
+
+      try {
+        final arr = await widget.getMasterEqWaveform(effectIndex, 1024);
+        if (!mounted || !_eqWaveformRunning) return;
+        final spectrum = _EqSpectrumAnalyzer.computeSpectrumDb(arr);
+        setState(() {
+          _eqWaveform = arr;
+          _eqSpectrumDb = spectrum;
+        });
+      } catch (_) {
+        // ignore transient bridge errors while polling
+      }
+    });
+  }
+
+  void _stopEqWaveformPolling() {
+    _eqWaveformRunning = false;
+    _eqWaveformTimer?.cancel();
+    _eqWaveformTimer = null;
+    _eqWaveform = const <double>[];
+    _eqSpectrumDb = const <double>[];
+  }
+
+  Future<void> _refreshEqAnalyzerSampleRate() async {
+    try {
+      final sr = await JuceAudioEngine.getHostSampleRate();
+      if (!mounted || !_eqWaveformRunning) return;
+      if ((sr - _eqAnalyzerSampleRate).abs() > 1.0) {
+        setState(() {
+          _eqAnalyzerSampleRate = sr;
+        });
+      }
+    } catch (_) {
+      // keep default if host SR is unavailable on this platform
+    }
   }
 
   @override
@@ -1718,22 +2644,32 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               // shrinkWrap: true,
               // physics: const NeverScrollableScrollPhysics(),
               padding: EdgeInsets.zero,
-              children: [for (int i = 0; i < _effects.length; i++) _buildMasterEffectTile(i)],
+              children: [
+                for (int i = 0; i < _effects.length; i++)
+                  _buildMasterEffectTile(i)
+              ],
               onReorder: (oldIndex, newIndex) async {
+                if (oldIndex < 0 || oldIndex >= _effects.length) return;
                 if (newIndex > oldIndex) newIndex--;
-                await widget.reorderMasterEffects(oldIndex, newIndex);
-                await _loadEffects();
+                newIndex = newIndex.clamp(0, _effects.length - 1);
+                if (oldIndex == newIndex) return;
 
                 setState(() {
-                  final name = _effects.removeAt(oldIndex);
-                  final bp = _bypassed.removeAt(oldIndex);
-                  _effects.insert(newIndex, name);
-                  _bypassed.insert(newIndex, bp);
+                  _applyLocalReorder(oldIndex, newIndex);
                 });
+
+                try {
+                  await widget.reorderMasterEffects(oldIndex, newIndex);
+                } catch (_) {
+                  await _loadEffects();
+                }
               },
             ),
           ),
-          if (_effects.length < 5) Padding(padding: const EdgeInsets.only(top: 8.0), child: _buildAddTile()),
+          if (_effects.length < 5)
+            Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: _buildAddTile()),
         ],
       ),
     );
@@ -1747,10 +2683,15 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     final isLocked = widget.mode == 'Basic' && lockedPresets.contains(name);
 
     return ActionChip(
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, // ← smaller hitbox
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4), // ← shrink chip
-      visualDensity: const VisualDensity(horizontal: -2, vertical: -2), // ← reduce height
-      backgroundColor: isLocked ? const Color.fromARGB(255, 61, 61, 61) : const Color.fromARGB(255, 88, 107, 200),
+      materialTapTargetSize:
+          MaterialTapTargetSize.shrinkWrap, // ← smaller hitbox
+      padding: const EdgeInsets.symmetric(
+          horizontal: 4, vertical: 4), // ← shrink chip
+      visualDensity:
+          const VisualDensity(horizontal: -2, vertical: -2), // ← reduce height
+      backgroundColor: isLocked
+          ? const Color.fromARGB(255, 61, 61, 61)
+          : const Color.fromARGB(255, 88, 107, 200),
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1758,13 +2699,16 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             L10n.translate(context, name),
             style: TextStyle(
               fontSize: 12,
-              color: isLocked ? const Color.fromARGB(255, 122, 122, 122) : const Color.fromARGB(255, 255, 255, 255),
+              color: isLocked
+                  ? const Color.fromARGB(255, 122, 122, 122)
+                  : const Color.fromARGB(255, 255, 255, 255),
             ),
           ),
           if (isLocked)
             const Padding(
               padding: EdgeInsets.only(left: 6),
-              child: Icon(Icons.lock, size: 16, color: Color.fromARGB(255, 122, 122, 122)),
+              child: Icon(Icons.lock,
+                  size: 16, color: Color.fromARGB(255, 122, 122, 122)),
             ),
         ],
       ),
@@ -1772,17 +2716,22 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     );
   }
 
-  Future<void> _handlePresetLoading(BuildContext context, String presetName) async {
+  Future<void> _handlePresetLoading(
+      BuildContext context, String presetName) async {
     final description = () {
       switch (presetName) {
         case 'Concert Hall':
-          return L10n.translate(context, 'Applies wide reverb and subtle EQ to simulate a live concert space.');
+          return L10n.translate(context,
+              'Applies wide reverb and subtle EQ to simulate a live concert space.');
         case 'Echoes':
-          return L10n.translate(context, 'Applies reverb and delay to give an echo effect.');
+          return L10n.translate(
+              context, 'Applies reverb and delay to give an echo effect.');
         case 'LoFi Effect':
-          return L10n.translate(context, 'Applies filters and soft distortion for a vintage, relaxed vibe.');
+          return L10n.translate(context,
+              'Applies filters and soft distortion for a vintage, relaxed vibe.');
         case 'Heavy Crunch':
-          return L10n.translate(context, 'Crushes sound with heavy distortion.');
+          return L10n.translate(
+              context, 'Crushes sound with heavy distortion.');
         default:
           return "${L10n.translate(context, 'This will replace your current effects with ')}'$presetName'.";
       }
@@ -1823,7 +2772,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     for (int i = 0; i < _effects.length; i++) {
       final params = await widget.getMasterPluginParameters(i);
       final isBypassed = await widget.getMasterEffectBypassState(i);
-      beforeSnapshots.add(EffectSnapshot(_effects[i], isBypassed, {for (final p in params) p['name']: p['value']}));
+      beforeSnapshots.add(EffectSnapshot(_effects[i], isBypassed,
+          {for (final p in params) p['name']: p['value']}));
     }
     final before = MasterEffectsSnapshot(beforeSnapshots);
 
@@ -1889,7 +2839,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     for (int i = 0; i < _effects.length; i++) {
       final params = await widget.getMasterPluginParameters(i);
       final isBypassed = await widget.getMasterEffectBypassState(i);
-      afterSnapshots.add(EffectSnapshot(_effects[i], isBypassed, {for (final p in params) p['name']: p['value']}));
+      afterSnapshots.add(EffectSnapshot(_effects[i], isBypassed,
+          {for (final p in params) p['name']: p['value']}));
     }
     final after = MasterEffectsSnapshot(afterSnapshots);
     widget.onMasterPresetCommit?.call(before, after);
@@ -1902,7 +2853,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 
   Widget _buildMasterEffectTile(int idx) {
     return ListTile(
-      key: ValueKey("master_effect_$idx"), // key must be on the tile itself
+      key: ValueKey("master_effect_${_effectKeys[idx]}"),
       contentPadding: EdgeInsets.zero,
 
       // only this handle starts reorder drag
@@ -1926,8 +2877,15 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             value: !_bypassed[idx],
             onChanged: (active) async {
               final shouldBypass = !active;
-              await widget.bypassMasterEffect(idx, shouldBypass);
+              final previous = _bypassed[idx];
+
               setState(() => _bypassed[idx] = shouldBypass);
+              try {
+                await widget.bypassMasterEffect(idx, shouldBypass);
+              } catch (_) {
+                if (!mounted) return;
+                setState(() => _bypassed[idx] = previous);
+              }
             },
             activeColor: const Color.fromARGB(255, 231, 231, 231),
             inactiveThumbColor: const Color.fromARGB(255, 186, 186, 186),
@@ -1935,7 +2893,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             activeTrackColor: const Color.fromARGB(255, 54, 54, 54),
           ),
           IconButton(
-            icon: const Icon(Icons.delete_outline, color: Color.fromARGB(255, 255, 164, 164)),
+            icon: const Icon(Icons.delete_outline,
+                color: Color.fromARGB(255, 255, 164, 164)),
             onPressed: () => _confirmRemove(idx),
           ),
         ],
@@ -1973,7 +2932,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(L10n.translate(context, 'Delete'), style: const TextStyle(color: Colors.red)),
+            child: Text(L10n.translate(context, 'Delete'),
+                style: const TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -1983,10 +2943,6 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       await widget.removeMasterEffect(idx, _effects[idx], false);
       _delayDivisionByEffect.remove(idx);
       await _loadEffects();
-      setState(() {
-        _effects.removeAt(idx);
-        _bypassed.removeAt(idx);
-      });
     }
   }
 
@@ -1996,7 +2952,34 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 
   Future<void> _showAddEffectModal() async {
     final plugins = await widget.scanPlugins();
-    const allowedInBasic = ["EQ 3-Band", "Compressor", "De-Esser", "Distortion", "Delay", "Reverb", "EQ Parametric"];
+    const allowedInBasic = [
+      "EQ 3-Band",
+      "Compressor",
+      "Limiter",
+      "Clipper",
+      "De-Esser",
+      "Distortion",
+      "Delay",
+      "Reverb",
+      "EQ Parametric",
+      "Pitch Shift",
+      "Chorus",
+      "Vibrato",
+    ];
+    const fxChoices = [
+      "EQ 3-Band",
+      "Compressor",
+      "Limiter",
+      "Clipper",
+      "De-Esser",
+      "Distortion",
+      "Delay",
+      "Reverb",
+      "EQ Parametric",
+      "Pitch Shift",
+      "Chorus",
+      "Vibrato",
+    ];
 
     // Dialog can use scrolling; this is outside the row panel layout.
     showDialog(
@@ -2005,29 +2988,62 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         return DefaultTabController(
           length: 2,
           child: AlertDialog(
-            backgroundColor: const Color.fromARGB(255, 79, 79, 79),
-            titlePadding: const EdgeInsets.only(top: 16, left: 16, right: 16, bottom: 16),
-            contentPadding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: TabBar(
-              labelColor: const Color.fromARGB(255, 255, 255, 255),
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: const Color.fromARGB(255, 255, 255, 255),
-              indicatorWeight: 2,
-              tabs: [
-                const Tab(text: 'FX'),
-                Tab(text: L10n.translate(context, 'On Device')),
-              ],
+            backgroundColor: const Color(0xFF1A2233),
+            surfaceTintColor: Colors.transparent,
+            titlePadding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            contentPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: Colors.white.withOpacity(0.12)),
+            ),
+            title: Container(
+              height: 36,
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF121927),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white.withOpacity(0.10)),
+              ),
+              child: TabBar(
+                dividerColor: Colors.transparent,
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicatorPadding: EdgeInsets.zero,
+                indicator: BoxDecoration(
+                  color: const Color(0xFF2D3F5D),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white70,
+                labelStyle: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                ),
+                unselectedLabelStyle: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                ),
+                tabs: [
+                  const Tab(text: 'FX'),
+                  Tab(text: L10n.translate(context, 'On Device')),
+                ],
+              ),
             ),
             content: SizedBox(
               width: double.maxFinite,
-              height: 400,
+              height: 390,
               child: TabBarView(
                 children: [
-                  ListView(
-                    children: ["EQ 3-Band", "Compressor", "De-Esser", "Distortion", "Delay", "Reverb", "EQ Parametric"]
-                        .map((name) {
-                      final isAllowed = widget.mode == 'Pro' || allowedInBasic.contains(name);
+                  ListView.separated(
+                    itemCount: fxChoices.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 1,
+                      thickness: 1,
+                      color: Colors.white.withOpacity(0.07),
+                    ),
+                    itemBuilder: (context, i) {
+                      final name = fxChoices[i];
+                      final isAllowed =
+                          widget.mode == 'Pro' || allowedInBasic.contains(name);
                       return GestureDetector(
                         onTap: isAllowed
                             ? () async {
@@ -2039,26 +3055,50 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                         child: Opacity(
                           opacity: isAllowed ? 1.0 : 0.4,
                           child: ListTile(
-                            title: Text(name),
-                            trailing: isAllowed ? null : const Icon(Icons.lock, size: 18, color: Colors.white70),
+                            dense: true,
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 10),
+                            title: Text(
+                              name,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 13.2),
+                            ),
+                            trailing: isAllowed
+                                ? null
+                                : const Icon(Icons.lock,
+                                    size: 18, color: Colors.white70),
                           ),
                         ),
                       );
-                    }).toList(),
+                    },
                   ),
-                  ListView(
-                    children: plugins.map((meta) {
+                  ListView.separated(
+                    itemCount: plugins.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 1,
+                      thickness: 1,
+                      color: Colors.white.withOpacity(0.07),
+                    ),
+                    itemBuilder: (context, i) {
+                      final meta = plugins[i];
                       final name = meta['name'] ?? meta['id'] ?? '';
                       final path = meta['id'] ?? '';
                       return ListTile(
-                        title: Text(name),
+                        dense: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 10),
+                        title: Text(
+                          name,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 13.2),
+                        ),
                         onTap: () async {
                           Navigator.pop(context);
                           await widget.insertMasterEffect(path);
                           await _loadEffects();
                         },
                       );
-                    }).toList(),
+                    },
                   ),
                 ],
               ),
@@ -2085,8 +3125,20 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     } else {
       _stopCompressorMetering();
     }
+    if (_effects[idx] == 'EQ Parametric' || _effects[idx] == 'EQ 3-Band') {
+      _startEqWaveformPolling(effectIndex: idx);
+    } else {
+      _stopEqWaveformPolling();
+    }
 
     var params = await widget.getMasterPluginParameters(idx);
+    if (params.isEmpty) {
+      for (int i = 0; i < 6; i++) {
+        await Future.delayed(const Duration(milliseconds: 120));
+        params = await widget.getMasterPluginParameters(idx);
+        if (params.isNotEmpty) break;
+      }
+    }
 
     // Basic-mode param filtering
     //TODO: TEMP limit plugin parameters no matter what "mode"
@@ -2099,15 +3151,39 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           }).toList();
           break;
 
+        case 'Limiter':
+          params = params.where((param) {
+            final name = param['name']?.toString() ?? '';
+            return ['Threshold', 'Release', 'Ceiling'].contains(name);
+          }).toList();
+          break;
+
+        case 'Clipper':
+          params = params.where((param) {
+            final name = param['name']?.toString() ?? '';
+            return ['Threshold', 'Ceiling'].contains(name);
+          }).toList();
+          break;
+
         case 'EQ Parametric':
           params = params.where((param) {
             final name = param['name']?.toString() ?? '';
             return [
               'HPF Frequency',
+              'HPF Slope',
+              'Band 1 Frequency',
               'Band 1 Gain',
+              'Band 1 Q',
+              'Band 2 Frequency',
               'Band 2 Gain',
+              'Band 2 Q',
+              'Band 3 Frequency',
               'Band 3 Gain',
+              'Band 3 Q',
+              'Band 4 Frequency',
               'Band 4 Gain',
+              'Band 4 Q',
+              'LPF Slope',
               'LPF Frequency',
             ].contains(name);
           }).toList();
@@ -2140,7 +3216,9 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     if (_paramsLoading) {
       return SizedBox(
         height: 180,
-        child: Center(child: CircularProgressIndicator(color: Theme.of(context).primaryColor)),
+        child: Center(
+            child: CircularProgressIndicator(
+                color: Theme.of(context).primaryColor)),
       );
     }
 
@@ -2149,14 +3227,26 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     // Special layout for EQ Parametric
     if (effectName == 'EQ Parametric' && _currentParams.isNotEmpty) {
       final pHPF = _paramByName(_currentParams, 'HPF Frequency');
+      final pHPFSlope = _paramByName(_currentParams, 'HPF Slope');
       final pLPF = _paramByName(_currentParams, 'LPF Frequency');
+      final pLPFSlope = _paramByName(_currentParams, 'LPF Slope');
+      final pB1Freq = _paramByName(_currentParams, 'Band 1 Frequency');
       final pB1 = _paramByName(_currentParams, 'Band 1 Gain');
+      final pB1Q = _paramByName(_currentParams, 'Band 1 Q');
+      final pB2Freq = _paramByName(_currentParams, 'Band 2 Frequency');
       final pB2 = _paramByName(_currentParams, 'Band 2 Gain');
+      final pB2Q = _paramByName(_currentParams, 'Band 2 Q');
+      final pB3Freq = _paramByName(_currentParams, 'Band 3 Frequency');
       final pB3 = _paramByName(_currentParams, 'Band 3 Gain');
+      final pB3Q = _paramByName(_currentParams, 'Band 3 Q');
+      final pB4Freq = _paramByName(_currentParams, 'Band 4 Frequency');
       final pB4 = _paramByName(_currentParams, 'Band 4 Gain');
+      final pB4Q = _paramByName(_currentParams, 'Band 4 Q');
 
       final hpfHz = (pHPF?['value'] as num?)?.toDouble() ?? 80.0;
       final lpfHz = (pLPF?['value'] as num?)?.toDouble() ?? 12000.0;
+      final hpfSlopeDbOct = _parseSlopeDbPerOct(pHPFSlope?['value']);
+      final lpfSlopeDbOct = _parseSlopeDbPerOct(pLPFSlope?['value']);
 
       final bandGains = [
         (pB1?['value'] as num?)?.toDouble() ?? 0,
@@ -2164,11 +3254,257 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         (pB3?['value'] as num?)?.toDouble() ?? 0,
         (pB4?['value'] as num?)?.toDouble() ?? 0,
       ];
-      final bandFreqs = [60.0, 400.0, 2000.0, 8000.0];
+      final bandFreqs = [
+        (pB1Freq?['value'] as num?)?.toDouble() ?? 60.0,
+        (pB2Freq?['value'] as num?)?.toDouble() ?? 400.0,
+        (pB3Freq?['value'] as num?)?.toDouble() ?? 2000.0,
+        (pB4Freq?['value'] as num?)?.toDouble() ?? 8000.0,
+      ];
+      final bandQs = [
+        (pB1Q?['value'] as num?)?.toDouble() ?? 1.0,
+        (pB2Q?['value'] as num?)?.toDouble() ?? 1.0,
+        (pB3Q?['value'] as num?)?.toDouble() ?? 1.0,
+        (pB4Q?['value'] as num?)?.toDouble() ?? 1.0,
+      ];
+
+      _EqFaderSpec? buildEqFader(
+        Map<String, dynamic>? param, {
+        required String label,
+        required String unit,
+        bool logarithmic = false,
+      }) {
+        if (param == null) return null;
+        final name = param['name'] as String;
+        return _EqFaderSpec(
+          label: label,
+          value: (param['value'] as num).toDouble(),
+          min: (param['min'] as num).toDouble(),
+          max: (param['max'] as num).toDouble(),
+          defaultValue: _paramDefaultAsDouble(param),
+          logarithmic: logarithmic,
+          unit: unit,
+          onChangeStart: (_) {
+            _EQParamStartValue = (param['value'] as num).toDouble();
+          },
+          onChanged: (v) {
+            setState(() => param['value'] = v);
+            widget.setMasterEffectParam(idx, name, v);
+          },
+          onChangeEnd: (v) {
+            final startValue = _EQParamStartValue;
+            if (startValue == null) return;
+            widget.onMasterPluginParamCommit?.call(
+              idx,
+              name,
+              startValue,
+              v,
+            );
+            _EQParamStartValue = null;
+          },
+          onReset: () {
+            final defaultValue = _paramDefaultAsDouble(param);
+            if (defaultValue == null) return;
+            final oldValue = (param['value'] as num).toDouble();
+            if ((oldValue - defaultValue).abs() < 1.0e-6) return;
+            setState(() => param['value'] = defaultValue);
+            widget.setMasterEffectParam(idx, name, defaultValue);
+            widget.onMasterPluginParamCommit?.call(
+              idx,
+              name,
+              oldValue,
+              defaultValue,
+            );
+          },
+        );
+      }
+
+      final gainFaders = <_EqFaderSpec>[
+        if (pB1 != null) buildEqFader(pB1, label: 'Band 1', unit: 'dB')!,
+        if (pB2 != null) buildEqFader(pB2, label: 'Band 2', unit: 'dB')!,
+        if (pB3 != null) buildEqFader(pB3, label: 'Band 3', unit: 'dB')!,
+        if (pB4 != null) buildEqFader(pB4, label: 'Band 4', unit: 'dB')!,
+      ];
+      final frequencyFaders = <_EqFaderSpec>[
+        if (pB1Freq != null)
+          buildEqFader(
+            pB1Freq,
+            label: 'Band 1',
+            unit: 'Hz',
+            logarithmic: true,
+          )!,
+        if (pB2Freq != null)
+          buildEqFader(
+            pB2Freq,
+            label: 'Band 2',
+            unit: 'Hz',
+            logarithmic: true,
+          )!,
+        if (pB3Freq != null)
+          buildEqFader(
+            pB3Freq,
+            label: 'Band 3',
+            unit: 'Hz',
+            logarithmic: true,
+          )!,
+        if (pB4Freq != null)
+          buildEqFader(
+            pB4Freq,
+            label: 'Band 4',
+            unit: 'Hz',
+            logarithmic: true,
+          )!,
+      ];
+      final qFaders = <_EqFaderSpec>[
+        if (pB1Q != null) buildEqFader(pB1Q, label: 'Band 1', unit: 'Q')!,
+        if (pB2Q != null) buildEqFader(pB2Q, label: 'Band 2', unit: 'Q')!,
+        if (pB3Q != null) buildEqFader(pB3Q, label: 'Band 3', unit: 'Q')!,
+        if (pB4Q != null) buildEqFader(pB4Q, label: 'Band 4', unit: 'Q')!,
+      ];
+      final hpfSlopeChoices =
+          (pHPFSlope != null && pHPFSlope['type'] == 'choice')
+              ? _extractChoiceValues(pHPFSlope)
+              : const <String>[];
+      final lpfSlopeChoices =
+          (pLPFSlope != null && pLPFSlope['type'] == 'choice')
+              ? _extractChoiceValues(pLPFSlope)
+              : const <String>[];
+      final hpfSlopeCurrent = hpfSlopeChoices.isEmpty
+          ? null
+          : (hpfSlopeChoices.contains(pHPFSlope?['value']?.toString())
+              ? pHPFSlope!['value'].toString()
+              : hpfSlopeChoices.first);
+      final lpfSlopeCurrent = lpfSlopeChoices.isEmpty
+          ? null
+          : (lpfSlopeChoices.contains(pLPFSlope?['value']?.toString())
+              ? pLPFSlope!['value'].toString()
+              : lpfSlopeChoices.first);
+      final frequencyExtraControls = <Widget>[
+        if (pHPF != null)
+          _buildEqFilterControlRow(
+            context: context,
+            label: 'HPF',
+            value: (pHPF['value'] as num).toDouble(),
+            min: (pHPF['min'] as num).toDouble(),
+            max: (pHPF['max'] as num).toDouble(),
+            logarithmic: true,
+            onChangeStart: (_) {
+              _EQParamStartValue = (pHPF['value'] as num).toDouble();
+            },
+            onChanged: (v) {
+              setState(() => pHPF['value'] = v);
+              widget.setMasterEffectParam(idx, pHPF['name'] as String, v);
+            },
+            onChangeEnd: (v) {
+              final startValue = _EQParamStartValue;
+              if (startValue == null) return;
+              widget.onMasterPluginParamCommit?.call(
+                idx,
+                pHPF['name'] as String,
+                startValue,
+                v,
+              );
+              _EQParamStartValue = null;
+            },
+            onDoubleTapReset: () {
+              final defaultValue = _paramDefaultAsDouble(pHPF);
+              if (defaultValue == null) return;
+              final oldValue = (pHPF['value'] as num).toDouble();
+              if ((oldValue - defaultValue).abs() < 1.0e-6) return;
+              setState(() => pHPF['value'] = defaultValue);
+              widget.setMasterEffectParam(
+                  idx, pHPF['name'] as String, defaultValue);
+              widget.onMasterPluginParamCommit?.call(
+                idx,
+                pHPF['name'] as String,
+                oldValue,
+                defaultValue,
+              );
+            },
+            slopeChoices: hpfSlopeChoices,
+            selectedSlope: hpfSlopeCurrent,
+            onSlopeChanged: (picked) {
+              if (pHPFSlope == null) return;
+              final oldVal = pHPFSlope['value'];
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                setState(() => pHPFSlope['value'] = picked);
+              });
+              widget.setMasterEffectParam(
+                  idx, pHPFSlope['name'] as String, picked);
+              widget.onMasterPluginParamCommit?.call(
+                idx,
+                pHPFSlope['name'] as String,
+                oldVal,
+                picked,
+              );
+            },
+          ),
+        if (pHPF != null && pLPF != null) const SizedBox(height: 6),
+        if (pLPF != null)
+          _buildEqFilterControlRow(
+            context: context,
+            label: 'LPF',
+            value: (pLPF['value'] as num).toDouble(),
+            min: (pLPF['min'] as num).toDouble(),
+            max: (pLPF['max'] as num).toDouble(),
+            logarithmic: true,
+            onChangeStart: (_) {
+              _EQParamStartValue = (pLPF['value'] as num).toDouble();
+            },
+            onChanged: (v) {
+              setState(() => pLPF['value'] = v);
+              widget.setMasterEffectParam(idx, pLPF['name'] as String, v);
+            },
+            onChangeEnd: (v) {
+              final startValue = _EQParamStartValue;
+              if (startValue == null) return;
+              widget.onMasterPluginParamCommit?.call(
+                idx,
+                pLPF['name'] as String,
+                startValue,
+                v,
+              );
+              _EQParamStartValue = null;
+            },
+            onDoubleTapReset: () {
+              final defaultValue = _paramDefaultAsDouble(pLPF);
+              if (defaultValue == null) return;
+              final oldValue = (pLPF['value'] as num).toDouble();
+              if ((oldValue - defaultValue).abs() < 1.0e-6) return;
+              setState(() => pLPF['value'] = defaultValue);
+              widget.setMasterEffectParam(
+                  idx, pLPF['name'] as String, defaultValue);
+              widget.onMasterPluginParamCommit?.call(
+                idx,
+                pLPF['name'] as String,
+                oldValue,
+                defaultValue,
+              );
+            },
+            slopeChoices: lpfSlopeChoices,
+            selectedSlope: lpfSlopeCurrent,
+            onSlopeChanged: (picked) {
+              if (pLPFSlope == null) return;
+              final oldVal = pLPFSlope['value'];
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                setState(() => pLPFSlope['value'] = picked);
+              });
+              widget.setMasterEffectParam(
+                  idx, pLPFSlope['name'] as String, picked);
+              widget.onMasterPluginParamCommit?.call(
+                idx,
+                pLPFSlope['name'] as String,
+                oldVal,
+                picked,
+              );
+            },
+          ),
+      ];
 
       return SingleChildScrollView(
         // You may want to add padding here if not already handled by internal widgets
-        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 10.0),
+        padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2176,24 +3512,88 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back),
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  constraints:
+                      const BoxConstraints.tightFor(width: 26, height: 26),
+                  splashRadius: 14,
+                  icon: const Icon(Icons.arrow_back, size: 18),
                   onPressed: () {
+                    _stopEqWaveformPolling();
                     setState(() {
                       _selectedEffectIndex = null;
                       _currentParams = [];
                     });
                   },
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  effectName,
-                  style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 16, fontWeight: FontWeight.w600),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    effectName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(1.00),
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () async {
+                    final changes = <Map<String, dynamic>>[];
+                    for (final p in _currentParams) {
+                      final next = _paramDefaultValue(p);
+                      if (next == null) continue;
+                      final old = p['value'];
+                      if (_paramValuesEqual(old, next)) continue;
+                      changes.add({
+                        'param': p,
+                        'old': old,
+                        'next': next,
+                      });
+                    }
+                    if (changes.isEmpty) return;
+
+                    setState(() {
+                      for (final c in changes) {
+                        (c['param'] as Map<String, dynamic>)['value'] =
+                            c['next'];
+                      }
+                    });
+
+                    for (final c in changes) {
+                      final p = c['param'] as Map<String, dynamic>;
+                      final oldVal = c['old'];
+                      final newVal = c['next'];
+                      final name = p['name'] as String;
+                      await widget.setMasterEffectParam(idx, name, newVal);
+                      widget.onMasterPluginParamCommit?.call(
+                        idx,
+                        name,
+                        oldVal,
+                        newVal,
+                      );
+                    }
+                  },
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                    minimumSize: const Size(0, 28),
+                  ),
+                  icon: const Icon(Icons.restart_alt, size: 16),
+                  label: const Text('Reset', style: TextStyle(fontSize: 12)),
                 ),
               ],
             ),
-            // const SizedBox(height: 8),
-            const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
+            const Divider(
+              height: 1,
+              thickness: 0.9,
+              color: Color.fromARGB(213, 104, 104, 104),
+            ),
+            const SizedBox(height: 6),
 
             LayoutBuilder(
               builder: (context, constraints) {
@@ -2204,173 +3604,29 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                   child: Column(
                     children: [
                       // EQ Preview
-                      _EqPreviewFull(hpfHz: hpfHz, lpfHz: lpfHz, bandGains: bandGains, bandFreqs: bandFreqs),
+                      _EqPreviewFull(
+                          hpfHz: hpfHz,
+                          lpfHz: lpfHz,
+                          hpfSlopeDbOct: hpfSlopeDbOct,
+                          lpfSlopeDbOct: lpfSlopeDbOct,
+                          bandGains: bandGains,
+                          bandFreqs: bandFreqs,
+                          bandQs: bandQs,
+                          waveformSamples: _eqWaveform,
+                          spectrumDb: _eqSpectrumDb,
+                          analyzerSampleRate: _eqAnalyzerSampleRate),
                       const SizedBox(height: 16),
-
-                      // Vertical faders row
-                      SizedBox(
-                        height: _eqRowHeight,
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown, // solves horizontal overflow
-                          alignment: Alignment.topCenter,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              if (pHPF != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'HPF\nFreq',
-                                  value: (pHPF['value'] as num).toDouble(),
-                                  min: (pHPF['min'] as num).toDouble(),
-                                  max: (pHPF['max'] as num).toDouble(),
-                                  logarithmic: true,
-                                  unit: 'Hz',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pHPF['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onMasterPluginParamCommit?.call(
-                                      idx,
-                                      pHPF['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pHPF['value'] = v);
-                                    widget.setMasterEffectParam(idx, pHPF['name'] as String, v);
-                                  },
-                                ),
-                              if (pB1 != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'Band1\nGain',
-                                  value: (pB1['value'] as num).toDouble(),
-                                  min: (pB1['min'] as num).toDouble(),
-                                  max: (pB1['max'] as num).toDouble(),
-                                  unit: 'dB',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pB1['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onMasterPluginParamCommit?.call(
-                                      idx,
-                                      pB1['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pB1['value'] = v);
-                                    widget.setMasterEffectParam(idx, pB1['name'] as String, v);
-                                  },
-                                ),
-                              if (pB2 != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'Band2\nGain',
-                                  value: (pB2['value'] as num).toDouble(),
-                                  min: (pB2['min'] as num).toDouble(),
-                                  max: (pB2['max'] as num).toDouble(),
-                                  unit: 'dB',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pB2['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onMasterPluginParamCommit?.call(
-                                      idx,
-                                      pB2['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pB2['value'] = v);
-                                    widget.setMasterEffectParam(idx, pB2['name'] as String, v);
-                                  },
-                                ),
-                              if (pB3 != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'Band3\nGain',
-                                  value: (pB3['value'] as num).toDouble(),
-                                  min: (pB3['min'] as num).toDouble(),
-                                  max: (pB3['max'] as num).toDouble(),
-                                  unit: 'dB',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pB3['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onMasterPluginParamCommit?.call(
-                                      idx,
-                                      pB3['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pB3['value'] = v);
-                                    widget.setMasterEffectParam(idx, pB3['name'] as String, v);
-                                  },
-                                ),
-                              if (pB4 != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'Band4\nGain',
-                                  value: (pB4['value'] as num).toDouble(),
-                                  min: (pB4['min'] as num).toDouble(),
-                                  max: (pB4['max'] as num).toDouble(),
-                                  unit: 'dB',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pB4['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onMasterPluginParamCommit?.call(
-                                      idx,
-                                      pB4['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pB4['value'] = v);
-                                    widget.setMasterEffectParam(idx, pB4['name'] as String, v);
-                                  },
-                                ),
-                              if (pLPF != null)
-                                _verticalFader(
-                                  context: context,
-                                  label: 'LPF\nFreq',
-                                  value: (pLPF['value'] as num).toDouble(),
-                                  min: (pLPF['min'] as num).toDouble(),
-                                  max: (pLPF['max'] as num).toDouble(),
-                                  logarithmic: true,
-                                  unit: 'Hz',
-                                  onChangeStart: (v) {
-                                    _EQParamStartValue = (pLPF['value'] as num).toDouble();
-                                  },
-                                  onChangeEnd: (v) {
-                                    widget.onMasterPluginParamCommit?.call(
-                                      idx,
-                                      pLPF['name'] as String,
-                                      _EQParamStartValue!,
-                                      v,
-                                    );
-                                    _EQParamStartValue = null;
-                                  },
-                                  onChanged: (v) {
-                                    setState(() => pLPF['value'] = v);
-                                    widget.setMasterEffectParam(idx, pLPF['name'] as String, v);
-                                  },
-                                ),
-                            ],
-                          ),
-                        ),
+                      _buildEqParametricTabs(
+                        context: context,
+                        gainFaders: gainFaders,
+                        frequencyFaders: frequencyFaders,
+                        qFaders: qFaders,
+                        frequencyExtraControls: frequencyExtraControls,
+                        selectedTabIndex: _eqParametricTabIndex,
+                        onTabChanged: (index) {
+                          if (_eqParametricTabIndex == index) return;
+                          setState(() => _eqParametricTabIndex = index);
+                        },
                       ),
                     ],
                   ),
@@ -2397,37 +3653,61 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       final freqs = [140.0, 1200.0, 8000.0];
 
       return SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back),
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  constraints:
+                      const BoxConstraints.tightFor(width: 26, height: 26),
+                  splashRadius: 14,
+                  icon: const Icon(Icons.arrow_back, size: 18),
                   onPressed: () {
+                    _stopEqWaveformPolling();
                     setState(() {
                       _selectedEffectIndex = null;
                       _currentParams = [];
                     });
                   },
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  effectName,
-                  style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 16, fontWeight: FontWeight.w600),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    effectName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(1.00),
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600),
+                  ),
                 ),
               ],
             ),
-            const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
+            const Divider(
+              height: 1,
+              thickness: 0.9,
+              color: Color.fromARGB(213, 104, 104, 104),
+            ),
+            const SizedBox(height: 6),
             LayoutBuilder(
               builder: (context, constraints) {
                 return ConstrainedBox(
                   constraints: BoxConstraints(maxWidth: constraints.maxWidth),
                   child: Column(
                     children: [
-                      _Eq3Preview(bandGains: gains, bandFreqs: freqs),
+                      _Eq3Preview(
+                        bandGains: gains,
+                        bandFreqs: freqs,
+                        waveformSamples: _eqWaveform,
+                        spectrumDb: _eqSpectrumDb,
+                        analyzerSampleRate: _eqAnalyzerSampleRate,
+                      ),
                       const SizedBox(height: 16),
                       SizedBox(
                         height: _eqRowHeight,
@@ -2440,13 +3720,36 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                               if (pLow != null)
                                 _verticalFader(
                                   context: context,
-                                  label: 'Low\nGain',
+                                  label: 'Low',
                                   value: (pLow['value'] as num).toDouble(),
                                   min: (pLow['min'] as num).toDouble(),
                                   max: (pLow['max'] as num).toDouble(),
+                                  defaultValue: _paramDefaultAsDouble(pLow),
                                   unit: 'dB',
+                                  onDoubleTapReset: () {
+                                    final defaultValue =
+                                        _paramDefaultAsDouble(pLow);
+                                    if (defaultValue == null) return;
+                                    final oldValue =
+                                        (pLow['value'] as num).toDouble();
+                                    if ((oldValue - defaultValue).abs() <
+                                        1.0e-6) {
+                                      return;
+                                    }
+                                    setState(
+                                        () => pLow['value'] = defaultValue);
+                                    widget.setMasterEffectParam(idx,
+                                        pLow['name'] as String, defaultValue);
+                                    widget.onMasterPluginParamCommit?.call(
+                                      idx,
+                                      pLow['name'] as String,
+                                      oldValue,
+                                      defaultValue,
+                                    );
+                                  },
                                   onChangeStart: (v) {
-                                    _EQParamStartValue = (pLow['value'] as num).toDouble();
+                                    _EQParamStartValue =
+                                        (pLow['value'] as num).toDouble();
                                   },
                                   onChangeEnd: (v) {
                                     widget.onMasterPluginParamCommit?.call(
@@ -2459,19 +3762,43 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                   },
                                   onChanged: (v) {
                                     setState(() => pLow['value'] = v);
-                                    widget.setMasterEffectParam(idx, pLow['name'] as String, v);
+                                    widget.setMasterEffectParam(
+                                        idx, pLow['name'] as String, v);
                                   },
                                 ),
                               if (pMid != null)
                                 _verticalFader(
                                   context: context,
-                                  label: 'Mid\nGain',
+                                  label: 'Mid',
                                   value: (pMid['value'] as num).toDouble(),
                                   min: (pMid['min'] as num).toDouble(),
                                   max: (pMid['max'] as num).toDouble(),
+                                  defaultValue: _paramDefaultAsDouble(pMid),
                                   unit: 'dB',
+                                  onDoubleTapReset: () {
+                                    final defaultValue =
+                                        _paramDefaultAsDouble(pMid);
+                                    if (defaultValue == null) return;
+                                    final oldValue =
+                                        (pMid['value'] as num).toDouble();
+                                    if ((oldValue - defaultValue).abs() <
+                                        1.0e-6) {
+                                      return;
+                                    }
+                                    setState(
+                                        () => pMid['value'] = defaultValue);
+                                    widget.setMasterEffectParam(idx,
+                                        pMid['name'] as String, defaultValue);
+                                    widget.onMasterPluginParamCommit?.call(
+                                      idx,
+                                      pMid['name'] as String,
+                                      oldValue,
+                                      defaultValue,
+                                    );
+                                  },
                                   onChangeStart: (v) {
-                                    _EQParamStartValue = (pMid['value'] as num).toDouble();
+                                    _EQParamStartValue =
+                                        (pMid['value'] as num).toDouble();
                                   },
                                   onChangeEnd: (v) {
                                     widget.onMasterPluginParamCommit?.call(
@@ -2484,19 +3811,43 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                   },
                                   onChanged: (v) {
                                     setState(() => pMid['value'] = v);
-                                    widget.setMasterEffectParam(idx, pMid['name'] as String, v);
+                                    widget.setMasterEffectParam(
+                                        idx, pMid['name'] as String, v);
                                   },
                                 ),
                               if (pHigh != null)
                                 _verticalFader(
                                   context: context,
-                                  label: 'High\nGain',
+                                  label: 'High',
                                   value: (pHigh['value'] as num).toDouble(),
                                   min: (pHigh['min'] as num).toDouble(),
                                   max: (pHigh['max'] as num).toDouble(),
+                                  defaultValue: _paramDefaultAsDouble(pHigh),
                                   unit: 'dB',
+                                  onDoubleTapReset: () {
+                                    final defaultValue =
+                                        _paramDefaultAsDouble(pHigh);
+                                    if (defaultValue == null) return;
+                                    final oldValue =
+                                        (pHigh['value'] as num).toDouble();
+                                    if ((oldValue - defaultValue).abs() <
+                                        1.0e-6) {
+                                      return;
+                                    }
+                                    setState(
+                                        () => pHigh['value'] = defaultValue);
+                                    widget.setMasterEffectParam(idx,
+                                        pHigh['name'] as String, defaultValue);
+                                    widget.onMasterPluginParamCommit?.call(
+                                      idx,
+                                      pHigh['name'] as String,
+                                      oldValue,
+                                      defaultValue,
+                                    );
+                                  },
                                   onChangeStart: (v) {
-                                    _EQParamStartValue = (pHigh['value'] as num).toDouble();
+                                    _EQParamStartValue =
+                                        (pHigh['value'] as num).toDouble();
                                   },
                                   onChangeEnd: (v) {
                                     widget.onMasterPluginParamCommit?.call(
@@ -2509,7 +3860,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                   },
                                   onChanged: (v) {
                                     setState(() => pHigh['value'] = v);
-                                    widget.setMasterEffectParam(idx, pHigh['name'] as String, v);
+                                    widget.setMasterEffectParam(
+                                        idx, pHigh['name'] as String, v);
                                   },
                                 ),
                             ],
@@ -2529,32 +3881,48 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     // Generic parameter page (no scroll, full height in row)
     return SingleChildScrollView(
       // You may want to add padding here if not already handled by internal widgets
-      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 10.0),
+      padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_back),
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                splashRadius: 14,
+                icon: const Icon(Icons.arrow_back, size: 18),
                 onPressed: () {
                   _stopCompressorMetering();
+                  _stopEqWaveformPolling();
                   setState(() {
                     _selectedEffectIndex = null;
                     _currentParams = [];
                   });
                 },
               ),
-              const SizedBox(width: 4),
-              Text(
-                effectName,
-                style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 16, fontWeight: FontWeight.w600),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  effectName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(1.00),
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600),
+                ),
               ),
             ],
           ),
-          // const SizedBox(height: 8),
-          const Divider(color: Color.fromARGB(213, 104, 104, 104)),
-          // const SizedBox(height: 8),
+          const SizedBox(height: 4),
+          const Divider(
+            height: 1,
+            thickness: 0.9,
+            color: Color.fromARGB(213, 104, 104, 104),
+          ),
+          const SizedBox(height: 6),
 
           if (effectName == 'Compressor') ...[
             // _buildCompressorMeterStrip(),
@@ -2569,14 +3937,19 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           // Params straight in Column
           for (var param in _currentParams) ...[
             if (_effects[idx] == 'Delay' && param['name'] == 'Delay Time') ...[
-              _buildDelayTimeParam(context: context, param: param, effectIndex: idx, bpm: widget.projectBpm),
+              _buildDelayTimeParam(
+                  context: context,
+                  param: param,
+                  effectIndex: idx,
+                  bpm: widget.projectBpm),
             ] else if (param['type'] == 'float') ...[
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(param['name'] as String, style: Theme.of(context).textTheme.bodyLarge),
+                    Text(param['name'] as String,
+                        style: Theme.of(context).textTheme.bodyLarge),
                     // const SizedBox(height: 4),
                     Row(
                       children: [
@@ -2600,53 +3973,91 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 
                               final minV = (param['min'] as num).toDouble();
                               final maxV = (param['max'] as num).toDouble();
-                              final rawV = (param['value'] as num).toDouble().clamp(minV, maxV);
+                              final rawV = (param['value'] as num)
+                                  .toDouble()
+                                  .clamp(minV, maxV);
 
-                              final skew = _getParamSkew(effectName, paramName); // null = linear
+                              final skew = _getParamSkew(
+                                  effectName, paramName); // null = linear
 
                               // value -> 0..1
-                              double toNorm(double v) => ((v - minV) / (maxV - minV)).clamp(0.0, 1.0);
+                              double toNorm(double v) =>
+                                  ((v - minV) / (maxV - minV)).clamp(0.0, 1.0);
 
                               // 0..1 -> value
-                              double fromNorm(double t) => minV + (maxV - minV) * t.clamp(0.0, 1.0);
+                              double fromNorm(double t) =>
+                                  minV + (maxV - minV) * t.clamp(0.0, 1.0);
 
                               // if skew exists: position uses norm^skew, and inverse uses ^(1/skew)
                               final norm = toNorm(rawV);
-                              final sliderPos = (skew == null) ? norm : math.pow(norm, skew).toDouble();
+                              final sliderPos = (skew == null)
+                                  ? norm
+                                  : math.pow(norm, skew).toDouble();
 
-                              return Slider(
-                                value: sliderPos,
-                                min: 0.0,
-                                max: 1.0,
-                                divisions: 200,
-                                label: rawV.toStringAsFixed(2),
-                                onChangeStart: (_) {
-                                  _paramDragStartValue = rawV;
-                                },
-                                onChanged: (p) {
-                                  final t = p.clamp(0.0, 1.0);
-                                  final newNorm = (skew == null) ? t : math.pow(t, 1.0 / skew!).toDouble();
-                                  final v = fromNorm(newNorm);
-
-                                  setState(() => param['value'] = v);
-                                  widget.setMasterEffectParam(idx, paramName, v);
-                                },
-                                onChangeEnd: (p) {
-                                  if (_paramDragStartValue == null) return;
-
-                                  final t = p.clamp(0.0, 1.0);
-                                  final newNorm = (skew == null) ? t : math.pow(t, 1.0 / skew!).toDouble();
-                                  final v = fromNorm(newNorm);
-
+                              return GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                onDoubleTap: () {
+                                  final defaultValue =
+                                      _paramDefaultAsDouble(param);
+                                  if (defaultValue == null) return;
+                                  final clampedDefault =
+                                      defaultValue.clamp(minV, maxV).toDouble();
+                                  final oldValue =
+                                      (param['value'] as num).toDouble();
+                                  if ((oldValue - clampedDefault).abs() <
+                                      1.0e-6) {
+                                    return;
+                                  }
+                                  setState(
+                                      () => param['value'] = clampedDefault);
+                                  widget.setMasterEffectParam(
+                                      idx, paramName, clampedDefault);
                                   widget.onMasterPluginParamCommit?.call(
                                     idx,
                                     paramName,
-                                    _paramDragStartValue!,
-                                    v,
+                                    oldValue,
+                                    clampedDefault,
                                   );
-
-                                  _paramDragStartValue = null;
                                 },
+                                child: Slider(
+                                  value: sliderPos,
+                                  min: 0.0,
+                                  max: 1.0,
+                                  divisions: 200,
+                                  label: rawV.toStringAsFixed(2),
+                                  onChangeStart: (_) {
+                                    _paramDragStartValue = rawV;
+                                  },
+                                  onChanged: (p) {
+                                    final t = p.clamp(0.0, 1.0);
+                                    final newNorm = (skew == null)
+                                        ? t
+                                        : math.pow(t, 1.0 / skew!).toDouble();
+                                    final v = fromNorm(newNorm);
+
+                                    setState(() => param['value'] = v);
+                                    widget.setMasterEffectParam(
+                                        idx, paramName, v);
+                                  },
+                                  onChangeEnd: (p) {
+                                    if (_paramDragStartValue == null) return;
+
+                                    final t = p.clamp(0.0, 1.0);
+                                    final newNorm = (skew == null)
+                                        ? t
+                                        : math.pow(t, 1.0 / skew!).toDouble();
+                                    final v = fromNorm(newNorm);
+
+                                    widget.onMasterPluginParamCommit?.call(
+                                      idx,
+                                      paramName,
+                                      _paramDragStartValue!,
+                                      v,
+                                    );
+
+                                    _paramDragStartValue = null;
+                                  },
+                                ),
                               );
                             })(),
                           ),
@@ -2669,42 +4080,51 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                 onChanged: (v) {
                   setState(() => param['value'] = v);
                   widget.setMasterEffectParam(idx, param['name'] as String, v);
-                  widget.onMasterPluginParamCommit?.call(idx, param['name'] as String, !v, v);
+                  widget.onMasterPluginParamCommit
+                      ?.call(idx, param['name'] as String, !v, v);
                 },
               ),
             ] else if (param['type'] == 'choice') ...[
               (() {
-                final keys = param.keys.where((k) => k.startsWith('choice_')).toList()
-                  ..sort((a, b) {
-                    final ai = int.parse(a.split('_')[1]);
-                    final bi = int.parse(b.split('_')[1]);
-                    return ai.compareTo(bi);
-                  });
+                final keys =
+                    param.keys.where((k) => k.startsWith('choice_')).toList()
+                      ..sort((a, b) {
+                        final ai = int.parse(a.split('_')[1]);
+                        final bi = int.parse(b.split('_')[1]);
+                        return ai.compareTo(bi);
+                      });
                 final choices = keys.map((k) => param[k] as String).toList();
                 final current = param['value'] as String;
 
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(param['name'] as String),
-                    trailing: Text(current, style: Theme.of(context).textTheme.bodyLarge),
+                    trailing: Text(current,
+                        style: Theme.of(context).textTheme.bodyLarge),
                     onTap: () async {
                       final picked = await showDialog<String>(
                         context: context,
                         useRootNavigator: true,
                         builder: (ctx) => SimpleDialog(
-                          title: Text("${L10n.translate(context, 'Select ')}${param['name']}"),
+                          title: Text(
+                              "${L10n.translate(context, 'Select ')}${param['name']}"),
                           children: choices.map((c) {
-                            return SimpleDialogOption(child: Text(c), onPressed: () => Navigator.pop(ctx, c));
+                            return SimpleDialogOption(
+                                child: Text(c),
+                                onPressed: () => Navigator.pop(ctx, c));
                           }).toList(),
                         ),
                       );
                       if (picked != null) {
                         final oldVal = param['value'];
                         setState(() => param['value'] = picked);
-                        widget.setMasterEffectParam(idx, param['name'] as String, picked);
-                        widget.onMasterPluginParamCommit?.call(idx, param['name'] as String, oldVal, picked);
+                        widget.setMasterEffectParam(
+                            idx, param['name'] as String, picked);
+                        widget.onMasterPluginParamCommit?.call(
+                            idx, param['name'] as String, oldVal, picked);
                       }
                     },
                   ),
@@ -2712,7 +4132,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               })(),
             ] else ...[
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(param['name'] as String),
@@ -2728,8 +4149,655 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 }
 
 // ---- Sizes for the vertical faders/rows (tweak to taste) ----
-const double _eqFaderHeight = 160;
+const double _eqFaderHeight = 156;
 const double _eqRowHeight = _eqFaderHeight + 60; // space for labels above/below
+
+class _EqFaderSpec {
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final double? defaultValue;
+  final String unit;
+  final bool logarithmic;
+  final ValueChanged<double> onChangeStart;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
+  final VoidCallback? onReset;
+
+  const _EqFaderSpec({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.defaultValue,
+    required this.unit,
+    required this.logarithmic,
+    required this.onChangeStart,
+    required this.onChanged,
+    required this.onChangeEnd,
+    required this.onReset,
+  });
+}
+
+Widget _buildEqParametricTabs({
+  required BuildContext context,
+  required List<_EqFaderSpec> gainFaders,
+  required List<_EqFaderSpec> frequencyFaders,
+  required List<_EqFaderSpec> qFaders,
+  required int selectedTabIndex,
+  required ValueChanged<int> onTabChanged,
+  List<Widget> frequencyExtraControls = const [],
+}) {
+  return _EqParametricTabsWidget(
+    gainFaders: gainFaders,
+    frequencyFaders: frequencyFaders,
+    qFaders: qFaders,
+    selectedTabIndex: selectedTabIndex,
+    onTabChanged: onTabChanged,
+    frequencyExtraControls: frequencyExtraControls,
+  );
+}
+
+class _EqParametricTabsWidget extends StatefulWidget {
+  final List<_EqFaderSpec> gainFaders;
+  final List<_EqFaderSpec> frequencyFaders;
+  final List<_EqFaderSpec> qFaders;
+  final int selectedTabIndex;
+  final ValueChanged<int> onTabChanged;
+  final List<Widget> frequencyExtraControls;
+
+  const _EqParametricTabsWidget({
+    required this.gainFaders,
+    required this.frequencyFaders,
+    required this.qFaders,
+    required this.selectedTabIndex,
+    required this.onTabChanged,
+    required this.frequencyExtraControls,
+  });
+
+  @override
+  State<_EqParametricTabsWidget> createState() =>
+      _EqParametricTabsWidgetState();
+}
+
+class _EqParametricTabsWidgetState extends State<_EqParametricTabsWidget>
+    with TickerProviderStateMixin {
+  late final TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(
+        length: 3, vsync: this, initialIndex: widget.selectedTabIndex);
+  }
+
+  @override
+  void didUpdateWidget(covariant _EqParametricTabsWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_tabController.index != widget.selectedTabIndex) {
+      _tabController.animateTo(widget.selectedTabIndex,
+          duration: Duration.zero);
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final frequencyExtraHeight =
+            widget.frequencyExtraControls.isEmpty ? 0.0 : 94.0;
+        final tabBodyHeight = _eqRowHeight +
+            (widget.selectedTabIndex == 1 ? frequencyExtraHeight : 0.0);
+
+        return Column(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0x22000000),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0x33888888)),
+              ),
+              child: TabBar(
+                controller: _tabController,
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+                dividerColor: Colors.transparent,
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicator: BoxDecoration(
+                  color: const Color(0x335C94D9),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                labelColor: Colors.white,
+                unselectedLabelColor: const Color(0xFFB9B9B9),
+                onTap: widget.onTabChanged,
+                tabs: const [
+                  Tab(height: 30, text: 'Gain'),
+                  Tab(height: 30, text: 'Frequency'),
+                  Tab(height: 30, text: 'Q'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: tabBodyHeight,
+              child: KeyedSubtree(
+                key: ValueKey<int>(widget.selectedTabIndex),
+                child: widget.selectedTabIndex == 0
+                    ? _buildEqTabPage(
+                        context: context,
+                        faders: widget.gainFaders,
+                      )
+                    : widget.selectedTabIndex == 1
+                        ? _buildEqTabPage(
+                            context: context,
+                            faders: widget.frequencyFaders,
+                            extraControls: widget.frequencyExtraControls,
+                          )
+                        : _buildEqTabPage(
+                            context: context,
+                            faders: widget.qFaders,
+                          ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+Widget _buildEqTabPage({
+  required BuildContext context,
+  required List<_EqFaderSpec> faders,
+  List<Widget> extraControls = const [],
+}) {
+  return Column(
+    children: [
+      _buildEqFaderRow(context: context, faders: faders),
+      if (extraControls.isNotEmpty) const SizedBox(height: 2),
+      ...extraControls,
+    ],
+  );
+}
+
+Widget _buildEqFaderRow({
+  required BuildContext context,
+  required List<_EqFaderSpec> faders,
+}) {
+  if (faders.isEmpty) {
+    return SizedBox(
+      height: _eqRowHeight,
+      child: Center(
+        child: Text(
+          'No controls',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ),
+    );
+  }
+
+  return SizedBox(
+    height: _eqRowHeight,
+    child: FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.topCenter,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          for (final f in faders)
+            _verticalFader(
+              context: context,
+              label: f.label,
+              value: f.value,
+              min: f.min,
+              max: f.max,
+              defaultValue: f.defaultValue,
+              logarithmic: f.logarithmic,
+              unit: f.unit,
+              onChangeStart: f.onChangeStart,
+              onChanged: f.onChanged,
+              onChangeEnd: f.onChangeEnd,
+              onDoubleTapReset: f.onReset,
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
+Widget _buildEqChoiceSelector({
+  required BuildContext context,
+  required String label,
+  required List<String> choices,
+  required String currentChoice,
+  required ValueChanged<String> onChanged,
+}) {
+  final compactLabel = label
+      .replaceAll(' Frequency', '')
+      .replaceAll(' Slope', '')
+      .replaceAll('Band ', 'B');
+
+  return Container(
+    padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
+    decoration: BoxDecoration(
+      color: const Color(0x15000000),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: const Color(0x33888888)),
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            compactLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ),
+        Flexible(
+          child: PopupMenuButton<String>(
+            initialValue: currentChoice,
+            tooltip: '',
+            padding: EdgeInsets.zero,
+            onSelected: onChanged,
+            itemBuilder: (_) => choices
+                .map((choice) => PopupMenuItem<String>(
+                      value: choice,
+                      child: Text(choice),
+                    ))
+                .toList(growable: false),
+            child: Container(
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0x1F000000),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0x33888888)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Expanded(
+                    child: Text(
+                      currentChoice,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.expand_more, size: 16),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _buildEqFilterControlRow({
+  required BuildContext context,
+  required String label,
+  required double value,
+  required double min,
+  required double max,
+  required bool logarithmic,
+  required ValueChanged<double> onChangeStart,
+  required ValueChanged<double> onChanged,
+  required ValueChanged<double> onChangeEnd,
+  VoidCallback? onDoubleTapReset,
+  List<String> slopeChoices = const [],
+  String? selectedSlope,
+  ValueChanged<String>? onSlopeChanged,
+}) {
+  final clampedValue = value.clamp(min, max).toDouble();
+  final sliderValue = logarithmic
+      ? _toLogPos(clampedValue, min, max)
+      : ((clampedValue - min) / (max - min)).clamp(0.0, 1.0);
+
+  return Container(
+    padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
+    decoration: BoxDecoration(
+      color: const Color(0x15000000),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: const Color(0x33888888)),
+    ),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 34,
+          child: Text(
+            label,
+            maxLines: 1,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        Expanded(
+          flex: 4,
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onDoubleTap: onDoubleTapReset,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                showValueIndicator: ShowValueIndicator.onDrag,
+                trackHeight: 4,
+                overlayShape: SliderComponentShape.noOverlay,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                valueIndicatorTextStyle: const TextStyle(
+                  color: Color(0xFF000000),
+                  fontSize: 11,
+                ),
+              ),
+              child: Slider(
+                min: 0.0,
+                max: 1.0,
+                divisions: 220,
+                value: sliderValue,
+                label: '${_fmtHz(clampedValue)} Hz',
+                onChangeStart: (p) {
+                  final v = logarithmic
+                      ? _fromLogPos(p, min, max)
+                      : (min + (max - min) * p.clamp(0.0, 1.0));
+                  onChangeStart(v);
+                },
+                onChanged: (p) {
+                  final v = logarithmic
+                      ? _fromLogPos(p, min, max)
+                      : (min + (max - min) * p.clamp(0.0, 1.0));
+                  onChanged(v);
+                },
+                onChangeEnd: (p) {
+                  final v = logarithmic
+                      ? _fromLogPos(p, min, max)
+                      : (min + (max - min) * p.clamp(0.0, 1.0));
+                  onChangeEnd(v);
+                },
+              ),
+            ),
+          ),
+        ),
+        if (slopeChoices.isNotEmpty &&
+            selectedSlope != null &&
+            onSlopeChanged != null) ...[
+          const SizedBox(width: 4),
+          SizedBox(
+            width: 84,
+            child: PopupMenuButton<String>(
+              initialValue: selectedSlope,
+              tooltip: '',
+              padding: EdgeInsets.zero,
+              onSelected: onSlopeChanged,
+              itemBuilder: (_) => slopeChoices
+                  .map((choice) =>
+                      PopupMenuItem<String>(value: choice, child: Text(choice)))
+                  .toList(growable: false),
+              child: Container(
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0x1F000000),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0x33888888)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        selectedSlope,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.expand_more, size: 16),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+Widget _buildEqSlopeControlsRow({
+  Widget? left,
+  Widget? right,
+}) {
+  return LayoutBuilder(
+    builder: (context, constraints) {
+      final isNarrow = constraints.maxWidth < 360;
+      if (isNarrow) {
+        return Column(
+          children: [
+            if (left != null) left,
+            if (left != null && right != null) const SizedBox(height: 6),
+            if (right != null) right,
+          ],
+        );
+      }
+      return Row(
+        children: [
+          Expanded(child: left ?? const SizedBox.shrink()),
+          const SizedBox(width: 8),
+          Expanded(child: right ?? const SizedBox.shrink()),
+        ],
+      );
+    },
+  );
+}
+
+List<String> _extractChoiceValues(Map<String, dynamic> param) {
+  final keys = param.keys.where((k) => k.startsWith('choice_')).toList()
+    ..sort((a, b) {
+      final ai = int.tryParse(a.split('_').last) ?? 0;
+      final bi = int.tryParse(b.split('_').last) ?? 0;
+      return ai.compareTo(bi);
+    });
+
+  return keys.map((k) => param[k].toString()).toList();
+}
+
+double? _paramDefaultAsDouble(Map<String, dynamic> param) {
+  final raw = param['defaultValue'];
+  if (raw is num) return raw.toDouble();
+  if (raw is String) {
+    final cleaned = raw.replaceAll(RegExp(r'[^0-9+\-\.]'), '');
+    final parsed = double.tryParse(cleaned);
+    if (parsed != null) return parsed;
+  }
+
+  final name = (param['name']?.toString() ?? '').trim();
+  const knownDefaults = <String, double>{
+    'HPF Frequency': 80.0,
+    'LPF Frequency': 12000.0,
+    'Band 1 Frequency': 60.0,
+    'Band 2 Frequency': 400.0,
+    'Band 3 Frequency': 2000.0,
+    'Band 4 Frequency': 8000.0,
+    'Band 1 Gain': 0.0,
+    'Band 2 Gain': 0.0,
+    'Band 3 Gain': 0.0,
+    'Band 4 Gain': 0.0,
+    'Band 1 Q': 1.0,
+    'Band 2 Q': 1.0,
+    'Band 3 Q': 1.0,
+    'Band 4 Q': 1.0,
+    'Low Gain': 0.0,
+    'Mid Gain': 0.0,
+    'High Gain': 0.0,
+  };
+  final fallback = knownDefaults[name];
+  if (fallback != null) {
+    final min = (param['min'] as num?)?.toDouble();
+    final max = (param['max'] as num?)?.toDouble();
+    if (min != null && max != null) {
+      return fallback.clamp(min, max).toDouble();
+    }
+    return fallback;
+  }
+
+  final min = (param['min'] as num?)?.toDouble();
+  final max = (param['max'] as num?)?.toDouble();
+  if (min != null && max != null) {
+    return (min + max) * 0.5;
+  }
+  return null;
+}
+
+dynamic _paramDefaultValue(Map<String, dynamic> param) {
+  final type = (param['type']?.toString() ?? '').toLowerCase();
+  final raw = param['defaultValue'];
+  final hasChoices = param.keys.any((k) => k.startsWith('choice_'));
+  final hasNumericRange =
+      param['min'] is num && param['max'] is num && param['value'] is num;
+
+  if (type == 'choice' || hasChoices) {
+    final choices = _extractChoiceValues(param);
+    if (choices.isEmpty) return null;
+    if (raw is String) {
+      if (choices.contains(raw)) return raw;
+      final idx = int.tryParse(raw);
+      if (idx != null && idx >= 0 && idx < choices.length) return choices[idx];
+    }
+    if (raw is num) {
+      final idx = raw.toInt();
+      if (idx >= 0 && idx < choices.length) return choices[idx];
+    }
+    return choices.first;
+  }
+
+  if (type == 'bool') {
+    if (raw is bool) return raw;
+    if (raw is num) return raw.toInt() != 0;
+    if (raw is String) {
+      final lower = raw.toLowerCase();
+      if (lower == 'true' || lower == '1') return true;
+      if (lower == 'false' || lower == '0') return false;
+    }
+    return false;
+  }
+
+  if (type == 'float' ||
+      type == 'double' ||
+      type == 'int' ||
+      hasNumericRange ||
+      raw is num ||
+      raw is String) {
+    return _paramDefaultAsDouble(param);
+  }
+
+  return raw;
+}
+
+bool _paramValuesEqual(dynamic a, dynamic b) {
+  if (a is num && b is num) {
+    return (a.toDouble() - b.toDouble()).abs() < 1.0e-6;
+  }
+  return a == b;
+}
+
+double _parseSlopeDbPerOct(dynamic slopeValue) {
+  if (slopeValue is num) {
+    final idx = slopeValue.toInt().clamp(0, 3);
+    return 12.0 * (idx + 1);
+  }
+  if (slopeValue is String) {
+    final match = RegExp(r'(\d+)').firstMatch(slopeValue);
+    if (match != null) {
+      final parsed = double.tryParse(match.group(1)!);
+      if (parsed != null) return parsed;
+    }
+  }
+  return 12.0;
+}
+
+Widget _buildEqAuxSlider({
+  required BuildContext context,
+  required String label,
+  required double value,
+  required double min,
+  required double max,
+  required bool logarithmic,
+  required String unit,
+  required ValueChanged<double> onChangeStart,
+  required ValueChanged<double> onChanged,
+  required ValueChanged<double> onChangeEnd,
+}) {
+  final clampedValue = value.clamp(min, max).toDouble();
+  final sliderValue = logarithmic
+      ? _toLogPos(clampedValue, min, max)
+      : ((clampedValue - min) / (max - min)).clamp(0.0, 1.0);
+
+  String prettyValue(double v) {
+    if (unit == 'Hz') return _fmtHz(v);
+    if (unit == 'Q') return v.toStringAsFixed(2);
+    if (unit == 'dB') return '${v.toStringAsFixed(1)} dB';
+    return v.toStringAsFixed(2);
+  }
+
+  return Padding(
+    padding: const EdgeInsets.only(top: 6),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            Text(
+              prettyValue(clampedValue),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        Slider(
+          min: 0.0,
+          max: 1.0,
+          divisions: 220,
+          value: sliderValue,
+          onChangeStart: (p) {
+            final v = logarithmic
+                ? _fromLogPos(p, min, max)
+                : (min + (max - min) * p.clamp(0.0, 1.0));
+            onChangeStart(v);
+          },
+          onChanged: (p) {
+            final v = logarithmic
+                ? _fromLogPos(p, min, max)
+                : (min + (max - min) * p.clamp(0.0, 1.0));
+            onChanged(v);
+          },
+          onChangeEnd: (p) {
+            final v = logarithmic
+                ? _fromLogPos(p, min, max)
+                : (min + (max - min) * p.clamp(0.0, 1.0));
+            onChangeEnd(v);
+          },
+        ),
+      ],
+    ),
+  );
+}
 
 Map<String, dynamic>? _paramByName(List params, String name) {
   for (final p in params) {
@@ -2796,24 +4864,92 @@ double? _getParamSkew(String effectName, String paramName) {
 String _fmtHz(double hz) {
   if (hz >= 1000) {
     final k = hz / 1000.0;
+    final kRounded = k.roundToDouble();
+    if ((k - kRounded).abs() < 0.05) {
+      return '${kRounded.toInt()}k';
+    }
     // 1 decimal up to 9.9k, then integer
     return k < 10 ? '${k.toStringAsFixed(1)}k' : '${k.toStringAsFixed(0)}k';
   }
-  return hz.toStringAsFixed(hz < 100 ? 1 : 0);
+  return hz.round().toString();
+}
+
+class _EqSpectrumAnalyzer {
+  static final Map<int, FFT> _fftCache = <int, FFT>{};
+
+  static FFT _fftForSize(int size) =>
+      _fftCache.putIfAbsent(size, () => FFT(size));
+
+  static int _nextPowerOfTwo(int v) {
+    var n = 1;
+    while (n < v) {
+      n <<= 1;
+    }
+    return n;
+  }
+
+  static double _log10(num x) => math.log(x) / math.ln10;
+
+  static List<double> computeSpectrumDb(List<double> samples) {
+    if (samples.length < 64) return const <double>[];
+
+    var fftSize = _nextPowerOfTwo(samples.length);
+    fftSize = fftSize.clamp(128, 2048);
+
+    final input = List<double>.filled(fftSize, 0.0, growable: false);
+    final srcStart = (samples.length - fftSize).clamp(0, samples.length);
+    final copyLen = math.min(fftSize, samples.length);
+    final readOffset = srcStart + (samples.length - srcStart - copyLen);
+    for (int i = 0; i < copyLen; i++) {
+      final window =
+          0.5 - 0.5 * math.cos((2.0 * math.pi * i) / (copyLen - 1).toDouble());
+      input[i] = samples[readOffset + i] * window;
+    }
+
+    final fft = _fftForSize(fftSize);
+    final freqDomain = fft.realFft(input);
+    final bins = freqDomain.length;
+    if (bins <= 1) return const <double>[];
+
+    final out = List<double>.filled(bins, -120.0, growable: false);
+    for (int i = 1; i < bins; i++) {
+      final c = freqDomain[i];
+      final mag = math.sqrt(c.x * c.x + c.y * c.y) / (fftSize * 0.5);
+      out[i] = 20.0 * _log10(mag + 1.0e-12);
+    }
+
+    for (int i = 1; i < bins - 1; i++) {
+      out[i] = (out[i - 1] + out[i] + out[i + 1]) / 3.0;
+    }
+
+    return out;
+  }
 }
 
 class _EqPreviewFull extends StatelessWidget {
   final double hpfHz;
   final double lpfHz;
+  final double hpfSlopeDbOct;
+  final double lpfSlopeDbOct;
   final List<double> bandGains; // dB values
   final List<double> bandFreqs; // Hz centers
+  final List<double> bandQs; // Q values
+  final List<double> waveformSamples; // post-EQ waveform
+  final List<double> spectrumDb; // precomputed analyzer spectrum
+  final double analyzerSampleRate;
 
   const _EqPreviewFull({
     super.key,
     required this.hpfHz,
     required this.lpfHz,
+    required this.hpfSlopeDbOct,
+    required this.lpfSlopeDbOct,
     required this.bandGains,
     required this.bandFreqs,
+    required this.bandQs,
+    required this.waveformSamples,
+    required this.spectrumDb,
+    required this.analyzerSampleRate,
   });
 
   @override
@@ -2828,7 +4964,17 @@ class _EqPreviewFull extends StatelessWidget {
       padding: const EdgeInsets.all(8),
       child: SizedBox.expand(
         child: CustomPaint(
-          painter: _EqPreviewFullPainter(hpfHz: hpfHz, lpfHz: lpfHz, bandGains: bandGains, bandFreqs: bandFreqs),
+          painter: _EqPreviewFullPainter(
+              hpfHz: hpfHz,
+              lpfHz: lpfHz,
+              hpfSlopeDbOct: hpfSlopeDbOct,
+              lpfSlopeDbOct: lpfSlopeDbOct,
+              bandGains: bandGains,
+              bandFreqs: bandFreqs,
+              bandQs: bandQs,
+              waveformSamples: waveformSamples,
+              spectrumDb: spectrumDb,
+              analyzerSampleRate: analyzerSampleRate),
         ),
       ),
     );
@@ -2837,21 +4983,125 @@ class _EqPreviewFull extends StatelessWidget {
 
 class _EqPreviewFullPainter extends CustomPainter {
   final double hpfHz, lpfHz;
+  final double hpfSlopeDbOct, lpfSlopeDbOct;
   final List<double> bandGains;
   final List<double> bandFreqs;
+  final List<double> bandQs;
+  final List<double> waveformSamples;
+  final List<double> spectrumDb;
+  final double analyzerSampleRate;
 
-  _EqPreviewFullPainter({required this.hpfHz, required this.lpfHz, required this.bandGains, required this.bandFreqs});
+  _EqPreviewFullPainter(
+      {required this.hpfHz,
+      required this.lpfHz,
+      required this.hpfSlopeDbOct,
+      required this.lpfSlopeDbOct,
+      required this.bandGains,
+      required this.bandFreqs,
+      required this.bandQs,
+      required this.waveformSamples,
+      required this.spectrumDb,
+      required this.analyzerSampleRate});
 
   static const double _minF = 20.0;
   static const double _maxF = 20000.0;
 
-  double _log2(num x) => math.log(x) / math.ln2;
+  double _log10(num x) => math.log(x) / math.ln10;
 
   // map Hz → log X position
   double _xForHz(double hz, double w) {
     final f = hz.clamp(_minF, _maxF);
-    final t = (math.log(f) - math.log(_minF)) / (math.log(_maxF) - math.log(_minF));
+    final t =
+        (math.log(f) - math.log(_minF)) / (math.log(_maxF) - math.log(_minF));
     return (t.clamp(0.0, 1.0)) * w;
+  }
+
+  double _butterworthHighpassDb({
+    required double f,
+    required double fc,
+    required double slopeDbOct,
+  }) {
+    final ff = f.clamp(1.0, 96000.0);
+    final fcc = fc.clamp(1.0, 96000.0);
+    final order = (slopeDbOct / 6.0).round().clamp(1, 16);
+    final ratio = fcc / ff;
+    final denom = 1.0 + math.pow(ratio, 2 * order);
+    return -10.0 * _log10(denom);
+  }
+
+  double _butterworthLowpassDb({
+    required double f,
+    required double fc,
+    required double slopeDbOct,
+  }) {
+    final ff = f.clamp(1.0, 96000.0);
+    final fcc = fc.clamp(1.0, 96000.0);
+    final order = (slopeDbOct / 6.0).round().clamp(1, 16);
+    final ratio = ff / fcc;
+    final denom = 1.0 + math.pow(ratio, 2 * order);
+    return -10.0 * _log10(denom);
+  }
+
+  double _sampleSpectrumAtHz({
+    required List<double> spectrumDb,
+    required double hz,
+    required double binHz,
+    required double nyquist,
+  }) {
+    if (spectrumDb.isEmpty || hz <= 0 || binHz <= 0 || hz > nyquist) {
+      return -120.0;
+    }
+
+    final idx = hz / binHz;
+    final maxIdx = spectrumDb.length - 1;
+    if (idx <= 1) return spectrumDb[1];
+    if (idx >= maxIdx) return spectrumDb[maxIdx];
+
+    final i0 = idx.floor();
+    final i1 = math.min(maxIdx, i0 + 1);
+    final t = idx - i0;
+    return spectrumDb[i0] * (1.0 - t) + spectrumDb[i1] * t;
+  }
+
+  void _drawFrequencyRegions(Canvas canvas, double w, double h) {
+    const regionEdgesHz = [20.0, 80.0, 300.0, 1200.0, 5000.0, 20000.0];
+    const markerHz = [80.0, 300.0, 1200.0, 5000.0, 12000.0];
+
+    final divider = Paint()
+      ..color = const Color(0x2A8F8F8F)
+      ..strokeWidth = 1.0;
+
+    for (int i = 0; i < regionEdgesHz.length - 1; i++) {
+      final f0 = regionEdgesHz[i];
+      final f1 = regionEdgesHz[i + 1];
+      final x0 = _xForHz(f0, w);
+      final x1 = _xForHz(f1, w);
+      final shade = Paint()
+        ..color =
+            (i.isEven ? const Color(0x0DFFFFFF) : const Color(0x05000000));
+      canvas.drawRect(Rect.fromLTRB(x0, 0, x1, h), shade);
+      canvas.drawLine(Offset(x0, 0), Offset(x0, h), divider);
+    }
+    final lastEdgeX = _xForHz(regionEdgesHz.last, w);
+    canvas.drawLine(Offset(lastEdgeX, 0), Offset(lastEdgeX, h), divider);
+
+    for (final hz in markerHz) {
+      final x = _xForHz(hz, w);
+      canvas.drawLine(Offset(x, 0), Offset(x, h), divider);
+      final tp = TextPainter(
+        text: TextSpan(
+          text: _fmtHz(hz),
+          style: const TextStyle(
+            color: Color(0x88D8D8D8),
+            fontSize: 9,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final textX = (x - tp.width * 0.5).clamp(0.0, w - tp.width);
+      tp.paint(canvas, Offset(textX, h - tp.height - 2));
+    }
   }
 
   @override
@@ -2859,11 +5109,17 @@ class _EqPreviewFullPainter extends CustomPainter {
     final w = size.width, h = size.height;
     if (w <= 1 || h <= 1) return;
 
+    _drawFrequencyRegions(canvas, w, h);
+
     // baseline axis
     final axis = Paint()
       ..color = const Color(0x55888888)
       ..strokeWidth = 1;
     canvas.drawLine(Offset(0, h - 1), Offset(w, h - 1), axis);
+    final zeroLine = Paint()
+      ..color = const Color(0x33888888)
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset(0, h * 0.5), Offset(w, h * 0.5), zeroLine);
 
     // clamp hpf/lpf
     double hpf = hpfHz.clamp(_minF, _maxF);
@@ -2892,17 +5148,16 @@ class _EqPreviewFullPainter extends CustomPainter {
       // start flat at 0dB
       double db = 0.0;
 
-      // HPF attenuation
-      if (f < hpf) {
-        final oct = _log2(hpf / f);
-        db -= oct * 12; // 12dB/oct approx
-      }
-
-      // LPF attenuation
-      if (f > lpf) {
-        final oct = _log2(f / lpf);
-        db -= oct * 12;
-      }
+      db += _butterworthHighpassDb(
+        f: f.toDouble(),
+        fc: hpf,
+        slopeDbOct: hpfSlopeDbOct,
+      );
+      db += _butterworthLowpassDb(
+        f: f.toDouble(),
+        fc: lpf,
+        slopeDbOct: lpfSlopeDbOct,
+      );
 
       // Add band gains as bumps
       for (int i = 0; i < bandFreqs.length; i++) {
@@ -2910,12 +5165,13 @@ class _EqPreviewFullPainter extends CustomPainter {
         if (gain.abs() < 0.1) continue;
 
         final fc = bandFreqs[i];
-        final q = 1.0; // fixed width for Basic preview
-        final bw = fc / q;
+        final q =
+            (i < bandQs.length ? bandQs[i] : 1.0).clamp(0.1, 20.0).toDouble();
+        final widthOctaves = (1.6 / q).clamp(0.12, 2.5);
 
         // gaussian-like bump
         final d = (math.log(f / fc) / math.ln2); // distance in octaves
-        final shape = math.exp(-(d * d) * 2.0); // narrower = steeper
+        final shape = math.exp(-(d * d) / (2.0 * widthOctaves * widthOctaves));
         db += gain * shape;
       }
 
@@ -2939,6 +5195,58 @@ class _EqPreviewFullPainter extends CustomPainter {
       ..close();
     canvas.drawPath(fillPath, fillPaint);
 
+    if (spectrumDb.length > 2) {
+      final spectrumPath = Path();
+      final fftSize = (spectrumDb.length - 1) * 2;
+      final sr = analyzerSampleRate > 1000.0 ? analyzerSampleRate : 44100.0;
+      final nyquist = sr * 0.5;
+      final binHz = sr / fftSize;
+
+      var peakDb = -120.0;
+      for (int i = 1; i < spectrumDb.length; i++) {
+        peakDb = math.max(peakDb, spectrumDb[i]);
+      }
+      final floorDb = math.max(-110.0, peakDb - 70.0);
+      final ceilDb = math.max(floorDb + 6.0, peakDb);
+
+      for (int px = 0; px < w; px++) {
+        final t = px / (w - 1);
+        final hz = _minF * math.pow(_maxF / _minF, t).toDouble();
+        final db = _sampleSpectrumAtHz(
+          spectrumDb: spectrumDb,
+          hz: hz,
+          binHz: binHz,
+          nyquist: nyquist,
+        );
+        final n = ((db - floorDb) / (ceilDb - floorDb)).clamp(0.0, 1.0);
+        final y = (h - 2) - (h * 0.86 * n);
+        if (px == 0) {
+          spectrumPath.moveTo(px.toDouble(), y);
+        } else {
+          spectrumPath.lineTo(px.toDouble(), y);
+        }
+      }
+
+      final spectrumFill = Path.from(spectrumPath)
+        ..lineTo(w, h)
+        ..lineTo(0, h)
+        ..close();
+      canvas.drawPath(
+        spectrumFill,
+        Paint()
+          ..color = const Color(0x223DADEB)
+          ..style = PaintingStyle.fill,
+      );
+      canvas.drawPath(
+        spectrumPath,
+        Paint()
+          ..color = const Color(0xAA72C8F2)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2
+          ..isAntiAlias = true,
+      );
+    }
+
     // draw stroke curve
     final strokePaint = Paint()
       ..color = const Color(0xFFB03A2E)
@@ -2950,15 +5258,34 @@ class _EqPreviewFullPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _EqPreviewFullPainter old) {
-    return old.hpfHz != hpfHz || old.lpfHz != lpfHz || old.bandGains != bandGains;
+    return old.hpfHz != hpfHz ||
+        old.lpfHz != lpfHz ||
+        old.hpfSlopeDbOct != hpfSlopeDbOct ||
+        old.lpfSlopeDbOct != lpfSlopeDbOct ||
+        old.bandGains != bandGains ||
+        old.bandFreqs != bandFreqs ||
+        old.bandQs != bandQs ||
+        old.waveformSamples != waveformSamples ||
+        old.spectrumDb != spectrumDb ||
+        old.analyzerSampleRate != analyzerSampleRate;
   }
 }
 
 class _Eq3Preview extends StatelessWidget {
   final List<double> bandGains; // [low, mid, high] dB
   final List<double> bandFreqs; // [lowFc, midFc, highFc] Hz
+  final List<double> waveformSamples; // post-EQ waveform
+  final List<double> spectrumDb; // precomputed analyzer spectrum
+  final double analyzerSampleRate;
 
-  const _Eq3Preview({super.key, required this.bandGains, required this.bandFreqs});
+  const _Eq3Preview({
+    super.key,
+    required this.bandGains,
+    required this.bandFreqs,
+    required this.waveformSamples,
+    required this.spectrumDb,
+    required this.analyzerSampleRate,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2979,6 +5306,9 @@ class _Eq3Preview extends StatelessWidget {
             lowFc: bandFreqs[0],
             midFc: bandFreqs[1],
             highFc: bandFreqs[2],
+            waveformSamples: waveformSamples,
+            spectrumDb: spectrumDb,
+            analyzerSampleRate: analyzerSampleRate,
           ),
         ),
       ),
@@ -2989,6 +5319,9 @@ class _Eq3Preview extends StatelessWidget {
 class _Eq3PreviewPainter extends CustomPainter {
   final double lowGainDb, midGainDb, highGainDb;
   final double lowFc, midFc, highFc;
+  final List<double> waveformSamples;
+  final List<double> spectrumDb;
+  final double analyzerSampleRate;
 
   _Eq3PreviewPainter({
     required this.lowGainDb,
@@ -2997,6 +5330,9 @@ class _Eq3PreviewPainter extends CustomPainter {
     required this.lowFc,
     required this.midFc,
     required this.highFc,
+    required this.waveformSamples,
+    required this.spectrumDb,
+    required this.analyzerSampleRate,
   });
 
   static const double _minF = 20.0;
@@ -3004,7 +5340,8 @@ class _Eq3PreviewPainter extends CustomPainter {
 
   double _xForHz(double hz, double w) {
     final f = hz.clamp(_minF, _maxF);
-    final t = (math.log(f) - math.log(_minF)) / (math.log(_maxF) - math.log(_minF));
+    final t =
+        (math.log(f) - math.log(_minF)) / (math.log(_maxF) - math.log(_minF));
     return (t.clamp(0.0, 1.0)) * w;
   }
 
@@ -3031,7 +5368,8 @@ class _Eq3PreviewPainter extends CustomPainter {
   }
 
   // Broad bell (gaussian in octave domain)
-  double _bellContributionDb({required double f, required double fc, required double gainDb}) {
+  double _bellContributionDb(
+      {required double f, required double fc, required double gainDb}) {
     if (gainDb.abs() < 0.01) return 0.0;
 
     final d = _log2(f / fc); // octaves away
@@ -3062,6 +5400,27 @@ class _Eq3PreviewPainter extends CustomPainter {
     );
 
     textPainter.paint(canvas, offset);
+  }
+
+  double _sampleSpectrumAtHz({
+    required List<double> spectrumDb,
+    required double hz,
+    required double binHz,
+    required double nyquist,
+  }) {
+    if (spectrumDb.isEmpty || hz <= 0 || binHz <= 0 || hz > nyquist) {
+      return -120.0;
+    }
+
+    final idx = hz / binHz;
+    final maxIdx = spectrumDb.length - 1;
+    if (idx <= 1) return spectrumDb[1];
+    if (idx >= maxIdx) return spectrumDb[maxIdx];
+
+    final i0 = idx.floor();
+    final i1 = math.min(maxIdx, i0 + 1);
+    final t = idx - i0;
+    return spectrumDb[i0] * (1.0 - t) + spectrumDb[i1] * t;
   }
 
   @override
@@ -3106,9 +5465,11 @@ class _Eq3PreviewPainter extends CustomPainter {
       final f = _minF * math.pow(_maxF / _minF, px / w);
 
       double db = 0.0;
-      db += _shelfContributionDb(f: f, fc: lowFc, gainDb: lowGainDb, isLowShelf: true);
+      db += _shelfContributionDb(
+          f: f, fc: lowFc, gainDb: lowGainDb, isLowShelf: true);
       db += _bellContributionDb(f: f, fc: midFc, gainDb: midGainDb);
-      db += _shelfContributionDb(f: f, fc: highFc, gainDb: highGainDb, isLowShelf: false);
+      db += _shelfContributionDb(
+          f: f, fc: highFc, gainDb: highGainDb, isLowShelf: false);
 
       // map dB (-24..+24) to canvas height
       final y = h * 0.5 - (db.clamp(-24.0, 24.0) / 24.0) * (h * 0.4);
@@ -3129,6 +5490,58 @@ class _Eq3PreviewPainter extends CustomPainter {
       ..close();
     canvas.drawPath(fillPath, fillPaint);
 
+    if (spectrumDb.length > 2) {
+      final spectrumPath = Path();
+      final fftSize = (spectrumDb.length - 1) * 2;
+      final sr = analyzerSampleRate > 1000.0 ? analyzerSampleRate : 44100.0;
+      final nyquist = sr * 0.5;
+      final binHz = sr / fftSize;
+
+      var peakDb = -120.0;
+      for (int i = 1; i < spectrumDb.length; i++) {
+        peakDb = math.max(peakDb, spectrumDb[i]);
+      }
+      final floorDb = math.max(-110.0, peakDb - 70.0);
+      final ceilDb = math.max(floorDb + 6.0, peakDb);
+
+      for (int px = 0; px < w; px++) {
+        final t = px / (w - 1);
+        final hz = _minF * math.pow(_maxF / _minF, t).toDouble();
+        final db = _sampleSpectrumAtHz(
+          spectrumDb: spectrumDb,
+          hz: hz,
+          binHz: binHz,
+          nyquist: nyquist,
+        );
+        final n = ((db - floorDb) / (ceilDb - floorDb)).clamp(0.0, 1.0);
+        final y = (h - 2) - (h * 0.86 * n);
+        if (px == 0) {
+          spectrumPath.moveTo(px.toDouble(), y);
+        } else {
+          spectrumPath.lineTo(px.toDouble(), y);
+        }
+      }
+
+      final spectrumFill = Path.from(spectrumPath)
+        ..lineTo(w, h)
+        ..lineTo(0, h)
+        ..close();
+      canvas.drawPath(
+        spectrumFill,
+        Paint()
+          ..color = const Color(0x223DADEB)
+          ..style = PaintingStyle.fill,
+      );
+      canvas.drawPath(
+        spectrumPath,
+        Paint()
+          ..color = const Color(0xAA72C8F2)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2
+          ..isAntiAlias = true,
+      );
+    }
+
     final strokePaint = Paint()
       ..color = const Color(0xFFB03A2E)
       ..style = PaintingStyle.stroke
@@ -3144,7 +5557,10 @@ class _Eq3PreviewPainter extends CustomPainter {
         old.highGainDb != highGainDb ||
         old.lowFc != lowFc ||
         old.midFc != midFc ||
-        old.highFc != highFc;
+        old.highFc != highFc ||
+        old.waveformSamples != waveformSamples ||
+        old.spectrumDb != spectrumDb ||
+        old.analyzerSampleRate != analyzerSampleRate;
   }
 }
 
@@ -3154,62 +5570,172 @@ Widget _verticalFader({
   required double value,
   required double min,
   required double max,
+  double? defaultValue,
   int? divisions,
   required ValueChanged<double> onChangeStart,
   onChanged,
   onChangeEnd,
+  VoidCallback? onDoubleTapReset,
   String? unit, // e.g. "Hz"
   bool logarithmic = false,
   double width = 56, // 👈 new
 }) {
-  final pos = logarithmic ? _toLogPos(value, min, max) : ((value.clamp(min, max) - min) / (max - min));
+  final pos = logarithmic
+      ? _toLogPos(value, min, max)
+      : ((value.clamp(min, max) - min) / (max - min));
 
   final labelText = (unit == 'Hz')
       ? '${_fmtHz(value)} Hz'
-      : (unit == null ? value.toStringAsFixed(0) : '${value.toStringAsFixed(0)} $unit');
+      : (unit == 'Q')
+          ? '${value.toStringAsFixed(2)} Q'
+          : (unit == 'dB')
+              ? '${value.toStringAsFixed(1)} dB'
+              : (unit == null
+                  ? value.toStringAsFixed(0)
+                  : '${value.toStringAsFixed(0)} $unit');
 
-  return SizedBox(
-    width: width, // 👈 respect caller width
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(labelText, style: Theme.of(context).textTheme.labelMedium, overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 6),
-        SizedBox(
-          height: _eqFaderHeight,
-          child: RotatedBox(
-            quarterTurns: 3,
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                showValueIndicator: ShowValueIndicator.never,
-                trackHeight: 4,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-              ),
-              child: Slider(
-                value: pos,
-                min: 0.0,
-                max: 1.0,
-                divisions: divisions ?? 200,
-                onChangeStart: (v) {
-                  onChangeStart(v);
-                },
-                onChanged: (p) {
-                  final v = logarithmic ? _fromLogPos(p, min, max) : (min + (max - min) * p);
-                  onChanged(v);
-                },
-                onChangeEnd: (p) {
-                  final v = logarithmic ? _fromLogPos(p, min, max) : (min + (max - min) * p);
-                  onChangeEnd(v);
-                },
+  return _EqVerticalFader(
+    width: width,
+    label: label,
+    labelText: labelText,
+    pos: pos,
+    min: min,
+    max: max,
+    logarithmic: logarithmic,
+    divisions: divisions ?? 200,
+    onChangeStart: onChangeStart,
+    onChanged: onChanged,
+    onChangeEnd: onChangeEnd,
+    onDoubleTapReset: (defaultValue != null && onDoubleTapReset != null)
+        ? onDoubleTapReset
+        : null,
+  );
+}
+
+class _EqVerticalFader extends StatefulWidget {
+  final double width;
+  final String label;
+  final String labelText;
+  final double pos;
+  final double min;
+  final double max;
+  final bool logarithmic;
+  final int divisions;
+  final ValueChanged<double> onChangeStart;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
+  final VoidCallback? onDoubleTapReset;
+
+  const _EqVerticalFader({
+    required this.width,
+    required this.label,
+    required this.labelText,
+    required this.pos,
+    required this.min,
+    required this.max,
+    required this.logarithmic,
+    required this.divisions,
+    required this.onChangeStart,
+    required this.onChanged,
+    required this.onChangeEnd,
+    required this.onDoubleTapReset,
+  });
+
+  @override
+  State<_EqVerticalFader> createState() => _EqVerticalFaderState();
+}
+
+class _EqVerticalFaderState extends State<_EqVerticalFader> {
+  static const double _valueToFaderGap = 7.0;
+  static const double _faderToNameGap = 7.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onDoubleTap: () {
+        setState(() {
+          widget.onDoubleTapReset?.call();
+        });
+      },
+      child: SizedBox(
+        width: widget.width, // 👈 respect caller width
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(widget.labelText,
+                style: Theme.of(context).textTheme.labelMedium,
+                overflow: TextOverflow.ellipsis),
+            const SizedBox(height: _valueToFaderGap),
+            SizedBox(
+              height: _eqFaderHeight,
+              child: RotatedBox(
+                quarterTurns: 3,
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    showValueIndicator: ShowValueIndicator.never,
+                    trackHeight: 4,
+                    trackShape: const _TightSliderTrackShape(),
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 8),
+                  ),
+                  child: Slider(
+                    value: widget.pos,
+                    min: 0.0,
+                    max: 1.0,
+                    divisions: widget.divisions,
+                    onChangeStart: (v) {
+                      widget.onChangeStart(v);
+                    },
+                    onChanged: (p) {
+                      final v = widget.logarithmic
+                          ? _fromLogPos(p, widget.min, widget.max)
+                          : (widget.min + (widget.max - widget.min) * p);
+                      widget.onChanged(v);
+                    },
+                    onChangeEnd: (p) {
+                      final v = widget.logarithmic
+                          ? _fromLogPos(p, widget.min, widget.max)
+                          : (widget.min + (widget.max - widget.min) * p);
+                      widget.onChangeEnd(v);
+                    },
+                  ),
+                ),
               ),
             ),
-          ),
+            const SizedBox(height: _faderToNameGap),
+            Text(widget.label,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+                maxLines: 2),
+          ],
         ),
-        const SizedBox(height: 6),
-        Text(label, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall, maxLines: 2),
-      ],
-    ),
-  );
+      ),
+    );
+  }
+}
+
+class _TightSliderTrackShape extends RoundedRectSliderTrackShape {
+  const _TightSliderTrackShape();
+  static const double _edgeInset = 4.0;
+
+  @override
+  Rect getPreferredRect({
+    required RenderBox parentBox,
+    Offset offset = Offset.zero,
+    required SliderThemeData sliderTheme,
+    bool isEnabled = false,
+    bool isDiscrete = false,
+  }) {
+    final trackHeight = sliderTheme.trackHeight ?? 4.0;
+    final trackLeft = offset.dx + _edgeInset;
+    final trackWidth = (parentBox.size.width - (_edgeInset * 2)).clamp(
+      0.0,
+      parentBox.size.width,
+    );
+    final trackTop = offset.dy + (parentBox.size.height - trackHeight) / 2;
+    return Rect.fromLTWH(trackLeft, trackTop, trackWidth, trackHeight);
+  }
 }
 
 double beatsToMs(double beats, double bpm) {
@@ -3248,7 +5774,8 @@ class CompressorStripFrame {
     required this.outR,
   });
 
-  static const zero = CompressorStripFrame(inL: 0, inR: 0, grDb: 0, outL: 0, outR: 0);
+  static const zero =
+      CompressorStripFrame(inL: 0, inR: 0, grDb: 0, outL: 0, outR: 0);
 
   CompressorStripFrame clamp() {
     double c01(double v) => v.clamp(0.0, 1.0).toDouble();
@@ -3262,7 +5789,8 @@ class CompressorStripFrame {
     );
   }
 
-  static CompressorStripFrame lerp(CompressorStripFrame a, CompressorStripFrame b, double t) {
+  static CompressorStripFrame lerp(
+      CompressorStripFrame a, CompressorStripFrame b, double t) {
     double l(double x, double y) => x + (y - x) * t;
     return CompressorStripFrame(
       inL: l(a.inL, b.inL),
@@ -3458,7 +5986,8 @@ class _GRSliderHorizontalPainter extends CustomPainter {
       ..strokeWidth = 1
       ..color = Colors.white.withOpacity(0.12);
 
-    final outer = RRect.fromRectAndRadius(Offset.zero & s, Radius.circular(h / 2));
+    final outer =
+        RRect.fromRectAndRadius(Offset.zero & s, Radius.circular(h / 2));
     c.drawRRect(outer, bg);
     c.drawRRect(outer, border);
 
@@ -3467,23 +5996,29 @@ class _GRSliderHorizontalPainter extends CustomPainter {
     final track = Rect.fromLTWH(pad, pad, w - pad * 2, h - pad * 2);
 
     final trackPaint = Paint()..color = Colors.white.withOpacity(0.08);
-    c.drawRRect(RRect.fromRectAndRadius(track, Radius.circular(track.height / 2)), trackPaint);
+    c.drawRRect(
+        RRect.fromRectAndRadius(track, Radius.circular(track.height / 2)),
+        trackPaint);
 
     // Fill (left -> right)
     final fillW = (track.width * t).clamp(0.0, track.width);
     final fillRect = Rect.fromLTWH(track.left, track.top, fillW, track.height);
 
     final fillPaint = Paint()..color = Colors.white.withOpacity(0.70);
-    c.drawRRect(RRect.fromRectAndRadius(fillRect, Radius.circular(track.height / 2)), fillPaint);
+    c.drawRRect(
+        RRect.fromRectAndRadius(fillRect, Radius.circular(track.height / 2)),
+        fillPaint);
 
     // Thumb (slider handle look)
     // Thumb sits at end of fill
     final thumbX = (track.left + fillW).clamp(track.left, track.right);
     final thumbW = 6.0;
-    final thumbRect = Rect.fromLTWH(thumbX - thumbW / 2, track.top - 1, thumbW, track.height + 2);
+    final thumbRect = Rect.fromLTWH(
+        thumbX - thumbW / 2, track.top - 1, thumbW, track.height + 2);
 
     final thumbPaint = Paint()..color = Colors.white.withOpacity(0.95);
-    c.drawRRect(RRect.fromRectAndRadius(thumbRect, const Radius.circular(6)), thumbPaint);
+    c.drawRRect(RRect.fromRectAndRadius(thumbRect, const Radius.circular(6)),
+        thumbPaint);
 
     // Simple tick marks (optional, subtle)
     final tick = Paint()

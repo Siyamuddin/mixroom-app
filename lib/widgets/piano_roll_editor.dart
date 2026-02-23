@@ -1,0 +1,2513 @@
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:mixroom/models/models.dart';
+
+typedef MidiCommitCallback = Future<void> Function({
+  required List<MidiNote> notes,
+  required Map<String, double> instrumentParams,
+  required String instrumentId,
+  required String instrumentName,
+});
+
+class PianoRollEditor extends StatefulWidget {
+  const PianoRollEditor({
+    super.key,
+    required this.clip,
+    required this.bpm,
+    required this.beatsPerBar,
+    required this.projectPlayheadMs,
+    required this.isPlaying,
+    required this.magnetEnabled,
+    required this.quantizeDivisionsPerBar,
+    required this.fullscreen,
+    required this.onFullscreenChanged,
+    required this.onClose,
+    required this.onCommit,
+    this.onPreviewNote,
+  });
+
+  final AudioTrack clip;
+  final double bpm;
+  final int beatsPerBar;
+  final double projectPlayheadMs;
+  final bool isPlaying;
+  final bool magnetEnabled;
+  final int quantizeDivisionsPerBar;
+  final bool fullscreen;
+  final ValueChanged<bool> onFullscreenChanged;
+  final VoidCallback onClose;
+  final MidiCommitCallback onCommit;
+  final Future<void> Function(int pitch, double velocity)? onPreviewNote;
+
+  @override
+  State<PianoRollEditor> createState() => _PianoRollEditorState();
+}
+
+class _PianoRollEditorState extends State<PianoRollEditor>
+    with TickerProviderStateMixin {
+  static const int _minPitch = 36;
+  static const int _maxPitch = 84;
+  static const Duration _gestureTapBlockDuration = Duration(milliseconds: 150);
+  static const double _minRowHeight = 14.0;
+  static const double _maxRowHeight = 40.0;
+  static const double _minPxPerBeat = 24.0;
+  static const double _maxPxPerBeat = 220.0;
+
+  final ScrollController _horizontalController = ScrollController();
+  final ScrollController _gridVerticalController = ScrollController();
+  final ScrollController _keysVerticalController = ScrollController();
+
+  late final TabController _tabController;
+  int _lastTabIndex = 0;
+
+  double _rowHeight = 22.0;
+  double _pxPerBeat = 56.0;
+  bool _syncingVerticalScroll = false;
+
+  String? _activeDragNoteId;
+  bool _activeDragIsResize = false;
+  bool _didMoveDuringDrag = false;
+  bool _suppressNextGridTap = false;
+  int? _pressedPreviewPitch;
+  late final Ticker _playheadTicker;
+  double _smoothedPlayheadMs = 0.0;
+  bool _pinchZoomActive = false;
+  bool _lockGridScroll = false;
+
+  late List<MidiNote> _notes;
+  late Map<String, double> _params;
+  late String _instrumentId;
+  late String _instrumentName;
+
+  String? _selectedNoteId;
+  final Set<String> _selectedNoteIds = <String>{};
+  List<MidiNote>? _copiedNotes;
+  Timer? _commitDebounce;
+  bool _velocityPanelOpen = false;
+
+  Map<String, MidiNote>? _dragStartNotesById;
+  double _dragAccumDxBeat = 0.0;
+  double _dragAccumDyRows = 0.0;
+
+  Offset? _boxSelectStartLocal;
+  Offset? _boxSelectCurrentLocal;
+  DateTime _ignoreGridTapUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  final Map<int, Offset> _activeGridPointers = <int, Offset>{};
+  bool _manualPinchActive = false;
+  Offset _pinchStartPointA = Offset.zero;
+  Offset _pinchStartPointB = Offset.zero;
+  double _pinchStartPxPerBeat = 56.0;
+  double _pinchStartRowHeight = 22.0;
+  double _pinchStartHorizontalOffset = 0.0;
+  double _pinchStartVerticalOffset = 0.0;
+  double _pinchStartFocalBeat = 0.0;
+  double _pinchStartFocalRow = 0.0;
+  Offset _pinchStartFocalLocal = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(_handleTabChanged);
+    _loadFromClip();
+    _gridVerticalController.addListener(_syncKeysWithGridScroll);
+    _smoothedPlayheadMs = widget.projectPlayheadMs;
+    _playheadTicker = createTicker((_) {
+      if (!mounted) return;
+      final target = widget.projectPlayheadMs;
+      final next =
+          _smoothedPlayheadMs + ((target - _smoothedPlayheadMs) * 0.24);
+      if ((next - _smoothedPlayheadMs).abs() >= 0.01) {
+        setState(() => _smoothedPlayheadMs = next);
+      }
+    });
+    if (widget.isPlaying) {
+      _playheadTicker.start();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant PianoRollEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final clipIdentityChanged =
+        oldWidget.clip.engineClipId != widget.clip.engineClipId;
+    final clipContentChanged = _clipDataDiffersFromWidget(
+      oldWidget.clip,
+      widget.clip,
+    );
+    if (clipIdentityChanged || clipContentChanged) {
+      _loadFromClip();
+      if (clipIdentityChanged) {
+        _clearSelection();
+      } else {
+        _selectedNoteIds.removeWhere(
+          (id) => !_notes.any((n) => n.id == id),
+        );
+        if (_selectedNoteId != null &&
+            !_notes.any((n) => n.id == _selectedNoteId)) {
+          _selectedNoteId = null;
+        }
+        if (_selectedNoteIds.isEmpty && _selectedNoteId == null) {
+          _velocityPanelOpen = false;
+        }
+      }
+    }
+    if (widget.isPlaying && !_playheadTicker.isActive) {
+      _playheadTicker.start();
+    } else if (!widget.isPlaying && _playheadTicker.isActive) {
+      _playheadTicker.stop();
+      _smoothedPlayheadMs = widget.projectPlayheadMs;
+      if (mounted) setState(() {});
+    } else if (!widget.isPlaying &&
+        (widget.projectPlayheadMs - _smoothedPlayheadMs).abs() > 0.1 &&
+        mounted) {
+      setState(() => _smoothedPlayheadMs = widget.projectPlayheadMs);
+    }
+  }
+
+  @override
+  void dispose() {
+    _commitDebounce?.cancel();
+    _activeGridPointers.clear();
+    _manualPinchActive = false;
+    _playheadTicker.dispose();
+    _horizontalController.dispose();
+    _gridVerticalController.removeListener(_syncKeysWithGridScroll);
+    _gridVerticalController.dispose();
+    _keysVerticalController.dispose();
+    _tabController.removeListener(_handleTabChanged);
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _loadFromClip() {
+    _notes = widget.clip.midiNotes.map((n) => n.copy()).toList();
+    _params = Map<String, double>.from(widget.clip.instrumentParams);
+    _instrumentId = widget.clip.instrumentId;
+    _instrumentName = widget.clip.instrumentName;
+    _ensureDefaultParams();
+  }
+
+  void _ensureDefaultParams() {
+    _params.putIfAbsent('oscillator', () => 1.0);
+    _params.putIfAbsent('cutoffHz', () => 3200.0);
+    _params.putIfAbsent('attackMs', () => 18.0);
+    _params.putIfAbsent('releaseMs', () => 180.0);
+    _params.putIfAbsent('drive', () => 0.08);
+  }
+
+  bool _clipDataDiffersFromWidget(AudioTrack previous, AudioTrack next) {
+    if (previous.instrumentId != next.instrumentId ||
+        previous.instrumentName != next.instrumentName) {
+      return true;
+    }
+
+    final previousParams = previous.instrumentParams;
+    final nextParams = next.instrumentParams;
+    if (previousParams.length != nextParams.length) return true;
+    for (final entry in previousParams.entries) {
+      final current = nextParams[entry.key];
+      if (current == null || (current - entry.value).abs() > 0.00001) {
+        return true;
+      }
+    }
+
+    final previousNotes = previous.midiNotes;
+    final nextNotes = next.midiNotes;
+    if (previousNotes.length != nextNotes.length) return true;
+    for (int i = 0; i < previousNotes.length; i++) {
+      final a = previousNotes[i];
+      final b = nextNotes[i];
+      if (a.id != b.id) return true;
+      if (a.pitch != b.pitch) return true;
+      if ((a.startBeat - b.startBeat).abs() > 0.00001) return true;
+      if ((a.lengthBeats - b.lengthBeats).abs() > 0.00001) return true;
+      if ((a.velocity - b.velocity).abs() > 0.00001) return true;
+    }
+    return false;
+  }
+
+  void _handleTabChanged() {
+    final idx = _tabController.index;
+    if (idx == _lastTabIndex) return;
+    _lastTabIndex = idx;
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _syncKeysWithGridScroll() {
+    if (_syncingVerticalScroll || !_gridVerticalController.hasClients) {
+      return;
+    }
+    if (!_keysVerticalController.hasClients) {
+      return;
+    }
+    _syncingVerticalScroll = true;
+    final target = _gridVerticalController.offset.clamp(
+      _keysVerticalController.position.minScrollExtent,
+      _keysVerticalController.position.maxScrollExtent,
+    );
+    _keysVerticalController.jumpTo(target);
+    _syncingVerticalScroll = false;
+  }
+
+  void _jumpBothVerticalControllers(double targetOffset) {
+    _syncingVerticalScroll = true;
+    if (_gridVerticalController.hasClients) {
+      final gridTarget = targetOffset.clamp(
+        _gridVerticalController.position.minScrollExtent,
+        _gridVerticalController.position.maxScrollExtent,
+      );
+      _gridVerticalController.jumpTo(gridTarget);
+    }
+    if (_keysVerticalController.hasClients) {
+      final keysTarget = targetOffset.clamp(
+        _keysVerticalController.position.minScrollExtent,
+        _keysVerticalController.position.maxScrollExtent,
+      );
+      _keysVerticalController.jumpTo(keysTarget);
+    }
+    _syncingVerticalScroll = false;
+  }
+
+  double get _msPerBeat => 60000.0 / widget.bpm.clamp(1.0, 400.0);
+
+  int get _pitchCount => (_maxPitch - _minPitch) + 1;
+
+  double get _contentHeight => _pitchCount * _rowHeight;
+
+  double get _clipSpanBeat {
+    final spanMs = (widget.clip.trimEnd - widget.clip.trimStart).inMilliseconds;
+    if (spanMs <= 0) return 0.0;
+    return spanMs / _msPerBeat;
+  }
+
+  double get _maxBeat {
+    var beat = math.max(32.0, _clipSpanBeat + 8.0);
+    for (final n in _notes) {
+      beat = math.max(beat, n.startBeat + n.lengthBeats + 1.0);
+    }
+    if (_horizontalController.hasClients) {
+      final visibleEndBeat = (_horizontalController.offset +
+              _horizontalController.position.viewportDimension) /
+          _pxPerBeat;
+      beat = math.max(beat, visibleEndBeat + 16.0);
+    }
+    return beat;
+  }
+
+  double get _contentWidth => _maxBeat * _pxPerBeat;
+
+  double get _quantizeBeat {
+    final safeDivisions = math.max(1, widget.quantizeDivisionsPerBar);
+    final safeBeatsPerBar = math.max(1, widget.beatsPerBar);
+    return safeBeatsPerBar / safeDivisions;
+  }
+
+  double get _minimumLengthBeat =>
+      widget.magnetEnabled ? _quantizeBeat : 0.0625;
+
+  Set<String> get _effectiveSelectedIds {
+    if (_selectedNoteIds.isNotEmpty) {
+      return Set<String>.from(_selectedNoteIds);
+    }
+    if (_selectedNoteId != null) {
+      return <String>{_selectedNoteId!};
+    }
+    return <String>{};
+  }
+
+  List<MidiNote> get _selectedNotes {
+    final ids = _effectiveSelectedIds;
+    if (ids.isEmpty) return const <MidiNote>[];
+    final out = <MidiNote>[];
+    for (final n in _notes) {
+      if (ids.contains(n.id)) out.add(n);
+    }
+    return out;
+  }
+
+  double get _selectedAverageVelocity {
+    final notes = _selectedNotes;
+    if (notes.isEmpty) return 0.8;
+    final total = notes.fold<double>(0.0, (sum, n) => sum + n.velocity);
+    return (total / notes.length).clamp(0.0, 1.0);
+  }
+
+  void _queueCommit({bool immediate = false}) {
+    _commitDebounce?.cancel();
+    if (immediate) {
+      unawaited(_commitNow());
+      return;
+    }
+    _commitDebounce = Timer(const Duration(milliseconds: 160), _commitNow);
+  }
+
+  Future<void> _commitNow() async {
+    await widget.onCommit(
+      notes: _notes.map((n) => n.copy()).toList(),
+      instrumentParams: Map<String, double>.from(_params),
+      instrumentId: _instrumentId,
+      instrumentName: _instrumentName,
+    );
+  }
+
+  double _snapBeat(double beat) {
+    if (!widget.magnetEnabled) {
+      return beat.clamp(0.0, 9999.0);
+    }
+    final q = (beat / _quantizeBeat).round() * _quantizeBeat;
+    return q.clamp(0.0, 9999.0);
+  }
+
+  double _snapLengthBeat(double length) {
+    final base = length.clamp(_minimumLengthBeat, 64.0);
+    if (!widget.magnetEnabled) return base;
+    final q = (base / _quantizeBeat).round() * _quantizeBeat;
+    return q.clamp(_minimumLengthBeat, 64.0);
+  }
+
+  void _selectSingle(String id) {
+    _selectedNoteIds
+      ..clear()
+      ..add(id);
+    _selectedNoteId = id;
+  }
+
+  void _clearSelection() {
+    _selectedNoteIds.clear();
+    _selectedNoteId = null;
+    _velocityPanelOpen = false;
+  }
+
+  void _normalizeSelectionState() {
+    if (_selectedNoteIds.isEmpty) {
+      _selectedNoteId = null;
+      return;
+    }
+    if (_selectedNoteId == null ||
+        !_selectedNoteIds.contains(_selectedNoteId)) {
+      _selectedNoteId = _selectedNoteIds.first;
+    }
+  }
+
+  Rect? get _currentSelectionRect {
+    if (_boxSelectStartLocal == null || _boxSelectCurrentLocal == null) {
+      return null;
+    }
+    return Rect.fromPoints(_boxSelectStartLocal!, _boxSelectCurrentLocal!);
+  }
+
+  void _finishBoxSelection() {
+    final rect = _currentSelectionRect;
+    if (rect == null) {
+      setState(() {
+        _boxSelectStartLocal = null;
+        _boxSelectCurrentLocal = null;
+      });
+      return;
+    }
+
+    final hits = <String>{};
+    for (final note in _notes) {
+      final noteRect = Rect.fromLTWH(
+        note.startBeat * _pxPerBeat,
+        _yForPitch(note.pitch) + 1.0,
+        math.max(10.0, note.lengthBeats * _pxPerBeat),
+        _rowHeight - 2.0,
+      );
+      if (rect.overlaps(noteRect)) {
+        hits.add(note.id);
+      }
+    }
+
+    setState(() {
+      _selectedNoteIds
+        ..clear()
+        ..addAll(hits);
+      _normalizeSelectionState();
+      _boxSelectStartLocal = null;
+      _boxSelectCurrentLocal = null;
+    });
+  }
+
+  int _clampPitch(int pitch) {
+    return pitch.clamp(_minPitch, _maxPitch);
+  }
+
+  int _pitchForY(double y) {
+    final row = (y / _rowHeight).floor();
+    final pitch = _maxPitch - row;
+    return _clampPitch(pitch);
+  }
+
+  double _beatForX(double x) {
+    return _snapBeat(x / _pxPerBeat);
+  }
+
+  double _yForPitch(int pitch) {
+    final row = (_maxPitch - pitch).toDouble();
+    return row * _rowHeight;
+  }
+
+  MidiNote? _noteById(String id) {
+    for (final n in _notes) {
+      if (n.id == id) return n;
+    }
+    return null;
+  }
+
+  String? _hitNoteIdAt(Offset local) {
+    for (int i = _notes.length - 1; i >= 0; i--) {
+      final note = _notes[i];
+      final rect = Rect.fromLTWH(
+        note.startBeat * _pxPerBeat,
+        _yForPitch(note.pitch) + 1.0,
+        math.max(10.0, note.lengthBeats * _pxPerBeat),
+        _rowHeight - 2.0,
+      );
+      if (rect.contains(local)) return note.id;
+    }
+    return null;
+  }
+
+  void _previewPianoKey(int pitch, {double velocity = 0.9}) {
+    setState(() => _pressedPreviewPitch = pitch);
+    final callback = widget.onPreviewNote;
+    if (callback != null) {
+      unawaited(callback(pitch, velocity.clamp(0.0, 1.0)));
+    }
+  }
+
+  void _releasePianoKey(int pitch) {
+    if (_pressedPreviewPitch != pitch) return;
+    setState(() => _pressedPreviewPitch = null);
+  }
+
+  void _adjustZoom({
+    required double xFactor,
+    required double yFactor,
+  }) {
+    final startX = _pxPerBeat;
+    final startY = _rowHeight;
+    final nextX = (startX * xFactor).clamp(_minPxPerBeat, _maxPxPerBeat);
+    final nextY = (startY * yFactor).clamp(_minRowHeight, _maxRowHeight);
+    if ((nextX - startX).abs() < 0.001 && (nextY - startY).abs() < 0.001) {
+      return;
+    }
+
+    final currentHorizontalOffset =
+        _horizontalController.hasClients ? _horizontalController.offset : 0.0;
+    final currentVerticalOffset = _gridVerticalController.hasClients
+        ? _gridVerticalController.offset
+        : 0.0;
+    final focalDx = _horizontalController.hasClients
+        ? _horizontalController.position.viewportDimension * 0.5
+        : 0.0;
+    final focalDy = _gridVerticalController.hasClients
+        ? _gridVerticalController.position.viewportDimension * 0.5
+        : 0.0;
+    final focalBeat = (currentHorizontalOffset + focalDx) / startX;
+    final focalRow = (currentVerticalOffset + focalDy) / startY;
+
+    setState(() {
+      _pxPerBeat = nextX;
+      _rowHeight = nextY;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_horizontalController.hasClients) {
+        final targetH = (focalBeat * _pxPerBeat) - focalDx;
+        _horizontalController.jumpTo(
+          targetH.clamp(
+            _horizontalController.position.minScrollExtent,
+            _horizontalController.position.maxScrollExtent,
+          ),
+        );
+      }
+      final targetV = (focalRow * _rowHeight) - focalDy;
+      _jumpBothVerticalControllers(targetV);
+    });
+  }
+
+  double _distance(Offset a, Offset b) => (a - b).distance;
+
+  void _maybeStartManualPinch() {
+    if (_manualPinchActive || _activeGridPointers.length < 2) return;
+    final pts = _activeGridPointers.values.toList(growable: false);
+    _pinchStartPointA = pts[0];
+    _pinchStartPointB = pts[1];
+    _pinchStartPxPerBeat = _pxPerBeat;
+    _pinchStartRowHeight = _rowHeight;
+    _pinchStartHorizontalOffset =
+        _horizontalController.hasClients ? _horizontalController.offset : 0.0;
+    _pinchStartVerticalOffset = _gridVerticalController.hasClients
+        ? _gridVerticalController.offset
+        : 0.0;
+    final focal = (_pinchStartPointA + _pinchStartPointB) / 2.0;
+    _pinchStartFocalLocal = focal;
+    _pinchStartFocalBeat =
+        (_pinchStartHorizontalOffset + focal.dx) / _pinchStartPxPerBeat;
+    _pinchStartFocalRow =
+        (_pinchStartVerticalOffset + focal.dy) / _pinchStartRowHeight;
+    _manualPinchActive = true;
+    _pinchZoomActive = true;
+    _setGridScrollLocked(true);
+    _suppressGridTapFor(const Duration(milliseconds: 220));
+  }
+
+  void _updateManualPinch() {
+    if (!_manualPinchActive || _activeGridPointers.length < 2) return;
+    final pts = _activeGridPointers.values.toList(growable: false);
+    final p1 = pts[0];
+    final p2 = pts[1];
+
+    final startDistance = _distance(_pinchStartPointA, _pinchStartPointB);
+    final currentDistance = _distance(p1, p2);
+    if (startDistance <= 0.5 || currentDistance <= 0.5) return;
+
+    final scale = (currentDistance / startDistance).clamp(0.25, 4.0);
+    final nextPxPerBeat =
+        (_pinchStartPxPerBeat * scale).clamp(_minPxPerBeat, _maxPxPerBeat);
+    final nextRowHeight =
+        (_pinchStartRowHeight * scale).clamp(_minRowHeight, _maxRowHeight);
+    final focal = (p1 + p2) / 2.0;
+
+    if ((_pxPerBeat - nextPxPerBeat).abs() < 0.001 &&
+        (_rowHeight - nextRowHeight).abs() < 0.001) {
+      return;
+    }
+
+    setState(() {
+      _pxPerBeat = nextPxPerBeat;
+      _rowHeight = nextRowHeight;
+    });
+
+    if (_horizontalController.hasClients) {
+      final targetH = (_pinchStartFocalBeat * _pxPerBeat) - focal.dx;
+      _horizontalController.jumpTo(
+        targetH.clamp(
+          _horizontalController.position.minScrollExtent,
+          _horizontalController.position.maxScrollExtent,
+        ),
+      );
+    }
+    // Keep vertical zoom anchored to where the pinch began to avoid
+    // accidental upward/downward drift while users change scale.
+    final targetV =
+        (_pinchStartFocalRow * _rowHeight) - _pinchStartFocalLocal.dy;
+    _jumpBothVerticalControllers(targetV);
+  }
+
+  void _endManualPinch() {
+    if (!_manualPinchActive) return;
+    _manualPinchActive = false;
+    _pinchZoomActive = false;
+    _setGridScrollLocked(false);
+    _suppressGridTapFor();
+  }
+
+  void _onGridPointerDown(PointerDownEvent event) {
+    _activeGridPointers[event.pointer] = event.localPosition;
+    _maybeStartManualPinch();
+  }
+
+  void _onGridPointerMove(PointerMoveEvent event) {
+    if (!_activeGridPointers.containsKey(event.pointer)) return;
+    _activeGridPointers[event.pointer] = event.localPosition;
+    _updateManualPinch();
+  }
+
+  void _onGridPointerUp(PointerEvent event) {
+    _activeGridPointers.remove(event.pointer);
+    if (_activeGridPointers.length < 2) {
+      _endManualPinch();
+    }
+  }
+
+  void _startBoxSelection(LongPressStartDetails details) {
+    if (_pinchZoomActive) return;
+    if (_hitNoteIdAt(details.localPosition) != null) return;
+    setState(() {
+      _boxSelectStartLocal = details.localPosition;
+      _boxSelectCurrentLocal = details.localPosition;
+      _suppressNextGridTap = true;
+    });
+  }
+
+  void _updateBoxSelection(LongPressMoveUpdateDetails details) {
+    if (_boxSelectStartLocal == null) return;
+    setState(() {
+      _boxSelectCurrentLocal = details.localPosition;
+    });
+  }
+
+  void _cancelBoxSelection() {
+    if (_boxSelectStartLocal == null && _boxSelectCurrentLocal == null) return;
+    setState(() {
+      _boxSelectStartLocal = null;
+      _boxSelectCurrentLocal = null;
+    });
+  }
+
+  void _setGridScrollLocked(bool locked) {
+    if (_lockGridScroll == locked) return;
+    setState(() {
+      _lockGridScroll = locked;
+    });
+  }
+
+  void _suppressGridTapFor([Duration duration = _gestureTapBlockDuration]) {
+    final until = DateTime.now().add(duration);
+    if (until.isAfter(_ignoreGridTapUntil)) {
+      _ignoreGridTapUntil = until;
+    }
+  }
+
+  void _beginNoteDrag(
+    MidiNote note,
+    DragStartDetails details, {
+    required double width,
+    required double handleWidth,
+  }) {
+    final selectedIds = _effectiveSelectedIds;
+    if (!selectedIds.contains(note.id)) {
+      _selectSingle(note.id);
+    } else {
+      _selectedNoteId = note.id;
+    }
+
+    final dragIds = _effectiveSelectedIds;
+    _dragStartNotesById = <String, MidiNote>{};
+    for (final n in _notes) {
+      if (dragIds.contains(n.id)) {
+        _dragStartNotesById![n.id] = n.copy();
+      }
+    }
+
+    _activeDragNoteId = note.id;
+    _activeDragIsResize = details.localPosition.dx >= (width - handleWidth);
+    _dragAccumDxBeat = 0.0;
+    _dragAccumDyRows = 0.0;
+    _didMoveDuringDrag = false;
+    _suppressNextGridTap = true;
+    _lockGridScroll = true;
+    _suppressGridTapFor();
+  }
+
+  void _updateNoteDrag(MidiNote anchor, DragUpdateDetails details) {
+    if (_activeDragNoteId != anchor.id) return;
+    if (_dragStartNotesById == null || _dragStartNotesById!.isEmpty) return;
+
+    _dragAccumDxBeat += details.delta.dx / _pxPerBeat;
+    _dragAccumDyRows += details.delta.dy / _rowHeight;
+    if (!_didMoveDuringDrag &&
+        (_dragAccumDxBeat.abs() > 0.01 || _dragAccumDyRows.abs() > 0.01)) {
+      _didMoveDuringDrag = true;
+    }
+
+    if (_activeDragIsResize) {
+      final base = _dragStartNotesById![anchor.id];
+      final live = _noteById(anchor.id);
+      if (base == null || live == null) return;
+      final proposed = base.lengthBeats + _dragAccumDxBeat;
+      live.lengthBeats = _snapLengthBeat(proposed);
+      return;
+    }
+    final rowShift = _dragAccumDyRows.round();
+
+    for (final entry in _dragStartNotesById!.entries) {
+      final base = entry.value;
+      final live = _noteById(entry.key);
+      if (live == null) continue;
+      final unsnappedStart = base.startBeat + _dragAccumDxBeat;
+      live.startBeat = widget.magnetEnabled
+          ? _snapBeat(unsnappedStart)
+          : unsnappedStart.clamp(0.0, 9999.0);
+      live.pitch = _clampPitch(base.pitch - rowShift);
+    }
+  }
+
+  void _endNoteDrag({required bool commit}) {
+    final shouldCommit = commit && _didMoveDuringDrag;
+    _activeDragNoteId = null;
+    _activeDragIsResize = false;
+    _dragStartNotesById = null;
+    _dragAccumDxBeat = 0.0;
+    _dragAccumDyRows = 0.0;
+    _didMoveDuringDrag = false;
+    _lockGridScroll = false;
+    _suppressNextGridTap = false;
+    _suppressGridTapFor();
+    if (shouldCommit) {
+      _queueCommit(immediate: true);
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _addNoteAt(Offset local) {
+    if (DateTime.now().isBefore(_ignoreGridTapUntil)) return;
+    if (_pinchZoomActive) return;
+    if (_boxSelectStartLocal != null || _boxSelectCurrentLocal != null) return;
+    if (_suppressNextGridTap) {
+      _suppressNextGridTap = false;
+      return;
+    }
+    if (_hitNoteIdAt(local) != null) return;
+
+    final beat = _beatForX(local.dx);
+    final pitch = _pitchForY(local.dy);
+    final id = '${DateTime.now().microsecondsSinceEpoch}_${_notes.length}';
+    final note = MidiNote(
+      id: id,
+      pitch: pitch,
+      startBeat: beat,
+      lengthBeats: widget.magnetEnabled ? math.max(_quantizeBeat, 0.25) : 1.0,
+      velocity: _selectedAverageVelocity,
+    );
+
+    setState(() {
+      _notes.add(note);
+      _selectSingle(id);
+    });
+    _queueCommit(immediate: true);
+  }
+
+  void _deleteSelectedNotes() {
+    final selected = _effectiveSelectedIds;
+    if (selected.isEmpty) return;
+    setState(() {
+      _notes.removeWhere((n) => selected.contains(n.id));
+      _clearSelection();
+    });
+    _queueCommit(immediate: true);
+  }
+
+  void _copySelectedNotes() {
+    final selectedIds = _effectiveSelectedIds;
+    if (selectedIds.isEmpty) return;
+    final copied = _notes
+        .where((n) => selectedIds.contains(n.id))
+        .map((n) => n.copy())
+        .toList();
+    copied.sort((a, b) {
+      final byBeat = a.startBeat.compareTo(b.startBeat);
+      if (byBeat != 0) return byBeat;
+      return a.pitch.compareTo(b.pitch);
+    });
+    if (copied.isEmpty) return;
+    _copiedNotes = copied;
+  }
+
+  void _pasteNotes() {
+    if (_copiedNotes == null || _copiedNotes!.isEmpty) return;
+    final now = DateTime.now().microsecondsSinceEpoch;
+    final minCopiedBeat =
+        _copiedNotes!.map((n) => n.startBeat).reduce((a, b) => math.min(a, b));
+    final selected = _selectedNotes;
+    final insertionBeat = selected.isNotEmpty
+        ? _snapBeat(
+            selected.map((n) => n.startBeat + n.lengthBeats).reduce(math.max),
+          )
+        : (_notes.isEmpty
+            ? 0.0
+            : _snapBeat(_notes.map((n) => n.startBeat).reduce(math.max) + 1.0));
+
+    final pastedIds = <String>{};
+    setState(() {
+      for (int i = 0; i < _copiedNotes!.length; i++) {
+        final src = _copiedNotes![i];
+        final id = '${now}_$i';
+        _notes.add(MidiNote(
+          id: id,
+          pitch: _clampPitch(src.pitch),
+          startBeat: _snapBeat(insertionBeat + (src.startBeat - minCopiedBeat)),
+          lengthBeats: _snapLengthBeat(src.lengthBeats),
+          velocity: src.velocity,
+        ));
+        pastedIds.add(id);
+      }
+      _selectedNoteIds
+        ..clear()
+        ..addAll(pastedIds);
+      _normalizeSelectionState();
+    });
+    _queueCommit(immediate: true);
+  }
+
+  void _duplicateSelectedNotes() {
+    _copySelectedNotes();
+    _pasteNotes();
+  }
+
+  void _setSelectedVelocity(double velocity) {
+    final selected = _effectiveSelectedIds;
+    if (selected.isEmpty) return;
+    final safe = velocity.clamp(0.05, 1.0);
+    setState(() {
+      for (final note in _notes) {
+        if (selected.contains(note.id)) {
+          note.velocity = safe;
+        }
+      }
+    });
+    _queueCommit();
+  }
+
+  void _scaleSelectedLength(double factor) {
+    final selected = _effectiveSelectedIds;
+    if (selected.isEmpty) return;
+    setState(() {
+      for (final note in _notes) {
+        if (selected.contains(note.id)) {
+          note.lengthBeats = _snapLengthBeat(note.lengthBeats * factor);
+        }
+      }
+    });
+    _queueCommit(immediate: true);
+  }
+
+  int _oscillatorIndex() {
+    final raw = (_params['oscillator'] ?? 1.0).round();
+    return raw.clamp(0, 3);
+  }
+
+  String _oscillatorLabel(int idx) {
+    switch (idx) {
+      case 0:
+        return 'Sine';
+      case 1:
+        return 'Saw';
+      case 2:
+        return 'Square';
+      case 3:
+        return 'Triangle';
+      default:
+        return 'Saw';
+    }
+  }
+
+  void _applyPreset(String preset) {
+    const presetValues = <String, Map<String, double>>{
+      'Soft Pad': {
+        'oscillator': 0.0,
+        'cutoffHz': 2100.0,
+        'attackMs': 80.0,
+        'releaseMs': 620.0,
+        'drive': 0.02,
+      },
+      'Pluck': {
+        'oscillator': 3.0,
+        'cutoffHz': 4700.0,
+        'attackMs': 2.0,
+        'releaseMs': 150.0,
+        'drive': 0.08,
+      },
+      'Bass Mono': {
+        'oscillator': 2.0,
+        'cutoffHz': 1200.0,
+        'attackMs': 8.0,
+        'releaseMs': 220.0,
+        'drive': 0.28,
+      },
+      'Bright Lead': {
+        'oscillator': 1.0,
+        'cutoffHz': 6200.0,
+        'attackMs': 4.0,
+        'releaseMs': 190.0,
+        'drive': 0.22,
+      },
+      'Warm Keys': {
+        'oscillator': 0.0,
+        'cutoffHz': 3200.0,
+        'attackMs': 10.0,
+        'releaseMs': 320.0,
+        'drive': 0.06,
+      },
+      'Analog Brass': {
+        'oscillator': 1.0,
+        'cutoffHz': 2800.0,
+        'attackMs': 18.0,
+        'releaseMs': 280.0,
+        'drive': 0.15,
+      },
+      'Cinematic Pad': {
+        'oscillator': 3.0,
+        'cutoffHz': 1900.0,
+        'attackMs': 95.0,
+        'releaseMs': 760.0,
+        'drive': 0.05,
+      },
+    };
+    final values = presetValues[preset];
+    if (values == null) return;
+    setState(() {
+      for (final entry in values.entries) {
+        _params[entry.key] = entry.value;
+      }
+    });
+    _queueCommit(immediate: true);
+  }
+
+  Future<void> _showMidiHelpDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1B2333),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text(
+          'Piano Roll Tips',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '1. Tap empty grid to add a note.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            SizedBox(height: 6),
+            Text(
+              '2. Drag a note to move it. Drag the right edge to resize.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            SizedBox(height: 6),
+            Text(
+              '3. Hold on empty grid and drag for box-select.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            SizedBox(height: 6),
+            Text(
+              '4. Pinch with two fingers to zoom in X/Y.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            SizedBox(height: 6),
+            Text(
+              '5. Use bottom tray for duplicate, delete, length, velocity.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final playheadBeat = ((_smoothedPlayheadMs -
+                (widget.clip.offset * 1000.0) +
+                widget.clip.trimStart.inMilliseconds) /
+            _msPerBeat)
+        .toDouble();
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF0E111A).withValues(alpha: 0.97),
+          border: Border(
+            top: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.5),
+              blurRadius: 24,
+              offset: const Offset(0, -6),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          top: widget.fullscreen,
+          bottom: false,
+          child: Column(
+            children: [
+              _buildHeaderBar(),
+              _buildTabBar(),
+              const Divider(height: 1, thickness: 1, color: Color(0x28FFFFFF)),
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    _buildMidiTab(playheadBeat),
+                    _buildInstrumentTab(),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeaderBar() {
+    final onMidiTab = _tabController.index == 0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              _instrumentName.isEmpty ? 'Instrument' : _instrumentName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 12.2,
+                letterSpacing: 0.1,
+              ),
+            ),
+          ),
+          if (onMidiTab) ...[
+            _toolbarIconButton(
+              icon: Icons.zoom_out_rounded,
+              tooltip: 'Zoom out',
+              onTap: () => _adjustZoom(xFactor: 0.86, yFactor: 0.90),
+            ),
+            const SizedBox(width: 5),
+            _toolbarIconButton(
+              icon: Icons.zoom_in_rounded,
+              tooltip: 'Zoom in',
+              onTap: () => _adjustZoom(xFactor: 1.16, yFactor: 1.12),
+            ),
+            const SizedBox(width: 5),
+          ],
+          _toolbarIconButton(
+            icon: Icons.help_outline,
+            tooltip: 'Piano roll help',
+            onTap: _showMidiHelpDialog,
+          ),
+          const SizedBox(width: 5),
+          _toolbarIconButton(
+            icon: widget.fullscreen
+                ? Icons.fullscreen_exit_outlined
+                : Icons.fullscreen_outlined,
+            tooltip: 'Toggle fullscreen',
+            onTap: () => widget.onFullscreenChanged(!widget.fullscreen),
+          ),
+          const SizedBox(width: 5),
+          _toolbarIconButton(
+            icon: Icons.close,
+            tooltip: 'Close',
+            onTap: widget.onClose,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: const Color(0xFF171F2B),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+        child: SizedBox(
+          height: 28,
+          child: TabBar(
+            controller: _tabController,
+            indicator: BoxDecoration(
+              color: const Color(0xFF2A384F),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+            ),
+            indicatorPadding: const EdgeInsets.symmetric(
+              horizontal: 2,
+              vertical: 2,
+            ),
+            indicatorSize: TabBarIndicatorSize.tab,
+            labelColor: Colors.white,
+            labelStyle:
+                const TextStyle(fontSize: 11.2, fontWeight: FontWeight.w700),
+            unselectedLabelColor: Colors.white70,
+            dividerColor: Colors.transparent,
+            splashBorderRadius: BorderRadius.circular(8),
+            tabs: const [
+              Tab(height: 28, text: 'MIDI'),
+              Tab(height: 28, text: 'Instrument'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMidiTab(double playheadBeat) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F1422),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 74,
+                child: _buildPianoKeys(),
+              ),
+              Expanded(
+                child: _buildRollGrid(playheadBeat),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectionOverlay() {
+    final selected = _selectedNotes;
+    if (selected.isEmpty) return const SizedBox.shrink();
+    final velocity = _selectedAverageVelocity;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (_velocityPanelOpen)
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOutCubic,
+            margin: const EdgeInsets.fromLTRB(6, 0, 6, 4),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xD6101825),
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            ),
+            child: SizedBox(
+              width: 286,
+              child: Container(
+                height: 24,
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(8),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 2.3,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 4.6,
+                          ),
+                          overlayShape: const RoundSliderOverlayShape(
+                            overlayRadius: 9,
+                          ),
+                        ),
+                        child: Slider(
+                          min: 0.05,
+                          max: 1.0,
+                          value: velocity,
+                          onChanged: _setSelectedVelocity,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 30,
+                      child: Text(
+                        velocity.toStringAsFixed(2),
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 8.8,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.fromLTRB(6, 0, 6, 6),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xD6101825),
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+          ),
+          child: IntrinsicWidth(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _trayAction(
+                  icon: Icons.control_point_duplicate_rounded,
+                  tooltip: 'Duplicate',
+                  enabled: true,
+                  onTap: _duplicateSelectedNotes,
+                ),
+                const SizedBox(width: 3),
+                _trayAction(
+                  icon: Icons.delete_outline_rounded,
+                  tooltip: 'Delete',
+                  enabled: true,
+                  onTap: _deleteSelectedNotes,
+                  danger: true,
+                ),
+                const SizedBox(width: 5),
+                _lengthAction('Len-', () => _scaleSelectedLength(0.8)),
+                const SizedBox(width: 4),
+                _lengthAction('Len+', () => _scaleSelectedLength(1.25)),
+                const SizedBox(width: 4),
+                _lengthAction(
+                  'Velocity',
+                  () =>
+                      setState(() => _velocityPanelOpen = !_velocityPanelOpen),
+                ),
+                const SizedBox(width: 4),
+                _trayAction(
+                  icon: Icons.close_rounded,
+                  tooltip: 'Close',
+                  enabled: true,
+                  onTap: () => setState(_clearSelection),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _lengthAction(String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        height: 22,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 8.8,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _trayAction({
+    required IconData icon,
+    required String tooltip,
+    required bool enabled,
+    required VoidCallback onTap,
+    bool danger = false,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(8),
+        child: Opacity(
+          opacity: enabled ? 1.0 : 0.35,
+          child: Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              color: danger
+                  ? const Color(0x40CF4B4B)
+                  : Colors.white.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: danger
+                    ? const Color(0x66E56F6F)
+                    : Colors.white.withValues(alpha: 0.12),
+              ),
+            ),
+            child: Icon(
+              icon,
+              color: danger ? const Color(0xFFFFB4B4) : Colors.white,
+              size: 13,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _instrumentVisualCategory() {
+    final text =
+        '${_instrumentId.toLowerCase()} ${_instrumentName.toLowerCase()}';
+    if (text.contains('drum') ||
+        text.contains('808') ||
+        text.contains('kick')) {
+      return 'Drums';
+    }
+    if (text.contains('bass') || text.contains('sub')) {
+      return 'Bass';
+    }
+    if (text.contains('pad') || text.contains('string')) {
+      return 'Pads';
+    }
+    if (text.contains('pluck') || text.contains('bell')) {
+      return 'Plucks';
+    }
+    if (text.contains('brass') || text.contains('horn')) {
+      return 'Brass';
+    }
+    if (text.contains('key') ||
+        text.contains('piano') ||
+        text.contains('organ')) {
+      return 'Keys';
+    }
+    if (text.contains('lead') ||
+        text.contains('saw') ||
+        text.contains('wave')) {
+      return 'Leads';
+    }
+    return 'Synth';
+  }
+
+  Color _instrumentVisualAccent(String category) {
+    switch (category) {
+      case 'Drums':
+        return const Color(0xFFFF6E6E);
+      case 'Bass':
+        return const Color(0xFF5FD36A);
+      case 'Pads':
+        return const Color(0xFF4BC9B6);
+      case 'Plucks':
+        return const Color(0xFFD77EFF);
+      case 'Brass':
+        return const Color(0xFFF1C24D);
+      case 'Keys':
+        return const Color(0xFF53A8FF);
+      case 'Leads':
+        return const Color(0xFFFFA749);
+      default:
+        return const Color(0xFF7FA5FF);
+    }
+  }
+
+  IconData _instrumentVisualIcon(String category) {
+    switch (category) {
+      case 'Drums':
+        return Icons.album_rounded;
+      case 'Bass':
+        return Icons.graphic_eq_rounded;
+      case 'Pads':
+        return Icons.waves_rounded;
+      case 'Plucks':
+        return Icons.auto_awesome_rounded;
+      case 'Brass':
+        return Icons.campaign_outlined;
+      case 'Keys':
+        return Icons.piano_rounded;
+      case 'Leads':
+        return Icons.bolt_rounded;
+      default:
+        return Icons.music_note_rounded;
+    }
+  }
+
+  Widget _buildInstrumentTab() {
+    final category = _instrumentVisualCategory();
+    final accent = _instrumentVisualAccent(category);
+    const scenes = <Map<String, dynamic>>[
+      {
+        'label': 'Soft Pad',
+        'subtitle': 'Wide + smooth',
+        'icon': Icons.cloud_queue_rounded,
+        'color': Color(0xFF4EC8AA),
+      },
+      {
+        'label': 'Pluck',
+        'subtitle': 'Short + bright',
+        'icon': Icons.flash_on_rounded,
+        'color': Color(0xFFD77EFF),
+      },
+      {
+        'label': 'Bass Mono',
+        'subtitle': 'Punch + low',
+        'icon': Icons.south_rounded,
+        'color': Color(0xFF6ED572),
+      },
+      {
+        'label': 'Bright Lead',
+        'subtitle': 'Forward + sharp',
+        'icon': Icons.whatshot_rounded,
+        'color': Color(0xFFFFA84A),
+      },
+      {
+        'label': 'Warm Keys',
+        'subtitle': 'Round + mellow',
+        'icon': Icons.piano_rounded,
+        'color': Color(0xFF5DAEFF),
+      },
+      {
+        'label': 'Analog Brass',
+        'subtitle': 'Stacked + bold',
+        'icon': Icons.campaign_rounded,
+        'color': Color(0xFFF2C45B),
+      },
+      {
+        'label': 'Cinematic Pad',
+        'subtitle': 'Slow + wide',
+        'icon': Icons.blur_on_rounded,
+        'color': Color(0xFF64C6B9),
+      },
+    ];
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  accent.withValues(alpha: 0.30),
+                  const Color(0xFF1A2232),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: accent.withValues(alpha: 0.58)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.22),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(_instrumentVisualIcon(category), color: accent),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _instrumentName.isEmpty
+                            ? 'Instrument'
+                            : _instrumentName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13.6,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        '$category tone controls',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.74),
+                          fontSize: 10.8,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Scenes',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.86),
+              fontSize: 11.8,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 86,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: scenes.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, index) {
+                final scene = scenes[index];
+                final sceneColor = scene['color'] as Color;
+                return InkWell(
+                  onTap: () => _applyPreset(scene['label'] as String),
+                  borderRadius: BorderRadius.circular(11),
+                  child: Ink(
+                    width: 132,
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    decoration: BoxDecoration(
+                      color: sceneColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(11),
+                      border:
+                          Border.all(color: sceneColor.withValues(alpha: 0.58)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          scene['icon'] as IconData,
+                          color: sceneColor,
+                          size: 16,
+                        ),
+                        const Spacer(),
+                        Text(
+                          scene['label'] as String,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          scene['subtitle'] as String,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.62),
+                            fontSize: 10.2,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+          _instrumentCard(
+            title: 'Oscillator',
+            subtitle: 'Pick the source waveform',
+            child: Row(
+              children: [
+                Expanded(
+                  child: _waveformButton(
+                    index: 0,
+                    icon: Icons.radio_button_checked_rounded,
+                    accent: accent,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _waveformButton(
+                    index: 1,
+                    icon: Icons.show_chart_rounded,
+                    accent: accent,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _waveformButton(
+                    index: 2,
+                    icon: Icons.crop_square_rounded,
+                    accent: accent,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _waveformButton(
+                    index: 3,
+                    icon: Icons.change_history_rounded,
+                    accent: accent,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _macroSliderCard(
+                  label: 'Drive',
+                  accent: accent,
+                  value: (_params['drive'] ?? 0.08).clamp(0.0, 1.0),
+                  min: 0.0,
+                  max: 1.0,
+                  valueLabelBuilder: (v) => '${(v * 100).round()}%',
+                  onChanged: (v) {
+                    setState(() => _params['drive'] = v);
+                    _queueCommit();
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _macroSliderCard(
+                  label: 'Cutoff',
+                  accent: accent,
+                  value: (_params['cutoffHz'] ?? 3200.0).clamp(200.0, 12000.0),
+                  min: 200.0,
+                  max: 12000.0,
+                  valueLabelBuilder: (v) => '${v.round()} Hz',
+                  onChanged: (v) {
+                    setState(() => _params['cutoffHz'] = v);
+                    _queueCommit();
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _instrumentCard(
+            title: 'Envelope',
+            subtitle: 'Shape note attack and tail',
+            child: Column(
+              children: [
+                _labeledSlider(
+                  label: 'Attack',
+                  value: (_params['attackMs'] ?? 18.0).clamp(0.0, 300.0),
+                  min: 0.0,
+                  max: 300.0,
+                  onChanged: (v) {
+                    setState(() => _params['attackMs'] = v);
+                    _queueCommit();
+                  },
+                ),
+                _labeledSlider(
+                  label: 'Release',
+                  value: (_params['releaseMs'] ?? 180.0).clamp(20.0, 1200.0),
+                  min: 20.0,
+                  max: 1200.0,
+                  onChanged: (v) {
+                    setState(() => _params['releaseMs'] = v);
+                    _queueCommit();
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _waveformButton({
+    required int index,
+    required IconData icon,
+    required Color accent,
+  }) {
+    final selected = _oscillatorIndex() == index;
+    return InkWell(
+      onTap: () {
+        setState(() => _params['oscillator'] = index.toDouble());
+        _queueCommit();
+      },
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? accent.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected
+                ? accent.withValues(alpha: 0.76)
+                : Colors.white.withValues(alpha: 0.12),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: selected ? accent : Colors.white70, size: 16),
+            const SizedBox(height: 2),
+            Text(
+              _oscillatorLabel(index),
+              style: TextStyle(
+                color: selected ? accent : Colors.white70,
+                fontSize: 10.2,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _macroSliderCard({
+    required String label,
+    required Color accent,
+    required double value,
+    required double min,
+    required double max,
+    required String Function(double value) valueLabelBuilder,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 9, 10, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141D2B),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: accent.withValues(alpha: 0.45)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11.3,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                valueLabelBuilder(value),
+                style: TextStyle(
+                  color: accent,
+                  fontSize: 10.6,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: accent,
+              inactiveTrackColor: Colors.white.withValues(alpha: 0.16),
+              thumbColor: accent,
+              overlayColor: accent.withValues(alpha: 0.20),
+              trackHeight: 3.2,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+            ),
+            child: Slider(
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _instrumentCard({
+    required String title,
+    required String subtitle,
+    required Widget child,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF161F2F),
+            Color(0xFF121B29),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            subtitle,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.62),
+              fontSize: 10.4,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPianoKeys() {
+    const blackKeyWidth = 46.0;
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFE2E8F1),
+        border: Border(
+          right: BorderSide(
+              color: const Color(0xFF768396).withValues(alpha: 0.9),
+              width: 1.0),
+        ),
+      ),
+      child: SingleChildScrollView(
+        controller: _keysVerticalController,
+        physics: const NeverScrollableScrollPhysics(),
+        child: SizedBox(
+          height: _contentHeight,
+          child: Column(
+            children: List<Widget>.generate(_pitchCount, (i) {
+              final pitch = _maxPitch - i;
+              final isBlack = _isBlackKey(pitch);
+              final belowPitch = pitch - 1;
+              final belowIsBlack =
+                  belowPitch >= _minPitch && _isBlackKey(belowPitch);
+              final abovePitch = pitch + 1;
+              final noteName = _noteNameForPitch(pitch);
+              final isPressed = _pressedPreviewPitch == pitch;
+              final showLabel = pitch % 12 == 0 || isPressed;
+              final topHalfPressed = isBlack &&
+                  abovePitch <= _maxPitch &&
+                  !_isBlackKey(abovePitch) &&
+                  _pressedPreviewPitch == abovePitch;
+              final bottomHalfPressed = isBlack &&
+                  belowPitch >= _minPitch &&
+                  !_isBlackKey(belowPitch) &&
+                  _pressedPreviewPitch == belowPitch;
+              final blackTop =
+                  isPressed ? const Color(0xFF3B4A63) : const Color(0xFF182131);
+              final blackBottom =
+                  isPressed ? const Color(0xFF253349) : const Color(0xFF0F1623);
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (_) => _previewPianoKey(pitch),
+                onTapUp: (_) => _releasePianoKey(pitch),
+                onTapCancel: () => _releasePianoKey(pitch),
+                child: SizedBox(
+                  height: _rowHeight,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: Container(
+                          color: isBlack
+                              ? (isPressed
+                                  ? const Color(0xFF2D3D54)
+                                  : const Color(0xFF15202F))
+                              : (isPressed
+                                  ? const Color(0xFFDCE7FB)
+                                  : const Color(0xFFF6F8FC)),
+                        ),
+                      ),
+                      if (isBlack)
+                        Positioned(
+                          left: blackKeyWidth,
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          child: Column(
+                            children: [
+                              Expanded(
+                                child: Container(
+                                  color: topHalfPressed
+                                      ? const Color(0xFFDCE7FB)
+                                      : const Color(0xFFF8FAFF),
+                                ),
+                              ),
+                              Container(
+                                height: 0.7,
+                                color: const Color(0xFFD3D9E8),
+                              ),
+                              Expanded(
+                                child: Container(
+                                  color: bottomHalfPressed
+                                      ? const Color(0xFFDCE7FB)
+                                      : const Color(0xFFF2F5FC),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (isBlack)
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          child: Container(
+                            width: blackKeyWidth,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [blackTop, blackBottom],
+                              ),
+                              borderRadius: const BorderRadius.horizontal(
+                                right: Radius.circular(1.2),
+                              ),
+                              border: Border.all(
+                                color: Colors.black.withValues(alpha: 0.32),
+                                width: 0.6,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.28),
+                                  blurRadius: 3,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (!isBlack)
+                        Positioned(
+                          left: 0,
+                          right: belowIsBlack ? null : 0,
+                          bottom: 0,
+                          width: belowIsBlack ? blackKeyWidth : null,
+                          child: Container(
+                            height: 0.7,
+                            color: const Color(0xFFD5DAE7),
+                          ),
+                        ),
+                      Positioned(
+                        left: isBlack ? 9 : 7,
+                        right: 4,
+                        top: 0,
+                        bottom: 0,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            showLabel ? noteName : '',
+                            maxLines: 1,
+                            overflow: TextOverflow.clip,
+                            style: TextStyle(
+                              color: isBlack
+                                  ? Colors.white.withValues(alpha: 0.82)
+                                  : const Color(0xFF27314A),
+                              fontSize: showLabel ? 10.2 : 0.1,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRollGrid(double playheadBeat) {
+    final physics = _lockGridScroll
+        ? const NeverScrollableScrollPhysics()
+        : const ClampingScrollPhysics();
+    return Container(
+      color: const Color(0xFF0F1422),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: SingleChildScrollView(
+              controller: _horizontalController,
+              scrollDirection: Axis.horizontal,
+              physics: physics,
+              child: SizedBox(
+                width: _contentWidth,
+                child: SingleChildScrollView(
+                  controller: _gridVerticalController,
+                  physics: physics,
+                  child: SizedBox(
+                    width: _contentWidth,
+                    height: _contentHeight,
+                    child: Listener(
+                      behavior: HitTestBehavior.opaque,
+                      onPointerDown: _onGridPointerDown,
+                      onPointerMove: _onGridPointerMove,
+                      onPointerUp: _onGridPointerUp,
+                      onPointerCancel: _onGridPointerUp,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        dragStartBehavior: DragStartBehavior.down,
+                        onTapUp: (details) => _addNoteAt(details.localPosition),
+                        onLongPressStart: _startBoxSelection,
+                        onLongPressMoveUpdate: _updateBoxSelection,
+                        onLongPressEnd: (_) => _finishBoxSelection(),
+                        onLongPressCancel: _cancelBoxSelection,
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: _PianoGridPainter(
+                                  rowHeight: _rowHeight,
+                                  pxPerBeat: _pxPerBeat,
+                                  maxPitch: _maxPitch,
+                                  minPitch: _minPitch,
+                                  maxBeat: _maxBeat,
+                                  beatsPerBar: widget.beatsPerBar,
+                                  quantizeDivisionsPerBar:
+                                      widget.quantizeDivisionsPerBar,
+                                  magnetEnabled: widget.magnetEnabled,
+                                ),
+                              ),
+                            ),
+                            if (_pressedPreviewPitch != null)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                top: _yForPitch(_pressedPreviewPitch!),
+                                height: _rowHeight,
+                                child: IgnorePointer(
+                                  child: Container(
+                                    color: const Color(0x33F0D17A),
+                                  ),
+                                ),
+                              ),
+                            for (final note in _notes) _buildNoteWidget(note),
+                            if (_currentSelectionRect != null)
+                              Positioned.fromRect(
+                                rect: _currentSelectionRect!,
+                                child: IgnorePointer(
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: const Color(0x2B78A7FF),
+                                      border: Border.all(
+                                        color: const Color(0xFF8CB6FF),
+                                        width: 1.2,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (playheadBeat >= 0.0)
+                              Positioned(
+                                left: playheadBeat * _pxPerBeat,
+                                top: 0,
+                                bottom: 0,
+                                child: IgnorePointer(
+                                  child: Container(
+                                    width: 2.0,
+                                    color: const Color(0xFFFFD45A),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (_selectedNotes.isNotEmpty)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Align(
+                alignment: Alignment.bottomRight,
+                child: _buildSelectionOverlay(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoteWidget(MidiNote note) {
+    final selected = _effectiveSelectedIds.contains(note.id);
+    final left = note.startBeat * _pxPerBeat;
+    final width = math.max(10.0, note.lengthBeats * _pxPerBeat);
+    final top = _yForPitch(note.pitch);
+    final alpha = (118 + (note.velocity * 108).round()).clamp(90, 235);
+    final resizeHitWidth = math.min(24.0, math.max(14.0, width * 0.34));
+    final handleWidth = selected ? math.max(18.0, resizeHitWidth) : 0.0;
+    final dragging = _activeDragNoteId == note.id;
+    final dragAccent = const Color(0xFF79DCA7);
+    final labelUsableWidth = width - handleWidth - 10.0;
+    final showNoteLabel =
+        selected && !dragging && labelUsableWidth >= 24.0 && _rowHeight >= 15;
+
+    return Positioned(
+      left: left,
+      top: top + 1,
+      width: width,
+      height: _rowHeight - 2,
+      child: Listener(
+        onPointerDown: (_) {
+          _setGridScrollLocked(true);
+          _suppressGridTapFor();
+        },
+        onPointerUp: (_) => _setGridScrollLocked(false),
+        onPointerCancel: (_) => _setGridScrollLocked(false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          dragStartBehavior: DragStartBehavior.down,
+          onTapDown: (_) {
+            setState(() {
+              _selectSingle(note.id);
+            });
+          },
+          onTapUp: (_) {
+            _previewPianoKey(note.pitch, velocity: note.velocity);
+            _suppressGridTapFor();
+            Future<void>.delayed(const Duration(milliseconds: 90), () {
+              if (!mounted) return;
+              _releasePianoKey(note.pitch);
+            });
+            _setGridScrollLocked(false);
+          },
+          onTapCancel: () {
+            _releasePianoKey(note.pitch);
+            _setGridScrollLocked(false);
+          },
+          onPanStart: (details) => setState(() {
+            _releasePianoKey(note.pitch);
+            _beginNoteDrag(
+              note,
+              details,
+              width: width,
+              handleWidth: resizeHitWidth,
+            );
+          }),
+          onPanUpdate: (details) {
+            if (_activeDragNoteId != note.id) return;
+            setState(() {
+              _updateNoteDrag(note, details);
+            });
+          },
+          onPanEnd: (_) => _endNoteDrag(commit: true),
+          onPanCancel: () => _endNoteDrag(commit: false),
+          child: Container(
+            clipBehavior: Clip.hardEdge,
+            decoration: BoxDecoration(
+              color: dragging
+                  ? dragAccent.withValues(alpha: 0.92)
+                  : Color.fromARGB(alpha, 72, 185, 123),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: dragging
+                    ? const Color(0xFFE9FFE7)
+                    : (selected
+                        ? const Color(0xFFE9FF98)
+                        : const Color(0x66000000)),
+                width: dragging ? 2.2 : (selected ? 2.0 : 1.0),
+              ),
+              boxShadow: dragging
+                  ? [
+                      BoxShadow(
+                        color: const Color(0x66A4F4C8).withValues(alpha: 0.75),
+                        blurRadius: 8,
+                        offset: const Offset(0, 0),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Stack(
+              children: [
+                if (showNoteLabel)
+                  Positioned.fill(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        left: 6,
+                        right: handleWidth + 3,
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _noteNameForPitch(note.pitch),
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.clip,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (selected)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: handleWidth,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.resizeColumn,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: dragging
+                              ? dragAccent.withValues(alpha: 0.85)
+                              : const Color(0x99FFE17A),
+                          borderRadius: const BorderRadius.horizontal(
+                            right: Radius.circular(4),
+                          ),
+                        ),
+                        child: Center(
+                          child: Container(
+                            width: 3,
+                            height: 14,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.90),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _isBlackKey(int pitch) {
+    const black = <int>{1, 3, 6, 8, 10};
+    return black.contains(pitch % 12);
+  }
+
+  String _noteNameForPitch(int pitch) {
+    const names = <String>[
+      'C',
+      'C#',
+      'D',
+      'D#',
+      'E',
+      'F',
+      'F#',
+      'G',
+      'G#',
+      'A',
+      'A#',
+      'B',
+    ];
+    final octave = (pitch ~/ 12) - 1;
+    return '${names[pitch % 12]}$octave';
+  }
+
+  Widget _toolbarIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Opacity(
+          opacity: onTap == null ? 0.35 : 1.0,
+          child: Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+            ),
+            child: Icon(icon, color: Colors.white, size: 17),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _labeledSlider({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    required ValueChanged<double> onChanged,
+    bool enabled = true,
+  }) {
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.4,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 62,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2.5,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              ),
+              child: Slider(
+                value: value.clamp(min, max),
+                min: min,
+                max: max,
+                onChanged: enabled ? onChanged : null,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 56,
+            child: Text(
+              value.toStringAsFixed(label == 'Velocity' ? 2 : 0),
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: Colors.white60,
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PianoGridPainter extends CustomPainter {
+  _PianoGridPainter({
+    required this.rowHeight,
+    required this.pxPerBeat,
+    required this.maxPitch,
+    required this.minPitch,
+    required this.maxBeat,
+    required this.beatsPerBar,
+    required this.quantizeDivisionsPerBar,
+    required this.magnetEnabled,
+  });
+
+  final double rowHeight;
+  final double pxPerBeat;
+  final int maxPitch;
+  final int minPitch;
+  final double maxBeat;
+  final int beatsPerBar;
+  final int quantizeDivisionsPerBar;
+  final bool magnetEnabled;
+
+  static bool _isBlackPitch(int pitch) {
+    const black = <int>{1, 3, 6, 8, 10};
+    return black.contains(pitch % 12);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rowPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.05)
+      ..strokeWidth = 0.7;
+    final whiteRowFill = Paint()
+      ..color = const Color(0xFF172233).withValues(alpha: 0.34);
+    final blackRowFill = Paint()
+      ..color = const Color(0xFF0D1523).withValues(alpha: 0.72);
+    final majorPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..strokeWidth = 1.5;
+    final beatPaint = Paint()
+      ..color = Colors.white.withValues(alpha: magnetEnabled ? 0.09 : 0.06)
+      ..strokeWidth = magnetEnabled ? 1.25 : 1.1;
+    final minorPaint = Paint()
+      ..color = Colors.white.withValues(alpha: magnetEnabled ? 0.07 : 0.04)
+      ..strokeWidth = magnetEnabled ? 1.05 : 1.0;
+
+    final pitchCount = (maxPitch - minPitch) + 1;
+    for (int r = 0; r < pitchCount; r++) {
+      final pitch = maxPitch - r;
+      final y = r * rowHeight;
+      if (_isBlackPitch(pitch)) {
+        canvas.drawRect(
+            Rect.fromLTWH(0, y, size.width, rowHeight), blackRowFill);
+      } else {
+        canvas.drawRect(
+            Rect.fromLTWH(0, y, size.width, rowHeight), whiteRowFill);
+      }
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), rowPaint);
+    }
+    canvas.drawLine(
+      Offset(0, pitchCount * rowHeight),
+      Offset(size.width, pitchCount * rowHeight),
+      rowPaint,
+    );
+
+    final safeBeatsPerBar = math.max(1, beatsPerBar);
+    final safeDivisions = math.max(1, quantizeDivisionsPerBar);
+    final divisionBeat = safeBeatsPerBar / safeDivisions;
+    final maxBars = (maxBeat / safeBeatsPerBar).ceil() + 1;
+
+    for (int bar = 0; bar <= maxBars; bar++) {
+      final barBeat = bar * safeBeatsPerBar;
+      final barX = barBeat * pxPerBeat;
+      canvas.drawLine(
+        Offset(barX, 0),
+        Offset(barX, size.height),
+        majorPaint,
+      );
+
+      for (int d = 1; d < safeDivisions; d++) {
+        final beat = barBeat + (d * divisionBeat);
+        if (beat > maxBeat) break;
+        final x = beat * pxPerBeat;
+        final isBeatBoundary = (d * safeBeatsPerBar) % safeDivisions == 0;
+        canvas.drawLine(
+          Offset(x, 0),
+          Offset(x, size.height),
+          isBeatBoundary ? beatPaint : minorPaint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PianoGridPainter oldDelegate) {
+    return rowHeight != oldDelegate.rowHeight ||
+        pxPerBeat != oldDelegate.pxPerBeat ||
+        maxPitch != oldDelegate.maxPitch ||
+        minPitch != oldDelegate.minPitch ||
+        maxBeat != oldDelegate.maxBeat ||
+        beatsPerBar != oldDelegate.beatsPerBar ||
+        quantizeDivisionsPerBar != oldDelegate.quantizeDivisionsPerBar ||
+        magnetEnabled != oldDelegate.magnetEnabled;
+  }
+}

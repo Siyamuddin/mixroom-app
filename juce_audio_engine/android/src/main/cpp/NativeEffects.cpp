@@ -673,3 +673,114 @@ bool DeesserAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) c
 #endif
 }
 #endif
+
+// ****CLIPPER****
+
+ClipperAudioProcessor::ClipperAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+#if !JucePlugin_IsMidiEffect
+#if !JucePlugin_IsSynth
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+#endif
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)
+#endif
+                         ),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>("threshold",
+                                                                                 "Threshold", juce::NormalisableRange<float>(-40.0f, 0.0f, 0.1f), 0.0f, "dB"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>("ceiling",
+                                                                                 "Ceiling", juce::NormalisableRange<float>(-40.0f, 0.0f, 0.1f), 0.0f, "dB"));
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void ClipperAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    clipper.prepare(sampleRate, samplesPerBlock);
+    clipper.setParameters(parameters);
+    setLatencySamples(clipper.getOversamplerLatency());
+}
+
+void ClipperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+    for (auto i = getTotalNumInputChannels(); i < getTotalNumOutputChannels(); ++i)
+        buffer.clear(i, 0, buffer.getNumSamples());
+
+    clipper.setParameters(parameters);
+    juce::dsp::AudioBlock<float> block(buffer);
+    juce::dsp::ProcessContextReplacing<float> context(block);
+    clipper.process(context);
+    gainReduction = clipper.getGainReduction();
+}
+
+void ClipperAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffer,
+                                                 juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+    for (auto i = getTotalNumInputChannels(); i < getTotalNumOutputChannels(); ++i)
+        buffer.clear(i, 0, buffer.getNumSamples());
+
+    // Latency-reporting processors must override bypass processing.
+    clipper.reset();
+}
+
+void ClipperAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void ClipperAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+bool ClipperAudioProcessor::acceptsMidi() const
+{
+#if JucePlugin_WantsMidiInput
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool ClipperAudioProcessor::producesMidi() const
+{
+#if JucePlugin_ProducesMidiOutput
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool ClipperAudioProcessor::isMidiEffect() const
+{
+#if JucePlugin_IsMidiEffect
+    return true;
+#else
+    return false;
+#endif
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool ClipperAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif

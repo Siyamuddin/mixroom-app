@@ -130,6 +130,15 @@ private:
 class JuceEngine
 {
 public:
+    struct ExportOptions
+    {
+        juce::String format{"wav"}; // "wav" | "mp3"
+        double sampleRate{44100.0};
+        int wavBitDepth{16};
+        bool wavDithering{true};
+        int mp3BitrateKbps{192};
+    };
+
     static JuceEngine &get();
 
     void initialiseEngine();
@@ -145,9 +154,10 @@ public:
     void setTrackVolume(int trackIdx, float volume);
     double getCurrentPosition(int trackIndex);
     double getTrackDuration(int trackIndex);
+    double getHostSampleRate() const;
     juce::Array<juce::NamedValueSet> getPluginParameterInfo(int trackIndex, int effectIndex);
-    juce::String exportMix(const juce::File &outFile);
-    juce::String exportTrack(int trackIndex, const juce::File &outFile);
+    juce::String exportMix(const juce::File &outFile, const ExportOptions &options = {});
+    juce::String exportTrack(int trackIndex, const juce::File &outFile, const ExportOptions &options = {});
     void play();
     void pause();
     void seek(int trackIndex, double positionSeconds);

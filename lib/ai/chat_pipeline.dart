@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'cloud_llm_service.dart';
 import 'project_state_builder.dart';
 import 'local_mixing_model.dart';
+import 'magnitude_predictor.dart';
 import '../models/goal_vector.dart';
 import '../models/mixing_result.dart';
 import 'package:mixroom/models/models.dart';
@@ -12,6 +13,7 @@ class ChatPipeline {
   final CloudLlmService llm;
   final ProjectStateBuilder projectBuilder;
   final LocalMixingModel mixModel;
+  final MixingMagnitudePredictor magnitudePredictor;
 
   /// Optional: UI can hook into this to show a global "thinking..." indicator.
   final void Function(bool isThinking)? onThinkingChanged;
@@ -20,7 +22,14 @@ class ChatPipeline {
   MixingResult? _pendingMix;
   final Map<int, String> _roleOverrides = {};
 
-  ChatPipeline({required this.llm, required this.projectBuilder, required this.mixModel, this.onThinkingChanged});
+  ChatPipeline({
+    required this.llm,
+    required this.projectBuilder,
+    required this.mixModel,
+    this.onThinkingChanged,
+    MixingMagnitudePredictor? magnitudePredictor,
+  }) : magnitudePredictor =
+            magnitudePredictor ?? const NoopMixingMagnitudePredictor();
 
   Future<ChatPipelineResult> handleUserText({
     required String text,
@@ -29,6 +38,8 @@ class ChatPipeline {
     required List<double> rowPan,
     required List<List<AutomationPoint>> rowAutomation,
     required double bpmFallback,
+    double masterGain0to3 = 1.0,
+    double masterPan0to1 = 0.5,
     bool autoApplyProposals = false,
   }) async {
     final userText = text.trim();
@@ -42,7 +53,8 @@ class ChatPipeline {
     final override = _parseRoleOverride(userText);
     if (override != null) {
       _roleOverrides[override.rowIndex] = override.role;
-      final msg = "Got it — I'll treat Track ${override.rowIndex + 1} as **${override.role}**.";
+      final msg =
+          "Got it — I'll treat Track ${override.rowIndex + 1} as **${override.role}**.";
       _push('user', userText);
       _push('assistant', msg);
       return ChatPipelineResult.message(msg);
@@ -66,6 +78,8 @@ class ChatPipeline {
         rowGain: rowGain,
         rowPan: rowPan,
         rowAutomation: rowAutomation,
+        masterGain0to3: masterGain0to3,
+        masterPan0to1: masterPan0to1,
         roleOverrides: _roleOverrides,
       );
 
@@ -82,6 +96,10 @@ class ChatPipeline {
         projectSnapshot: snapshot,
         pendingMix: _pendingMix,
       );
+      final llmMeta = <String, dynamic>{
+        'tool': llmRes.toolName,
+        if (llmRes.toolArgs != null) 'tool_args': llmRes.toolArgs,
+      };
 
       print("LLM done");
 
@@ -97,7 +115,7 @@ class ChatPipeline {
         final msg = llmRes.text!.trim();
         _push('user', userText);
         _push('assistant', msg);
-        return ChatPipelineResult.message(msg);
+        return ChatPipelineResult.message(msg, meta: llmMeta);
       }
 
       // 2.2) Style preset request (bypass mix logic entirely)
@@ -131,7 +149,8 @@ class ChatPipeline {
 
       if (!hasAudio && llmRes.toolName == 'mix_model_request') {
         final args = Map<String, dynamic>.from(llmRes.toolArgs!);
-        final assistantMsg = (args['assistant_message']?.toString().trim() ?? '');
+        final assistantMsg =
+            (args['assistant_message']?.toString().trim() ?? '');
 
         final msg = assistantMsg.isNotEmpty
             ? assistantMsg
@@ -139,7 +158,7 @@ class ChatPipeline {
 
         _push('user', userText);
         _push('assistant', msg);
-        return ChatPipelineResult.message(msg);
+        return ChatPipelineResult.message(msg, meta: llmMeta);
       }
 
       // Normalize tool args into a list of "calls" (supports both single and multi tool outputs)
@@ -151,21 +170,35 @@ class ChatPipeline {
       final args = Map<String, dynamic>.from(llmRes.toolArgs!);
 
       final List<Map<String, dynamic>> actions = (args['actions'] is List)
-          ? (args['actions'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList()
+          ? (args['actions'] as List)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList()
           : const [];
 
-      final String assistantMessage = (args['assistant_message']?.toString().trim().isNotEmpty == true)
-          ? args['assistant_message'].toString().trim()
-          : '';
+      final String assistantMessage =
+          (args['assistant_message']?.toString().trim().isNotEmpty == true)
+              ? args['assistant_message'].toString().trim()
+              : '';
 
       final bool asksPermission = args['asks_permission'] == true;
 
-      final String rawMode = (args['mode'] ?? 'propose').toString().toLowerCase();
+      final String rawMode =
+          (args['mode'] ?? 'propose').toString().toLowerCase();
       final bool strict = rawMode == 'execute';
+      final modelMeta = <String, dynamic>{
+        ...llmMeta,
+        'mode': rawMode,
+        'assistant_message': assistantMessage,
+        'llm_actions': actions,
+        'learned_magnitude_enabled': magnitudePredictor.isEnabled,
+        'learned_magnitude_ready': magnitudePredictor.isReady,
+      };
 
       // Collect a merged mix result across all calls
       final List<MixAction> mergedActions = [];
       final List<String> mergedNotes = [];
+      bool fallbackUsed = false;
+      final Set<String> fallbackReasons = <String>{};
 
       for (final action in actions) {
         // Safety: each action MUST have a goal
@@ -179,14 +212,50 @@ class ChatPipeline {
           continue; // skip malformed action
         }
 
-        final mix = mixModel.run(project: project, goal: goal, strict: strict, roleOverrides: _roleOverrides);
+        final mix = mixModel.run(
+            project: project,
+            goal: goal,
+            strict: strict,
+            roleOverrides: _roleOverrides);
 
-        if (!mix.isNoOp && mix.actions.isNotEmpty) {
-          mergedActions.addAll(mix.actions);
+        var resolvedActions = mix.actions;
+        if (resolvedActions.isNotEmpty) {
+          final refineResult = await magnitudePredictor.refine(
+            project: project,
+            goal: goal,
+            actions: resolvedActions,
+            strict: strict,
+          );
+          resolvedActions = refineResult.actions;
+          if (refineResult.fallbackUsed) {
+            fallbackUsed = true;
+            if (refineResult.fallbackReason != null &&
+                refineResult.fallbackReason!.isNotEmpty) {
+              fallbackReasons.add(refineResult.fallbackReason!);
+            }
+          }
+        }
+
+        if (resolvedActions.isNotEmpty) {
+          mergedActions.addAll(resolvedActions);
         }
 
         if (mix.notes.isNotEmpty) {
           mergedNotes.addAll(mix.notes);
+        }
+      }
+      modelMeta['learned_magnitude_fallback_used'] = fallbackUsed;
+      if (fallbackReasons.isNotEmpty) {
+        modelMeta['learned_magnitude_fallback_reasons'] =
+            fallbackReasons.toList();
+      }
+      if (fallbackUsed) {
+        if (!magnitudePredictor.isEnabled) {
+          mergedNotes
+              .add('Using heuristic magnitudes (learned model disabled).');
+        } else {
+          mergedNotes.add(
+              'Using heuristic magnitudes fallback for this request (${fallbackReasons.join(', ')}).');
         }
       }
 
@@ -194,17 +263,20 @@ class ChatPipeline {
       _push('user', userText);
 
       if (mergedActions.isEmpty) {
-        final msg =
-            assistantMessage.isNotEmpty ? _appendNotes(assistantMessage, mergedNotes) : "No mix changes were applied.";
+        final msg = assistantMessage.isNotEmpty
+            ? _appendNotes(assistantMessage, mergedNotes)
+            : "No mix changes were applied.";
 
         _push('assistant', msg);
-        return ChatPipelineResult.message(msg);
+        return ChatPipelineResult.message(msg, meta: modelMeta);
       }
 
       // Build merged mix result
       final mergedMix = MixingResult(
         actions: mergedActions,
-        summary: assistantMessage.isNotEmpty ? assistantMessage : "Applied mix changes.",
+        summary: assistantMessage.isNotEmpty
+            ? assistantMessage
+            : "Applied mix changes.",
         isNoOp: false,
         notes: mergedNotes,
       );
@@ -212,24 +284,29 @@ class ChatPipeline {
       if (strict) {
         _pendingMix = null;
 
-        final msg = assistantMessage.isNotEmpty ? _appendNotes(assistantMessage, mergedMix.notes) : mergedMix.summary;
+        final msg = assistantMessage.isNotEmpty
+            ? _appendNotes(assistantMessage, mergedMix.notes)
+            : mergedMix.summary;
 
         _push('assistant', msg);
-        return ChatPipelineResult.mix(mergedMix, msg);
+        return ChatPipelineResult.mix(mergedMix, msg, meta: modelMeta);
       }
 
       // Otherwise this is a PROPOSAL (store pending + ask permission)
       if (autoApplyProposals) {
-        final msg = _appendNotes(assistantMessage.isNotEmpty ? assistantMessage : mergedMix.summary, mergedMix.notes);
+        final msg = _appendNotes(
+            assistantMessage.isNotEmpty ? assistantMessage : mergedMix.summary,
+            mergedMix.notes);
 
         _push('assistant', msg);
-        return ChatPipelineResult.mix(mergedMix, msg);
+        return ChatPipelineResult.mix(mergedMix, msg, meta: modelMeta);
       }
 
       _pendingMix = mergedMix;
 
       // Centralized proposal phrasing
-      String msg = assistantMessage.isNotEmpty ? assistantMessage : mergedMix.summary;
+      String msg =
+          assistantMessage.isNotEmpty ? assistantMessage : mergedMix.summary;
 
       msg = _appendNotes(msg, mergedMix.notes);
 
@@ -238,7 +315,7 @@ class ChatPipeline {
       }
 
       _push('assistant', msg);
-      return ChatPipelineResult.message(msg);
+      return ChatPipelineResult.message(msg, meta: modelMeta);
     } finally {
       onThinkingChanged?.call(false);
     }
@@ -264,7 +341,9 @@ class ChatPipeline {
     final goal = args['goal'];
     if (goal is! Map) return true;
 
-    final intensity = (goal['intensity'] is num) ? (goal['intensity'] as num).toDouble() : 0.0;
+    final intensity = (goal['intensity'] is num)
+        ? (goal['intensity'] as num).toDouble()
+        : 0.0;
 
     double bestConf = 0.0;
     final intents = goal['intents'];
@@ -285,7 +364,9 @@ class ChatPipeline {
   }
 
   _RoleOverride? _parseRoleOverride(String text) {
-    final m = RegExp(r'(track|row)\s*(\d+)\s*(is|=|:)\s*(.+)$', caseSensitive: false).firstMatch(text);
+    final m =
+        RegExp(r'(track|row)\s*(\d+)\s*(is|=|:)\s*(.+)$', caseSensitive: false)
+            .firstMatch(text);
     if (m == null) return null;
     final n = int.tryParse(m.group(2) ?? '');
     if (n == null || n <= 0) return null;
@@ -295,13 +376,18 @@ class ChatPipeline {
 
     if (rhs.contains('vocal') || rhs.contains('lead') || rhs.contains('vox'))
       role = 'vocals';
-    else if (rhs.contains('drum') || rhs.contains('kick') || rhs.contains('snare') || rhs.contains('hat'))
+    else if (rhs.contains('drum') ||
+        rhs.contains('kick') ||
+        rhs.contains('snare') ||
+        rhs.contains('hat'))
       role = 'drums';
     else if (rhs.contains('bass'))
       role = 'bass';
     else if (rhs.contains('guitar'))
       role = 'guitar';
-    else if (rhs.contains('synth') || rhs.contains('keys') || rhs.contains('piano')) role = 'synth';
+    else if (rhs.contains('synth') ||
+        rhs.contains('keys') ||
+        rhs.contains('piano')) role = 'synth';
 
     if (role == null) return null;
     return _RoleOverride(rowIndex: n - 1, role: role);
@@ -347,20 +433,34 @@ class ChatPipeline {
     b.writeln('bpm=${p.bpm.toStringAsFixed(2)}');
 
     for (final r in p.rows) {
-      final roles = r.roleProbs.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-      final top = roles.take(3).map((e) => '${e.key}:${(e.value * 100).round()}%').join(', ');
+      final roles = r.roleProbs.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      final top = roles
+          .take(3)
+          .map((e) => '${e.key}:${(e.value * 100).round()}%')
+          .join(', ');
       final fx = r.effects.map((e) => e.name).join(', ');
 
-      final overlaps = <int>[];
+      final overlaps = <String>[];
       for (int j = 0; j < p.maxRows; j++) {
         if (j == r.rowIndex) continue;
-        if (p.overlapMatrix[r.rowIndex][j] == 1) overlaps.add(j + 1);
+        if (p.overlapMatrix[r.rowIndex][j] != 1) continue;
+        double ratio = 1.0;
+        if (r.rowIndex < p.overlapRatioMatrix.length &&
+            j < p.overlapRatioMatrix[r.rowIndex].length) {
+          ratio = p.overlapRatioMatrix[r.rowIndex][j].clamp(0.0, 1.0);
+        }
+        overlaps.add('${j + 1}(${ratio.toStringAsFixed(2)})');
       }
 
       final centroid = (r.audioStats['centroid_hz'] ?? 0).toStringAsFixed(0);
       final sibil = (r.audioStats['sibilance'] ?? 0).toStringAsFixed(2);
       final bassy = (r.audioStats['bassiness'] ?? 0).toStringAsFixed(2);
       final zcr = (r.audioStats['zcr'] ?? 0).toStringAsFixed(3);
+      final hfRms = (r.audioStats['hf_rms'] ?? 0).toStringAsFixed(3);
+      final stRmsP95 = (r.audioStats['st_rms_p95'] ?? 0).toStringAsFixed(3);
+      final transientDensity =
+          (r.audioStats['transient_density'] ?? 0).toStringAsFixed(3);
 
       b.writeln(
         'Track ${r.rowIndex + 1}: '
@@ -369,7 +469,8 @@ class ChatPipeline {
         'rms=${r.approxRms.toStringAsFixed(3)} crest=${r.approxCrest.toStringAsFixed(2)} '
         'gain=${r.gain0to3.toStringAsFixed(2)} pan=${r.pan0To1.toStringAsFixed(2)} '
         'roles=[$top] role_consistency=${r.roleConsistency.toStringAsFixed(2)} '
-        'spectral{centroid_hz=$centroid zcr=$zcr sibil=$sibil bassy=$bassy} '
+        'spectral{centroid_hz=$centroid zcr=$zcr hf_rms=$hfRms sibil=$sibil bassy=$bassy} '
+        'dynamics{st_rms_p95=$stRmsP95 transient_density=$transientDensity} '
         'overlaps=${overlaps.isEmpty ? "none" : overlaps.join(",")} '
         'fx=[$fx]', // TODO: paste all parameters within each fx rather than just name
       );

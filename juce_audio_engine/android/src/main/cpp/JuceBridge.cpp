@@ -142,6 +142,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackDurationJNI(JNIEnv *, jc
     // return result;
 }
 
+extern "C" JNIEXPORT jdouble JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getHostSampleRateJNI(JNIEnv *, jclass)
+{
+    std::atomic<double> result{44100.0};
+    juce::MessageManager::getInstance()->callSync([&result]
+                                                  { result = JuceEngine::get().getHostSampleRate(); });
+    return result.load();
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertEffectJNI(JNIEnv *env, jclass, jint track, jstring pluginPath)
 {
@@ -258,26 +267,65 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTrackVolumeJNI(JNIEnv *, jcla
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *env, jclass, jstring outPath)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *env,
+                                                              jclass,
+                                                              jstring outPath,
+                                                              jstring format,
+                                                              jint sampleRate,
+                                                              jint wavBitDepth,
+                                                              jboolean wavDithering,
+                                                              jint mp3BitrateKbps)
 {
     const char *c = env->GetStringUTFChars(outPath, nullptr);
     juce::String jucePath(c);
     env->ReleaseStringUTFChars(outPath, c);
+
+    const char *formatChars = env->GetStringUTFChars(format, nullptr);
+    juce::String formatValue(formatChars);
+    env->ReleaseStringUTFChars(format, formatChars);
+
+    JuceEngine::ExportOptions options;
+    options.format = formatValue;
+    options.sampleRate = (double)sampleRate;
+    options.wavBitDepth = (int)wavBitDepth;
+    options.wavDithering = (wavDithering == JNI_TRUE);
+    options.mp3BitrateKbps = (int)mp3BitrateKbps;
+
     juce::String result;
     juce::MessageManager::getInstance()->callSync([&]
-                                                  { result = JuceEngine::get().exportMix(juce::File(jucePath)); });
+                                                  { result = JuceEngine::get().exportMix(juce::File(jucePath), options); });
     return env->NewStringUTF(result.toRawUTF8());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportTrackJNI(JNIEnv *env, jclass, jint trackIdx, jstring outPath)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportTrackJNI(JNIEnv *env,
+                                                                jclass,
+                                                                jint trackIdx,
+                                                                jstring outPath,
+                                                                jstring format,
+                                                                jint sampleRate,
+                                                                jint wavBitDepth,
+                                                                jboolean wavDithering,
+                                                                jint mp3BitrateKbps)
 {
     const char *c = env->GetStringUTFChars(outPath, nullptr);
     juce::String jucePath(c);
     env->ReleaseStringUTFChars(outPath, c);
+
+    const char *formatChars = env->GetStringUTFChars(format, nullptr);
+    juce::String formatValue(formatChars);
+    env->ReleaseStringUTFChars(format, formatChars);
+
+    JuceEngine::ExportOptions options;
+    options.format = formatValue;
+    options.sampleRate = (double)sampleRate;
+    options.wavBitDepth = (int)wavBitDepth;
+    options.wavDithering = (wavDithering == JNI_TRUE);
+    options.mp3BitrateKbps = (int)mp3BitrateKbps;
+
     juce::String result;
     juce::MessageManager::getInstance()->callSync([&]
-                                                  { result = JuceEngine::get().exportTrack(trackIdx, juce::File(jucePath)); });
+                                                  { result = JuceEngine::get().exportTrack(trackIdx, juce::File(jucePath), options); });
     return env->NewStringUTF(result.toRawUTF8());
 }
 

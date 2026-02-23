@@ -81,7 +81,8 @@ class MyAppState extends State<MyApp> {
       theme: ThemeData(
         fontFamily: 'Pretendard',
         brightness: Brightness.dark,
-        primaryColor: const Color(0xFF0C1A32), //const Color.fromARGB(255, 98, 98, 98),
+        primaryColor:
+            const Color(0xFF0C1A32), //const Color.fromARGB(255, 98, 98, 98),
         scaffoldBackgroundColor: const Color(0xFF0C1A32),
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color.fromARGB(255, 107, 107, 107),
@@ -96,14 +97,22 @@ class MyAppState extends State<MyApp> {
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color.fromARGB(255, 103, 103, 103),
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
         snackBarTheme: SnackBarThemeData(
           behavior: SnackBarBehavior.floating,
-          backgroundColor: const Color.fromARGB(255, 68, 68, 68).withOpacity(0.98),
+          backgroundColor: const Color(0xFF162641),
           elevation: 6,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(
+              color: Colors.white.withOpacity(0.12),
+            ),
+          ),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           contentTextStyle: const TextStyle(
             fontFamily: 'Pretendard',
             fontSize: 15,
@@ -111,13 +120,68 @@ class MyAppState extends State<MyApp> {
             fontWeight: FontWeight.w500,
           ),
         ),
+        dialogTheme: DialogThemeData(
+          backgroundColor: const Color(0xFF13233D),
+          elevation: 14,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(
+              color: Colors.white.withOpacity(0.12),
+            ),
+          ),
+          titleTextStyle: const TextStyle(
+            fontFamily: 'Pretendard',
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+          contentTextStyle: const TextStyle(
+            fontFamily: 'Pretendard',
+            color: Colors.white70,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        bottomSheetTheme: BottomSheetThemeData(
+          backgroundColor: const Color(0xFF13233D),
+          surfaceTintColor: Colors.transparent,
+          modalBackgroundColor: const Color(0xFF13233D),
+          modalBarrierColor: Colors.black.withOpacity(0.55),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          elevation: 12,
+        ),
+        popupMenuTheme: PopupMenuThemeData(
+          color: const Color(0xFF13233D),
+          elevation: 12,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: Colors.white.withOpacity(0.08)),
+          ),
+          textStyle: const TextStyle(
+            fontFamily: 'Pretendard',
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xFFB9D4FF),
+          ),
+        ),
 
         textTheme: const TextTheme(
-          displayLarge: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
-          titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.white),
-          titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: Colors.white70),
+          displayLarge: TextStyle(
+              fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+          titleLarge: TextStyle(
+              fontSize: 20, fontWeight: FontWeight.w600, color: Colors.white),
+          titleMedium: TextStyle(
+              fontSize: 16, fontWeight: FontWeight.w500, color: Colors.white70),
           bodyMedium: TextStyle(fontSize: 14, color: Colors.white60),
-          labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+          labelLarge: TextStyle(
+              fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
         ),
       ),
       //****TEMPORARY****
@@ -132,7 +196,8 @@ bool _zeroOffsetPointerGuardInstalled = false;
 
 void _installZeroOffsetPointerGuard() {
   if (_zeroOffsetPointerGuardInstalled) return;
-  GestureBinding.instance.pointerRouter.addGlobalRoute(_absorbZeroOffsetPointerEvent);
+  GestureBinding.instance.pointerRouter
+      .addGlobalRoute(_absorbZeroOffsetPointerEvent);
   _zeroOffsetPointerGuardInstalled = true;
 }
 
@@ -156,7 +221,8 @@ void main() async {
 
   listenForNativeLogs();
 
-  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+  await SystemChrome.setPreferredOrientations(
+      [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
 
   // FlutterError.onError = (details) {
   //   JuceAudioEngine.shutdown();
@@ -173,7 +239,8 @@ void main() async {
 
   await OpenMixroomService.init();
 
-  runApp(ChangeNotifierProvider(create: (context) => LocaleProvider(), child: const MyApp()));
+  runApp(ChangeNotifierProvider(
+      create: (context) => LocaleProvider(), child: const MyApp()));
 }
 
 void listenForNativeLogs() {
@@ -211,7 +278,8 @@ Future<void> _cleanupAllTempFiles() async {
 
     final sizeMB = (totalBytes / (1024 * 1024)).toStringAsFixed(1);
     if (deletedCount > 0) {
-      print("🧹 Deleted $deletedCount item${deletedCount == 1 ? '' : 's'} ($sizeMB MB) from temp directory.");
+      print(
+          "🧹 Deleted $deletedCount item${deletedCount == 1 ? '' : 's'} ($sizeMB MB) from temp directory.");
     } else {
       print("🧼 Temp directory was already clean.");
     }

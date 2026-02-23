@@ -5,9 +5,16 @@ import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:path/path.dart' as p;
+import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/screens/audio_editor.dart';
+
+class _NoSwipeMaterialPageRoute<T> extends MaterialPageRoute<T> {
+  _NoSwipeMaterialPageRoute({required super.builder});
+
+  @override
+  bool get popGestureEnabled => false;
+}
 
 class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({super.key});
@@ -67,7 +74,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     // 3. Push editor
     await Navigator.push(
       context,
-      MaterialPageRoute(
+      _NoSwipeMaterialPageRoute(
         builder: (_) => AudioEditorScreen(mode: "Pro", projectDir: dir),
       ),
     );
@@ -89,11 +96,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     // TODO: arbitrary delay to prevent bad UX from (probably) unavoidable blocking UI lag when going to DAW screen
     await Future.delayed(const Duration(milliseconds: 300));
 
-    final dir = await ProjectManager.createNewProjectDir(name: "Untitled Project");
+    final dir =
+        await ProjectManager.createNewProjectDir(name: "Untitled Project");
 
     await Navigator.push(
       context,
-      MaterialPageRoute(
+      _NoSwipeMaterialPageRoute(
         builder: (_) => AudioEditorScreen(mode: "Pro", projectDir: dir),
       ),
     );
@@ -109,25 +117,86 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final controller = TextEditingController(text: meta.name);
     final res = await showDialog<String>(
       context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF0C1A32),
-        title: const Text("Rename project", style: TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: controller,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: "Project name",
-            hintStyle: const TextStyle(color: Colors.white54),
-            filled: true,
-            fillColor: Colors.white10,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        final cs = theme.colorScheme;
+        return MediaQuery.removeViewInsets(
+          context: ctx,
+          removeBottom: true,
+          child: Dialog(
+            alignment: Alignment.topCenter,
+            insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.drive_file_rename_outline, color: cs.primary),
+                      const SizedBox(width: 8),
+                      const Text(
+                        "Rename Project",
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.12)),
+                    ),
+                    child: TextField(
+                      controller: controller,
+                      autofocus: true,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) =>
+                          Navigator.pop(ctx, controller.text.trim()),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: "Project name",
+                        hintStyle: const TextStyle(color: Colors.white54),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        suffixIconColor: cs.primary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text("Cancel"),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () =>
+                            Navigator.pop(ctx, controller.text.trim()),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: cs.primary,
+                          foregroundColor: cs.onPrimary,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text("Save"),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text("Save")),
-        ],
-      ),
+        );
+      },
     );
 
     if (res == null) return;
@@ -139,13 +208,17 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       await _refresh();
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("✅ Project renamed")),
+      showAppSnackBar(
+        context,
+        "Project renamed",
+        tone: AppPopupTone.success,
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("⚠️ Rename failed: $e")),
+      showAppSnackBar(
+        context,
+        "Rename failed: $e",
+        tone: AppPopupTone.error,
       );
     }
   }
@@ -155,11 +228,17 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF0C1A32),
-        title: const Text("Delete project?", style: TextStyle(color: Colors.white)),
-        content: Text("“${meta.name}” will be permanently deleted.", style: const TextStyle(color: Colors.white70)),
+        title: const Text("Delete project?",
+            style: TextStyle(color: Colors.white)),
+        content: Text("“${meta.name}” will be permanently deleted.",
+            style: const TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("Delete")),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel")),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Delete")),
         ],
       ),
     );
@@ -190,8 +269,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       await SharePlus.instance.share(params);
     } catch (e) {
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('⚠️ Export failed: $e')),
+      showAppSnackBar(
+        context,
+        'Export failed: $e',
+        tone: AppPopupTone.error,
       );
     }
   }
@@ -210,8 +291,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Future<void> _importProjectFromFile(String path) async {
     try {
       if (!path.toLowerCase().endsWith('.mixroom')) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a .mixroom project file')),
+        showAppSnackBar(
+          context,
+          'Please select a .mixroom project file',
+          tone: AppPopupTone.warning,
         );
         return;
       }
@@ -230,7 +313,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       // Open imported project immediately (optional)
       await Navigator.push(
         context,
-        MaterialPageRoute(
+        _NoSwipeMaterialPageRoute(
           builder: (_) => AudioEditorScreen(mode: "Pro", projectDir: newDir),
         ),
       );
@@ -238,8 +321,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       await _refresh();
     } catch (e) {
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('⚠️ Import failed: $e')),
+      showAppSnackBar(
+        context,
+        'Import failed: $e',
+        tone: AppPopupTone.error,
       );
     }
   }
@@ -298,25 +383,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   void _showProjectLimitDialog() {
-    showDialog(
+    showAppMessageDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF0C1A32),
-        title: const Text(
-          "Project limit reached",
-          style: TextStyle(color: Colors.white),
-        ),
-        content: const Text(
-          "Delete a project to create or import a new one.",
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("OK"),
-          ),
-        ],
-      ),
+      title: "Project limit reached",
+      message: "Delete a project to create or import a new one.",
+      buttonLabel: "OK",
+      icon: Icons.folder_off_outlined,
     );
   }
 
@@ -325,6 +397,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final canCreate = _projects.length < ProjectManager.maxProjects;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       // appBar: AppBar(
       //   title: const Text("Projects"),
       // ),
@@ -343,7 +416,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           child: Center(
             child: Padding(
               padding: const EdgeInsets.only(top: 22),
-              child: Image.asset('assets/mixroom_logo202_home.png', height: 28, fit: BoxFit.contain),
+              child: Image.asset('assets/mixroom_logo202_home.png',
+                  height: 28, fit: BoxFit.contain),
             ),
           ),
         ),
@@ -365,8 +439,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           height: kActionCardHeight,
                           child: _compactActionCard(
                             icon: Icons.add_circle_outline,
-                            title: canCreate ? "New Project" : "Project limit reached",
-                            subtitle: canCreate ? "Create a new project" : "Delete one to continue",
+                            title: canCreate
+                                ? "New Project"
+                                : "Project limit reached",
+                            subtitle: canCreate
+                                ? "Create a new project"
+                                : "Delete one to continue",
                             onTap: () {
                               if (!canCreate) {
                                 _showProjectLimitDialog();
@@ -412,39 +490,57 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                   Expanded(
                     child: _projects.isEmpty
                         ? const Center(
-                            child: Text("No saved projects yet.", style: TextStyle(color: Colors.white70)),
+                            child: Text("No saved projects yet.",
+                                style: TextStyle(color: Colors.white70)),
                           )
                         : ListView.separated(
                             itemCount: _projects.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 10),
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
                             itemBuilder: (_, i) {
                               final p = _projects[i];
                               return _GlassCard(
                                 child: ListTile(
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                                  leading: const Icon(Icons.folder_open_rounded, color: Colors.white),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(18)),
+                                  leading: const Icon(Icons.folder_open_rounded,
+                                      color: Colors.white),
                                   title: Text(
                                     p.name,
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600),
                                   ),
                                   subtitle: Text(
                                     "Last opened: ${DateFormat('yyyy-MM-dd HH:mm').format(p.lastOpenedAt.toLocal())}", //${p.lastOpenedAt.toLocal()}",
-                                    style: const TextStyle(color: Colors.white60, fontSize: 12),
+                                    style: const TextStyle(
+                                        color: Colors.white60, fontSize: 12),
                                   ),
                                   onTap: () => _openProject(p.dir),
                                   trailing: PopupMenuButton<String>(
-                                    icon: const Icon(Icons.more_vert, color: Colors.white70),
+                                    icon: const Icon(Icons.more_vert,
+                                        color: Colors.white70),
                                     onSelected: (v) async {
-                                      if (v == "open") await _openProject(p.dir);
+                                      if (v == "open")
+                                        await _openProject(p.dir);
                                       if (v == "share") await _shareProject(p);
-                                      if (v == "rename") await _renameProject(p);
-                                      if (v == "delete") await _deleteProject(p);
+                                      if (v == "rename")
+                                        await _renameProject(p);
+                                      if (v == "delete")
+                                        await _deleteProject(p);
                                     },
                                     itemBuilder: (_) => const [
-                                      PopupMenuItem(value: "open", child: Text("Open")),
-                                      PopupMenuItem(value: "share", child: Text("Share (.mixroom)")),
-                                      PopupMenuItem(value: "rename", child: Text("Rename")),
-                                      PopupMenuItem(value: "delete", child: Text("Delete")),
+                                      PopupMenuItem(
+                                          value: "open", child: Text("Open")),
+                                      PopupMenuItem(
+                                          value: "share",
+                                          child: Text("Share (.mixroom)")),
+                                      PopupMenuItem(
+                                          value: "rename",
+                                          child: Text("Rename")),
+                                      PopupMenuItem(
+                                          value: "delete",
+                                          child: Text("Delete")),
                                     ],
                                   ),
                                 ),
@@ -470,36 +566,46 @@ class _GlassCard extends StatelessWidget {
         color: Colors.white.withOpacity(0.06),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.white.withOpacity(0.08)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 18, offset: const Offset(0, 10))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.25),
+              blurRadius: 18,
+              offset: const Offset(0, 10))
+        ],
       ),
       child: child,
     );
   }
 }
 
-Future<void> showLoadingDialog(BuildContext context, {String message = 'Loading…'}) async {
+Future<void> showLoadingDialog(BuildContext context,
+    {String message = 'Loading…'}) async {
+  final colors = Theme.of(context).colorScheme;
   return showDialog(
     context: context,
     barrierDismissible: false,
-    barrierColor: Colors.black.withOpacity(0.45),
+    barrierColor: Colors.black.withOpacity(0.55),
     builder: (_) {
       return Center(
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
           decoration: BoxDecoration(
-            color: const Color(0xFF0C1A32),
+            color: const Color(0xFF13233D),
             borderRadius: BorderRadius.circular(16),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 20)],
+            border: Border.all(color: Colors.white.withOpacity(0.1)),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 20)
+            ],
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(
+              SizedBox(
                 width: 26,
                 height: 26,
                 child: CircularProgressIndicator(
                   strokeWidth: 3,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
                 ),
               ),
               const SizedBox(width: 16),

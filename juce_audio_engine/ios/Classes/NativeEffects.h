@@ -316,6 +316,7 @@ public:
     bool isMidiEffect() const override;
     void getStateInformation(juce::MemoryBlock &destData) override;
     void setStateInformation(const void *data, int sizeInBytes) override;
+    std::vector<float> getRecentWaveform(int sampleCount) const;
 
     ~EQAudioProcessor() override {}
     const juce::String getName() const override { return "EQ Parametric"; }
@@ -332,8 +333,13 @@ public:
     const juce::StringArray filterSlopes{"12 dB/Oct", "24 dB/Oct", "36 dB/Oct"};
 
 private:
+    static constexpr int kWaveformRingSize = 4096;
+    void pushWaveformSamples(const juce::AudioBuffer<float> &buffer) noexcept;
+
     Equalizer equalizer;
     const std::array<float, numBands> defaultFreq{60.0f, 400.0f, 2000.0f, 8000.0f};
+    std::array<float, kWaveformRingSize> waveformRing{};
+    std::atomic<int> waveformWritePos{0};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EQAudioProcessor)
 };
@@ -1131,6 +1137,7 @@ public:
 
     void getStateInformation(juce::MemoryBlock &destData) override;
     void setStateInformation(const void *data, int sizeInBytes) override;
+    std::vector<float> getRecentWaveform(int sampleCount) const;
 
     ~EQ3AudioProcessor() override = default;
 
@@ -1147,6 +1154,10 @@ public:
 
 private:
     EQ3Band eq3;
+    static constexpr int kWaveformRingSize = 2048;
+    void pushWaveformSamples(const juce::AudioBuffer<float> &buffer) noexcept;
+    std::array<float, kWaveformRingSize> waveformRing{};
+    std::atomic<int> waveformWritePos{0};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EQ3AudioProcessor)
 };
@@ -1387,4 +1398,704 @@ private:
     std::atomic<float> grDb{0.0f};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CompressorAudioProcessor)
+};
+
+// ****LIMITER****
+
+struct LimiterParameters
+{
+    float threshold;
+    float ceiling;
+    float releaseTime;
+    bool stereo;
+};
+
+class LimiterModule
+{
+public:
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        parameters.threshold = apvts.getRawParameterValue("threshold")->load();
+        parameters.ceiling = apvts.getRawParameterValue("ceiling")->load();
+
+        const float releaseInput = apvts.getRawParameterValue("release")->load();
+        parameters.releaseTime = static_cast<float>(
+            std::exp(-1.0f / (releaseInput * sampleRate / 1000.0)));
+
+        parameters.stereo = apvts.getRawParameterValue("stereo")->load();
+    }
+
+    void prepare(double inputSampleRate, int maxBlockSize)
+    {
+        sampleRate = inputSampleRate;
+        bufferSize = maxBlockSize;
+        compressionBuffer.setSize(numOutputs, maxBlockSize);
+        envelopeBuffer.setSize(numOutputs, maxBlockSize);
+    }
+
+    void process(juce::AudioBuffer<float> &inputBuffer)
+    {
+        compressionBuffer.makeCopyOf(inputBuffer, true);
+        createEnvelope();
+        calculateGainReduction();
+        applyLimiting(inputBuffer);
+    }
+
+    std::array<float, numOutputs> getGainReduction() const
+    {
+        return std::array<float, numOutputs>{
+            outputGainReduction[0] * -1.0f,
+            outputGainReduction[1] * -1.0f,
+        };
+    }
+
+private:
+    void applyHysteresis(float &compLevel, float inputSample)
+    {
+        const float releaseLevel =
+            inputSample + parameters.releaseTime * (compLevel - inputSample);
+        compLevel = (compLevel < inputSample) ? inputSample : releaseLevel;
+    }
+
+    void createEnvelope()
+    {
+        for (int sample = 0; sample < bufferSize; ++sample)
+        {
+            if (parameters.stereo)
+            {
+                const float maxSample = juce::jmax(
+                    std::abs(compressionBuffer.getSample(0, sample)),
+                    std::abs(compressionBuffer.getSample(1, sample)));
+
+                applyHysteresis(compressionLevel[0], maxSample);
+                for (int channel = 0; channel < numOutputs; ++channel)
+                    envelopeBuffer.setSample(channel, sample, compressionLevel[0]);
+            }
+            else
+            {
+                for (int channel = 0; channel < numOutputs; ++channel)
+                {
+                    const float inputSample = std::abs(compressionBuffer.getSample(channel, sample));
+                    applyHysteresis(compressionLevel[channel], inputSample);
+                    envelopeBuffer.setSample(channel, sample, compressionLevel[channel]);
+                }
+            }
+        }
+    }
+
+    void calculateGainReduction()
+    {
+        outputGainReduction = {0.0f, 0.0f};
+
+        for (int sample = 0; sample < bufferSize; ++sample)
+        {
+            for (int channel = 0; channel < numOutputs; ++channel)
+            {
+                float currentGainReduction =
+                    parameters.threshold -
+                    juce::Decibels::gainToDecibels(envelopeBuffer.getSample(channel, sample));
+
+                currentGainReduction = juce::jmin(0.0f, currentGainReduction);
+                outputGainReduction[channel] =
+                    juce::jmin(currentGainReduction, outputGainReduction[channel]);
+
+                currentGainReduction += parameters.ceiling - parameters.threshold;
+                currentGainReduction =
+                    std::pow(10.0f, 0.05f * currentGainReduction);
+
+                compressionBuffer.setSample(channel, sample, currentGainReduction);
+            }
+        }
+    }
+
+    void applyLimiting(juce::AudioBuffer<float> &buffer)
+    {
+        for (int channel = 0; channel < numOutputs; ++channel)
+        {
+            juce::FloatVectorOperations::multiply(
+                buffer.getWritePointer(channel),
+                compressionBuffer.getReadPointer(channel),
+                bufferSize);
+        }
+    }
+
+    double sampleRate{0.0};
+    int bufferSize{0};
+
+    LimiterParameters parameters;
+    std::array<float, numOutputs> compressionLevel{0.0f, 0.0f};
+    std::array<float, numOutputs> outputGainReduction{0.0f, 0.0f};
+
+    juce::AudioBuffer<float> compressionBuffer, envelopeBuffer;
+};
+
+class LimiterAudioProcessor : public juce::AudioProcessor
+{
+public:
+    LimiterAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Limiter"; }
+
+    juce::AudioProcessorValueTreeState parameters;
+    std::array<float, numOutputs> gainReduction;
+
+private:
+    LimiterModule limiter;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LimiterAudioProcessor)
+};
+
+// ****CLIPPER****
+
+struct ClipperParameters
+{
+    float threshold;
+    float ceiling;
+};
+
+class ClipperModule
+{
+public:
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        parameters.threshold = apvts.getRawParameterValue("threshold")->load();
+        parameters.ceiling = apvts.getRawParameterValue("ceiling")->load();
+    }
+
+    void prepare(double inputSampleRate, int maxBlockSize)
+    {
+        bufferSize = maxBlockSize;
+        oversampledBufferSize = maxBlockSize * 4;
+        oversampler.reset();
+        oversampler.initProcessing((size_t)maxBlockSize);
+    }
+
+    void process(const juce::dsp::ProcessContextReplacing<float> &context)
+    {
+        auto &outputBlock = context.getOutputBlock();
+        auto upsampledBlock = oversampler.processSamplesUp(context.getInputBlock());
+        const int nUp = (int)upsampledBlock.getNumSamples();
+
+        clipBlock(upsampledBlock, nUp, oversampledGainReduction);
+        oversampler.processSamplesDown(outputBlock);
+
+        const int n = (int)outputBlock.getNumSamples();
+        clipBlock(outputBlock, n, normalGainReduction);
+        applyGain(outputBlock, n);
+    }
+
+    std::array<float, numOutputs> getGainReduction() const
+    {
+        return {
+            oversampledGainReduction[0] + normalGainReduction[0],
+            oversampledGainReduction[1] + normalGainReduction[1]};
+    }
+
+    int getOversamplerLatency() const
+    {
+        return (int)oversampler.getLatencyInSamples();
+    }
+
+    void reset()
+    {
+        oversampler.reset();
+    }
+
+private:
+    void clipBlock(juce::dsp::AudioBlock<float> &block,
+                   int blockSize,
+                   std::array<float, numOutputs> &outGr)
+    {
+        outGr = {0.0f, 0.0f};
+        std::array<float, numOutputs> tempGr{0.0f, 0.0f};
+
+        const float thresholdHigh = juce::Decibels::decibelsToGain(parameters.threshold);
+        const float thresholdLow = -thresholdHigh;
+
+        for (int sample = 0; sample < blockSize; ++sample)
+        {
+            for (int channel = 0; channel < numOutputs; ++channel)
+            {
+                const float inputSample = block.getSample(channel, sample);
+                const float outputSample = juce::jlimit(thresholdLow, thresholdHigh, inputSample);
+
+                if (inputSample != outputSample)
+                    tempGr[channel] = juce::Decibels::gainToDecibels(std::abs(inputSample) + 1.0e-9f) - parameters.threshold;
+
+                outGr[channel] = juce::jmax(tempGr[channel], outGr[channel]);
+                block.setSample(channel, sample, outputSample);
+            }
+        }
+    }
+
+    void applyGain(juce::dsp::AudioBlock<float> &block, int blockSize)
+    {
+        const float autoGain = juce::Decibels::decibelsToGain(-parameters.threshold);
+        const float ceilingGain = juce::Decibels::decibelsToGain(parameters.ceiling);
+
+        for (int sample = 0; sample < blockSize; ++sample)
+            for (int channel = 0; channel < numOutputs; ++channel)
+                block.setSample(channel, sample, block.getSample(channel, sample) * autoGain * ceilingGain);
+    }
+
+    int bufferSize{0};
+    int oversampledBufferSize{0};
+    ClipperParameters parameters{0.0f, 0.0f};
+    std::array<float, numOutputs> oversampledGainReduction{0.0f, 0.0f};
+    std::array<float, numOutputs> normalGainReduction{0.0f, 0.0f};
+    juce::dsp::Oversampling<float> oversampler{
+        2, 2,
+        juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR,
+        false, true};
+};
+
+class ClipperAudioProcessor : public juce::AudioProcessor
+{
+public:
+    ClipperAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void processBlockBypassed(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Clipper"; }
+
+    juce::AudioProcessorValueTreeState parameters;
+    std::array<float, numOutputs> gainReduction;
+
+private:
+    ClipperModule clipper;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipperAudioProcessor)
+};
+
+// ****PITCH SHIFT****
+
+struct PitchShiftParameters
+{
+    float semitones;
+    float mix;
+};
+
+class PitchShiftModule
+{
+public:
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        params.semitones = apvts.getRawParameterValue("semitones")->load();
+        params.mix = apvts.getRawParameterValue("mix")->load() * 0.01f;
+    }
+
+    void prepare(double inputSampleRate, int maxBlockSize)
+    {
+        juce::ignoreUnused(inputSampleRate);
+        const int minDelay = juce::jmax(512, maxBlockSize * 4);
+        ringSize = minDelay + 2;
+
+        for (int ch = 0; ch < numOutputs; ++ch)
+        {
+            ringBuffers[ch].assign((size_t)ringSize, 0.0f);
+            writePos[ch] = 0;
+            phase[ch] = 0.0f;
+        }
+    }
+
+    void process(juce::AudioBuffer<float> &buffer)
+    {
+        const int n = buffer.getNumSamples();
+        const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
+        if (n <= 0 || channels <= 0 || ringSize <= 2)
+            return;
+
+        const float ratio = std::pow(2.0f, params.semitones / 12.0f);
+        const float phaseInc = (1.0f - ratio) / (float)(ringSize - 2);
+
+        const float dryMix = std::pow(std::sin(0.5f * juce::float_Pi * (1.0f - params.mix)), 2.0f);
+        const float wetMix = std::pow(std::sin(0.5f * juce::float_Pi * params.mix), 2.0f);
+
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            auto &ring = ringBuffers[ch];
+            float *io = buffer.getWritePointer(ch);
+            int w = writePos[ch];
+            float ph = phase[ch];
+
+            for (int i = 0; i < n; ++i)
+            {
+                const float in = io[i];
+                ring[(size_t)w] = in;
+
+                const float d1 = ph * (float)(ringSize - 2);
+                const float d2 = std::fmod(d1 + 0.5f * (float)(ringSize - 2),
+                                           (float)(ringSize - 2));
+
+                const float a = readDelayedSample(ring, w, d1);
+                const float b = readDelayedSample(ring, w, d2);
+
+                const float p1 = ph;
+                const float p2 = std::fmod(ph + 0.5f, 1.0f);
+                const float g1 = 1.0f - std::abs(2.0f * p1 - 1.0f);
+                const float g2 = 1.0f - std::abs(2.0f * p2 - 1.0f);
+                const float norm = g1 + g2 + 1.0e-6f;
+
+                const float wet = (a * g1 + b * g2) / norm;
+                io[i] = in * dryMix + wet * wetMix;
+
+                ph += phaseInc;
+                while (ph >= 1.0f)
+                    ph -= 1.0f;
+                while (ph < 0.0f)
+                    ph += 1.0f;
+
+                ++w;
+                if (w >= ringSize)
+                    w = 0;
+            }
+
+            writePos[ch] = w;
+            phase[ch] = ph;
+        }
+    }
+
+private:
+    static float readDelayedSample(const std::vector<float> &ring,
+                                   int writeIdx,
+                                   float delaySamples)
+    {
+        const int n = (int)ring.size();
+        if (n <= 1)
+            return 0.0f;
+
+        float readPos = (float)writeIdx - delaySamples;
+        while (readPos < 0.0f)
+            readPos += (float)n;
+        while (readPos >= (float)n)
+            readPos -= (float)n;
+
+        const int i0 = (int)readPos;
+        const int i1 = (i0 + 1) % n;
+        const float frac = readPos - (float)i0;
+        return ring[(size_t)i0] + (ring[(size_t)i1] - ring[(size_t)i0]) * frac;
+    }
+
+    PitchShiftParameters params{0.0f, 1.0f};
+    int ringSize{0};
+    std::array<std::vector<float>, numOutputs> ringBuffers;
+    std::array<int, numOutputs> writePos{0, 0};
+    std::array<float, numOutputs> phase{0.0f, 0.0f};
+};
+
+class PitchShiftAudioProcessor : public juce::AudioProcessor
+{
+public:
+    PitchShiftAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Pitch Shift"; }
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    PitchShiftModule pitchShift;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PitchShiftAudioProcessor)
+};
+
+// ****CHORUS****
+
+struct ChorusParameters
+{
+    float rateHz;
+    float depth;
+    float centreDelayMs;
+    float feedback;
+    float mix;
+};
+
+class ChorusModule
+{
+public:
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        params.rateHz = apvts.getRawParameterValue("rate")->load();
+        params.depth = apvts.getRawParameterValue("depth")->load();
+        params.centreDelayMs = apvts.getRawParameterValue("centreDelay")->load();
+        params.feedback = apvts.getRawParameterValue("feedback")->load() * 0.01f;
+        params.mix = apvts.getRawParameterValue("mix")->load() * 0.01f;
+    }
+
+    void prepare(double sampleRate, int maxBlockSize)
+    {
+        dryBuffer.setSize(numOutputs, maxBlockSize);
+        wetBuffer.setSize(numOutputs, maxBlockSize);
+
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = (juce::uint32)maxBlockSize;
+        spec.numChannels = (juce::uint32)numOutputs;
+        chorus.prepare(spec);
+        chorus.reset();
+    }
+
+    void process(juce::AudioBuffer<float> &buffer)
+    {
+        const int n = buffer.getNumSamples();
+        if (n <= 0)
+            return;
+
+        dryBuffer.makeCopyOf(buffer, true);
+        wetBuffer.makeCopyOf(buffer, true);
+
+        chorus.setRate(params.rateHz);
+        chorus.setDepth(params.depth);
+        chorus.setCentreDelay(params.centreDelayMs);
+        chorus.setFeedback(params.feedback);
+        chorus.setMix(1.0f);
+
+        juce::dsp::AudioBlock<float> wetBlock(wetBuffer);
+        juce::dsp::ProcessContextReplacing<float> ctx(wetBlock);
+        chorus.process(ctx);
+
+        const float dryMix = std::pow(std::sin(0.5f * juce::float_Pi * (1.0f - params.mix)), 2.0f);
+        const float wetMix = std::pow(std::sin(0.5f * juce::float_Pi * params.mix), 2.0f);
+
+        const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            const float *dry = dryBuffer.getReadPointer(ch);
+            const float *wet = wetBuffer.getReadPointer(ch);
+            float *out = buffer.getWritePointer(ch);
+            for (int i = 0; i < n; ++i)
+                out[i] = dry[i] * dryMix + wet[i] * wetMix;
+        }
+    }
+
+private:
+    ChorusParameters params{0.8f, 0.35f, 7.0f, 0.1f, 0.35f};
+    juce::AudioBuffer<float> dryBuffer, wetBuffer;
+    juce::dsp::Chorus<float> chorus;
+};
+
+class ChorusAudioProcessor : public juce::AudioProcessor
+{
+public:
+    ChorusAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Chorus"; }
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    ChorusModule chorusFx;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChorusAudioProcessor)
+};
+
+// ****VIBRATO****
+
+struct VibratoParameters
+{
+    float rateHz;
+    float depth;
+    float centreDelayMs;
+    float mix;
+};
+
+class VibratoModule
+{
+public:
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        params.rateHz = apvts.getRawParameterValue("rate")->load();
+        params.depth = apvts.getRawParameterValue("depth")->load();
+        params.centreDelayMs = apvts.getRawParameterValue("centreDelay")->load();
+        params.mix = apvts.getRawParameterValue("mix")->load() * 0.01f;
+    }
+
+    void prepare(double sampleRate, int maxBlockSize)
+    {
+        dryBuffer.setSize(numOutputs, maxBlockSize);
+        wetBuffer.setSize(numOutputs, maxBlockSize);
+
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = (juce::uint32)maxBlockSize;
+        spec.numChannels = (juce::uint32)numOutputs;
+        vibrato.prepare(spec);
+        vibrato.reset();
+    }
+
+    void process(juce::AudioBuffer<float> &buffer)
+    {
+        const int n = buffer.getNumSamples();
+        if (n <= 0)
+            return;
+
+        dryBuffer.makeCopyOf(buffer, true);
+        wetBuffer.makeCopyOf(buffer, true);
+
+        vibrato.setRate(params.rateHz);
+        vibrato.setDepth(params.depth);
+        vibrato.setCentreDelay(params.centreDelayMs);
+        vibrato.setFeedback(0.0f);
+        vibrato.setMix(1.0f);
+
+        juce::dsp::AudioBlock<float> wetBlock(wetBuffer);
+        juce::dsp::ProcessContextReplacing<float> ctx(wetBlock);
+        vibrato.process(ctx);
+
+        const float dryMix = std::pow(std::sin(0.5f * juce::float_Pi * (1.0f - params.mix)), 2.0f);
+        const float wetMix = std::pow(std::sin(0.5f * juce::float_Pi * params.mix), 2.0f);
+
+        const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            const float *dry = dryBuffer.getReadPointer(ch);
+            const float *wet = wetBuffer.getReadPointer(ch);
+            float *out = buffer.getWritePointer(ch);
+            for (int i = 0; i < n; ++i)
+                out[i] = dry[i] * dryMix + wet[i] * wetMix;
+        }
+    }
+
+private:
+    VibratoParameters params{4.5f, 0.6f, 7.0f, 1.0f};
+    juce::AudioBuffer<float> dryBuffer, wetBuffer;
+    juce::dsp::Chorus<float> vibrato;
+};
+
+class VibratoAudioProcessor : public juce::AudioProcessor
+{
+public:
+    VibratoAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Vibrato"; }
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    VibratoModule vibratoFx;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VibratoAudioProcessor)
 };

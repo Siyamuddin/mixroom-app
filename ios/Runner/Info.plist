@@ -112,25 +112,24 @@
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>com.mixroom.project</string>
-			<key>UTTypeDescription</key>
-			<string>Mixroom Project</string>
 			<key>UTTypeConformsTo</key>
 			<array>
-			<string>public.data</string>
+				<string>public.data</string>
 			</array>
+			<key>UTTypeDescription</key>
+			<string>Mixroom Project</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.mixroom.project</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
-			<key>public.filename-extension</key>
-			<array>
-				<string>mixroom</string>
-			</array>
-			<key>public.mime-type</key>
-			<string>application/x-mixroom</string>
+				<key>public.filename-extension</key>
+				<array>
+					<string>mixroom</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/x-mixroom</string>
 			</dict>
 		</dict>
 	</array>
-
 </dict>
 </plist>

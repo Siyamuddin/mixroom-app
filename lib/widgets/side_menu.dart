@@ -2,10 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/screens/home.dart';
+import 'package:mixroom/helpers/app_popup.dart';
 import 'package:provider/provider.dart';
-import '../screens/video_editor.dart';
-import '../screens/effects.dart';
-import '../screens/account.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
@@ -26,7 +24,11 @@ class SideMenu extends StatelessWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to open store: $e')));
+        showAppSnackBar(
+          context,
+          'Failed to open store: $e',
+          tone: AppPopupTone.error,
+        );
       }
     }
   }
@@ -55,7 +57,10 @@ class SideMenu extends StatelessWidget {
                       onTap: () async {
                         await JuceAudioEngine.shutdown();
                         Navigator.pop(context);
-                        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const HomeScreen()));
+                        Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) => const HomeScreen()));
                       },
                     ),
                     ListTile(
@@ -103,7 +108,8 @@ class SideMenu extends StatelessWidget {
                       //   '© Mixroom',
                       //   style: TextStyle(fontSize: 12, color: Colors.grey),
                       // ),
-                      Text(L10n.translate(context, '© Mixroom'), style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      Text(L10n.translate(context, '© Mixroom'),
+                          style: TextStyle(fontSize: 12, color: Colors.grey)),
                       // Text(
                       //   'Powered by Mixroom',
                       //   style: TextStyle(fontSize: 12, color: Colors.grey),
@@ -125,7 +131,8 @@ Widget _buildLanguageSelector(BuildContext context) {
   return Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
     child: DropdownButton<Locale>(
-      value: Provider.of<LocaleProvider>(context).locale ?? L10n.getDeviceLocale(context),
+      value: Provider.of<LocaleProvider>(context).locale ??
+          L10n.getDeviceLocale(context),
       isExpanded: true,
       items: L10n.supportedLocales.map((locale) {
         return DropdownMenuItem(
@@ -134,7 +141,8 @@ Widget _buildLanguageSelector(BuildContext context) {
             children: [
               _getFlag(locale.languageCode),
               const SizedBox(width: 12),
-              Text(locale.languageCode.toUpperCase(), style: const TextStyle(fontSize: 16)),
+              Text(locale.languageCode.toUpperCase(),
+                  style: const TextStyle(fontSize: 16)),
             ],
           ),
         );
@@ -156,5 +164,6 @@ Widget _getFlag(String languageCode) {
     'zh': '🇨🇳', // China flag
     'ja': '🇯🇵', // Japan flag
   };
-  return Text(flags[languageCode] ?? '🌐', style: const TextStyle(fontSize: 24));
+  return Text(flags[languageCode] ?? '🌐',
+      style: const TextStyle(fontSize: 24));
 }

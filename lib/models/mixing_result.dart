@@ -9,6 +9,15 @@ class MixAction {
   /// - adjust_effect_param_by_name  {row, effect_name_contains, param_name OR param_name_contains_any,
   ///                                 mode:set|delta, value|value_norm?, delta|delta_norm?,
   ///                                 clamp_0_1?, skip_if_missing_effect?}
+  /// - set_master_gain              {mode:set|delta, value|delta}
+  /// - set_master_pan               {mode:set|delta, value|delta}
+  /// - ensure_master_effect         {effect_name_contains}
+  /// - delete_master_effect         {effect_name_contains}
+  /// - adjust_master_effect_param_by_name
+  ///                                {effect_name_contains, param_name OR param_name_contains_any,
+  ///                                 mode:set|delta, value|value_norm?, delta|delta_norm?,
+  ///                                 clamp_0_1?, skip_if_missing_effect?}
+  /// - hard_reset_master_fx         {}
   /// - noop
   final String type;
   final Map<String, dynamic> data;
@@ -64,11 +73,13 @@ class MixingResult {
 class ChatPipelineResult {
   final String message;
   final MixingResult? mixing;
+  final Map<String, dynamic>? meta;
 
-  const ChatPipelineResult.message(this.message) : mixing = null;
-  const ChatPipelineResult.mix(this.mixing, this.message);
+  const ChatPipelineResult.message(this.message, {this.meta}) : mixing = null;
+  const ChatPipelineResult.mix(this.mixing, this.message, {this.meta});
 
-  bool get hasMix => mixing != null && !(mixing!.isNoOp || mixing!.actions.isEmpty);
+  bool get hasMix =>
+      mixing != null && !(mixing!.isNoOp || mixing!.actions.isEmpty);
 
   @override
   String toString() {

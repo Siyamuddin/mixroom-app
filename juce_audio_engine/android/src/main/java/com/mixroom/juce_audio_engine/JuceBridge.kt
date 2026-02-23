@@ -23,6 +23,7 @@ object JuceBridge {
     @JvmStatic external fun seekJNI(trackIndex: Int, positionSeconds: Double)
     @JvmStatic external fun getCurrentPositionJNI(trackIndex: Int): Double
     @JvmStatic external fun getTrackDurationJNI(trackIndex: Int): Double
+    @JvmStatic external fun getHostSampleRateJNI(): Double
 
     // Volume & bypass
     @JvmStatic external fun setTrackVolumeJNI(trackIndex: Int, volume: Float)
@@ -41,8 +42,24 @@ object JuceBridge {
     @JvmStatic external fun getPluginBypassStateJNI(trackIndex: Int, effectIndex: Int): Boolean
 
     // Export
-    @JvmStatic external fun exportMixJNI(outputPath: String): String
-    @JvmStatic external fun exportTrackJNI(trackIndex: Int, outputPath: String): String
+    @JvmStatic external fun exportMixJNI(
+        outputPath: String,
+        format: String,
+        sampleRate: Int,
+        wavBitDepth: Int,
+        wavDithering: Boolean,
+        mp3BitrateKbps: Int
+    ): String
+
+    @JvmStatic external fun exportTrackJNI(
+        trackIndex: Int,
+        outputPath: String,
+        format: String,
+        sampleRate: Int,
+        wavBitDepth: Int,
+        wavDithering: Boolean,
+        mp3BitrateKbps: Int
+    ): String
 
     // Plugin discovery
     @JvmStatic external fun getAvailablePluginsJNI(): ArrayList<HashMap<String, String>>

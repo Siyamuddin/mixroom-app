@@ -1040,3 +1040,147 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeesserAudioProcessor)
 };
+
+// ****CLIPPER****
+
+struct ClipperParameters
+{
+    float threshold;
+    float ceiling;
+};
+
+class ClipperModule
+{
+public:
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        parameters.threshold = apvts.getRawParameterValue("threshold")->load();
+        parameters.ceiling = apvts.getRawParameterValue("ceiling")->load();
+    }
+
+    void prepare(double inputSampleRate, int maxBlockSize)
+    {
+        juce::ignoreUnused(inputSampleRate);
+        bufferSize = maxBlockSize;
+        oversampledBufferSize = maxBlockSize * 4;
+        oversampler.reset();
+        oversampler.initProcessing((size_t)maxBlockSize);
+    }
+
+    void process(const juce::dsp::ProcessContextReplacing<float> &context)
+    {
+        auto &outputBlock = context.getOutputBlock();
+        auto upsampledBlock = oversampler.processSamplesUp(context.getInputBlock());
+        const int nUp = (int)upsampledBlock.getNumSamples();
+
+        clipBlock(upsampledBlock, nUp, oversampledGainReduction);
+        oversampler.processSamplesDown(outputBlock);
+
+        const int n = (int)outputBlock.getNumSamples();
+        clipBlock(outputBlock, n, normalGainReduction);
+        applyGain(outputBlock, n);
+    }
+
+    std::array<float, numOutputs> getGainReduction() const
+    {
+        return {
+            oversampledGainReduction[0] + normalGainReduction[0],
+            oversampledGainReduction[1] + normalGainReduction[1]};
+    }
+
+    int getOversamplerLatency() const
+    {
+        return (int)oversampler.getLatencyInSamples();
+    }
+
+    void reset()
+    {
+        oversampler.reset();
+    }
+
+private:
+    void clipBlock(juce::dsp::AudioBlock<float> &block,
+                   int blockSize,
+                   std::array<float, numOutputs> &outGr)
+    {
+        outGr = {0.0f, 0.0f};
+        std::array<float, numOutputs> tempGr{0.0f, 0.0f};
+
+        const float thresholdHigh = juce::Decibels::decibelsToGain(parameters.threshold);
+        const float thresholdLow = -thresholdHigh;
+
+        for (int sample = 0; sample < blockSize; ++sample)
+        {
+            for (int channel = 0; channel < numOutputs; ++channel)
+            {
+                const float inputSample = block.getSample(channel, sample);
+                const float outputSample = juce::jlimit(thresholdLow, thresholdHigh, inputSample);
+
+                if (inputSample != outputSample)
+                    tempGr[channel] = juce::Decibels::gainToDecibels(std::abs(inputSample) + 1.0e-9f) - parameters.threshold;
+
+                outGr[channel] = juce::jmax(tempGr[channel], outGr[channel]);
+                block.setSample(channel, sample, outputSample);
+            }
+        }
+    }
+
+    void applyGain(juce::dsp::AudioBlock<float> &block, int blockSize)
+    {
+        const float autoGain = juce::Decibels::decibelsToGain(-parameters.threshold);
+        const float ceilingGain = juce::Decibels::decibelsToGain(parameters.ceiling);
+
+        for (int sample = 0; sample < blockSize; ++sample)
+            for (int channel = 0; channel < numOutputs; ++channel)
+                block.setSample(channel, sample, block.getSample(channel, sample) * autoGain * ceilingGain);
+    }
+
+    int bufferSize{0};
+    int oversampledBufferSize{0};
+    ClipperParameters parameters{0.0f, 0.0f};
+    std::array<float, numOutputs> oversampledGainReduction{0.0f, 0.0f};
+    std::array<float, numOutputs> normalGainReduction{0.0f, 0.0f};
+    juce::dsp::Oversampling<float> oversampler{
+        2, 2,
+        juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR,
+        false, true};
+};
+
+class ClipperAudioProcessor : public juce::AudioProcessor
+{
+public:
+    ClipperAudioProcessor();
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    void processBlockBypassed(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool acceptsMidi() const override;
+    bool producesMidi() const override;
+    bool isMidiEffect() const override;
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    ~ClipperAudioProcessor() override {}
+    const juce::String getName() const override { return "Mixroom Clipper"; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+    bool hasEditor() const override { return true; }
+
+    juce::AudioProcessorValueTreeState parameters;
+    std::array<float, numOutputs> gainReduction;
+
+private:
+    ClipperModule clipper;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipperAudioProcessor)
+};

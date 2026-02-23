@@ -40,3 +40,6 @@ ios/Flutter/Flutter.podspec
 # for juce_audio_engine binary
 *.a
 *.xcframework
+
+# python
+.venv/

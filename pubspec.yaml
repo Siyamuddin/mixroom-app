@@ -39,6 +39,7 @@ dependencies:
   # video_editor_2: ^3.1.0
   # video_trimmer: ^4.0.2
   file_picker: ^10.3.3
+  accessing_security_scoped_resource: ^3.4.0
 
   # ios
   # ffmpeg_kit_flutter_full_gpl: ^6.0.3 #ffmpeg_kit_flutter_min: ^6.0.3
@@ -74,7 +75,6 @@ dependencies:
   video_player: ^2.10.0
   audioplayers: ^6.4.0
   # python_shell: ^0.0.7
-  flutter_sound: ^9.26.0
   google_fonts: ^6.2.1
   # flutter_blue_plus: ^1.35.3   // UNCOMMENT ONCE TO ENABLE BLUETOOTH FUNCTION
   # flutter_reactive_ble: ^5.4.0  // UNCOMMENT ONCE TO ENABLE BLUETOOTH FUNCTION
@@ -103,6 +103,7 @@ dependencies:
   juce_audio_engine:
       path: juce_audio_engine
   flutter_neumorphic_plus: ^3.4.0
+  path: ^1.9.1
   path_provider: ^2.1.5
   http: ^1.5.0
   image: ^4.5.4
@@ -195,6 +196,9 @@ flutter:
     - assets/mixroom_logo202_home.png
     - assets/magnet-solid-full.svg
     - assets/models/yamnet.onnx
+    # Enable after exporting trained models:
+    # - assets/models/mix_apply_classifier.onnx
+    # - assets/models/mix_magnitude_regressor.onnx
     # - assets/models/gemma-2b-it-gpu-int4.bin
     # - assets/models/phi3-mini.gguf (don't use)
     # - assets/models/hammer-2.1-0.5b-gpu-int8.task

@@ -142,11 +142,25 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSArray* plugins = [JuceBridge scanPluginsObjC];
         result(plugins);
     } else if ([call.method isEqualToString:@"exportMix"]) {
-        NSString* out = [JuceBridge exportMixObjC:args[@"outPath"]];
+        NSString* out = [JuceBridge exportMixObjC:args[@"outPath"] settings:args];
         result(out);
     } else if ([call.method isEqualToString:@"exportTrack"]) {
         NSInteger track = [args[@"track"] integerValue];
-        NSString* out = [JuceBridge exportTrackObjC:track outPath:args[@"outPath"]];
+        NSString* out = [JuceBridge exportTrackObjC:track outPath:args[@"outPath"] settings:args];
+        result(out);
+    } else if ([call.method isEqualToString:@"renderInstrumentClip"]) {
+        NSString *outPath = args[@"outPath"] ?: @"";
+        NSString *instrumentId = args[@"instrumentId"] ?: @"mixroom.basic_synth";
+        NSString *instrumentName = args[@"instrumentName"] ?: @"Basic Synth";
+        double bpm = [args[@"bpm"] doubleValue];
+        NSArray *notes = args[@"notes"] ?: @[];
+        NSDictionary *params = args[@"params"] ?: @{};
+        NSString *out = [JuceBridge renderInstrumentClipObjC:outPath
+                                                instrumentId:instrumentId
+                                              instrumentName:instrumentName
+                                                         bpm:bpm
+                                                       notes:notes
+                                                      params:params];
         result(out);
     } else if ([call.method isEqualToString:@"bypassPlugin"]) {
         NSDictionary* a = call.arguments;
@@ -198,11 +212,63 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     // ----------------------------------------
     // NEW CLIP-LEVEL API
     // ----------------------------------------
+    } else if ([call.method isEqualToString:@"supportsLiveMidiClipPlayback"]) {
+        result(@([JuceBridge supportsLiveMidiClipPlaybackObjC]));
+    } else if ([call.method isEqualToString:@"loadMidiClip"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        NSInteger rowId = [args[@"rowId"] integerValue];
+        if (args[@"row"] != nil) rowId = [args[@"row"] integerValue];
+        NSString *instrumentId = args[@"instrumentId"] ?: @"mixroom.basic_synth";
+        NSString *instrumentName = args[@"instrumentName"] ?: @"Basic Synth";
+        NSArray *notes = args[@"notes"] ?: @[];
+        NSDictionary *params = args[@"params"] ?: @{};
+        double sourceTempoBpm = [args[@"sourceTempoBpm"] doubleValue];
+        double startSec = [args[@"startSec"] doubleValue];
+        double lengthSec = [args[@"lengthSec"] doubleValue];
+        double inFileOffsetSec = [args[@"inFileOffsetSec"] doubleValue];
+        BOOL ok = [JuceBridge loadMidiClipObjC:clip
+                                         rowId:rowId
+                                  instrumentId:instrumentId
+                                instrumentName:instrumentName
+                                         notes:notes
+                                        params:params
+                                sourceTempoBpm:sourceTempoBpm
+                                      startSec:startSec
+                                     lengthSec:lengthSec
+                               inFileOffsetSec:inFileOffsetSec];
+        result(@(ok));
+    } else if ([call.method isEqualToString:@"updateMidiClipEvents"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        NSString *instrumentId = args[@"instrumentId"] ?: @"mixroom.basic_synth";
+        NSString *instrumentName = args[@"instrumentName"] ?: @"Basic Synth";
+        NSArray *notes = args[@"notes"] ?: @[];
+        NSDictionary *params = args[@"params"] ?: @{};
+        double sourceTempoBpm = [args[@"sourceTempoBpm"] doubleValue];
+        BOOL ok = [JuceBridge updateMidiClipObjC:clip
+                                     instrumentId:instrumentId
+                                   instrumentName:instrumentName
+                                            notes:notes
+                                           params:params
+                                   sourceTempoBpm:sourceTempoBpm];
+        result(@(ok));
     } else if ([call.method isEqualToString:@"loadClip"]) {
         NSInteger clip = [args[@"clip"] integerValue];
-        NSInteger row  = [args[@"row"] integerValue];
+        NSInteger rowId  = [args[@"rowId"] integerValue];
+        if (args[@"row"] != nil) rowId = [args[@"row"] integerValue]; // backward compat
         NSString *path = args[@"path"];
-        [JuceBridge loadClipObjC:clip rowIndex:row path:path];
+        double startSec = [args[@"startSec"] doubleValue];
+        double lengthSec = [args[@"lengthSec"] doubleValue];
+        double inFileOffsetSec = [args[@"inFileOffsetSec"] doubleValue];
+        [JuceBridge loadClipObjC:clip
+                           rowId:rowId
+                            path:path
+                        startSec:startSec
+                       lengthSec:lengthSec
+                 inFileOffsetSec:inFileOffsetSec];
+        result(nil);
+    } else if ([call.method isEqualToString:@"unloadClip"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        [JuceBridge unloadClipObjC:clip];
         result(nil);
     } else if ([call.method isEqualToString:@"setClipGain"]) {
         NSInteger clip = [args[@"clip"] integerValue];
@@ -214,6 +280,19 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         float pan      = [args[@"pan"] floatValue];
         [JuceBridge setClipPanObjC:clip pan:pan];
         result(nil);
+    } else if ([call.method isEqualToString:@"setClipPitch"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        float semitones = [args[@"semitones"] floatValue];
+        [JuceBridge setClipPitchObjC:clip semitones:semitones];
+        result(nil);
+    } else if ([call.method isEqualToString:@"setClipStretchOptions"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        double tempoRatio = [args[@"tempoRatio"] doubleValue];
+        BOOL preservePitch = [args[@"preservePitch"] boolValue];
+        [JuceBridge setClipStretchOptionsObjC:clip
+                                   tempoRatio:tempoRatio
+                                preservePitch:preservePitch];
+        result(nil);
     } else if ([call.method isEqualToString:@"muteClip"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         BOOL mute      = [args[@"mute"] boolValue];
@@ -221,8 +300,63 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result(nil);
     } else if ([call.method isEqualToString:@"moveClipToRow"]) {
         NSInteger clip = [args[@"clip"] integerValue];
-        NSInteger row  = [args[@"row"] integerValue];
-        [JuceBridge moveClipToRowObjC:clip newRow:row];
+        NSInteger rowId  = [args[@"rowId"] integerValue];
+        if (args[@"row"] != nil) rowId = [args[@"row"] integerValue]; // backward compat
+        [JuceBridge moveClipToRowObjC:clip newRowId:rowId];
+        result(nil);
+    } else if ([call.method isEqualToString:@"setClipTime"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        double startSec = [args[@"startSec"] doubleValue];
+        double lengthSec = [args[@"lengthSec"] doubleValue];
+        double inFileOffsetSec = [args[@"inFileOffsetSec"] doubleValue];
+        [JuceBridge setClipTimeObjC:clip
+                           startSec:startSec
+                          lengthSec:lengthSec
+                    inFileOffsetSec:inFileOffsetSec];
+        result(nil);
+    } else if ([call.method isEqualToString:@"addRow"]) {
+        NSString *name = args[@"name"] ?: @"Row";
+        NSInteger iconId = [args[@"iconId"] integerValue];
+        result([JuceBridge addRowObjC:name iconId:iconId]);
+    } else if ([call.method isEqualToString:@"insertRowAbove"]) {
+        NSInteger referenceRowId = [args[@"referenceRowId"] integerValue];
+        NSString *name = args[@"name"] ?: @"Row";
+        NSInteger iconId = [args[@"iconId"] integerValue];
+        result([JuceBridge insertRowAboveObjC:referenceRowId name:name iconId:iconId]);
+    } else if ([call.method isEqualToString:@"insertRowBelow"]) {
+        NSInteger referenceRowId = [args[@"referenceRowId"] integerValue];
+        NSString *name = args[@"name"] ?: @"Row";
+        NSInteger iconId = [args[@"iconId"] integerValue];
+        result([JuceBridge insertRowBelowObjC:referenceRowId name:name iconId:iconId]);
+    } else if ([call.method isEqualToString:@"deleteRow"] || [call.method isEqualToString:@"removeRow"]) {
+        NSInteger rowId = [args[@"rowId"] integerValue];
+        if (args[@"row"] != nil) rowId = [args[@"row"] integerValue];
+        result(@([JuceBridge removeRowObjC:rowId]));
+    } else if ([call.method isEqualToString:@"moveRowOrder"]) {
+        NSInteger from = [args[@"from"] integerValue];
+        NSInteger to = [args[@"to"] integerValue];
+        result(@([JuceBridge moveRowOrderObjC:from toIndex:to]));
+    } else if ([call.method isEqualToString:@"renameRow"]) {
+        NSInteger rowId = [args[@"rowId"] integerValue];
+        if (args[@"row"] != nil) rowId = [args[@"row"] integerValue];
+        NSString *name = args[@"name"] ?: @"Row";
+        result(@([JuceBridge renameRowObjC:rowId name:name]));
+    } else if ([call.method isEqualToString:@"setRowIcon"]) {
+        NSInteger rowId = [args[@"rowId"] integerValue];
+        if (args[@"row"] != nil) rowId = [args[@"row"] integerValue];
+        NSInteger iconId = [args[@"iconId"] integerValue];
+        result(@([JuceBridge setRowIconObjC:rowId iconId:iconId]));
+    } else if ([call.method isEqualToString:@"getRowList"] || [call.method isEqualToString:@"getRows"]) {
+        result([JuceBridge getRowsObjC]);
+    } else if ([call.method isEqualToString:@"setTransportSeconds"]) {
+        double t = [args[@"timeSeconds"] doubleValue];
+        [JuceBridge setTransportSecondsObjC:t];
+        result(nil);
+    } else if ([call.method isEqualToString:@"getTransportSeconds"]) {
+        result(@([JuceBridge getTransportSecondsObjC]));
+    } else if ([call.method isEqualToString:@"seekTransport"]) {
+        double t = [args[@"timeSeconds"] doubleValue];
+        [JuceBridge setTransportSecondsObjC:t];
         result(nil);
 
     // ----------------------------------------
@@ -231,8 +365,14 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"insertTrackEffect"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSString *path = args[@"path"];
-        [JuceBridge insertTrackEffectObjC:row path:path];
-        result(nil);
+        BOOL ok = [JuceBridge insertTrackEffectObjC:row path:path];
+        if (ok) {
+            result(@(YES));
+        } else {
+            result([FlutterError errorWithCode:@"insert_track_effect_failed"
+                                       message:@"Failed to insert row effect"
+                                       details:@{@"row": @(row), @"path": path ?: @""}]);
+        }
     } else if ([call.method isEqualToString:@"removeTrackEffect"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
@@ -247,6 +387,9 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"getTrackEffectsForRow"]) {
         NSInteger row = [args[@"row"] integerValue];
         result([JuceBridge getTrackEffectsForRowObjC:row]);
+    } else if ([call.method isEqualToString:@"getTrackEffectIdsForRow"]) {
+        NSInteger row = [args[@"row"] integerValue];
+        result([JuceBridge getTrackEffectIdsForRowObjC:row]);
     } else if ([call.method isEqualToString:@"setTrackEffect"]) {
         NSInteger row    = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
@@ -299,8 +442,14 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     // ----------------------------------------
     } else if ([call.method isEqualToString:@"insertMasterEffect"]) {
         NSString *path = args[@"path"];
-        [JuceBridge insertMasterEffectObjC:path];
-        result(nil);
+        BOOL ok = [JuceBridge insertMasterEffectObjC:path];
+        if (ok) {
+            result(@(YES));
+        } else {
+            result([FlutterError errorWithCode:@"insert_master_effect_failed"
+                                       message:@"Failed to insert master effect"
+                                       details:@{@"path": path ?: @""}]);
+        }
     } else if ([call.method isEqualToString:@"removeMasterEffect"]) {
         NSInteger effect = [args[@"effect"] integerValue];
         [JuceBridge removeMasterEffectObjC:effect];
@@ -312,6 +461,8 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result(nil);
     } else if ([call.method isEqualToString:@"getMasterEffects"]) {
         result([JuceBridge getMasterEffectsObjC]);
+    } else if ([call.method isEqualToString:@"getMasterEffectIds"]) {
+        result([JuceBridge getMasterEffectIdsObjC]);
     } else if ([call.method isEqualToString:@"setMasterEffect"]) {
         NSInteger effect = [args[@"effect"] integerValue];
         NSString *param  = args[@"paramId"];
@@ -401,6 +552,23 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSInteger effect = [call.arguments[@"effect"] integerValue];
         NSArray* arr = [JuceBridge getMasterCompressorMeterObjC:effect];
         result(arr);
+    }
+    else if ([call.method isEqualToString:@"getHostSampleRate"]) {
+        double sr = [JuceBridge getHostSampleRateObjC];
+        result(@(sr));
+    }
+    else if ([call.method isEqualToString:@"getRowEqWaveform"]) {
+        NSInteger row = [call.arguments[@"row"] integerValue];
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSInteger sampleCount = [call.arguments[@"sampleCount"] integerValue];
+        NSArray* arr = [JuceBridge getRowEqWaveformObjC:row effectIndex:effect sampleCount:sampleCount];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getMasterEqWaveform"]) {
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSInteger sampleCount = [call.arguments[@"sampleCount"] integerValue];
+        NSArray* arr = [JuceBridge getMasterEqWaveformObjC:effect sampleCount:sampleCount];
+        result(arr);
 
 
     // ----------------------------------------
@@ -438,6 +606,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSString *path = args[@"path"];
         NSArray *samples = [JuceBridge decodeAudioMono16kObjC:path];
         result(samples);
+    } else if ([call.method isEqualToString:@"analyzeAudioStereo16k"]) {
+        NSString *path = args[@"path"];
+        NSDictionary *stats = [JuceBridge analyzeAudioStereo16kObjC:path];
+        result(stats);
     } else if ([call.method isEqualToString:@"getInputDevices"]) {
     result([JuceBridge getInputDevicesObjC]);
     }

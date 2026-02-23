@@ -12,9 +12,11 @@ class LlmResult {
   const LlmResult({this.text, this.toolName, this.toolArgs});
 
   factory LlmResult.text(String text, Map<String, dynamic>? toolArgs) =>
-      LlmResult(text: text, toolName: 'informational_response', toolArgs: toolArgs);
+      LlmResult(
+          text: text, toolName: 'informational_response', toolArgs: toolArgs);
 
-  factory LlmResult.tool(String toolName, Map<String, dynamic> toolArgs, {String? text}) =>
+  factory LlmResult.tool(String toolName, Map<String, dynamic> toolArgs,
+          {String? text}) =>
       LlmResult(text: text, toolName: toolName, toolArgs: toolArgs);
 }
 
@@ -204,6 +206,10 @@ Rules:
 • Do NOT infer GLOBAL when an instrument or role is mentioned
 • Do NOT base scope solely on singular vs plural wording
 • MULTI-TRACK applies only to tracks sharing the referenced role, not to all tracks
+• Set target.scope to:
+  - "master" for overall/master-bus/finishing requests
+  - "row" for explicit track- or role-targeted requests
+  - "auto" when scope should be inferred by the local planner
 
 ────────────────────────────────
 CORE MIXING INTELLIGENCE RULES
@@ -278,8 +284,9 @@ You may ONLY influence the mix via these concepts:
 • Distortion (insert / adjust / delete)
 • De-Esser (insert / adjust / delete)
 • Compressor (insert / adjust / delete)
+• Limiter (insert / adjust / delete)
 
-DO NOT invent limiters, sidechains, or automation.
+DO NOT invent sidechains or automation.
 
 Numeric decisions are handled locally.
 You describe INTENT, not numbers.
@@ -349,7 +356,7 @@ GOAL FORMAT (MANDATORY)
 
   "intents": [
     {
-      "kind": "gain | pan | eq | reverb | delay | distortion | deesser | compressor | balance",
+      "kind": "gain | pan | eq | reverb | delay | distortion | deesser | compressor | limiter | balance",
       "direction": "up | down | left | right | center | widen | narrow | remove | null",
       "descriptor": "muddy | boxy | harsh | bright | thin | dull | boomy | sibilant | null",
       "confidence": 0.0 to 1.0
@@ -359,6 +366,7 @@ GOAL FORMAT (MANDATORY)
   "target": {
     "row_index": number | null,
     "role": "vocals | drums | bass | guitar | synth | null",
+    "scope": "auto | row | master",
     "confidence": 0.0 to 1.0
   },
 
@@ -399,6 +407,7 @@ Allowed kinds:
 - distortion
 - deesser
 - compressor
+- limiter
 - balance
 
 Allowed directions (or null):
@@ -552,12 +561,20 @@ If it is not, the response is INVALID. If unclear what the used language is, the
     required String projectSnapshot,
     MixingResult? pendingMix,
   }) async {
+    if (apiKey.trim().isEmpty) {
+      return LlmResult.text(
+        'AI is not configured. Launch with --dart-define=OPENAI_API_KEY=YOUR_KEY.',
+        null,
+      );
+    }
+
     final body = {
       'model': model,
       'temperature': 0.2,
       'instructions': _systemPrompt,
       'input': [
-        ...conversation.map((m) => {'role': m['role'], 'content': m['content']}),
+        ...conversation
+            .map((m) => {'role': m['role'], 'content': m['content']}),
         {'role': 'user', 'content': 'PROJECT_SNAPSHOT:\n$projectSnapshot'},
         if (pendingMix != null)
           {
@@ -639,8 +656,14 @@ If it is not, the response is INVALID. If unclear what the used language is, the
           'parameters': {
             'type': 'object',
             'properties': {
-              'message': {'type': 'string', 'description': 'Pure informational response. No mix changes.'},
-              'cancels_pending': {'type': 'boolean', 'description': 'Whether a pending mix is canceled or rejected.'},
+              'message': {
+                'type': 'string',
+                'description': 'Pure informational response. No mix changes.'
+              },
+              'cancels_pending': {
+                'type': 'boolean',
+                'description': 'Whether a pending mix is canceled or rejected.'
+              },
             },
             'required': ['message', 'cancels_pending'],
           },
@@ -739,7 +762,8 @@ If it is not, the response is INVALID. If unclear what the used language is, the
               },
               'assistant_message': {
                 'type': 'string',
-                'description': 'Single unified message describing the overall mix change',
+                'description':
+                    'Single unified message describing the overall mix change',
               },
               'asks_permission': {'type': 'boolean'},
               'actions': {
@@ -768,12 +792,23 @@ If it is not, the response is INVALID. If unclear what the used language is, the
                                   'distortion',
                                   'deesser',
                                   'compressor',
+                                  'limiter',
                                   'balance',
                                 ],
                               },
                               'direction': {
                                 'type': 'string',
-                                'enum': ['up', 'down', 'left', 'right', 'center', 'widen', 'narrow', 'remove', 'null'],
+                                'enum': [
+                                  'up',
+                                  'down',
+                                  'left',
+                                  'right',
+                                  'center',
+                                  'widen',
+                                  'narrow',
+                                  'remove',
+                                  'null'
+                                ],
                               },
                               'descriptor': {
                                 'type': 'string',
@@ -802,6 +837,10 @@ If it is not, the response is INVALID. If unclear what the used language is, the
                           'properties': {
                             'role': {'type': 'string'},
                             'row_index': {'type': 'integer'},
+                            'scope': {
+                              'type': 'string',
+                              'enum': ['auto', 'row', 'master']
+                            },
                             'confidence': {'type': 'number'},
                           },
                           'required': ['confidence'],
@@ -831,7 +870,10 @@ If it is not, the response is INVALID. If unclear what the used language is, the
 
     final response = await http.post(
       Uri.parse(_apiUrl),
-      headers: {'Authorization': 'Bearer $apiKey', 'Content-Type': 'application/json'},
+      headers: {
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json'
+      },
       body: jsonEncode(body),
     );
 
@@ -840,7 +882,8 @@ If it is not, the response is INVALID. If unclear what the used language is, the
       // print(response.body);
       // throw Exception('LLM error: ${response.body}');
       // return LlmResult.text('LLM error: ${response.body}');
-      return LlmResult.text('There has been an error, please try again in a moment.', null);
+      return LlmResult.text(
+          'There has been an error, please try again in a moment.', null);
     }
 
     final json = jsonDecode(response.body);
@@ -860,7 +903,9 @@ If it is not, the response is INVALID. If unclear what the used language is, the
         if (name == null) continue;
 
         final argsRaw = o['arguments'];
-        final Map<String, dynamic> args = argsRaw is String ? jsonDecode(argsRaw) : Map<String, dynamic>.from(argsRaw);
+        final Map<String, dynamic> args = argsRaw is String
+            ? jsonDecode(argsRaw)
+            : Map<String, dynamic>.from(argsRaw);
 
         if (name == 'informational_response') {
           return LlmResult.text(args['message']?.toString() ?? '', args);
@@ -884,12 +929,15 @@ If it is not, the response is INVALID. If unclear what the used language is, the
           // ✅ CRITICAL FIX:
           // If the model emitted a structured object, treat it as a tool call
           if (text is Map<String, dynamic>) {
-            toolResults.add(LlmResult.tool('mix_model_request', Map<String, dynamic>.from(text)));
+            toolResults.add(LlmResult.tool(
+                'mix_model_request', Map<String, dynamic>.from(text)));
             continue;
           }
 
           // Normal assistant text
-          if (text is String && text.trim().isNotEmpty && assistantText == null) {
+          if (text is String &&
+              text.trim().isNotEmpty &&
+              assistantText == null) {
             assistantText = text.trim();
           }
         }
@@ -939,10 +987,10 @@ If it is not, the response is INVALID. If unclear what the used language is, the
 
 //   /// 🔐 DO NOT hardcode in production
 //   // static const String _apiKey = String.fromEnvironment(
-//   //     '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');
+//   //     '<set-via-dart-define>');
 
 //   static const String _apiKey =
-//       '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';
+//       '<set-via-dart-define>';
 //   static const String _systemPrompt = r'''
 // You are MixAssistant, an on-device DAW mixing helper.
 

@@ -40,8 +40,4 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
   end
-  installer.pods_project.build_configurations.each do |config|
-    # Lock project format to Xcode 13-compatible (version 54)
-    config.build_settings['XCODE_PROJECT_FORMAT_VERSION'] = '3.0'  # Corresponds to Xcode 13
-  end
 end

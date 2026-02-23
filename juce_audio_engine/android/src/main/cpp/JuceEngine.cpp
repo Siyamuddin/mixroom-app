@@ -2,6 +2,7 @@
 #include <future>
 #include "JuceLogBridge.h" // Bring in the function
 #include <unordered_map>
+#include <cmath>
 #include <juce_core/native/juce_JNIHelpers_android.h>
 #include <android/log.h>
 
@@ -594,6 +595,8 @@ void JuceEngine::removePluginEffect(int trackIdx, int effectIndex)
     if (trackIdx < 0 || trackIdx >= trackEffectChains.size())
         return;
     auto *chain = trackEffectChains[trackIdx];
+    if (chain == nullptr)
+        return;
     if (effectIndex < 0 || effectIndex >= chain->size())
         return;
 
@@ -611,12 +614,17 @@ void JuceEngine::reorderPluginEffects(int trackIdx, int fromIndex, int toIndex)
     if (trackIdx < 0 || trackIdx >= trackEffectChains.size())
         return;
     auto *chain = trackEffectChains[trackIdx];
+    if (chain == nullptr)
+        return;
     if (fromIndex < 0 || fromIndex >= chain->size() || toIndex < 0 || toIndex > chain->size())
+        return;
+    if (fromIndex == toIndex)
         return;
 
     auto nodeID = chain->getReference(fromIndex);
 
     chain->removeRange(fromIndex, 1);
+    toIndex = juce::jlimit(0, chain->size(), toIndex);
     chain->insert(toIndex, nodeID);
 
     rewireTrackChain(trackIdx);
@@ -786,6 +794,17 @@ double JuceEngine::getTrackDuration(int trackIndex)
     return 0.0;
 }
 
+double JuceEngine::getHostSampleRate() const
+{
+    if (auto *device = deviceManager.getCurrentAudioDevice())
+    {
+        const double sr = device->getCurrentSampleRate();
+        if (sr > 1000.0)
+            return sr;
+    }
+    return 44100.0;
+}
+
 juce::StringArray JuceEngine::getTrackEffects(int trackIndex)
 {
     // juceLogToFlutter("Hello from  JuceEngine::getTrackEffects");
@@ -843,6 +862,10 @@ void JuceEngine::insertPluginEffect(int trackIdx, const juce::String &pluginPath
         else if (pluginPath == "Mixroom De-Esser")
         {
             plugin = std::make_unique<DeesserAudioProcessor>();
+        }
+        else if (pluginPath == "Mixroom Clipper")
+        {
+            plugin = std::make_unique<ClipperAudioProcessor>();
         }
         else
         {
@@ -1127,19 +1150,27 @@ Array<NamedValueSet> JuceEngine::getPluginParameterInfo(int trackIndex, int effe
                 e.set("type", "float");
                 e.set("min", fp->range.start);
                 e.set("max", fp->range.end);
-                e.set("default", fp->get());
+                e.set("default",
+                      fp->range.convertFrom0to1(p->getDefaultValue()));
                 e.set("value", fp->get());
             }
             else if (auto *bp = dynamic_cast<juce::AudioParameterBool *>(p))
             {
                 e.set("type", "bool");
-                e.set("default", bp->get());
+                e.set("default", p->getDefaultValue() >= 0.5f);
                 e.set("value", bp->get());
             }
             else if (auto *cp = dynamic_cast<juce::AudioParameterChoice *>(p))
             {
                 e.set("type", "choice");
-                e.set("default", cp->getCurrentChoiceName());
+                const int maxIndex = juce::jmax(0, cp->choices.size() - 1);
+                const int defaultIndex = juce::jlimit(
+                    0,
+                    maxIndex,
+                    juce::roundToInt(p->getDefaultValue() * (float)maxIndex));
+                e.set("default",
+                      cp->choices.isEmpty() ? juce::String()
+                                            : cp->choices[defaultIndex]);
                 for (int j = 0; j < cp->choices.size(); ++j)
                     e.set("choice_" + juce::String(j), cp->choices[j]);
                 e.set("value", cp->getCurrentChoiceName());
@@ -1207,24 +1238,70 @@ Array<NamedValueSet> JuceEngine::getPluginParameterInfo(int trackIndex, int effe
     return results;
 }
 
+namespace
+{
+JuceEngine::ExportOptions sanitiseExportOptions(const JuceEngine::ExportOptions &input)
+{
+    JuceEngine::ExportOptions out = input;
+    out.format = out.format.toLowerCase();
+    if (!(out.format == "wav" || out.format == "mp3"))
+        out.format = "wav";
+
+    out.sampleRate = juce::jlimit(8000.0, 192000.0, out.sampleRate);
+    if (!(out.wavBitDepth == 16 || out.wavBitDepth == 24 || out.wavBitDepth == 32))
+        out.wavBitDepth = 16;
+    out.mp3BitrateKbps = juce::jlimit(32, 320, out.mp3BitrateKbps);
+    return out;
+}
+
+void applyTpdfDither(juce::AudioBuffer<float> &buffer, int bitDepth)
+{
+    if (bitDepth >= 32)
+        return;
+
+    const float lsb = 1.0f / (float)(1 << (bitDepth - 1));
+    juce::Random rng;
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+    {
+        float *data = buffer.getWritePointer(ch);
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            const float n = (rng.nextFloat() - rng.nextFloat()) * lsb;
+            data[i] += n;
+        }
+    }
+}
+} // namespace
+
 // EXPORT OF ENTIRE MIX (NOT PER-TRACK)
-String JuceEngine::exportMix(const File &outFile)
+String JuceEngine::exportMix(const File &outFile, const ExportOptions &rawOptions)
 {
     juceLogToFlutter("Hello from JuceEngine::exportMix");
+    const auto options = sanitiseExportOptions(rawOptions);
+
+    if (options.format == "mp3")
+    {
+        juceLogToFlutter("❌ JUCE native MP3 export is not available on this mobile build.");
+        return {};
+    }
 
     WavAudioFormat fmt;
     auto fs = std::unique_ptr<FileOutputStream>(outFile.createOutputStream());
     if (!fs)
         return {};
-    double sr = 44100.0;
-    int bs = 512, nc = 2, bp = 16;
+    const double sr = options.sampleRate;
+    AudioIODevice *dev = deviceManager.getCurrentAudioDevice();
+    const double liveSampleRate = dev ? dev->getCurrentSampleRate() : 44100.0;
+    const int liveBlockSize = dev ? dev->getCurrentBufferSizeSamples() : 512;
+    const int bs = juce::jlimit(64, 4096, liveBlockSize > 0 ? liveBlockSize : 512);
+    const int nc = 2;
+    const int bp = options.wavBitDepth;
     auto w = std::unique_ptr<AudioFormatWriter>(
         fmt.createWriterFor(fs.get(), sr, nc, bp, {}, 0));
     if (!w)
         return {};
     fs.release();
 
-    graph.prepareToPlay(sr, bs);
     AudioBuffer<float> buf(nc, bs);
     MidiBuffer midi;
 
@@ -1240,23 +1317,81 @@ String JuceEngine::exportMix(const File &outFile)
         }
     }
 
-    int64 written = 0;
-    while (written < total)
+    if (total <= 0)
+        return outFile.getFullPathName();
+
+    auto runOfflinePass = [&](bool writeOutput, float outputGain, float *peakOut)
     {
-        buf.clear();
-        graph.processBlock(buf, midi);
-        int toWrite = (int)std::min<int64>(bs, total - written);
-        w->writeFromAudioSampleBuffer(buf, 0, toWrite);
-        written += toWrite;
+        graph.prepareToPlay(sr, bs);
+
+        int64 processed = 0;
+        while (processed < total)
+        {
+            const int toDo = (int)std::min<int64>(bs, total - processed);
+            buf.clear();
+            midi.clear();
+            graph.processBlock(buf, midi);
+
+            if (peakOut != nullptr)
+            {
+                for (int ch = 0; ch < nc; ++ch)
+                {
+                    const float *data = buf.getReadPointer(ch);
+                    for (int i = 0; i < toDo; ++i)
+                        *peakOut = juce::jmax(*peakOut, std::abs(data[i]));
+                }
+            }
+
+            if (writeOutput)
+            {
+                if (outputGain < 0.9999f)
+                    buf.applyGain(outputGain);
+                if (options.wavDithering)
+                    applyTpdfDither(buf, bp);
+                w->writeFromAudioSampleBuffer(buf, 0, toDo);
+            }
+
+            processed += toDo;
+        }
+    };
+
+    float peak = 0.0f;
+    runOfflinePass(false, 1.0f, &peak);
+
+    constexpr float kExportCeilingDb = -1.0f;
+    const float ceilingLinear = std::pow(10.0f, kExportCeilingDb / 20.0f);
+    float exportGain = 1.0f;
+    if (peak > ceilingLinear && peak > 0.0f)
+        exportGain = ceilingLinear / peak;
+
+    if (exportGain < 0.9999f)
+    {
+        juceLogToFlutter(("⚠️ exportMix auto-trim: " +
+                          juce::String(juce::Decibels::gainToDecibels(exportGain), 2) +
+                          " dB")
+                             .toRawUTF8());
     }
+
+    runOfflinePass(true, exportGain, nullptr);
+    graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
+                        liveBlockSize > 0 ? liveBlockSize : 512);
 
     return outFile.getFullPathName();
 }
 
 // PER-TRACK EXPORT
-juce::String JuceEngine::exportTrack(int trackIndex, const juce::File &outFile)
+juce::String JuceEngine::exportTrack(int trackIndex,
+                                     const juce::File &outFile,
+                                     const ExportOptions &rawOptions)
 {
     juceLogToFlutter("▶️ exportTrack (overwrite + FX + gain) BEGIN");
+    const auto options = sanitiseExportOptions(rawOptions);
+
+    if (options.format == "mp3")
+    {
+        juceLogToFlutter("❌ JUCE native MP3 exportTrack is not available on this mobile build.");
+        return {};
+    }
 
     // 0) Validate trackIndex & get sourceFile
     if (trackIndex < 0 || trackIndex >= trackNodes.size())
@@ -1313,6 +1448,11 @@ juce::String JuceEngine::exportTrack(int trackIndex, const juce::File &outFile)
     int numChannels = (int)reader->numChannels;   // e.g. 2 if stereo
     double sampleRate = reader->sampleRate;       // e.g. 48000 if file is 48 kHz
     int64 totalSamples = reader->lengthInSamples; // total length in samples
+
+    if (std::abs(sampleRate - options.sampleRate) > 1.0)
+    {
+        juceLogToFlutter("⚠️ exportTrack ignores custom sampleRate for now; keeping source sampleRate.");
+    }
 
     // juceLogToFlutter(("ℹ️ exportTrack: sourceFile → "
     //                   + String(numChannels) + "ch, "
@@ -1403,6 +1543,8 @@ juce::String JuceEngine::exportTrack(int trackIndex, const juce::File &outFile)
                         cloned = std::make_unique<DistortionAudioProcessor>();
                     else if (name == "Mixroom De-Esser")
                         cloned = std::make_unique<DeesserAudioProcessor>();
+                    else if (name == "Mixroom Clipper")
+                        cloned = std::make_unique<ClipperAudioProcessor>();
                     else
                     {
                         juceLogToFlutter("❌ exportTrack: unsupported native FX");
@@ -1439,7 +1581,7 @@ juce::String JuceEngine::exportTrack(int trackIndex, const juce::File &outFile)
         return {};
     }
 
-    const int bitsPerSample = 16;
+    const int bitsPerSample = options.wavBitDepth;
     std::unique_ptr<juce::AudioFormatWriter> writer(
         wavFormat.createWriterFor(
             fs.get(), // <– raw pointer to FileOutputStream
@@ -1493,6 +1635,9 @@ juce::String JuceEngine::exportTrack(int trackIndex, const juce::File &outFile)
             userGain = gainProcessors[trackIndex]->gain->get();
         float perceptualGain = std::min<float>(userGain * userGain, 9.0f); // std::min<int64>(userGain * userGain, 9.0f);
         buffer.applyGain(perceptualGain);
+
+        if (options.wavDithering)
+            applyTpdfDither(buffer, bitsPerSample);
 
         // 5d) Write that block into WAV
         writer->writeFromAudioSampleBuffer(buffer, 0, howMany);
@@ -1572,6 +1717,8 @@ void JuceEngine::bypassPlugin(int trackIndex, int effectIndex, bool shouldBypass
         return;
 
     auto *chain = trackEffectChains[trackIndex];
+    if (chain == nullptr)
+        return;
     if (effectIndex < 0 || effectIndex >= chain->size())
         return;
 
@@ -1588,6 +1735,8 @@ bool JuceEngine::getPluginBypassState(int trackIndex, int effectIndex)
         return false;
 
     auto *chain = trackEffectChains[trackIndex];
+    if (chain == nullptr)
+        return false;
     if (effectIndex < 0 || effectIndex >= chain->size())
         return false;
 
