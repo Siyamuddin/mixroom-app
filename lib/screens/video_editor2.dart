@@ -62,6 +62,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
+import 'package:mixroom/helpers/subscription_service.dart';
+import 'package:mixroom/models/subscription_models.dart';
 import 'package:mixroom/widgets/side_menu.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -82,6 +84,7 @@ import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:mixroom/screens/home.dart';
 import 'package:mixroom/screens/mini_timeline_pro.dart';
 import 'package:easy_video_editor/easy_video_editor.dart';
+import 'package:mixroom/widgets/export_success_preview_player.dart';
 
 Completer<void> _cancelSignal = Completer();
 
@@ -128,14 +131,39 @@ class _AudioExportSettings {
 // ----------------- //
 class VideoEditorScreen2 extends StatefulWidget {
   final String mode;
+  final bool? isProEntitled;
 
-  const VideoEditorScreen2({Key? key, required this.mode}) : super(key: key);
+  const VideoEditorScreen2({
+    Key? key,
+    required this.mode,
+    this.isProEntitled,
+  }) : super(key: key);
   @override
   State<VideoEditorScreen2> createState() => _VideoEditorScreenState2();
 }
 
 class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  bool _subscriptionCapabilityOrLegacy(String capability) {
+    try {
+      return context
+          .read<SubscriptionService>()
+          .canUseCapability(capability);
+    } catch (_) {
+      return widget.mode == 'Pro';
+    }
+  }
+
+  bool get _isProEntitled {
+    final explicit = widget.isProEntitled;
+    if (explicit != null) return explicit;
+    return _subscriptionCapabilityOrLegacy(SubscriptionCapability.proEditor);
+  }
+
+  bool get _isBasicTier => !_isProEntitled;
+
+  String get _resolvedMode => _isProEntitled ? 'Pro' : 'Basic';
+
   // Video variables
   bool useBetterPlayer = false;
   File? _videoFile;
@@ -2900,7 +2928,11 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(16)),
             ),
-            child: EffectsDrawer(trackIndex: trackIndex, mode: widget.mode),
+            child: EffectsDrawer(
+              trackIndex: trackIndex,
+              mode: _resolvedMode,
+              isProEntitled: _isProEntitled,
+            ),
           ),
         ),
       ),
@@ -4001,7 +4033,7 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                 onTap: () {
                   Navigator.pop(context);
 
-                  if (widget.mode == "Basic" && _segments.length == 1) {
+                  if (_isBasicTier && _segments.length == 1) {
                     showDialog(
                       context: context,
                       builder: (context) => AlertDialog(
@@ -4038,7 +4070,7 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                 onTap: () {
                   Navigator.pop(context);
 
-                  if (widget.mode == "Basic" && _audioTracks.length == 3) {
+                  if (_isBasicTier && _audioTracks.length == 3) {
                     showDialog(
                       context: context,
                       builder: (context) => AlertDialog(
@@ -4985,7 +5017,7 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                 children: [
                                   GestureDetector(
                                     onTap: () {
-                                      if (widget.mode == "Basic" &&
+                                      if (_isBasicTier &&
                                           _segments.length == 1) {
                                         showDialog(
                                           context: context,
@@ -6795,6 +6827,12 @@ class ExportSuccessScreen extends StatelessWidget {
     }
   }
 
+  void _showUploadComingSoon(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Platform upload coming soon')),
+    );
+  }
+
   Future<Map<String, String>?> showUploadDialog(BuildContext context) {
     final titleController = TextEditingController(text: 'My Mixroom Video');
     final descController =
@@ -6937,45 +6975,53 @@ class ExportSuccessScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final message = isVideo
+        ? L10n.translate(context, 'Your video was exported successfully!')
+        : L10n.translate(context, 'Your audio was exported successfully!');
+    const pageBg = Color(0xFF0F172A);
+    const topBarBg = Color(0xFF0E1420);
+    const accent = Color(0xFF6C8CFF);
+
     return Consumer<LocaleProvider>(
       // Wrap SideMenu with Consumer
       builder: (context, localeProvider, child) {
         return Scaffold(
+          backgroundColor: pageBg,
           appBar: AppBar(
-            backgroundColor: const Color.fromARGB(255, 22, 22, 22),
+            backgroundColor: topBarBg,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            automaticallyImplyLeading: false,
+            title: Text(
+              L10n.translate(context, 'Export Successful'),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
+              ),
+            ),
             actions: [
-              TextButton(
-                onPressed: () {
-                  // Navigator.pushAndRemoveUntil(
-                  //   context,
-                  //   PageRouteBuilder(
-                  //     pageBuilder: (context, animation, secondaryAnimation) => HomeScreen(),
-                  //     transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                  //       const beginScale = 0.96;
-                  //       const endScale = 1.0;
-                  //       const curve = Curves.easeOutCubic;
-
-                  //       final tween = Tween<double>(begin: beginScale, end: endScale)
-                  //           .chain(CurveTween(curve: curve));
-                  //       final fadeTween = Tween<double>(begin: 0.0, end: 1.0)
-                  //           .chain(CurveTween(curve: curve));
-
-                  //       return FadeTransition(
-                  //         opacity: animation.drive(fadeTween),
-                  //         child: ScaleTransition(
-                  //           scale: animation.drive(tween),
-                  //           child: child,
-                  //         ),
-                  //       );
-                  //     },
-                  //     transitionDuration: const Duration(milliseconds: 300),
-                  //   ),
-                  //   (route) => false,
-                  // );
-                  Navigator.pop(context, true);
-                },
-                child: Text(L10n.translate(context, 'Done'),
-                    style: TextStyle(fontSize: 16, color: Colors.white)),
+              Padding(
+                padding: const EdgeInsets.only(right: 12, top: 4),
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    textStyle: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context, true);
+                  },
+                  icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
+                  label: Text(L10n.translate(context, 'Done')),
+                ),
               ),
             ],
           ), //title: Text(L10n.translate(context, 'Export Successful'))),
@@ -6990,132 +7036,84 @@ class ExportSuccessScreen extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Icon(Icons.check_circle, color: Colors.green, size: 100),
+                      TweenAnimationBuilder<double>(
+                        key: ValueKey(filePath),
+                        duration: const Duration(milliseconds: 900),
+                        curve: Curves.easeOutBack,
+                        tween: Tween(begin: 0.6, end: 1.0),
+                        builder: (context, scale, child) {
+                          return Transform.scale(scale: scale, child: child);
+                        },
+                        child: Icon(
+                          Icons.task_alt_rounded,
+                          color: Colors.greenAccent,
+                          size: 96,
+                          shadows: const [
+                            Shadow(
+                              blurRadius: 12,
+                              color: Color(0x6634D399),
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 20),
                       // Text(
                       //   'Your ${isVideo ? 'video' : 'audio'} was exported successfully!',
                       //   style: Theme.of(context).textTheme.headlineSmall,
                       //   textAlign: TextAlign.center,
                       // ),
-                      isVideo
-                          ? Text(
-                              L10n.translate(context,
-                                  'Your video was exported successfully!'),
-                              style: Theme.of(context).textTheme.headlineSmall,
-                              textAlign: TextAlign.center,
-                            )
-                          : Text(
-                              L10n.translate(context,
-                                  'Your audio was exported successfully!'),
-                              style: Theme.of(context).textTheme.headlineSmall,
-                              textAlign: TextAlign.center,
+                      Text(
+                        message,
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
                             ),
-                      const SizedBox(height: 40),
-                      // ElevatedButton(
-                      //   onPressed: () => _shareFile(context),
-                      //   child: const Text('Share File'),
-                      // ),
-                      // const SizedBox(height: 20),
-                      Text(L10n.translate(context, 'Share directly to:')),
-                      const SizedBox(height: 20),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                        child: Wrap(
-                          spacing: 32,
-                          runSpacing: 24,
-                          alignment: WrapAlignment.start,
-                          children: [
-                            if (isVideo)
-                              _SocialButton(
-                                iconWidget: Image.asset(
-                                    'assets/youtube_icon.png',
-                                    width: 56),
-                                label: 'YouTube',
-                                onTap: () async {
-                                  final info = await showUploadDialog(context);
-                                  if (info == null) return;
-
-                                  try {
-                                    final videoId =
-                                        await YoutubeService.uploadVideo(
-                                      file: File(filePath),
-                                      title: info['title']!,
-                                      description: info['description']!,
-                                    );
-
-                                    if (videoId == null) {
-                                      print('upload failed, videoId == null');
-                                      return;
-                                    }
-
-                                    final qrThumb =
-                                        await generateThumbnailWithQR(videoId);
-                                    await YoutubeService.uploadThumbnail(
-                                        videoId, qrThumb);
-                                    showQRPopup(context, qrThumb);
-                                  } catch (e) {
-                                    print("❌ Upload failed: $e");
-                                    ScaffoldMessenger.of(
-                                      context,
-                                    ).showSnackBar(SnackBar(
-                                        content: Text('❌ Upload failed')));
-                                  }
-
-                                  // try {
-                                  //   final videoId = await YoutubeService.uploadVideo(
-                                  //     file: File(filePath),
-                                  //     title: 'My Mixroom Video',
-                                  //     description: 'Made with Mixroom 🎸🎬',
-                                  //   );
-                                  //   if(videoId == null) {
-                                  //     print('upload failed, videoId == null');
-                                  //     return;
-                                  //   }
-                                  //   final url = 'https://youtube.com/watch?v=$videoId';
-                                  //   ScaffoldMessenger.of(context).showSnackBar(
-                                  //     SnackBar(content: Text('✅ Uploaded: $url')),
-                                  //   );
-                                  // } catch (e) {
-                                  //   ScaffoldMessenger.of(context).showSnackBar(
-                                  //     SnackBar(content: Text('Upload failed: $e')),
-                                  //   );
-                                  //   print("upload error reason: $e");
-                                  // }
-                                },
-                              ),
-                            if (isVideo)
-                              _SocialButton(
-                                iconWidget: Image.asset('assets/ig_icon.png',
-                                    width: 56),
-                                label: 'Instagram',
-                                onTap: () => _openSocialMedia(
-                                    'instagram://library',
-                                    'https://www.instagram.com/'),
-                              ),
-                            if (isVideo)
-                              _SocialButton(
-                                iconWidget: Image.asset(
-                                    'assets/tiktok_icon.png',
-                                    width: 56),
-                                label: 'TikTok',
-                                onTap: () => _openSocialMedia(
-                                    'snssdk1233://upload',
-                                    'https://www.tiktok.com/upload'),
-                              ),
-                            if (!isVideo)
-                              _SocialButton(
-                                iconWidget: Image.asset(
-                                    'assets/soundcloud_icon.png',
-                                    width: 56),
-                                label: 'SoundCloud',
-                                onTap: () => _openSocialMedia(
-                                    'soundcloud://upload',
-                                    'https://soundcloud.com/upload'),
-                              ),
-                          ],
-                        ),
+                        textAlign: TextAlign.center,
                       ),
+                      const SizedBox(height: 40),
+                      ExportSuccessPreviewPlayer(filePath: filePath, isVideo: isVideo),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: () => _shareFile(context),
+                              icon: const Icon(Icons.ios_share_rounded, size: 20),
+                              label: Text(L10n.translate(context, 'share')),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
+                                backgroundColor: accent,
+                                foregroundColor: Colors.white,
+                                textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _showUploadComingSoon(context),
+                              icon: const Icon(Icons.cloud_upload_rounded, size: 20),
+                              label: const Text('Upload to platform'),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
+                                foregroundColor: Colors.white70,
+                                side: const BorderSide(
+                                  color: Color(0xFF4F5A73),
+                                ),
+                                textStyle:
+                                    const TextStyle(fontWeight: FontWeight.w600),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
                       // const SizedBox(height: 40),
                       // OutlinedButton(
                       //   onPressed: () => Navigator.popUntil(
@@ -7237,7 +7235,13 @@ class _SocialButton extends StatelessWidget {
 class EffectsDrawer extends StatefulWidget {
   final int trackIndex;
   final String mode;
-  const EffectsDrawer({Key? key, required this.trackIndex, this.mode = "Basic"})
+  final bool? isProEntitled;
+  const EffectsDrawer({
+    Key? key,
+    required this.trackIndex,
+    this.mode = "Basic",
+    this.isProEntitled,
+  })
       : super(key: key);
 
   @override
@@ -7248,6 +7252,24 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
   List<String> _effects = [];
   List<bool> _bypassed = [];
   bool _loading = true;
+
+  bool _subscriptionCapabilityOrLegacy(String capability) {
+    try {
+      return context
+          .read<SubscriptionService>()
+          .canUseCapability(capability);
+    } catch (_) {
+      return widget.mode == 'Pro';
+    }
+  }
+
+  bool get _isProEntitled {
+    final explicit = widget.isProEntitled;
+    if (explicit != null) return explicit;
+    return _subscriptionCapabilityOrLegacy(SubscriptionCapability.proEditor);
+  }
+
+  bool get _isBasicTier => !_isProEntitled;
 
   @override
   void initState() {
@@ -7379,7 +7401,7 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
 
   ActionChip _buildPresetChip(String name) {
     const lockedPresets = []; //['LoFi Effect', 'Heavy Crunch'];
-    final isLocked = widget.mode == 'Basic' && lockedPresets.contains(name);
+    final isLocked = _isBasicTier && lockedPresets.contains(name);
 
     return ActionChip(
       backgroundColor: isLocked
@@ -7726,7 +7748,7 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
                       'Mixroom Clipper'
                     ].map((name) {
                       final isAllowed =
-                          widget.mode == 'Pro' || allowedInBasic.contains(name);
+                          _isProEntitled || allowedInBasic.contains(name);
                       return GestureDetector(
                         onTap: isAllowed
                             ? () async {
@@ -7778,7 +7800,7 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
         await JuceAudioEngine.getPluginParameters(widget.trackIndex, idx);
 
     // Limit what parameters are shown if it's basic mode
-    if (widget.mode == "Basic") {
+    if (_isBasicTier) {
       switch (_effects[idx]) {
         case 'Mixroom Reverb':
           params = params.where((param) {

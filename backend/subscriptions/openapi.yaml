@@ -1,0 +1,119 @@
+openapi: 3.0.3
+info:
+  title: Mixroom Subscription API
+  version: 1.0.0
+  description: Canonical entitlement and billing API for Mixroom clients.
+servers:
+  - url: https://api.mixroom.ai
+paths:
+  /v1/entitlements/me:
+    get:
+      summary: Get current user's canonical entitlement snapshot
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Entitlement snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entitlement'
+  /v1/billing/web/checkout-session:
+    post:
+      summary: Create web checkout session (Paddle/Toss)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [region_code]
+              properties:
+                region_code:
+                  type: string
+                success_url:
+                  type: string
+                cancel_url:
+                  type: string
+      responses:
+        '200':
+          description: Checkout session
+  /v1/billing/mobile/apple/verify:
+    post:
+      summary: Verify Apple subscription transaction
+      security:
+        - bearerAuth: []
+  /v1/billing/mobile/google/verify:
+    post:
+      summary: Verify Google subscription purchase token
+      security:
+        - bearerAuth: []
+  /v1/billing/restore:
+    post:
+      summary: Trigger restore from provider account
+      security:
+        - bearerAuth: []
+  /v1/billing/portal-url:
+    get:
+      summary: Resolve provider management URL
+      security:
+        - bearerAuth: []
+  /v1/webhooks/apple:
+    post:
+      summary: Apple ASSN V2 webhook
+  /v1/webhooks/google:
+    post:
+      summary: Google RTDN webhook
+  /v1/webhooks/paddle:
+    post:
+      summary: Paddle webhook
+  /v1/webhooks/toss:
+    post:
+      summary: Toss webhook
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Entitlement:
+      type: object
+      required:
+        - user_id
+        - tier
+        - status
+        - effective_at
+        - capabilities
+        - revision
+      properties:
+        user_id:
+          type: string
+        tier:
+          type: string
+          enum: [free, pro, studio]
+        status:
+          type: string
+          enum: [trialing, active, grace_period, past_due, paused, canceled, expired, refunded, revoked]
+        effective_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        source_provider:
+          type: string
+          enum: [apple, google, paddle, toss, admin_grant, unknown]
+        source_subscription_id:
+          type: string
+        capabilities:
+          type: object
+          additionalProperties:
+            type: boolean
+        management_channel:
+          type: string
+        revision:
+          type: integer

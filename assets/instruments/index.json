@@ -1,0 +1,230 @@
+{
+  "pack": "VSCO-2-CE-1.1.0",
+  "presets": [
+    {
+      "category": "Keys",
+      "preset": "OrganQuiet.sfz",
+      "default_path": "Keys/Organ/Quiet/",
+      "sample_count": 21,
+      "copied_new_samples": 21,
+      "copied_new_megabytes": 42.79
+    },
+    {
+      "category": "Keys",
+      "preset": "OrganLoud.sfz",
+      "default_path": "Keys/Organ/Loud/",
+      "sample_count": 21,
+      "copied_new_samples": 21,
+      "copied_new_megabytes": 43.38
+    },
+    {
+      "category": "Percussion",
+      "preset": "Marimba.sfz",
+      "default_path": "Percussion/Marimba/",
+      "sample_count": 10,
+      "copied_new_samples": 10,
+      "copied_new_megabytes": 11.23
+    },
+    {
+      "category": "Percussion",
+      "preset": "Glockenspiel.sfz",
+      "default_path": "Percussion/Glock/",
+      "sample_count": 6,
+      "copied_new_samples": 6,
+      "copied_new_megabytes": 6.08
+    },
+    {
+      "category": "Drums",
+      "name": "Mixroom Drum Starter",
+      "preset": "MixroomDrumStarter.sfz",
+      "default_path": "Percussion/",
+      "sample_count": 9,
+      "copied_new_samples": 9,
+      "copied_new_megabytes": 5.57,
+      "outputGain": 0.9,
+      "attackMs": 2.0,
+      "releaseMs": 300.0
+    },
+    {
+      "category": "Strings",
+      "name": "Violin Ensemble Pizzicato",
+      "preset": "ViolinEnsPizz.sfz",
+      "default_path": "Strings/Violin Section/Pizz/",
+      "sample_count": 44,
+      "copied_new_samples": 44,
+      "copied_new_megabytes": 8.6,
+      "releaseMs": 360.0
+    },
+    {
+      "category": "Brass",
+      "name": "Trumpet Staccato",
+      "preset": "TrumpetStac.sfz",
+      "default_path": "Brass/Trumpet/stac/",
+      "sample_count": 66,
+      "copied_new_samples": 66,
+      "copied_new_megabytes": 13.96,
+      "releaseMs": 260.0
+    },
+    {
+      "category": "Woodwinds",
+      "name": "Piccolo Sustain",
+      "preset": "PiccoloSus.sfz",
+      "default_path": "Woodwinds/Piccolo/Sus/",
+      "sample_count": 5,
+      "copied_new_samples": 5,
+      "copied_new_megabytes": 11.32,
+      "releaseMs": 640.0
+    },
+    {
+      "category": "Percussion",
+      "preset": "Xylophone.sfz",
+      "default_path": "Percussion/Xylo/",
+      "sample_count": 8,
+      "copied_new_samples": 8,
+      "copied_new_megabytes": 4.33,
+      "releaseMs": 560.0
+    },
+    {
+      "category": "Percussion",
+      "name": "Tubular Bells",
+      "preset": "TubularBells.sfz",
+      "default_path": "Percussion/",
+      "sample_count": 4,
+      "copied_new_samples": 4,
+      "copied_new_megabytes": 15.28,
+      "releaseMs": 1120.0
+    },
+    {
+      "category": "Woodwinds",
+      "name": "Piccolo Staccato",
+      "preset": "PiccoloStac.sfz",
+      "default_path": "Woodwinds/Piccolo/stac/",
+      "sample_count": 5,
+      "copied_new_samples": 5,
+      "copied_new_megabytes": 0.58,
+      "releaseMs": 220.0
+    },
+    {
+      "category": "Woodwinds",
+      "name": "Flute Staccato",
+      "preset": "FluteStac.sfz",
+      "default_path": "Woodwinds/Flute/stac/",
+      "sample_count": 48,
+      "copied_new_samples": 48,
+      "copied_new_megabytes": 9.68,
+      "releaseMs": 220.0
+    },
+    {
+      "category": "Woodwinds",
+      "name": "Oboe Staccato",
+      "preset": "OboeStac.sfz",
+      "default_path": "Woodwinds/Oboe/stac/",
+      "sample_count": 51,
+      "copied_new_samples": 51,
+      "copied_new_megabytes": 6.75,
+      "releaseMs": 240.0
+    },
+    {
+      "category": "Woodwinds",
+      "name": "Clarinet Staccato",
+      "preset": "ClarinetStac.sfz",
+      "default_path": "Woodwinds/Clarinet/stac/",
+      "sample_count": 64,
+      "copied_new_samples": 64,
+      "copied_new_megabytes": 6.39,
+      "releaseMs": 220.0
+    },
+    {
+      "category": "Woodwinds",
+      "name": "Bassoon Staccato",
+      "preset": "BassoonStac.sfz",
+      "default_path": "Woodwinds/Bassoon/stac/",
+      "sample_count": 46,
+      "copied_new_samples": 46,
+      "copied_new_megabytes": 5.45,
+      "releaseMs": 240.0
+    },
+    {
+      "category": "Brass",
+      "name": "Tuba Staccato",
+      "preset": "TubaStac.sfz",
+      "default_path": "Brass/Tuba/stac/",
+      "sample_count": 64,
+      "copied_new_samples": 64,
+      "copied_new_megabytes": 8.9,
+      "releaseMs": 260.0
+    },
+    {
+      "category": "Drums",
+      "name": "Mixroom Acoustic Drum Kit",
+      "preset": "MixroomAcousticDrumKit.sfz",
+      "default_path": "Percussion/",
+      "sample_count": 18,
+      "copied_new_samples": 12,
+      "copied_new_megabytes": 7.36,
+      "outputGain": 0.94,
+      "attackMs": 1.0,
+      "releaseMs": 260.0
+    },
+    {
+      "category": "Drums",
+      "name": "Mixroom Dry Drum Kit",
+      "preset": "MixroomDryDrumKit.sfz",
+      "default_path": "Percussion/",
+      "sample_count": 12,
+      "copied_new_samples": 0,
+      "copied_new_megabytes": 0.0,
+      "outputGain": 0.92,
+      "attackMs": 1.0,
+      "releaseMs": 220.0
+    },
+    {
+      "category": "Drums",
+      "name": "Tic Tok Men Moogdrums 1",
+      "preset": "TicTokMenMoogdrums1.sfz",
+      "default_path": "Electronic/TicTokMen/Moogdrums1/",
+      "sample_count": 79,
+      "copied_new_samples": 79,
+      "copied_new_megabytes": 2.17,
+      "outputGain": 0.95,
+      "attackMs": 1.0,
+      "releaseMs": 240.0
+    },
+    {
+      "category": "Drums",
+      "name": "Tic Tok Men RetroDrums 1",
+      "preset": "TicTokMenRetroDrums1.sfz",
+      "default_path": "Electronic/TicTokMen/RetroDrums1/",
+      "sample_count": 70,
+      "copied_new_samples": 70,
+      "copied_new_megabytes": 2.52,
+      "outputGain": 0.95,
+      "attackMs": 1.0,
+      "releaseMs": 260.0
+    },
+    {
+      "category": "Drums",
+      "name": "Mixroom Electro Punch Kit",
+      "preset": "MixroomElectroPunchKit.sfz",
+      "default_path": "Electronic/TicTokMen/",
+      "sample_count": 16,
+      "copied_new_samples": 0,
+      "copied_new_megabytes": 0.0,
+      "outputGain": 0.98,
+      "attackMs": 1.0,
+      "releaseMs": 200.0
+    },
+    {
+      "category": "Drums",
+      "name": "Mixroom Synthwave Kit",
+      "preset": "MixroomSynthwaveKit.sfz",
+      "default_path": "Electronic/TicTokMen/",
+      "sample_count": 16,
+      "copied_new_samples": 0,
+      "copied_new_megabytes": 0.0,
+      "outputGain": 0.96,
+      "attackMs": 1.0,
+      "releaseMs": 260.0
+    }
+  ]
+}

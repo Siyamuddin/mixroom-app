@@ -27,6 +27,56 @@ require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelpe
 
 flutter_ios_podfile_setup
 
+# flutter_gemma 0.11.16 pulls TensorFlowLiteSelectTfOps nightly, which currently has
+# only an ios-arm64 slice and breaks simulator linking.
+flutter_gemma_podspec = File.join(
+  __dir__,
+  '.symlinks',
+  'plugins',
+  'flutter_gemma',
+  'ios',
+  'flutter_gemma.podspec'
+)
+if File.exist?(flutter_gemma_podspec)
+  gemma_podspec = File.read(flutter_gemma_podspec)
+  patched_podspec = gemma_podspec.gsub(
+    /^\s*s\.dependency\s+'TensorFlowLiteSelectTfOps'.*\n/,
+    ''
+  )
+  if patched_podspec != gemma_podspec
+    begin
+      File.write(flutter_gemma_podspec, patched_podspec)
+    rescue SystemCallError => e
+      Pod::UI.warn("Could not patch flutter_gemma podspec (#{e.message})")
+    end
+  end
+end
+
+# ffmpeg_kit_flutter_new_full currently excludes arm64 for the iOS simulator in
+# its podspec. Xcode 26+ flags this as unsupported; keep only legacy i386 exclude.
+ffmpeg_new_full_podspec = File.join(
+  __dir__,
+  '.symlinks',
+  'plugins',
+  'ffmpeg_kit_flutter_new_full',
+  'ios',
+  'ffmpeg_kit_flutter_new_full.podspec'
+)
+if File.exist?(ffmpeg_new_full_podspec)
+  ffmpeg_podspec = File.read(ffmpeg_new_full_podspec)
+  patched_podspec = ffmpeg_podspec.gsub(
+    /'EXCLUDED_ARCHS\[sdk=iphonesimulator\*\]'\s*=>\s*'i386 arm64'/,
+    "'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386'"
+  )
+  if patched_podspec != ffmpeg_podspec
+    begin
+      File.write(ffmpeg_new_full_podspec, patched_podspec)
+    rescue SystemCallError => e
+      Pod::UI.warn("Could not patch ffmpeg_kit_flutter_new_full podspec (#{e.message})")
+    end
+  end
+end
+
 target 'Runner' do
   use_frameworks! :linkage => :static
   # pod 'ffmpeg-kit-ios-full-gpl', :git => 'https://github.com/Chihoc/ffmpeg-kit-ios-full-gpl.git'
@@ -39,5 +89,17 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings.delete('EXCLUDED_ARCHS[sdk=iphonesimulator*]')
+    end
+  end
+
+  installer.aggregate_targets.each do |aggregate_target|
+    aggregate_target.user_project.native_targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings.delete('EXCLUDED_ARCHS[sdk=iphonesimulator*]')
+      end
+    end
+    aggregate_target.user_project.save
   end
 end

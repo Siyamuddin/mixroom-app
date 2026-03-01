@@ -8,9 +8,13 @@
 #include <array>
 #include <atomic>
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
+#include <deque>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <regex>
 #include <unordered_map>
 #include <vector>
 
@@ -49,10 +53,12 @@ public:
         if (numChannels < 2)
             return;
 
-        const float p = pan->get(); // -1..1
-        const float angle = (p + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
-        const float leftGain = std::cos(angle);
-        const float rightGain = std::sin(angle);
+        // Stereo balance law with unity center:
+        // p = -1 -> full left, p = 0 -> center (L=1,R=1), p = +1 -> full right.
+        // This avoids cumulative -3 dB center drops when multiple pan stages are chained.
+        const float p = juce::jlimit(-1.0f, 1.0f, pan->get()); // -1..1
+        const float leftGain = (p <= 0.0f) ? 1.0f : (1.0f - p);
+        const float rightGain = (p >= 0.0f) ? 1.0f : (1.0f + p);
 
         auto *left = buffer.getWritePointer(0);
         auto *right = buffer.getWritePointer(1);
@@ -923,13 +929,49 @@ public:
         next.instrumentId = instrumentId;
         next.instrumentName = instrumentName;
         next.sourceTempoBpm = juce::jlimit(1.0, 400.0, sourceTempoBpm);
+        next.sampledDefinition =
+            resolveSampledDefinition(instrumentId, instrumentName);
+        next.sampledAttackOverride =
+            params.contains(juce::Identifier("attackMs"));
+        next.sampledReleaseOverride =
+            params.contains(juce::Identifier("releaseMs"));
+
         next.preset = resolvePreset(instrumentId, instrumentName);
+        if (next.sampledDefinition != nullptr &&
+            !next.sampledDefinition->regions.empty())
+        {
+            next.preset.family = InstrumentFamily::sampled;
+            next.preset.attackMs = next.sampledDefinition->defaultAttackSec * 1000.0;
+            next.preset.releaseMs = next.sampledDefinition->defaultReleaseSec * 1000.0;
+            next.preset.outputGain = 0.72;
+            next.preset.drive = 0.0;
+            next.preset.noise = 0.0;
+        }
         applyParamOverrides(next.preset, params);
 
         {
             const juce::ScopedLock lock(stateLock);
             pendingState = next;
             pendingVersion++;
+        }
+    }
+
+    void enqueueLiveMidiEvent(bool noteOn, int channel, int pitch, float velocity)
+    {
+        const juce::ScopedLock lock(liveStateLock);
+        pendingLiveMidiEvents.push_back(
+            {
+                noteOn,
+                juce::jlimit(1, 16, channel),
+                juce::jlimit(0, 127, pitch),
+                juce::jlimit(0.0f, 1.0f, velocity),
+            });
+        if (pendingLiveMidiEvents.size() > 512)
+        {
+            pendingLiveMidiEvents.erase(
+                pendingLiveMidiEvents.begin(),
+                pendingLiveMidiEvents.begin() +
+                    (std::ptrdiff_t)(pendingLiveMidiEvents.size() - 512));
         }
     }
 
@@ -950,123 +992,335 @@ public:
             return;
         if (!blockTransportStartSec || !hostSampleRate)
             return;
-        if (isPlaying != nullptr && !isPlaying->load(std::memory_order_relaxed))
-            return;
 
         const double sr = hostSampleRate->load(std::memory_order_relaxed);
         if (sr <= 0.0)
             return;
 
+        const bool hostPlaying =
+            (isPlaying == nullptr) || isPlaying->load(std::memory_order_relaxed);
+
         const int numSamples = buffer.getNumSamples();
         const double blockStart = blockTransportStartSec->load(std::memory_order_relaxed);
         const double blockEnd = blockStart + (double)numSamples / sr;
 
-        const double cs = clipStartSec.load(std::memory_order_relaxed);
-        const double cl = clipLengthSec.load(std::memory_order_relaxed);
-        const double ce = cs + cl;
-
-        if (blockEnd <= cs || blockStart >= ce)
-            return;
-
-        const int writeStart = juce::jlimit(
-            0, numSamples, (int)std::ceil((cs - blockStart) * sr));
-        const int writeEnd = juce::jlimit(
-            0, numSamples, (int)std::ceil((ce - blockStart) * sr));
-        const int framesToRender = juce::jmax(0, writeEnd - writeStart);
-        if (framesToRender <= 0)
-            return;
-
         refreshCachedState();
-        if (cachedNotes.empty())
+        applyPendingLiveMidiEvents();
+
+        const bool sampledMode =
+            cachedPreset.family == InstrumentFamily::sampled &&
+            cachedSampledDefinition != nullptr &&
+            !cachedSampledDefinition->regions.empty();
+        const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
+        const double releaseSec = juce::jmax(0.02, cachedPreset.releaseMs / 1000.0);
+        const float driveGain =
+            sampledMode ? 1.0f : (float)(1.0 + cachedPreset.drive * 5.0);
+        const int outChannels = buffer.getNumChannels();
+        const bool stereo = outChannels >= 2;
+
+        const bool hasTimelineNotes = hostPlaying && !cachedNotes.empty();
+        const bool hasLiveNotes = !activeLiveNotes.empty();
+        if (!hasTimelineNotes && !hasLiveNotes)
             return;
 
         const double speedRatio = getTempoPlaybackRatio();
         const double safeRatio = speedRatio <= 0.0 ? 1.0 : speedRatio;
         const double sourceSecPerBeat = 60.0 / juce::jlimit(1.0, 400.0, cachedSourceTempoBpm);
-        const double inFile = fileOffsetSec.load(std::memory_order_relaxed);
-        const double startTimelineSec = blockStart + ((double)writeStart / sr);
-        const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
-        const double releaseSec = juce::jmax(0.02, cachedPreset.releaseMs / 1000.0);
-        const double releaseSourceSec = releaseSec * safeRatio;
-        const float driveGain = (float)(1.0 + cachedPreset.drive * 5.0);
-
-        const int outChannels = buffer.getNumChannels();
-        const bool stereo = outChannels >= 2;
-
-        for (int i = 0; i < framesToRender; ++i)
+        if (hasTimelineNotes)
         {
-            const double timelineSec = startTimelineSec + ((double)i / sr);
-            const double sourceSec = ((timelineSec - cs) * safeRatio) + inFile;
+            const double cs = clipStartSec.load(std::memory_order_relaxed);
+            const double cl = clipLengthSec.load(std::memory_order_relaxed);
+            const double ce = cs + cl;
+
+            if (blockEnd > cs && blockStart < ce)
+            {
+                const int writeStart = juce::jlimit(
+                    0, numSamples, (int)std::ceil((cs - blockStart) * sr));
+                const int writeEnd = juce::jlimit(
+                    0, numSamples, (int)std::ceil((ce - blockStart) * sr));
+                const int framesToRender = juce::jmax(0, writeEnd - writeStart);
+                if (framesToRender > 0)
+                {
+                    const double inFile = fileOffsetSec.load(std::memory_order_relaxed);
+                    const double startTimelineSec = blockStart + ((double)writeStart / sr);
+                    std::vector<const SampledRegion *> timelineRegions;
+                    if (sampledMode)
+                    {
+                        timelineRegions.reserve(cachedNotes.size());
+                        for (const auto &note : cachedNotes)
+                        {
+                            const int midiVelocity = juce::jlimit(
+                                0,
+                                127,
+                                (int)std::lround(
+                                    juce::jlimit(0.0, 1.0, note.velocity) * 127.0));
+                            timelineRegions.push_back(
+                                pickSampledRegion(
+                                    *cachedSampledDefinition,
+                                    juce::jlimit(0, 127, note.pitch),
+                                    midiVelocity));
+                        }
+                    }
+
+                    for (int i = 0; i < framesToRender; ++i)
+                    {
+                        const double timelineSec = startTimelineSec + ((double)i / sr);
+                        const double sourceSec = ((timelineSec - cs) * safeRatio) + inFile;
+                        float mixL = 0.0f;
+                        float mixR = 0.0f;
+
+                        for (size_t noteIndex = 0; noteIndex < cachedNotes.size(); ++noteIndex)
+                        {
+                            const auto &note = cachedNotes[noteIndex];
+                            const SampledRegion *sampledRegion =
+                                sampledMode ? timelineRegions[noteIndex] : nullptr;
+                            if (sampledMode && sampledRegion == nullptr)
+                                continue;
+
+                            double noteAttackSec = attackSec;
+                            double noteReleaseSec = releaseSec;
+                            if (sampledRegion != nullptr)
+                            {
+                                if (!cachedSampledAttackOverride)
+                                    noteAttackSec =
+                                        juce::jmax(0.001, sampledRegion->attackSec);
+                                if (!cachedSampledReleaseOverride)
+                                    noteReleaseSec =
+                                        juce::jmax(0.02, sampledRegion->releaseSec);
+                            }
+                            const double releaseSourceSec = noteReleaseSec * safeRatio;
+
+                            const double noteStartSourceSec = note.startBeat * sourceSecPerBeat;
+                            const double noteLengthSourceSec = juce::jmax(0.001, note.lengthBeats * sourceSecPerBeat);
+                            const double noteEndSourceSec = noteStartSourceSec + noteLengthSourceSec + releaseSourceSec;
+                            if (sourceSec < noteStartSourceSec || sourceSec >= noteEndSourceSec)
+                                continue;
+
+                            const double ageSourceSec = sourceSec - noteStartSourceSec;
+                            const double ageRealSec = ageSourceSec / safeRatio;
+                            const double noteLengthRealSec = noteLengthSourceSec / safeRatio;
+
+                            double env = 0.0;
+                            if (ageRealSec < noteAttackSec)
+                                env = ageRealSec / noteAttackSec;
+                            else if (ageRealSec < noteLengthRealSec)
+                                env = 1.0;
+                            else
+                                env = 1.0 - ((ageRealSec - noteLengthRealSec) / noteReleaseSec);
+
+                            if (env <= 0.0)
+                                continue;
+
+                            const double totalRealSec = juce::jmax(
+                                0.001, noteLengthRealSec + noteReleaseSec);
+                            const double noteProgress = juce::jlimit(0.0, 1.0, ageRealSec / totalRealSec);
+
+                            double notePitch = (double)note.pitch + (double)pitchSemitones.load(std::memory_order_relaxed);
+                            if (!preserveTempoPitch.load(std::memory_order_relaxed) && safeRatio > 0.0)
+                                notePitch += 12.0 * (std::log(safeRatio) / std::log(2.0));
+
+                            const float velocityGain =
+                                (float)juce::jlimit(0.0, 1.0, note.velocity);
+
+                            if (sampledRegion != nullptr)
+                            {
+                                float sampleL = 0.0f;
+                                float sampleR = 0.0f;
+                                if (!renderSampledStereo(
+                                        *sampledRegion,
+                                        notePitch,
+                                        ageRealSec,
+                                        sr,
+                                        sampleL,
+                                        sampleR))
+                                {
+                                    continue;
+                                }
+
+                                const float gain =
+                                    (float)env *
+                                    velocityGain *
+                                    (float)cachedPreset.outputGain *
+                                    (float)sampledRegion->gainLinear;
+                                mixL += sampleL * gain;
+                                mixR += sampleR * gain;
+                                continue;
+                            }
+
+                            const double freq = 440.0 * std::pow(2.0, (notePitch - 69.0) / 12.0);
+                            const int seedBase = (int)(note.pitch * 97 + (int)(note.startBeat * 2000.0) * 13);
+                            const int sampleSeed = seedBase + (int)std::floor(ageRealSec * sr);
+
+                            const float raw = renderInstrumentSample(cachedPreset,
+                                                                     note.pitch,
+                                                                     freq,
+                                                                     ageRealSec,
+                                                                     noteProgress,
+                                                         env,
+                                                         sr,
+                                                         sampleSeed);
+                            const float sampleValue = std::tanh(raw * driveGain) *
+                                                      (float)env *
+                                                      velocityGain *
+                                                      (float)cachedPreset.outputGain;
+
+                            const double pan = juce::jlimit(-0.95, 0.95,
+                                                            std::sin((double)note.pitch * 0.23 + note.startBeat * 0.9) * cachedPreset.stereoWidth);
+                            const float leftGain = (float)std::sqrt(0.5 * (1.0 - pan));
+                            const float rightGain = (float)std::sqrt(0.5 * (1.0 + pan));
+
+                            mixL += sampleValue * leftGain;
+                            mixR += sampleValue * rightGain;
+                        }
+
+                        mixL = juce::jlimit(-1.0f, 1.0f, mixL);
+                        mixR = juce::jlimit(-1.0f, 1.0f, mixR);
+                        const int outIndex = writeStart + i;
+
+                        buffer.setSample(0, outIndex, buffer.getSample(0, outIndex) + mixL);
+                        if (stereo)
+                            buffer.setSample(1, outIndex, buffer.getSample(1, outIndex) + mixR);
+                        else
+                            buffer.setSample(0, outIndex, buffer.getSample(0, outIndex) + 0.5f * (mixL + mixR));
+                    }
+                }
+            }
+        }
+
+        if (activeLiveNotes.empty())
+            return;
+
+        const double invSr = 1.0 / sr;
+        for (int i = 0; i < numSamples; ++i)
+        {
             float mixL = 0.0f;
             float mixR = 0.0f;
 
-            for (const auto &note : cachedNotes)
+            for (auto &voice : activeLiveNotes)
             {
-                const double noteStartSourceSec = note.startBeat * sourceSecPerBeat;
-                const double noteLengthSourceSec = juce::jmax(0.001, note.lengthBeats * sourceSecPerBeat);
-                const double noteEndSourceSec = noteStartSourceSec + noteLengthSourceSec + releaseSourceSec;
-                if (sourceSec < noteStartSourceSec || sourceSec >= noteEndSourceSec)
-                    continue;
-
-                const double ageSourceSec = sourceSec - noteStartSourceSec;
-                const double ageRealSec = ageSourceSec / safeRatio;
-                const double noteLengthRealSec = noteLengthSourceSec / safeRatio;
+                const bool voiceSampled =
+                    sampledMode && voice.sampledSource != nullptr;
+                const double voiceAttackSec =
+                    (voiceSampled && !cachedSampledAttackOverride)
+                        ? juce::jmax(0.001, voice.sampledAttackSec)
+                        : attackSec;
+                const double voiceReleaseSec =
+                    (voiceSampled && !cachedSampledReleaseOverride)
+                        ? juce::jmax(0.02, voice.sampledReleaseSec)
+                        : releaseSec;
 
                 double env = 0.0;
-                if (ageRealSec < attackSec)
-                    env = ageRealSec / attackSec;
-                else if (ageRealSec < noteLengthRealSec)
-                    env = 1.0;
+                if (!voice.releasing)
+                {
+                    env = (voice.ageSec < voiceAttackSec)
+                              ? (voice.ageSec / voiceAttackSec)
+                              : 1.0;
+                }
                 else
-                    env = 1.0 - ((ageRealSec - noteLengthRealSec) / releaseSec);
+                {
+                    const double releaseNorm = voice.releaseAgeSec / voiceReleaseSec;
+                    env = voice.releaseStartLevel * (1.0 - releaseNorm);
+                }
 
                 if (env <= 0.0)
+                {
+                    voice.ageSec += invSr;
+                    if (voice.releasing)
+                        voice.releaseAgeSec += invSr;
                     continue;
+                }
 
-                const double totalRealSec = juce::jmax(0.001, noteLengthRealSec + releaseSec);
-                const double noteProgress = juce::jlimit(0.0, 1.0, ageRealSec / totalRealSec);
+                const double noteProgress = voice.releasing
+                                                ? juce::jlimit(0.0, 1.0, voice.releaseAgeSec / voiceReleaseSec)
+                                                : juce::jlimit(0.0, 0.85, voice.ageSec / juce::jmax(0.08, voiceAttackSec + 0.42));
 
-                double notePitch = (double)note.pitch + (double)pitchSemitones.load(std::memory_order_relaxed);
-                if (!preserveTempoPitch.load(std::memory_order_relaxed) && safeRatio > 0.0)
-                    notePitch += 12.0 * (std::log(safeRatio) / std::log(2.0));
+                double notePitch = (double)voice.pitch + (double)pitchSemitones.load(std::memory_order_relaxed);
+
+                if (voiceSampled)
+                {
+                    float sampleL = 0.0f;
+                    float sampleR = 0.0f;
+                    if (!renderSampledStereo(
+                            voice.sampledSource,
+                            voice.sampledKeyCenter,
+                            notePitch,
+                            voice.ageSec,
+                            sr,
+                            sampleL,
+                            sampleR))
+                    {
+                        voice.releasing = true;
+                        voice.releaseAgeSec = voiceReleaseSec;
+                        voice.ageSec += invSr;
+                        continue;
+                    }
+
+                    const float gain =
+                        (float)env *
+                        (float)voice.velocity *
+                        (float)cachedPreset.outputGain *
+                        (float)voice.sampledGainLinear;
+                    mixL += sampleL * gain;
+                    mixR += sampleR * gain;
+
+                    voice.ageSec += invSr;
+                    if (voice.releasing)
+                        voice.releaseAgeSec += invSr;
+                    continue;
+                }
 
                 const double freq = 440.0 * std::pow(2.0, (notePitch - 69.0) / 12.0);
-                const int seedBase = (int)(note.pitch * 97 + (int)(note.startBeat * 2000.0) * 13);
-                const int sampleSeed = seedBase + (int)std::floor(ageRealSec * sr);
+                const int sampleSeed = voice.seedBase + (int)std::floor(voice.ageSec * sr);
 
                 const float raw = renderInstrumentSample(cachedPreset,
-                                                         note.pitch,
+                                                         voice.pitch,
                                                          freq,
-                                                         ageRealSec,
+                                                         voice.ageSec,
                                                          noteProgress,
                                                          env,
                                                          sr,
                                                          sampleSeed);
-                const float driven = std::tanh(raw * driveGain);
-                const float sampleValue = driven *
+                const float sampleValue = std::tanh(raw * driveGain) *
                                           (float)env *
-                                          (float)juce::jlimit(0.0, 1.0, note.velocity) *
+                                          (float)voice.velocity *
                                           (float)cachedPreset.outputGain;
 
                 const double pan = juce::jlimit(-0.95, 0.95,
-                                                std::sin((double)note.pitch * 0.23 + note.startBeat * 0.9) * cachedPreset.stereoWidth);
+                                                std::sin((double)voice.pitch * 0.23 + (double)voice.channel * 0.37) * cachedPreset.stereoWidth);
                 const float leftGain = (float)std::sqrt(0.5 * (1.0 - pan));
                 const float rightGain = (float)std::sqrt(0.5 * (1.0 + pan));
 
                 mixL += sampleValue * leftGain;
                 mixR += sampleValue * rightGain;
+
+                voice.ageSec += invSr;
+                if (voice.releasing)
+                    voice.releaseAgeSec += invSr;
             }
 
             mixL = juce::jlimit(-1.0f, 1.0f, mixL);
             mixR = juce::jlimit(-1.0f, 1.0f, mixR);
-            const int outIndex = writeStart + i;
-
-            buffer.setSample(0, outIndex, buffer.getSample(0, outIndex) + mixL);
+            buffer.setSample(0, i, buffer.getSample(0, i) + mixL);
             if (stereo)
-                buffer.setSample(1, outIndex, buffer.getSample(1, outIndex) + mixR);
+                buffer.setSample(1, i, buffer.getSample(1, i) + mixR);
             else
-                buffer.setSample(0, outIndex, buffer.getSample(0, outIndex) + 0.5f * (mixL + mixR));
+                buffer.setSample(0, i, buffer.getSample(0, i) + 0.5f * (mixL + mixR));
         }
+
+        activeLiveNotes.erase(
+            std::remove_if(
+                activeLiveNotes.begin(),
+                activeLiveNotes.end(),
+                [sampledMode, releaseSec, this](const ActiveLiveNote &voice)
+                {
+                    const double voiceReleaseSec =
+                        (sampledMode && voice.sampledSource != nullptr &&
+                         !cachedSampledReleaseOverride)
+                            ? juce::jmax(0.02, voice.sampledReleaseSec)
+                            : releaseSec;
+                    return voice.releasing && voice.releaseAgeSec >= voiceReleaseSec;
+                }),
+            activeLiveNotes.end());
     }
 
     const juce::String getName() const override { return "TimelineMidiClipProcessor"; }
@@ -1088,6 +1342,7 @@ private:
     enum class InstrumentFamily
     {
         basic,
+        sampled,
         bass,
         pad,
         lead,
@@ -1116,13 +1371,74 @@ private:
         double noise = 0.02;
     };
 
+    struct DecodedSamplePcm
+    {
+        int sampleRate = 48000;
+        std::vector<float> left;
+        std::vector<float> right;
+
+        int frameCount() const
+        {
+            return (int)juce::jmin(left.size(), right.size());
+        }
+    };
+
+    struct SampledRegion
+    {
+        std::shared_ptr<const DecodedSamplePcm> sample;
+        int loKey = 0;
+        int hiKey = 127;
+        int keyCenter = 60;
+        int loVel = 0;
+        int hiVel = 127;
+        double gainLinear = 1.0;
+        double attackSec = 0.005;
+        double releaseSec = 0.35;
+    };
+
+    struct SampledDefinition
+    {
+        juce::String sfzAssetPath;
+        std::vector<SampledRegion> regions;
+        double defaultAttackSec = 0.005;
+        double defaultReleaseSec = 0.35;
+    };
+
     struct PendingState
     {
         juce::Array<TimelineMidiNote> notes;
         juce::String instrumentId;
         juce::String instrumentName;
         InstrumentPreset preset;
+        std::shared_ptr<const SampledDefinition> sampledDefinition;
+        bool sampledAttackOverride = false;
+        bool sampledReleaseOverride = false;
         double sourceTempoBpm = 120.0;
+    };
+
+    struct LiveMidiEvent
+    {
+        bool noteOn = false;
+        int channel = 1;
+        int pitch = 60;
+        float velocity = 1.0f;
+    };
+
+    struct ActiveLiveNote
+    {
+        int channel = 1;
+        int pitch = 60;
+        double velocity = 1.0;
+        double ageSec = 0.0;
+        bool releasing = false;
+        double releaseAgeSec = 0.0;
+        double releaseStartLevel = 1.0;
+        int seedBase = 0;
+        std::shared_ptr<const DecodedSamplePcm> sampledSource;
+        int sampledKeyCenter = 60;
+        double sampledGainLinear = 1.0;
+        double sampledAttackSec = 0.005;
+        double sampledReleaseSec = 0.35;
     };
 
     static double readParam(const juce::NamedValueSet &params, const char *key, double fallback)
@@ -1171,6 +1487,572 @@ private:
         default:
             return (float)(p < 0.5 ? (-1.0 + 4.0 * p) : (3.0 - 4.0 * p));
         }
+    }
+
+    using SfzOpcodeMap = std::unordered_map<std::string, juce::String>;
+
+    struct SampledAssetCache
+    {
+        juce::CriticalSection lock;
+        std::unordered_map<std::string, std::shared_ptr<const SampledDefinition>> definitions;
+        std::unordered_map<std::string, std::shared_ptr<const DecodedSamplePcm>> samples;
+        std::deque<std::string> sampleLru;
+    };
+
+    static SampledAssetCache &sampledAssetCache()
+    {
+        static SampledAssetCache cache;
+        return cache;
+    }
+
+    static juce::String normalizeAssetPath(const juce::String &rawPath)
+    {
+        juce::String path = rawPath.trim().replaceCharacter('\\', '/');
+        while (path.contains("//"))
+            path = path.replace("//", "/");
+        while (path.startsWithChar('/'))
+            path = path.substring(1);
+        return path;
+    }
+
+    static juce::File resolveFlutterAssetFile(const juce::String &assetPathRaw)
+    {
+        const juce::String assetPath = normalizeAssetPath(assetPathRaw);
+        if (assetPath.isEmpty())
+            return {};
+
+        const juce::File appBundle =
+            juce::File::getSpecialLocation(juce::File::currentApplicationFile)
+                .getParentDirectory();
+        const std::array<juce::File, 4> roots = {
+            appBundle.getChildFile("Frameworks")
+                .getChildFile("App.framework")
+                .getChildFile("flutter_assets"),
+            appBundle.getChildFile("flutter_assets"),
+            appBundle.getChildFile("Frameworks").getChildFile("App.framework"),
+            appBundle};
+
+        for (const auto &root : roots)
+        {
+            if (!root.exists())
+                continue;
+            const auto direct = root.getChildFile(assetPath);
+            if (direct.existsAsFile())
+                return direct;
+
+            const auto nested = root.getChildFile("flutter_assets")
+                                    .getChildFile(assetPath);
+            if (nested.existsAsFile())
+                return nested;
+        }
+
+        return appBundle.getChildFile("Frameworks")
+            .getChildFile("App.framework")
+            .getChildFile("flutter_assets")
+            .getChildFile(assetPath);
+    }
+
+    static SfzOpcodeMap parseSfzOpcodes(const juce::String &lineRaw)
+    {
+        SfzOpcodeMap out;
+        const juce::String line =
+            lineRaw.upToFirstOccurrenceOf("//", false, false).trim();
+        if (line.isEmpty())
+            return out;
+
+        static const std::regex pattern("([A-Za-z_][A-Za-z0-9_]*)=");
+        const std::string utf8 = line.toStdString();
+
+        std::vector<size_t> matchStarts;
+        std::vector<size_t> matchLengths;
+        std::vector<std::string> matchKeys;
+        for (std::sregex_iterator it(utf8.begin(), utf8.end(), pattern), end;
+             it != end; ++it)
+        {
+            matchStarts.push_back((size_t)it->position());
+            matchLengths.push_back((size_t)it->length());
+            matchKeys.push_back((*it)[1].str());
+        }
+
+        if (matchStarts.empty())
+            return out;
+
+        for (size_t i = 0; i < matchStarts.size(); ++i)
+        {
+            const size_t valueStart = matchStarts[i] + matchLengths[i];
+            const size_t valueEnd =
+                (i + 1 < matchStarts.size()) ? matchStarts[i + 1] : utf8.size();
+            if (valueStart >= valueEnd)
+                continue;
+
+            const juce::String key =
+                juce::String(matchKeys[i].c_str()).trim().toLowerCase();
+            const juce::String value =
+                juce::String::fromUTF8(utf8.data() + valueStart,
+                                       (int)(valueEnd - valueStart))
+                    .trim();
+            if (key.isEmpty() || value.isEmpty())
+                continue;
+            out[key.toStdString()] = value;
+        }
+
+        return out;
+    }
+
+    static void mergeOpcodeMap(SfzOpcodeMap &dst, const SfzOpcodeMap &src)
+    {
+        for (const auto &entry : src)
+            dst[entry.first] = entry.second;
+    }
+
+    static juce::String opcodeValue(const SfzOpcodeMap &values, const char *key)
+    {
+        if (auto found = values.find(std::string(key)); found != values.end())
+            return found->second;
+        return {};
+    }
+
+    static double readSfzNumeric(const SfzOpcodeMap &values,
+                                 const char *key,
+                                 double fallback)
+    {
+        const juce::String raw = opcodeValue(values, key).trim();
+        if (raw.isEmpty())
+            return fallback;
+        const double parsed = raw.getDoubleValue();
+        if (!std::isfinite(parsed))
+            return fallback;
+        return parsed;
+    }
+
+    static juce::String resolveSfzSampleAssetPath(const juce::String &sfzAssetPath,
+                                                  const juce::String &defaultPathRaw,
+                                                  const juce::String &samplePathRaw)
+    {
+        const juce::String sfzPath = normalizeAssetPath(sfzAssetPath);
+        const int slash = sfzPath.lastIndexOfChar('/');
+        const juce::String sfzDir =
+            slash >= 0 ? sfzPath.substring(0, slash) : juce::String();
+        const juce::String defaultPath = normalizeAssetPath(defaultPathRaw);
+        const juce::String samplePath = normalizeAssetPath(samplePathRaw);
+
+        juce::String joined = sfzDir;
+        if (defaultPath.isNotEmpty())
+        {
+            if (joined.isNotEmpty())
+                joined << "/";
+            joined << defaultPath;
+        }
+        if (samplePath.isNotEmpty())
+        {
+            if (joined.isNotEmpty())
+                joined << "/";
+            joined << samplePath;
+        }
+
+        return normalizeAssetPath(joined);
+    }
+
+    static void touchSampleLru(SampledAssetCache &cache, const std::string &key)
+    {
+        auto it = std::find(cache.sampleLru.begin(), cache.sampleLru.end(), key);
+        if (it != cache.sampleLru.end())
+            cache.sampleLru.erase(it);
+        cache.sampleLru.push_back(key);
+    }
+
+    static std::shared_ptr<const DecodedSamplePcm>
+    decodedSampleForAsset(const juce::String &sampleAssetPath)
+    {
+        const juce::String normalized = normalizeAssetPath(sampleAssetPath);
+        if (normalized.isEmpty())
+            return nullptr;
+        const std::string cacheKey = normalized.toLowerCase().toStdString();
+
+        auto &cache = sampledAssetCache();
+        {
+            const juce::ScopedLock lock(cache.lock);
+            if (auto found = cache.samples.find(cacheKey); found != cache.samples.end())
+            {
+                touchSampleLru(cache, cacheKey);
+                return found->second;
+            }
+        }
+
+        const juce::File sampleFile = resolveFlutterAssetFile(normalized);
+        if (!sampleFile.existsAsFile())
+            return nullptr;
+
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader(
+            formats.createReaderFor(sampleFile));
+        if (reader == nullptr || reader->lengthInSamples <= 1)
+            return nullptr;
+        if (reader->lengthInSamples > (juce::int64)std::numeric_limits<int>::max())
+            return nullptr;
+
+        const int frameCount = (int)reader->lengthInSamples;
+        juce::AudioBuffer<float> decodedBuffer(2, frameCount);
+        const bool ok = reader->read(&decodedBuffer,
+                                     0,
+                                     frameCount,
+                                     0,
+                                     true,
+                                     true);
+        if (!ok)
+            return nullptr;
+
+        auto decoded = std::make_shared<DecodedSamplePcm>();
+        decoded->sampleRate =
+            (int)juce::jlimit(4000.0, 192000.0, reader->sampleRate);
+        decoded->left.assign(decodedBuffer.getReadPointer(0),
+                             decodedBuffer.getReadPointer(0) + frameCount);
+        if (decodedBuffer.getNumChannels() > 1)
+        {
+            decoded->right.assign(decodedBuffer.getReadPointer(1),
+                                  decodedBuffer.getReadPointer(1) + frameCount);
+        }
+        else
+        {
+            decoded->right = decoded->left;
+        }
+
+        {
+            const juce::ScopedLock lock(cache.lock);
+            cache.samples[cacheKey] = decoded;
+            touchSampleLru(cache, cacheKey);
+            constexpr size_t kMaxCachedSamples = 64;
+            while (cache.sampleLru.size() > kMaxCachedSamples)
+            {
+                const std::string oldest = cache.sampleLru.front();
+                cache.sampleLru.pop_front();
+                cache.samples.erase(oldest);
+            }
+        }
+
+        return decoded;
+    }
+
+    static std::shared_ptr<const SampledDefinition>
+    sampledDefinitionForAsset(const juce::String &sfzAssetPathRaw)
+    {
+        const juce::String sfzAssetPath = normalizeAssetPath(sfzAssetPathRaw);
+        if (sfzAssetPath.isEmpty())
+            return nullptr;
+
+        const std::string cacheKey = sfzAssetPath.toLowerCase().toStdString();
+        auto &cache = sampledAssetCache();
+        {
+            const juce::ScopedLock lock(cache.lock);
+            if (auto found = cache.definitions.find(cacheKey);
+                found != cache.definitions.end())
+            {
+                return found->second;
+            }
+        }
+
+        const juce::File sfzFile = resolveFlutterAssetFile(sfzAssetPath);
+        if (!sfzFile.existsAsFile())
+            return nullptr;
+
+        const juce::String sfzText = sfzFile.loadFileAsString();
+        if (sfzText.isEmpty())
+            return nullptr;
+
+        SfzOpcodeMap control;
+        SfzOpcodeMap global;
+        SfzOpcodeMap group;
+        SfzOpcodeMap *region = nullptr;
+        std::vector<SfzOpcodeMap> rawRegions;
+        juce::String currentBlock;
+
+        juce::StringArray lines;
+        lines.addLines(sfzText);
+        for (const auto &rawLine : lines)
+        {
+            const juce::String line =
+                rawLine.upToFirstOccurrenceOf("//", false, false).trim();
+            if (line.isEmpty())
+                continue;
+
+            if (line.startsWithChar('<') && line.endsWithChar('>') &&
+                line.length() >= 3)
+            {
+                const juce::String tag =
+                    line.substring(1, line.length() - 1).trim().toLowerCase();
+                currentBlock = tag;
+                if (tag == "group")
+                {
+                    group.clear();
+                }
+                else if (tag == "region")
+                {
+                    rawRegions.emplace_back();
+                    region = &rawRegions.back();
+                    mergeOpcodeMap(*region, control);
+                    mergeOpcodeMap(*region, global);
+                    mergeOpcodeMap(*region, group);
+                }
+                continue;
+            }
+
+            const auto opcodes = parseSfzOpcodes(line);
+            if (opcodes.empty())
+                continue;
+
+            if (currentBlock == "control")
+                mergeOpcodeMap(control, opcodes);
+            else if (currentBlock == "global")
+                mergeOpcodeMap(global, opcodes);
+            else if (currentBlock == "group")
+                mergeOpcodeMap(group, opcodes);
+            else if (currentBlock == "region")
+            {
+                if (region == nullptr)
+                {
+                    rawRegions.emplace_back();
+                    region = &rawRegions.back();
+                    mergeOpcodeMap(*region, control);
+                    mergeOpcodeMap(*region, global);
+                    mergeOpcodeMap(*region, group);
+                }
+                mergeOpcodeMap(*region, opcodes);
+            }
+        }
+
+        const juce::String defaultPathRaw = opcodeValue(control, "default_path");
+        const double globalAttackSec =
+            readSfzNumeric(global, "ampeg_attack", 0.005);
+        const double globalReleaseSec =
+            readSfzNumeric(global, "ampeg_release", 0.35);
+        const double globalVol = readSfzNumeric(global, "volume", 0.0);
+
+        auto definition = std::make_shared<SampledDefinition>();
+        definition->sfzAssetPath = sfzAssetPath;
+        definition->defaultAttackSec = juce::jlimit(0.0, 4.0, globalAttackSec);
+        definition->defaultReleaseSec =
+            juce::jlimit(0.02, 12.0, globalReleaseSec);
+        definition->regions.reserve(rawRegions.size());
+
+        for (const auto &r : rawRegions)
+        {
+            const juce::String sampleRaw = opcodeValue(r, "sample").trim();
+            if (sampleRaw.isEmpty())
+                continue;
+
+            const juce::String sampleAssetPath = resolveSfzSampleAssetPath(
+                sfzAssetPath,
+                opcodeValue(r, "default_path").isNotEmpty()
+                    ? opcodeValue(r, "default_path")
+                    : defaultPathRaw,
+                sampleRaw);
+            auto sample = decodedSampleForAsset(sampleAssetPath);
+            if (sample == nullptr || sample->frameCount() < 2)
+                continue;
+
+            SampledRegion regionDef;
+            regionDef.sample = sample;
+            regionDef.loKey =
+                juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "lokey", 0.0)));
+            regionDef.hiKey =
+                juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "hikey", 127.0)));
+
+            double keyCenter = readSfzNumeric(r, "pitch_keycenter", std::numeric_limits<double>::quiet_NaN());
+            if (!std::isfinite(keyCenter))
+            {
+                keyCenter = readSfzNumeric(
+                    r,
+                    "key",
+                    (double)std::lround((regionDef.loKey + regionDef.hiKey) * 0.5));
+            }
+            regionDef.keyCenter =
+                juce::jlimit(0, 127, (int)std::lround(keyCenter));
+            regionDef.loVel =
+                juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "lovel", 0.0)));
+            regionDef.hiVel =
+                juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "hivel", 127.0)));
+
+            const double regionVolDb = juce::jlimit(
+                -24.0,
+                20.0,
+                readSfzNumeric(r, "volume", globalVol));
+            regionDef.gainLinear = std::pow(10.0, regionVolDb / 20.0);
+            regionDef.attackSec = juce::jlimit(
+                0.0,
+                4.0,
+                readSfzNumeric(r, "ampeg_attack", globalAttackSec));
+            regionDef.releaseSec = juce::jlimit(
+                0.02,
+                12.0,
+                readSfzNumeric(r, "ampeg_release", globalReleaseSec));
+            definition->regions.push_back(regionDef);
+        }
+
+        if (definition->regions.empty())
+            return nullptr;
+
+        {
+            const juce::ScopedLock lock(cache.lock);
+            cache.definitions[cacheKey] = definition;
+        }
+        return definition;
+    }
+
+    static juce::String sfzAssetPathForInstrument(const juce::String &instrumentId,
+                                                  const juce::String &instrumentName)
+    {
+        const juce::String id = instrumentId.toLowerCase().trim();
+        if (id.startsWith("sfz_asset:"))
+            return normalizeAssetPath(instrumentId.substring(10));
+
+        static const std::unordered_map<std::string, std::string> knownMap = {
+            {"sfz.vsco.violin_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsSusVib.sfz"},
+            {"sfz.vsco.cello_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/CelloEnsSusVib.sfz"},
+            {"sfz.vsco.trumpet_sus", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetSus.sfz"},
+            {"sfz.vsco.fhorn_sus", "assets/instruments/VSCO-2-CE-1.1.0/FHornSus.sfz"},
+            {"sfz.vsco.flute_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/FluteSusVib.sfz"},
+            {"sfz.vsco.clarinet_sus", "assets/instruments/VSCO-2-CE-1.1.0/ClarinetSus.sfz"},
+            {"sfz.vsco.organ_quiet", "assets/instruments/VSCO-2-CE-1.1.0/OrganQuiet.sfz"},
+            {"sfz.vsco.organ_loud", "assets/instruments/VSCO-2-CE-1.1.0/OrganLoud.sfz"},
+            {"sfz.vsco.marimba", "assets/instruments/VSCO-2-CE-1.1.0/Marimba.sfz"},
+            {"sfz.vsco.glockenspiel", "assets/instruments/VSCO-2-CE-1.1.0/Glockenspiel.sfz"},
+        };
+        if (auto found = knownMap.find(id.toStdString()); found != knownMap.end())
+            return found->second.c_str();
+
+        const juce::String text = (id + " " + instrumentName.toLowerCase());
+        auto contains = [&](const char *needle) { return text.contains(needle); };
+        if (contains("violin"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsSusVib.sfz";
+        if (contains("cello"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/CelloEnsSusVib.sfz";
+        if (contains("trumpet"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/TrumpetSus.sfz";
+        if (contains("horn"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/FHornSus.sfz";
+        if (contains("flute"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/FluteSusVib.sfz";
+        if (contains("clarinet"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/ClarinetSus.sfz";
+        if (contains("organ quiet"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/OrganQuiet.sfz";
+        if (contains("organ"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/OrganLoud.sfz";
+        if (contains("marimba"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/Marimba.sfz";
+        if (contains("glock"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/Glockenspiel.sfz";
+        return {};
+    }
+
+    static std::shared_ptr<const SampledDefinition>
+    resolveSampledDefinition(const juce::String &instrumentId,
+                             const juce::String &instrumentName)
+    {
+        const juce::String assetPath =
+            sfzAssetPathForInstrument(instrumentId, instrumentName);
+        if (assetPath.isEmpty())
+            return nullptr;
+        return sampledDefinitionForAsset(assetPath);
+    }
+
+    static const SampledRegion *pickSampledRegion(const SampledDefinition &definition,
+                                                  int pitch,
+                                                  int velocity)
+    {
+        const SampledRegion *best = nullptr;
+        int bestKeyDistance = std::numeric_limits<int>::max();
+        int bestVelDistance = std::numeric_limits<int>::max();
+
+        auto consider = [&](const SampledRegion &region, bool enforceVelocity)
+        {
+            if (pitch < region.loKey || pitch > region.hiKey)
+                return;
+            if (enforceVelocity && (velocity < region.loVel || velocity > region.hiVel))
+                return;
+
+            const int keyDistance = std::abs(pitch - region.keyCenter);
+            const int velDistance =
+                velocity < region.loVel ? (region.loVel - velocity)
+                                        : velocity > region.hiVel ? (velocity - region.hiVel)
+                                                                  : 0;
+            if (best == nullptr || keyDistance < bestKeyDistance ||
+                (keyDistance == bestKeyDistance && velDistance < bestVelDistance))
+            {
+                best = &region;
+                bestKeyDistance = keyDistance;
+                bestVelDistance = velDistance;
+            }
+        };
+
+        for (const auto &region : definition.regions)
+            consider(region, true);
+        if (best != nullptr)
+            return best;
+        for (const auto &region : definition.regions)
+            consider(region, false);
+        return best;
+    }
+
+    static bool renderSampledStereo(
+        const std::shared_ptr<const DecodedSamplePcm> &sample,
+        int keyCenter,
+        double notePitch,
+        double ageSec,
+        double outputSampleRate,
+        float &outL,
+        float &outR)
+    {
+        outL = 0.0f;
+        outR = 0.0f;
+        if (sample == nullptr || outputSampleRate <= 0.0 || ageSec < 0.0)
+            return false;
+
+        const auto &pcm = *sample;
+        const int frameCount = pcm.frameCount();
+        if (frameCount < 2)
+            return false;
+
+        const double semitoneOffset = notePitch - (double)keyCenter;
+        const double playbackRate =
+            std::pow(2.0, semitoneOffset / 12.0) *
+            ((double)pcm.sampleRate / outputSampleRate);
+        if (!std::isfinite(playbackRate) || playbackRate <= 0.0)
+            return false;
+
+        const double samplePos = ageSec * outputSampleRate * playbackRate;
+        if (samplePos < 0.0 || samplePos >= (double)(frameCount - 1))
+            return false;
+
+        const int index = (int)std::floor(samplePos);
+        const int nextIndex = juce::jmin(index + 1, frameCount - 1);
+        const double frac = samplePos - (double)index;
+
+        const float l0 = pcm.left[(size_t)index];
+        const float l1 = pcm.left[(size_t)nextIndex];
+        const float r0 = pcm.right[(size_t)index];
+        const float r1 = pcm.right[(size_t)nextIndex];
+        outL = juce::jlimit(-1.0f, 1.0f, (float)(l0 + (l1 - l0) * frac));
+        outR = juce::jlimit(-1.0f, 1.0f, (float)(r0 + (r1 - r0) * frac));
+        return true;
+    }
+
+    static bool renderSampledStereo(const SampledRegion &region,
+                                    double notePitch,
+                                    double ageSec,
+                                    double outputSampleRate,
+                                    float &outL,
+                                    float &outR)
+    {
+        return renderSampledStereo(
+            region.sample,
+            region.keyCenter,
+            notePitch,
+            ageSec,
+            outputSampleRate,
+            outL,
+            outR);
     }
 
     static const std::unordered_map<std::string, InstrumentPreset> &presetMap()
@@ -1259,7 +2141,10 @@ private:
         if (params.contains(juce::Identifier("drive")))
             preset.drive = juce::jlimit(0.0, 1.0, readParam(params, "drive", preset.drive));
         if (params.contains(juce::Identifier("outputGain")))
-            preset.outputGain = juce::jlimit(0.15, 0.75, readParam(params, "outputGain", preset.outputGain));
+        {
+            const double maxGain = (preset.family == InstrumentFamily::sampled) ? 2.0 : 0.75;
+            preset.outputGain = juce::jlimit(0.15, maxGain, readParam(params, "outputGain", preset.outputGain));
+        }
         if (params.contains(juce::Identifier("detune")))
             preset.detune = juce::jlimit(0.0, 0.03, readParam(params, "detune", preset.detune));
         if (params.contains(juce::Identifier("stereoWidth")))
@@ -1488,6 +2373,79 @@ private:
                             tempoPlaybackRatio.load(std::memory_order_relaxed));
     }
 
+    void applyPendingLiveMidiEvents()
+    {
+        std::vector<LiveMidiEvent> pending;
+        {
+            const juce::ScopedLock lock(liveStateLock);
+            if (pendingLiveMidiEvents.empty())
+                return;
+            pending.swap(pendingLiveMidiEvents);
+        }
+
+        const bool sampledMode =
+            cachedPreset.family == InstrumentFamily::sampled &&
+            cachedSampledDefinition != nullptr &&
+            !cachedSampledDefinition->regions.empty();
+
+        for (const auto &event : pending)
+        {
+            if (event.noteOn && event.velocity > 0.0f)
+            {
+                ActiveLiveNote voice;
+                voice.channel = juce::jlimit(1, 16, event.channel);
+                voice.pitch = juce::jlimit(0, 127, event.pitch);
+                voice.velocity = juce::jlimit(0.0, 1.0, (double)event.velocity);
+                voice.ageSec = 0.0;
+                voice.releasing = false;
+                voice.releaseAgeSec = 0.0;
+                voice.releaseStartLevel = 1.0;
+                voice.seedBase = voice.pitch * 97 + voice.channel * 29 + (int)std::lround(voice.velocity * 1000.0);
+
+                if (sampledMode)
+                {
+                    const int midiVelocity = juce::jlimit(
+                        0,
+                        127,
+                        (int)std::lround(voice.velocity * 127.0));
+                    const SampledRegion *region = pickSampledRegion(
+                        *cachedSampledDefinition,
+                        voice.pitch,
+                        midiVelocity);
+                    if (region == nullptr || region->sample == nullptr)
+                        continue;
+
+                    voice.sampledSource = region->sample;
+                    voice.sampledKeyCenter = region->keyCenter;
+                    voice.sampledGainLinear = region->gainLinear;
+                    voice.sampledAttackSec = region->attackSec;
+                    voice.sampledReleaseSec = region->releaseSec;
+                }
+
+                activeLiveNotes.push_back(voice);
+                if (activeLiveNotes.size() > 256)
+                {
+                    activeLiveNotes.erase(
+                        activeLiveNotes.begin(),
+                        activeLiveNotes.begin() +
+                            (std::ptrdiff_t)(activeLiveNotes.size() - 256));
+                }
+                continue;
+            }
+
+            for (auto it = activeLiveNotes.rbegin(); it != activeLiveNotes.rend(); ++it)
+            {
+                if (it->channel != event.channel || it->pitch != event.pitch || it->releasing)
+                    continue;
+
+                it->releasing = true;
+                it->releaseAgeSec = 0.0;
+                it->releaseStartLevel = 1.0;
+                break;
+            }
+        }
+    }
+
     void refreshCachedState()
     {
         const int version = pendingVersion.load(std::memory_order_relaxed);
@@ -1514,6 +2472,9 @@ private:
         }
 
         cachedPreset = local.preset;
+        cachedSampledDefinition = local.sampledDefinition;
+        cachedSampledAttackOverride = local.sampledAttackOverride;
+        cachedSampledReleaseOverride = local.sampledReleaseOverride;
         cachedSourceTempoBpm = local.sourceTempoBpm;
     }
 
@@ -1530,19 +2491,25 @@ private:
     std::atomic<bool> muted{false};
 
     juce::CriticalSection stateLock;
+    juce::CriticalSection liveStateLock;
     PendingState pendingState;
     std::atomic<int> pendingVersion{1};
     int cachedVersion = 0;
+    std::vector<LiveMidiEvent> pendingLiveMidiEvents;
+    std::vector<ActiveLiveNote> activeLiveNotes;
 
     std::vector<TimelineMidiNote> cachedNotes;
     InstrumentPreset cachedPreset;
+    std::shared_ptr<const SampledDefinition> cachedSampledDefinition;
+    bool cachedSampledAttackOverride = false;
+    bool cachedSampledReleaseOverride = false;
     double cachedSourceTempoBpm = 120.0;
 };
 
 // ---------------------------
 // JuceEngine
 // ---------------------------
-class JuceEngine
+class JuceEngine : public juce::MidiInputCallback
 {
 public:
     struct ExportOptions
@@ -1578,7 +2545,7 @@ public:
     void bypassPlugin(int trackIndex, int effectIndex, bool shouldBypass);
     bool getPluginBypassState(int trackIndex, int effectIndex);
     void bypassTrack(int trackIndex, bool shouldBypass);
-    juce::Array<juce::PluginDescription> getKnownPlugins() const;
+    juce::Array<juce::PluginDescription> getKnownPlugins();
     void insertPluginEffect(int trackIdx, const juce::String &pluginPath, std::function<void(bool)> callback);
     void shutdownEngine();
 
@@ -1612,6 +2579,17 @@ public:
                               const juce::NamedValueSet &params,
                               double sourceTempoBpm);
     bool supportsLiveMidiClipPlayback() const { return true; }
+    struct LiveMidiInputEvent
+    {
+        int clipId = -1;
+        bool noteOn = false;
+        int channel = 1;
+        int pitch = 60;
+        float velocity = 0.0f;
+        double transportSec = 0.0;
+    };
+    bool setLiveMidiInputTargetClip(int clipId);
+    std::vector<LiveMidiInputEvent> consumeLiveMidiInputEvents();
     bool unloadClip(int clipId);
     bool moveClipToRow(int clipId, int newRowId);
     bool setClipTime(int clipId, double startSec, double lengthSec, double inFileOffsetSec = 0.0);
@@ -1627,6 +2605,8 @@ public:
             transportSec.load(std::memory_order_relaxed),
             std::memory_order_relaxed);
     }
+    // Audio thread only; routes queued MIDI input events into clip processors.
+    void dispatchQueuedLiveMidiInputEventsForAudioThread();
     void advanceTransportBySamples(int numSamples)
     {
         if (!isPlayingAtomic.load(std::memory_order_relaxed))
@@ -1655,7 +2635,7 @@ public:
     void debugPrintGraphStructure();
 
     // CLIP-LEVEL
-    void setClipGain(int clipIndex, float gain); // gain ∈ 0..3
+    void setClipGain(int clipIndex, float gain); // gain UI ∈ 0..3 (mapped to -60..+6 dB)
     void muteClip(int clipIndex, bool shouldMute);
     void setClipPan(int clipIndex, float pan); // -1..1 where 0 = center
     void setClipPitch(int clipIndex, float semitones); // pitch ∈ -24..24
@@ -1671,11 +2651,19 @@ public:
                                  const juce::var &newValue);
     juce::StringArray getTrackEffectsForRow(int trackRow);
     juce::StringArray getTrackEffectIdsForRow(int trackRow);
+    juce::StringArray getTrackEffectInstanceIdsForRow(int trackRow);
     juce::Array<juce::NamedValueSet> getTrackPluginParameterInfo(int row, int effectIndex);
     void bypassRowEffect(int rowIndex, int effectIndex, bool shouldBypass);
     bool getRowEffectBypassState(int rowIndex, int effectIndex);
     void setTrackAutomationPoints(int trackRow,
                                   const std::vector<AutomationPoint> &points);
+    void setTrackEffectAutomationPoints(int trackRow,
+                                        int effectIndex,
+                                        const juce::String &paramId,
+                                        float minValue,
+                                        float maxValue,
+                                        const std::vector<AutomationPoint> &points);
+    void clearTrackEffectAutomationForRow(int trackRow);
     void setRowGain(int row, float gain);
     void muteRow(int rowIndex, bool shouldMute);
     bool isRowMuted(int rowIndex);
@@ -1699,6 +2687,7 @@ public:
 
     // Transport for automation
     void setAutomationTransport(double timeSeconds); // Dart passes seconds
+    void applyTrackEffectAutomationAtCurrentBlockStart();
 
     void setMetronomeEnabled(bool);
     void setMetronomeVolume(float);
@@ -1713,7 +2702,8 @@ public:
     bool selectInputDevice(const juce::String &name);
     juce::String getCurrentInputDeviceName() const;
     int getNumInputChannels() const;
-    void routeLiveInputToRow(int row, int channelCount);
+    void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
+    void requestAudioDeviceRefreshAsync(const juce::String &reason);
 
     // Recording
     bool startRecordingToWav(const juce::File &file,
@@ -1751,6 +2741,8 @@ public:
     double getHostSampleRate() const;
     std::vector<float> getRowEqWaveform(int row, int effectIndex, int sampleCount);
     std::vector<float> getMasterEqWaveform(int effectIndex, int sampleCount);
+    void handleIncomingMidiMessage(juce::MidiInput *source,
+                                   const juce::MidiMessage &message) override;
 
 private:
     JuceEngine();
@@ -1772,7 +2764,6 @@ private:
 
     bool engineInitialized = false;
     bool formatsRegistered = false; // will only be flipped once to true
-
     juce::AudioFormatManager formatManager;
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;
@@ -1789,6 +2780,8 @@ private:
     juce::OwnedArray<juce::Array<juce::AudioProcessorGraph::NodeID>> trackEffectChains;
 
     juce::KnownPluginList pluginList;
+    void scanPluginsIfNeeded();
+    bool pluginsScanned = false;
     std::vector<juce::String> getExposedParametersForPlugin(const juce::String &pluginId);
 
     juce::AudioDeviceManager deviceManager;
@@ -1803,11 +2796,22 @@ private:
     std::atomic<double> blockTransportStartSec{0.0}; // set each audio callback block
     std::atomic<double> hostSampleRateAtomic{44100.0};
     std::atomic<bool> isPlayingAtomic{false};
+    std::atomic<int> liveMidiInputTargetClip{-1};
+    std::mutex liveMidiInputQueueMutex;
+    std::vector<LiveMidiInputEvent> liveMidiInputPendingForAudio;
+    std::vector<LiveMidiInputEvent> liveMidiInputPendingForFlutter;
+    std::vector<juce::String> midiInputCallbackDeviceIds;
+    std::atomic<bool> midiInputCallbacksInitialized{false};
 
     // Basic limits
     static constexpr int kNumTracks = 5;  // legacy fixed-row compatibility paths
     static constexpr int kMaxRows = 100;  // hard safety cap
     static constexpr int kMaxClips = 500; // safety cap for simultaneous clips
+    static constexpr float kGainUiMin = 0.0f;
+    static constexpr float kGainUiMax = 3.0f;
+    static constexpr float kGainDbMin = -60.0f;
+    static constexpr float kGainDbMax = 6.0f;
+    static constexpr float kGainUiUnity = 2.0f;
 
     // Legacy row/clip routing containers retained for compatibility.
     juce::Array<StereoPanProcessor *> clipPanProcessors;
@@ -1920,13 +2924,24 @@ private:
 
     struct RowState
     {
+        struct TrackEffectAutomationLane
+        {
+            int effectIndex = -1;
+            juce::String paramId;
+            float minValue = 0.0f;
+            float maxValue = 1.0f;
+            std::vector<AutomationPoint> points;
+            float lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+        };
+
         int rowId = 0; // stable id
         juce::String name = "Row";
         int iconId = 0;      // UI icon enum/int
-        float gainUi = 1.0f; // 0..3 UI domain
+        float gainUi = kGainUiUnity; // 0..3 UI domain, piecewise taper with unity at 2.0
         float panUi = 0.5f;  // 0..1 UI domain
         bool muted = false;
         std::vector<AutomationPoint> automationPoints;
+        std::vector<TrackEffectAutomationLane> effectAutomationLanes;
 
         // processors
         TrackInputProcessor *inputProc = nullptr;
@@ -1976,6 +2991,8 @@ private:
     int recordChannelStart = 0;
     int recordChannelCount = 1;
     int recordChannelOffset = 0;
+    std::atomic<int> desiredInputOpenChannels{0};
+    std::atomic<bool> audioRouteRefreshPending{false};
 
     juce::LinearSmoothedValue<float> recPeak; // optional amplitude meter
     std::mutex graphRenderMutex;
@@ -1987,8 +3004,17 @@ private:
     void rebuildRowIdIndexCache();
     juce::AudioProcessorGraph::Node::Ptr getRowInputNodeById(int rowId);
     int getRowIndexById(int rowId) const;
+    void applyTrackEffectAutomationAtTimeSeconds(double timeSeconds);
+    void resetTrackEffectAutomationLatches();
+    void resetTrackEffectAutomationLatchesForRow(int row);
     void compactRowFxChain(int row);
     void compactMasterFxChain();
+    bool applyPreferredAudioDeviceSetup(int desiredInputChannels,
+                                        bool forceReopen,
+                                        const juce::String &reason);
+    void refreshMidiInputCallbacks();
+    void clearMidiInputCallbacks();
+    void logCurrentAudioDeviceState(const juce::String &reason) const;
 };
 
 class MetronomeAudioCallback : public juce::AudioIODeviceCallback
@@ -2057,6 +3083,8 @@ public:
 
         // set block transport start time for all processors (clips, automation)
         engine.setBlockTransportStartFromCurrent();
+        engine.applyTrackEffectAutomationAtCurrentBlockStart();
+        engine.dispatchQueuedLiveMidiInputEventsForAudioThread();
 
         // ===============================
         // 3️⃣ RENDER GRAPH (OUTPUT ONLY)

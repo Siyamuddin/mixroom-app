@@ -2,10 +2,10 @@ Pod::Spec.new do |s|
   s.name             = 'juce_audio_engine'
   s.version          = '0.0.1'
   s.summary          = 'JUCE audio engine for Flutter'
-  s.description      = 'Realtime audio engine built on JUCE'
-  s.homepage         = 'https://example.com'
+  s.description      = 'Internal proprietary realtime audio engine for Mixroom'
+  s.homepage         = 'https://mixroom.app'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'you' => 'email@example.com' }
+  s.author           = { 'Mixroom' => 'andrew@mixroom.ai' }
   s.source           = { :path => '.' }
 
   s.source_files = [

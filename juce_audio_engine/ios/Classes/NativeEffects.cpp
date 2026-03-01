@@ -1029,6 +1029,7 @@ void LimiterAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock
 {
     limiter.prepare(sampleRate, samplesPerBlock);
     limiter.setParameters(parameters);
+    grDb.store(0.0f, std::memory_order_relaxed);
 }
 
 void LimiterAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
@@ -1042,6 +1043,10 @@ void LimiterAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce:
     limiter.setParameters(parameters);
     limiter.process(buffer);
     gainReduction = limiter.getGainReduction();
+    const float gr = juce::jmax(gainReduction[0], gainReduction[1]);
+    constexpr float alpha = 0.18f;
+    const float prev = grDb.load(std::memory_order_relaxed);
+    grDb.store(prev + alpha * (gr - prev), std::memory_order_relaxed);
 }
 
 void LimiterAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
@@ -1108,6 +1113,7 @@ void ClipperAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock
     clipper.prepare(sampleRate, samplesPerBlock);
     clipper.setParameters(parameters);
     setLatencySamples(clipper.getOversamplerLatency());
+    grDb.store(0.0f, std::memory_order_relaxed);
 }
 
 void ClipperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
@@ -1123,6 +1129,10 @@ void ClipperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce:
     juce::dsp::ProcessContextReplacing<float> ctx(block);
     clipper.process(ctx);
     gainReduction = clipper.getGainReduction();
+    const float gr = juce::jmax(gainReduction[0], gainReduction[1]);
+    constexpr float alpha = 0.22f;
+    const float prev = grDb.load(std::memory_order_relaxed);
+    grDb.store(prev + alpha * (gr - prev), std::memory_order_relaxed);
 }
 
 void ClipperAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffer,
@@ -1136,6 +1146,7 @@ void ClipperAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffe
 
     // Latency-reporting processors must override bypass processing.
     clipper.reset();
+    grDb.store(0.0f, std::memory_order_relaxed);
 }
 
 void ClipperAudioProcessor::getStateInformation(juce::MemoryBlock &destData)

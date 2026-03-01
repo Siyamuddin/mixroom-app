@@ -30,6 +30,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.2
+  country_flags: ^2.0.0 # For country flags
   # video_editor: ^2.4.0
   # fraction: ^4.1.4
   # image_picker: ^1.1.2
@@ -88,6 +92,7 @@ dependencies:
   flutter_gen: ^5.10.0
   shared_preferences: ^2.5.3
   provider: ^6.1.4
+  in_app_purchase: ^3.2.2
   image_picker: ^1.1.2
   video_thumbnail: ^0.5.3
   easy_video_editor: ^0.1.2
@@ -123,14 +128,6 @@ dependencies:
   collection: ^1.19.1
   archive: ^4.0.7
 
-
-flutter_localizations:
-  sdk: flutter
-  intl: ^0.17.0
-  country_flags: ^2.0.0 # For country flags
-
-
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -150,9 +147,14 @@ flutter_native_splash:
   android: true
   ios: true
   image: assets/mixroom_logo202_home_4x.png #mixroom_logo_splash_big.png      # White transparent logo
+  image_android: assets/mixroom_logo202_home_4x.png
+  image_ios: assets/mixroom_logo202_home_4x.png
   android_gravity: center
   ios_content_mode: center
   color: "#15498E" # "#0F1A2A" is darker color
+  android_12:
+    image: assets/mixroom_logo202_home_4x.png
+    icon_background_color: "#15498E"
   # background_image: assets/home_background.png  # Blurred guitar background
 
 # command to refresh: dart run flutter_launcher_icons
@@ -194,8 +196,12 @@ flutter:
     - assets/mixroom_logo_202.png
     - assets/mixroom_logo202_home_4x.png
     - assets/mixroom_logo202_home.png
+    - assets/short_white.png
     - assets/magnet-solid-full.svg
+    - assets/instruments/
     - assets/models/yamnet.onnx
+    - assets/models/spleeter_vocals.fp16.onnx
+    - assets/models/spleeter_accompaniment.fp16.onnx
     # Enable after exporting trained models:
     # - assets/models/mix_apply_classifier.onnx
     # - assets/models/mix_magnitude_regressor.onnx

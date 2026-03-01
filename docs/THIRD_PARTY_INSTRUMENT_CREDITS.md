@@ -11,6 +11,14 @@ This document tracks third-party JUCE instrument projects referenced by Mixroom'
   - full license text in a `licenses/` folder,
   - attribution notices required by that license.
 
+## Bundled sampled assets
+
+- VSCO 2 CE audio assets are bundled under `assets/instruments/VSCO-2-CE-1.1.0/`
+  (CC0 license included in that directory).
+- Tic Tok Men Moogdrums1 / RetroDrums1 one-shots are bundled under
+  `assets/instruments/VSCO-2-CE-1.1.0/Electronic/TicTokMen/` and sourced from
+  sfzinstruments mirrors.
+
 ## Referenced projects
 
 | Mixroom Instrument ID | Source Project | Repository | License (upstream) | Notes |

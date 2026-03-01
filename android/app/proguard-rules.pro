@@ -7,3 +7,8 @@
 -keepclasseswithmembernames class * {
     native <methods>;
 }
+
+# MediaPipe proto symbols are referenced by optional profiler/template APIs.
+# These classes are not packaged in this app build and can be safely ignored.
+-dontwarn com.google.mediapipe.proto.CalculatorProfileProto$CalculatorProfile
+-dontwarn com.google.mediapipe.proto.GraphTemplateProto$CalculatorGraphTemplate

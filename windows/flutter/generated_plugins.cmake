@@ -7,6 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
   flutter_onnxruntime
   flutter_webrtc
+  juce_audio_engine
   permission_handler_windows
   record_windows
   share_plus

@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <cmath>
 
 #include "JuceLogBridge.h" // Bring in the function
 
@@ -8,12 +9,19 @@ extern "C" void juceLogToFlutter(const char *msg);
 class SimpleGainProcessor : public juce::AudioProcessor
 {
 public:
+    static constexpr float kUiMin = 0.0f;
+    static constexpr float kUiMax = 3.0f;
+    static constexpr float kDbMin = -60.0f;
+    static constexpr float kDbMax = 6.0f;
+    static constexpr float kUiUnity = 2.0f;
+
     SimpleGainProcessor()
         : juce::AudioProcessor(BusesProperties()
                                    .withInput("Input", juce::AudioChannelSet::stereo(), true)
                                    .withOutput("Output", juce::AudioChannelSet::stereo(), true))
     {
-        addParameter(gain = new juce::AudioParameterFloat("volume", "Volume", 0.0f, 3.0f, 1.0f));
+        addParameter(gain = new juce::AudioParameterFloat(
+                         "volume", "Volume", kUiMin, kUiMax, kUiUnity));
     }
 
     void setMuted(bool m) { muted = m; }
@@ -31,9 +39,27 @@ public:
 
     void processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &) override
     {
-        float userGain = gain->get(); // value from 0.0 → 3.0
-        // juceLogToFlutter(("Gain value: " + juce::String(userGain)).toRawUTF8());
-        float perceptualGain = juce::jmin(userGain * userGain, 9.0f); // Apply loudness curve and clamp
+        const float userGain = juce::jlimit(kUiMin, kUiMax, gain->get());
+        float db = 0.0f;
+
+        if (userGain <= kUiUnity)
+        {
+            const float t = (kUiUnity <= kUiMin)
+                                ? 0.0f
+                                : (userGain - kUiMin) / (kUiUnity - kUiMin);
+            db = kDbMin + ((0.0f - kDbMin) * juce::jlimit(0.0f, 1.0f, t));
+        }
+        else
+        {
+            const float t = (kUiMax <= kUiUnity)
+                                ? 0.0f
+                                : (userGain - kUiUnity) / (kUiMax - kUiUnity);
+            db = 0.0f + ((kDbMax - 0.0f) * juce::jlimit(0.0f, 1.0f, t));
+        }
+
+        const float linearGain = (db <= kDbMin + 0.001f)
+                                     ? 0.0f
+                                     : std::pow(10.0f, db / 20.0f);
 
         if (muted)
         {
@@ -41,12 +67,12 @@ public:
         }
         else
         {
-            buffer.applyGain(perceptualGain);
+            buffer.applyGain(linearGain);
         }
     }
 
     // Metadata
-    const juce::String getName() const override { return "SimpleGain"; }
+    const juce::String getName() const override { return "Gain"; }
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }

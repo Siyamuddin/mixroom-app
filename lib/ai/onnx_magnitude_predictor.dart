@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 
+import 'ai_debug.dart';
 import '../models/goal_vector.dart';
 import '../models/mixing_result.dart';
 import '../models/project_state.dart';
@@ -119,17 +120,25 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
   Future<void> load() async {
     if (!enabled) return;
 
+    aiDebugLog(
+      'onnx-mag',
+      'loading assets apply="$applyModelAsset" magnitude="$magnitudeModelAsset"',
+    );
     try {
       _applySession = await _ort.createSessionFromAsset(applyModelAsset);
+      aiDebugLog('onnx-mag', 'apply model loaded');
     } catch (_) {
       _applySession = null;
+      aiDebugLog('onnx-mag', 'apply model load failed');
     }
 
     try {
       _magnitudeSession =
           await _ort.createSessionFromAsset(magnitudeModelAsset);
+      aiDebugLog('onnx-mag', 'magnitude model loaded');
     } catch (_) {
       _magnitudeSession = null;
+      aiDebugLog('onnx-mag', 'magnitude model load failed');
     }
   }
 
@@ -144,6 +153,7 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
       return const MagnitudeRefineResult(actions: [], fallbackUsed: false);
     }
     if (!enabled) {
+      aiDebugLog('onnx-mag', 'disabled -> fallback');
       return MagnitudeRefineResult(
         actions: actions,
         fallbackUsed: true,
@@ -151,6 +161,7 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
       );
     }
     if (_applySession == null || _magnitudeSession == null) {
+      aiDebugLog('onnx-mag', 'model_not_ready -> fallback');
       return MagnitudeRefineResult(
         actions: actions,
         fallbackUsed: true,
@@ -165,6 +176,10 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
       strict: strict,
     );
     if (contextFeatures.length + _actionFeatureCount != kFeatureCount) {
+      aiDebugLog(
+        'onnx-mag',
+        'feature contract mismatch context=${contextFeatures.length} action=$_actionFeatureCount totalExpected=$kFeatureCount',
+      );
       return MagnitudeRefineResult(
         actions: actions,
         fallbackUsed: true,
@@ -179,6 +194,10 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
         ..._buildActionFeatures(project, action),
       ];
       if (features.length != kFeatureCount) {
+        aiDebugLog(
+          'onnx-mag',
+          'feature contract mismatch built=${features.length} expected=$kFeatureCount',
+        );
         return MagnitudeRefineResult(
           actions: actions,
           fallbackUsed: true,
@@ -190,6 +209,10 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
       final rawMagnitude = await _predictScalar(_magnitudeSession!, features);
 
       if (applyScore == null || rawMagnitude == null) {
+        aiDebugLog(
+          'onnx-mag',
+          'inference failed action=${action.type} applyScore=$applyScore rawMagnitude=$rawMagnitude',
+        );
         return MagnitudeRefineResult(
           actions: actions,
           fallbackUsed: true,
@@ -199,22 +222,42 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
 
       // Match training clamp (0..3).
       var predictedScale = rawMagnitude.clamp(0.0, 3.0);
+      var decision = 'keep';
 
       if (applyScore < 0.15) {
         if (!strict) {
+          aiDebugLog(
+            'onnx-mag',
+            'action=${action.type} applyScore=${applyScore.toStringAsFixed(3)} rawScale=${rawMagnitude.toStringAsFixed(3)} decision=drop(strict=false)',
+          );
           continue;
         }
         predictedScale = math.min(predictedScale, 0.25);
+        decision = 'strong_attenuate';
       }
 
       if (applyScore < applyThreshold) {
         if (!strict) {
           predictedScale = math.min(predictedScale, 0.35);
+          decision = 'attenuate_non_strict';
         } else {
           predictedScale = math.min(predictedScale, 0.65);
+          if (decision == 'keep') {
+            decision = 'attenuate_strict';
+          }
         }
       }
 
+      aiDebugLog(
+        'onnx-mag',
+        'action=${action.type} applyScore=${applyScore.toStringAsFixed(3)} rawScale=${rawMagnitude.toStringAsFixed(3)} finalScale=${predictedScale.toStringAsFixed(3)} decision=$decision strict=$strict',
+      );
+      if (kAiDebugVerbose) {
+        aiDebugLog(
+          'onnx-mag',
+          'actionData=${aiDebugShortMap(action.data)}',
+        );
+      }
       refined.add(_scaleAction(project, action, predictedScale));
     }
 

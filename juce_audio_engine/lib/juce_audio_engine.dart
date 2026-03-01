@@ -1,6 +1,48 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+class JuceEngineCapabilities {
+  final bool externalPluginHosting;
+  final List<String> supportedPluginFormats;
+  final bool nativePluginEditor;
+
+  const JuceEngineCapabilities({
+    required this.externalPluginHosting,
+    required this.supportedPluginFormats,
+    required this.nativePluginEditor,
+  });
+
+  static const JuceEngineCapabilities none = JuceEngineCapabilities(
+    externalPluginHosting: false,
+    supportedPluginFormats: <String>[],
+    nativePluginEditor: false,
+  );
+
+  factory JuceEngineCapabilities.fromMap(Map<String, dynamic> map) {
+    final rawFormats = map['supportedPluginFormats'];
+    final formats = <String>[];
+    if (rawFormats is List) {
+      for (final item in rawFormats) {
+        final value = item?.toString().trim() ?? '';
+        if (value.isNotEmpty) formats.add(value);
+      }
+    }
+    return JuceEngineCapabilities(
+      externalPluginHosting: map['externalPluginHosting'] == true,
+      supportedPluginFormats: formats,
+      nativePluginEditor: map['nativePluginEditor'] == true,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      'externalPluginHosting': externalPluginHosting,
+      'supportedPluginFormats': supportedPluginFormats,
+      'nativePluginEditor': nativePluginEditor,
+    };
+  }
+}
+
 class JuceAudioEngine {
   static const _ch = MethodChannel('juce_audio_engine');
   static const _eventCh = EventChannel('juce_audio_engine/events');
@@ -16,7 +58,7 @@ class JuceAudioEngine {
         final track = event['track'] as int;
         final path = event['path'] as String;
         final success = event['success'] as bool;
-        print("Plugin loaded: $success for $path on track $track");
+        debugPrint("Plugin loaded: $success for $path on track $track");
       }
     });
   }
@@ -25,7 +67,7 @@ class JuceAudioEngine {
   // Helpers
   // -------------------------------
   static void _logError(String method, Object error) {
-    print('JuceAudioEngine.$method failed: $error');
+    debugPrint('JuceAudioEngine.$method failed: $error');
   }
 
   // -------------------------------
@@ -92,7 +134,7 @@ class JuceAudioEngine {
         'bypass': shouldBypass,
       });
     } on PlatformException catch (e) {
-      print('bypassTrack failed: $e');
+      debugPrint('bypassTrack failed: $e');
     }
   }
 
@@ -331,17 +373,82 @@ class JuceAudioEngine {
   // -------------------------------
   // Plugin scanning & export
   // -------------------------------
-  static Future<List<Map<String, String>>> scanPlugins() async {
+  static JuceEngineCapabilities _fallbackEngineCapabilities() {
+    if (kIsWeb) return JuceEngineCapabilities.none;
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.macOS:
+        return const JuceEngineCapabilities(
+          externalPluginHosting: true,
+          supportedPluginFormats: <String>['AU', 'VST3'],
+          nativePluginEditor: false,
+        );
+      case TargetPlatform.windows:
+        return const JuceEngineCapabilities(
+          externalPluginHosting: true,
+          supportedPluginFormats: <String>['VST3'],
+          nativePluginEditor: false,
+        );
+      case TargetPlatform.iOS:
+        return const JuceEngineCapabilities(
+          externalPluginHosting: false,
+          supportedPluginFormats: <String>['AUv3'],
+          nativePluginEditor: false,
+        );
+      case TargetPlatform.android:
+      case TargetPlatform.linux:
+      case TargetPlatform.fuchsia:
+        return JuceEngineCapabilities.none;
+    }
+  }
+
+  static Future<JuceEngineCapabilities> getEngineCapabilities() async {
+    try {
+      final raw = await _ch
+          .invokeMethod<Map<dynamic, dynamic>>('getEngineCapabilities');
+      if (raw == null) return _fallbackEngineCapabilities();
+      return JuceEngineCapabilities.fromMap(Map<String, dynamic>.from(raw));
+    } on MissingPluginException {
+      return _fallbackEngineCapabilities();
+    } on PlatformException catch (e) {
+      _logError('getEngineCapabilities', e);
+      return _fallbackEngineCapabilities();
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> scanPlugins() async {
     try {
       final result = await _ch.invokeMethod<List<dynamic>>('scanPlugins');
-      return result
-              ?.cast<Map<dynamic, dynamic>>()
-              .map((m) => Map<String, String>.from(m))
-              .toList() ??
-          <Map<String, String>>[];
+      final normalized = <Map<String, dynamic>>[];
+      if (result == null) return normalized;
+      for (final item in result) {
+        if (item is! Map) continue;
+        final raw = Map<String, dynamic>.from(item);
+        final rawId = raw['id']?.toString().trim() ?? '';
+        final rawPath = raw['path']?.toString().trim() ?? '';
+        final rawName = raw['name']?.toString().trim() ?? '';
+
+        final id =
+            rawId.isNotEmpty ? rawId : (rawPath.isNotEmpty ? rawPath : rawName);
+        if (id.isEmpty) continue;
+
+        final out = <String, dynamic>{
+          'id': id,
+          'name': rawName.isNotEmpty ? rawName : id,
+        };
+
+        final format = raw['format']?.toString().trim() ?? '';
+        if (format.isNotEmpty) out['format'] = format;
+        final manufacturer = raw['manufacturer']?.toString().trim() ?? '';
+        if (manufacturer.isNotEmpty) out['manufacturer'] = manufacturer;
+        final category = raw['category']?.toString().trim() ?? '';
+        if (category.isNotEmpty) out['category'] = category;
+
+        normalized.add(out);
+      }
+      return normalized;
     } on PlatformException catch (e) {
       _logError('scanPlugins', e);
-      return <Map<String, String>>[];
+      return <Map<String, dynamic>>[];
     }
   }
 
@@ -528,6 +635,59 @@ class JuceAudioEngine {
     } on PlatformException catch (e) {
       _logError('updateMidiClipEvents', e);
       return false;
+    }
+  }
+
+  static Future<bool> setLiveMidiInputTargetClip(int clipIndex) async {
+    try {
+      final ok = await _ch.invokeMethod<bool>('setLiveMidiInputTargetClip', {
+        'clip': clipIndex,
+      });
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      _logError('setLiveMidiInputTargetClip', e);
+      return false;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> consumeLiveMidiInputEvents() async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'consumeLiveMidiInputEvents',
+      );
+      if (raw == null) return <Map<String, dynamic>>[];
+      return raw
+          .map((e) => Map<String, dynamic>.from(e as Map<dynamic, dynamic>))
+          .toList();
+    } on PlatformException catch (e) {
+      _logError('consumeLiveMidiInputEvents', e);
+      return <Map<String, dynamic>>[];
+    }
+  }
+
+  static Future<List<Map<String, String>>>
+      getConnectedMidiInputDevices() async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getConnectedMidiInputDevices',
+      );
+      if (raw == null) return <Map<String, String>>[];
+      return raw
+          .map((entry) {
+            final map =
+                Map<String, dynamic>.from(entry as Map<dynamic, dynamic>);
+            final id = (map['id'] as String?)?.trim() ?? '';
+            final name = (map['name'] as String?)?.trim() ?? id;
+            return <String, String>{
+              'id': id,
+              'name': name,
+            };
+          })
+          .where((entry) => (entry['id'] ?? '').isNotEmpty)
+          .toList();
+    } on PlatformException catch (e) {
+      _logError('getConnectedMidiInputDevices', e);
+      return <Map<String, String>>[];
     }
   }
 
@@ -828,6 +988,19 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<List<String>> getTrackEffectInstanceIdsForRow(int row) async {
+    try {
+      final list = await _ch.invokeListMethod<String>(
+        'getTrackEffectInstanceIdsForRow',
+        {'row': row},
+      );
+      return list ?? <String>[];
+    } on PlatformException catch (e) {
+      _logError('getTrackEffectInstanceIdsForRow', e);
+      return <String>[];
+    }
+  }
+
   static Future<void> setTrackEffect(
       int row, int effectIndex, String paramId, dynamic value) async {
     try {
@@ -871,8 +1044,8 @@ class JuceAudioEngine {
     }
   }
 
-  /// points: List<Map<String, double>> with keys like
-  /// { "timeSeconds": double, "value": double }
+  /// points: `List<Map<String, double>>` with keys like
+  /// `{ "timeSeconds": double, "value": double }`
   static Future<void> setTrackAutomationPoints(
       int row, List<Map<String, dynamic>> points) async {
     try {
@@ -882,6 +1055,38 @@ class JuceAudioEngine {
       });
     } on PlatformException catch (e) {
       _logError('setTrackAutomationPoints', e);
+    }
+  }
+
+  static Future<void> setTrackEffectAutomationPoints(
+    int row,
+    int effectIndex,
+    String paramId,
+    double minValue,
+    double maxValue,
+    List<Map<String, dynamic>> points,
+  ) async {
+    try {
+      await _ch.invokeMethod('setTrackEffectAutomationPoints', {
+        'row': row,
+        'effect': effectIndex,
+        'paramId': paramId,
+        'min': minValue,
+        'max': maxValue,
+        'points': points,
+      });
+    } on PlatformException catch (e) {
+      _logError('setTrackEffectAutomationPoints', e);
+    }
+  }
+
+  static Future<void> clearTrackEffectAutomationForRow(int row) async {
+    try {
+      await _ch.invokeMethod('clearTrackEffectAutomationForRow', {
+        'row': row,
+      });
+    } on PlatformException catch (e) {
+      _logError('clearTrackEffectAutomationForRow', e);
     }
   }
 
@@ -1056,7 +1261,13 @@ class JuceAudioEngine {
   // TRANSPORT / DEBUG
   // ===============================
   static Future<void> setAutomationTransport(double timeSeconds) async {
-    await setTransportSeconds(timeSeconds);
+    try {
+      await _ch.invokeMethod('setAutomationTransport', {
+        'timeSeconds': timeSeconds,
+      });
+    } on PlatformException catch (e) {
+      _logError('setAutomationTransport', e);
+    }
   }
 
   static Future<void> debugPrintGraph(String title) async {

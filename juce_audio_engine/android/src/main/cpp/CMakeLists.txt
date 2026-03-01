@@ -46,6 +46,7 @@ set(SRC_FILES
     JuceBridge.cpp
     JuceEngine.cpp
     NativeEffects.cpp
+    InstrumentRenderers.cpp
     JuceLogBridge.cpp
 )
 

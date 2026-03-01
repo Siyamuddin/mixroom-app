@@ -39,7 +39,7 @@ class ProjectMeta {
 }
 
 class ProjectManager {
-  static const int maxProjects = 5;
+  static const int maxProjects = 10000;
 
   static Future<Directory> _rootDir() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -80,14 +80,14 @@ class ProjectManager {
 
   static Future<List<ProjectMeta>> listProjects() async {
     final root = await _rootDir();
-    final dirs = root.listSync().whereType<Directory>().toList();
-
     final metas = <ProjectMeta>[];
-    for (final d in dirs) {
+    await for (final entity in root.list(followLinks: false)) {
+      if (entity is! Directory) continue;
+      final d = entity;
       final f = _projectJsonFile(d);
-      if (!f.existsSync()) continue;
+      if (!await f.exists()) continue;
       try {
-        final json = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+        final json = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
         metas.add(
           ProjectMeta(
             dir: d,
@@ -156,29 +156,18 @@ class ProjectManager {
       throw FileSystemException("project.json missing", jsonFileOld.path);
     }
 
-    // Find collision-safe folder name inside SAME parent.
-    // Use both sibling folder names and sibling project.json names so we
-    // still resolve collisions for legacy projects where json/folder diverged.
+    // Find a collision-safe folder name inside the same parent using folder
+    // names only. This keeps rename fast even with many projects.
     final parent = dir.parent;
     final base = _sanitizeFolderName(trimmed);
     final selfPathNorm = p.normalize(dir.path);
-    final occupiedNamesLower = <String>{};
-    final siblings = parent.listSync().whereType<Directory>().toList();
-    for (final sibling in siblings) {
+    final siblingFolderNamesLower = <String>{};
+    await for (final entity in parent.list(followLinks: false)) {
+      if (entity is! Directory) continue;
+      final sibling = entity;
       final siblingNorm = p.normalize(sibling.path);
       if (siblingNorm == selfPathNorm) continue;
-
-      occupiedNamesLower.add(p.basename(sibling.path).toLowerCase());
-
-      final siblingJson = _projectJsonFile(sibling);
-      if (!siblingJson.existsSync()) continue;
-      try {
-        final json =
-            jsonDecode(siblingJson.readAsStringSync()) as Map<String, dynamic>;
-        final siblingName = (json["name"] as String?)?.trim() ?? '';
-        if (siblingName.isEmpty) continue;
-        occupiedNamesLower.add(_sanitizeFolderName(siblingName).toLowerCase());
-      } catch (_) {}
+      siblingFolderNamesLower.add(p.basename(sibling.path).toLowerCase());
     }
 
     String resolved = base;
@@ -189,9 +178,9 @@ class ProjectManager {
       final desiredDir = Directory(desiredPath);
       final desiredExists = await desiredDir.exists();
       final takenByOtherDir = desiredExists && desiredNorm != selfPathNorm;
-      final takenByProjectName =
-          occupiedNamesLower.contains(resolved.toLowerCase());
-      if (!takenByOtherDir && !takenByProjectName) break;
+      final takenBySiblingFolder =
+          siblingFolderNamesLower.contains(resolved.toLowerCase());
+      if (!takenByOtherDir && !takenBySiblingFolder) break;
       resolved = "$base #$i";
       i++;
     }

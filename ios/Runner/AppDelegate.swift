@@ -10,68 +10,15 @@ import AVFAudio
   private var hapticsChannel: FlutterMethodChannel?
   private var edgeGesturesChannel: FlutterMethodChannel?
   private var initialMixroomPath: String?
+  private var didAttemptHapticsAudioSessionConfig = false
+  private var channelsInitialized = false
 
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-
     GeneratedPluginRegistrant.register(with: self)
-    configureHapticsForAudioSession()
-
-    if let controller = window?.rootViewController as? FlutterViewController {
-      channel = FlutterMethodChannel(name: channelName, binaryMessenger: controller.binaryMessenger)
-      hapticsChannel = FlutterMethodChannel(name: "mixroom/haptics", binaryMessenger: controller.binaryMessenger)
-      edgeGesturesChannel = FlutterMethodChannel(
-        name: "mixroom/edge_gestures",
-        binaryMessenger: controller.binaryMessenger
-      )
-
-      channel?.setMethodCallHandler { [weak self] call, result in
-        guard let self = self else { return }
-        if call.method == "getInitialMixroomPath" {
-          result(self.initialMixroomPath)
-          self.initialMixroomPath = nil
-        } else {
-          result(FlutterMethodNotImplemented)
-        }
-      }
-
-      hapticsChannel?.setMethodCallHandler { [weak self] call, result in
-        guard let self = self else {
-          result(FlutterError(code: "UNAVAILABLE", message: "App delegate released", details: nil))
-          return
-        }
-
-        guard call.method == "impact" else {
-          result(FlutterMethodNotImplemented)
-          return
-        }
-
-        let args = call.arguments as? [String: Any]
-        let style = (args?["style"] as? String) ?? "light"
-        self.performHapticImpact(style: style)
-        result(nil)
-      }
-
-      edgeGesturesChannel?.setMethodCallHandler { [weak self] call, result in
-        guard let self = self else {
-          result(FlutterError(code: "UNAVAILABLE", message: "App delegate released", details: nil))
-          return
-        }
-
-        guard call.method == "setDeferred" else {
-          result(FlutterMethodNotImplemented)
-          return
-        }
-
-        let args = call.arguments as? [String: Any]
-        let enabled = (args?["enabled"] as? Bool) ?? false
-        self.setSystemGestureDeferral(enabled: enabled)
-        result(nil)
-      }
-    }
-
+    bindChannelsIfNeeded()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -87,10 +34,9 @@ import AVFAudio
 
   override func applicationDidBecomeActive(_ application: UIApplication) {
     super.applicationDidBecomeActive(application)
-    configureHapticsForAudioSession()
   }
 
-  private func handleIncomingURL(_ url: URL) {
+  func handleIncomingURL(_ url: URL) {
     // Only .mixroom files
     if !url.path.lowercased().hasSuffix(".mixroom") { return }
 
@@ -120,6 +66,7 @@ import AVFAudio
   }
 
   private func deliverPath(_ path: String) {
+    bindChannelsIfNeeded()
     // if Flutter channel ready, emit immediately; else store for cold-start retrieval
     if let channel = channel {
       channel.invokeMethod("openMixroomPath", arguments: path)
@@ -150,6 +97,8 @@ import AVFAudio
 
   private func configureHapticsForAudioSession() {
     guard #available(iOS 13.0, *) else { return }
+    if didAttemptHapticsAudioSessionConfig { return }
+    didAttemptHapticsAudioSessionConfig = true
     do {
       try AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
     } catch {
@@ -159,8 +108,96 @@ import AVFAudio
 
   private func setSystemGestureDeferral(enabled: Bool) {
     DispatchQueue.main.async {
-      guard let vc = self.window?.rootViewController as? EdgeDeferringFlutterViewController else { return }
+      guard let vc = self.currentEdgeDeferringFlutterViewController() else { return }
       vc.setSystemGestureDeferralEnabled(enabled)
     }
+  }
+
+  private func currentFlutterViewController() -> FlutterViewController? {
+    if #available(iOS 13.0, *) {
+      for scene in UIApplication.shared.connectedScenes {
+        guard let windowScene = scene as? UIWindowScene else { continue }
+
+        if let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+           let vc = keyWindow.rootViewController as? FlutterViewController {
+          return vc
+        }
+
+        if let vc = windowScene.windows
+          .compactMap({ $0.rootViewController as? FlutterViewController })
+          .first {
+          return vc
+        }
+      }
+    }
+
+    return window?.rootViewController as? FlutterViewController
+  }
+
+  private func currentEdgeDeferringFlutterViewController()
+    -> EdgeDeferringFlutterViewController?
+  {
+    return currentFlutterViewController() as? EdgeDeferringFlutterViewController
+  }
+
+  private func bindChannelsIfNeeded() {
+    if channelsInitialized { return }
+    guard let registrar = self.registrar(forPlugin: "mixroom_app_delegate_channels") else {
+      return
+    }
+    let messenger = registrar.messenger()
+
+    channel = FlutterMethodChannel(name: channelName, binaryMessenger: messenger)
+    hapticsChannel = FlutterMethodChannel(name: "mixroom/haptics", binaryMessenger: messenger)
+    edgeGesturesChannel = FlutterMethodChannel(
+      name: "mixroom/edge_gestures",
+      binaryMessenger: messenger
+    )
+
+    channel?.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else { return }
+      if call.method == "getInitialMixroomPath" {
+        result(self.initialMixroomPath)
+        self.initialMixroomPath = nil
+      } else {
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
+    hapticsChannel?.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else {
+        result(FlutterError(code: "UNAVAILABLE", message: "App delegate released", details: nil))
+        return
+      }
+
+      guard call.method == "impact" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+
+      let args = call.arguments as? [String: Any]
+      let style = (args?["style"] as? String) ?? "light"
+      self.performHapticImpact(style: style)
+      result(nil)
+    }
+
+    edgeGesturesChannel?.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else {
+        result(FlutterError(code: "UNAVAILABLE", message: "App delegate released", details: nil))
+        return
+      }
+
+      guard call.method == "setDeferred" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+
+      let args = call.arguments as? [String: Any]
+      let enabled = (args?["enabled"] as? Bool) ?? false
+      self.setSystemGestureDeferral(enabled: enabled)
+      result(nil)
+    }
+
+    channelsInitialized = true
   }
 }

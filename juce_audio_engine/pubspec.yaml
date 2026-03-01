@@ -1,7 +1,7 @@
 name: juce_audio_engine
-description: "A new Flutter plugin project."
+description: "Internal proprietary JUCE-based audio engine plugin for the Mixroom application."
 version: 0.0.1
-homepage:
+publish_to: 'none'
 
 environment:
   sdk: ^3.6.0
@@ -40,6 +40,10 @@ flutter:
       ios:
         pluginClass: JuceAudioEnginePlugin
         podspec: ios/juce_audio_engine.podspec
+      macos:
+        pluginClass: JuceAudioEnginePluginSwift
+      windows:
+        pluginClass: JuceAudioEnginePluginCApi
 
   # To add assets to your plugin package, add an assets section, like this:
   # assets:

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -13,6 +14,7 @@ import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
+import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/models/mixing_result.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
@@ -21,7 +23,10 @@ import 'package:uuid/uuid.dart';
 import '../helpers/youtube_upload.dart';
 import 'package:mixroom/models/models.dart';
 // import 'package:mixroom/chat/_old_chat_screen.dart';
+import 'package:mixroom/ai/assistant_action_utils.dart';
+import 'package:mixroom/ai/ai_debug.dart';
 import 'package:mixroom/ai/chat_pipeline.dart';
+import 'package:mixroom/ai/spleeter_stem_separator.dart';
 import 'package:mixroom/ai/goal_vector_builder.dart';
 import 'package:mixroom/ai/instrument_classifier.dart';
 // import 'package:mixroom/ai/local_llm_service.dart';
@@ -44,7 +49,6 @@ import 'package:mixroom/models/goal_vector.dart';
 
 import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_full/ffprobe_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_full/log.dart';
 import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
 import 'package:ffmpeg_kit_flutter_new_full/session.dart';
 
@@ -83,10 +87,12 @@ import 'package:accessing_security_scoped_resource/accessing_security_scoped_res
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_file_dialog/flutter_file_dialog.dart';
+import 'package:mixroom/helpers/export_save_dialog.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/helpers/project_manager.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
+import 'package:mixroom/helpers/subscription_service.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -101,12 +107,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 import 'package:mixroom/screens/home.dart';
+import 'package:mixroom/models/subscription_models.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
 import 'package:mixroom/widgets/piano_roll_editor.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:just_audio/just_audio.dart' as ja;
 import 'package:record/record.dart';
 import 'package:mixroom/widgets/sample_browser_panel.dart';
+import 'package:mixroom/widgets/export_success_preview_player.dart';
 
 Completer<void> _cancelSignal = Completer();
 
@@ -124,6 +132,201 @@ const List<String> kMixroomBuiltInEffects = [
   "Chorus",
   "Vibrato",
 ];
+
+const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
+  {
+    'id': 'sfz.vsco.violin_ens_sus_vib',
+    'name': 'Violin Ensemble Sustain Vibrato',
+    'category': 'instrument',
+    'pickerCategory': 'Strings',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsSusVib.sfz',
+    'outputGain': 0.72,
+    'attackMs': 8.0,
+    'releaseMs': 620.0,
+  },
+  {
+    'id': 'sfz.vsco.cello_ens_sus_vib',
+    'name': 'Cello Ensemble Sustain Vibrato',
+    'category': 'instrument',
+    'pickerCategory': 'Strings',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/CelloEnsSusVib.sfz',
+    'outputGain': 0.74,
+    'attackMs': 8.0,
+    'releaseMs': 680.0,
+  },
+  {
+    'id': 'sfz.vsco.trumpet_sus',
+    'name': 'Trumpet Sustain',
+    'category': 'instrument',
+    'pickerCategory': 'Brass',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/TrumpetSus.sfz',
+    'outputGain': 0.68,
+    'attackMs': 6.0,
+    'releaseMs': 420.0,
+  },
+  {
+    'id': 'sfz.vsco.fhorn_sus',
+    'name': 'French Horn Sustain',
+    'category': 'instrument',
+    'pickerCategory': 'Brass',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/FHornSus.sfz',
+    'outputGain': 0.68,
+    'attackMs': 7.0,
+    'releaseMs': 460.0,
+  },
+  {
+    'id': 'sfz.vsco.flute_sus_vib',
+    'name': 'Flute Sustain Vibrato',
+    'category': 'instrument',
+    'pickerCategory': 'Woodwinds',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/FluteSusVib.sfz',
+    'outputGain': 0.66,
+    'attackMs': 4.0,
+    'releaseMs': 380.0,
+  },
+  {
+    'id': 'sfz.vsco.clarinet_sus',
+    'name': 'Clarinet Sustain',
+    'category': 'instrument',
+    'pickerCategory': 'Woodwinds',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/ClarinetSus.sfz',
+    'outputGain': 0.68,
+    'attackMs': 5.0,
+    'releaseMs': 420.0,
+  },
+  {
+    'id': 'sfz.vsco.organ_quiet',
+    'name': 'Organ Quiet',
+    'category': 'instrument',
+    'pickerCategory': 'Keys',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/OrganQuiet.sfz',
+    'outputGain': 0.58,
+    'attackMs': 2.0,
+    'releaseMs': 280.0,
+  },
+  {
+    'id': 'sfz.vsco.organ_loud',
+    'name': 'Organ Loud',
+    'category': 'instrument',
+    'pickerCategory': 'Keys',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/OrganLoud.sfz',
+    'outputGain': 0.56,
+    'attackMs': 2.0,
+    'releaseMs': 260.0,
+  },
+  {
+    'id': 'sfz.vsco.marimba',
+    'name': 'Marimba',
+    'category': 'instrument',
+    'pickerCategory': 'Percussion',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/Marimba.sfz',
+    'outputGain': 0.74,
+    'attackMs': 2.0,
+    'releaseMs': 520.0,
+  },
+  {
+    'id': 'sfz.vsco.glockenspiel',
+    'name': 'Glockenspiel',
+    'category': 'instrument',
+    'pickerCategory': 'Percussion',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/Glockenspiel.sfz',
+    'outputGain': 0.82,
+    'attackMs': 2.0,
+    'releaseMs': 820.0,
+  },
+];
+
+class _SfzRegion {
+  const _SfzRegion({
+    required this.sampleAssetPath,
+    required this.loKey,
+    required this.hiKey,
+    required this.keyCenter,
+    required this.loVel,
+    required this.hiVel,
+    required this.gainLinear,
+    required this.attackSec,
+    required this.releaseSec,
+  });
+
+  final String sampleAssetPath;
+  final int loKey;
+  final int hiKey;
+  final int keyCenter;
+  final int loVel;
+  final int hiVel;
+  final double gainLinear;
+  final double attackSec;
+  final double releaseSec;
+}
+
+class _SfzDefinition {
+  const _SfzDefinition({
+    required this.sfzAssetPath,
+    required this.regions,
+    required this.defaultAttackSec,
+    required this.defaultReleaseSec,
+  });
+
+  final String sfzAssetPath;
+  final List<_SfzRegion> regions;
+  final double defaultAttackSec;
+  final double defaultReleaseSec;
+}
+
+class _SfzParsedLine {
+  const _SfzParsedLine({
+    this.blockTag,
+    this.opcodes = const <String, String>{},
+  });
+
+  final String? blockTag;
+  final Map<String, String> opcodes;
+}
+
+class _DecodedStereoPcm {
+  const _DecodedStereoPcm({
+    required this.sampleRate,
+    required this.left,
+    required this.right,
+  });
+
+  final int sampleRate;
+  final Float32List left;
+  final Float32List right;
+
+  int get frameCount => math.min(left.length, right.length);
+}
 
 const List<Map<String, dynamic>> kInstrumentCatalog = [
   {
@@ -2063,12 +2266,171 @@ class _CopiedClipGroupEntry {
   });
 }
 
+class _InputChannelRouteOption {
+  final int channelStart;
+  final int channelCount;
+
+  const _InputChannelRouteOption({
+    required this.channelStart,
+    required this.channelCount,
+  });
+
+  String get label {
+    if (channelCount <= 1) {
+      return 'Mono ${channelStart + 1}';
+    }
+    return 'Stereo ${channelStart + 1}+${channelStart + channelCount}';
+  }
+}
+
+class _AutomationTargetMeta {
+  final String targetId;
+  final String label;
+  final int effectIndex; // -1 = row volume
+  final String paramId;
+  final String type; // float|bool|choice
+  final double min;
+  final double max;
+  final double initialNormalized;
+
+  const _AutomationTargetMeta({
+    required this.targetId,
+    required this.label,
+    required this.effectIndex,
+    required this.paramId,
+    required this.type,
+    required this.min,
+    required this.max,
+    this.initialNormalized = 0.5,
+  });
+
+  bool get isVolume => targetId == 'volume';
+
+  Map<String, dynamic> toUiMap() => <String, dynamic>{
+        'id': targetId,
+        'label': label,
+        'isVolume': isVolume,
+        'effectIndex': effectIndex,
+        'paramId': paramId,
+        'type': type,
+        'min': min,
+        'max': max,
+        'initialNormalized': initialNormalized.clamp(0.0, 1.0),
+      };
+
+  AutomationLaneSnapshot toLaneSnapshot(List<AutomationPoint> points) {
+    return AutomationLaneSnapshot(
+      targetId: targetId,
+      label: label,
+      effectIndex: effectIndex,
+      paramId: paramId,
+      type: type,
+      min: min,
+      max: max,
+      points: points.map((p) => p.copy()).toList(growable: false),
+    );
+  }
+
+  static _AutomationTargetMeta fromLaneSnapshot(AutomationLaneSnapshot lane) {
+    final laneInitial = lane.points.isNotEmpty
+        ? lane.points.first.volume.clamp(0.0, 1.0).toDouble()
+        : (lane.targetId == 'volume' ? 0.75 : 0.5);
+    return _AutomationTargetMeta(
+      targetId: lane.targetId,
+      label: lane.label,
+      effectIndex: lane.effectIndex,
+      paramId: lane.paramId,
+      type: lane.type,
+      min: lane.min,
+      max: lane.max,
+      initialNormalized: laneInitial,
+    );
+  }
+}
+
+class _ParsedAutomationTargetId {
+  final bool isVolume;
+  final int legacyEffectIndex;
+  final String effectKey;
+  final String paramId;
+
+  const _ParsedAutomationTargetId({
+    required this.isVolume,
+    required this.legacyEffectIndex,
+    required this.effectKey,
+    required this.paramId,
+  });
+}
+
+class _ClipMono16kSegment {
+  final Float32List samples;
+  final int sampleRate;
+  final double timelineStartMs;
+  final double timelineEndMs;
+  final double timelineMsPerLocalMs;
+
+  const _ClipMono16kSegment({
+    required this.samples,
+    required this.sampleRate,
+    required this.timelineStartMs,
+    required this.timelineEndMs,
+    required this.timelineMsPerLocalMs,
+  });
+}
+
+enum AudioEditorInitialAction { exportWav, exportMp3 }
+
+class _EditorLayoutSpec {
+  final EdgeInsets topBarPadding;
+  final double topBarBottomGap;
+  final double topBarClusterGap;
+  final double topBarActionButtonSize;
+
+  const _EditorLayoutSpec({
+    required this.topBarPadding,
+    required this.topBarBottomGap,
+    required this.topBarClusterGap,
+    required this.topBarActionButtonSize,
+  });
+
+  factory _EditorLayoutSpec.fromSize(Size size) {
+    final isDesktop = PlatformCapabilities.current.isDesktop;
+    final width = size.width;
+    final scale = isDesktop
+        ? (width >= 1900
+            ? 1.26
+            : width >= 1600
+                ? 1.16
+                : width >= 1360
+                    ? 1.08
+                    : 1.0)
+        : 1.0;
+    return _EditorLayoutSpec(
+      topBarPadding: EdgeInsets.fromLTRB(
+        16.0 * scale,
+        12.0 * scale,
+        16.0 * scale,
+        8.0 * scale,
+      ),
+      topBarBottomGap: isDesktop ? 14.0 : 12.0,
+      topBarClusterGap: 10.0 * scale,
+      topBarActionButtonSize: 48.0 * scale,
+    );
+  }
+}
+
 class AudioEditorScreen extends StatefulWidget {
   final String mode;
   final Directory projectDir;
+  final bool? isProEntitled;
+  final AudioEditorInitialAction? initialAction;
 
   const AudioEditorScreen(
-      {Key? key, required this.mode, required this.projectDir})
+      {Key? key,
+      required this.mode,
+      required this.projectDir,
+      this.isProEntitled,
+      this.initialAction})
       : super(key: key);
   @override
   State<AudioEditorScreen> createState() => _AudioEditorScreenState2();
@@ -2100,6 +2462,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     '.caf',
   };
 
+  bool _subscriptionCapabilityOrLegacy(String capability) {
+    try {
+      return context.read<SubscriptionService>().canUseCapability(capability);
+    } catch (_) {
+      return widget.mode == 'Pro';
+    }
+  }
+
+  bool get _isProEntitled {
+    final explicit = widget.isProEntitled;
+    if (explicit != null) return explicit;
+    return _subscriptionCapabilityOrLegacy(SubscriptionCapability.proEditor);
+  }
+
+  String get _resolvedMode => _isProEntitled ? "Pro" : "Basic";
+  PlatformCapabilities _platformCapabilities = PlatformCapabilities.current;
+
+  bool get _desktopNativeWavOnlyExport =>
+      _platformCapabilities.desktopNativeWavOnlyExport;
+
   static const MethodChannel _edgeGesturesChannel =
       MethodChannel('mixroom/edge_gestures');
   static void _noopRefreshRowFx(int row) {}
@@ -2108,6 +2490,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String _projectName = "Untitled Project";
   bool _everSaved = false;
   bool _loadedOnce = false;
+  bool _handledInitialAction = false;
 
   Duration _scrubPosition = Duration.zero;
   bool _isPlaying = false;
@@ -2133,13 +2516,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _transportPollBusy = false;
   Duration _lastTransportPollElapsed = Duration.zero;
   Duration _lastTransportSampleElapsed = Duration.zero;
+  Duration _lastTransportUiNotifyElapsed = Duration.zero;
+  Duration _lastFxPlaybackRefreshElapsed = Duration.zero;
+  Duration _transportPlayStartSyncGraceUntil = Duration.zero;
+  Duration _transportEndCheckGraceUntil = Duration.zero;
   double _lastTransportSampleSeconds = 0.0;
   double _transportRateSecPerSec = 0.0;
   Ticker? _transportTicker;
   final ValueNotifier<Duration> _transportClock = ValueNotifier(Duration.zero);
   static const Duration _kTransportPollInterval = Duration(milliseconds: 50);
+  static const Duration _kTransportPlayStartSyncGrace =
+      Duration(milliseconds: 180);
+  static const Duration _kTransportUiNotifyInterval = Duration.zero;
   static const Duration _kTransportMaxExtrapolation =
       Duration(milliseconds: 120);
+  static const Duration _kFxPlaybackRefreshInterval =
+      Duration(milliseconds: 90);
 
   // string of export filter to pass to effects screen
   String filterString = "";
@@ -2188,15 +2580,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   int _selectedRow = 0;
   List<TimelineRow> _rows = [];
+  List<int> _timelineSelectedClipIndices = const <int>[];
+  int _timelinePrimarySelectedClipIndex = -1;
 
-  void _setGlobalAudioClock(Duration value) {
+  void _setGlobalAudioClock(Duration value, {bool forceNotify = false}) {
     if (_globalAudioClock == value && _transportClock.value == value) {
       return;
     }
     _globalAudioClock = value;
-    if (_transportClock.value != value) {
-      _transportClock.value = value;
-    }
+    final now = _transportUiStopwatch.elapsed;
+    final elapsedSinceUiNotify = now - _lastTransportUiNotifyElapsed;
+    final bool shouldNotify = forceNotify ||
+        !_isPlaying ||
+        elapsedSinceUiNotify >= _kTransportUiNotifyInterval;
+    if (!shouldNotify) return;
+    _lastTransportUiNotifyElapsed = now;
+    if (_transportClock.value != value) _transportClock.value = value;
   }
 
   void _syncTransportClock(Duration value, {required bool playing}) {
@@ -2205,7 +2604,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _lastTransportSampleElapsed = now;
     _lastTransportPollElapsed = now;
     _transportRateSecPerSec = playing ? 1.0 : 0.0;
-    _setGlobalAudioClock(value);
+    _setGlobalAudioClock(value, forceNotify: true);
   }
 
   Duration _estimateTransportClockFromSample() {
@@ -2255,7 +2654,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       _lastTransportSampleSeconds = t;
       _lastTransportSampleElapsed = sampleElapsed;
-      _setGlobalAudioClock(Duration(milliseconds: (t * 1000.0).round()));
+      final suppressImmediateSnap = _isPlaying &&
+          !force &&
+          sampleElapsed < _transportPlayStartSyncGraceUntil;
+      if (!suppressImmediateSnap) {
+        _setGlobalAudioClock(Duration(milliseconds: (t * 1000.0).round()));
+      }
     } catch (_) {
       // Ignore transient bridge errors; next poll will recover.
     } finally {
@@ -2263,13 +2667,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  void _refreshFxUiForPlaybackTick() {
+    if (!_isPlaying) return;
+    final now = _transportUiStopwatch.elapsed;
+    if (now - _lastFxPlaybackRefreshElapsed < _kFxPlaybackRefreshInterval) {
+      return;
+    }
+    _lastFxPlaybackRefreshElapsed = now;
+    for (int row = 0; row < _rowCount; row++) {
+      _refreshRowFxPlayback(row);
+    }
+  }
+
   // === Recording state (Dart-only, no JUCE) ===
   final AudioRecorder _micRecorder = AudioRecorder();
 
   bool _isRecording = false;
+  bool _isMidiClipRecording = false;
   double _recordingStartMs = 0; // project time where the recording starts
   String? _recordingFilePath; // temp recorded file (m4a/wav/etc)
   Timer? _recordingPeakTimer;
+  Timer? _midiInputPollTimer;
+  int? _midiRecordingClipEngineId;
+  bool _midiInputDrainBusy = false;
+  int _nextMidiRecordNoteToken = 0;
+  double _lastMidiRecordTransportSec = 0.0;
+  bool _midiRecordHasChanges = false;
+  final Map<String, List<MidiNote>> _midiHeldNotesByKey =
+      <String, List<MidiNote>>{};
 
   // for live preview waveform
   List<double> _recordingPeaks = []; // 0..1 peaks while recording
@@ -2278,7 +2703,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   // so keeping this local state might be unnecessary (and cause a factor of drift from source of truth which is JUCE) (maybe consider removing?)
   final List<double> _rowPan = [];
   final List<double> _rowGain = [];
+  static const double _kGainUiMin = 0.0;
+  static const double _kGainUiMax = 3.0;
+  static const double _kGainDbMin = -60.0;
+  static const double _kGainDbMax = 6.0;
+  static const double _kGainUiUnity = 2.0;
+  static const double _kLegacyLinearGainUiUnity = 2.727272727272727;
+  final Map<int, _ClipStretchSnapshot> _pendingStretchUndoByClip =
+      <int, _ClipStretchSnapshot>{};
   final List<List<AutomationPoint>> _rowVolumeAutomation = [];
+  final Map<int, Map<String, List<AutomationPoint>>> _rowPluginAutomation =
+      <int, Map<String, List<AutomationPoint>>>{};
+  final Map<int, Map<String, List<AutomationClipSnapshot>>>
+      _rowAutomationClips = <int, Map<String, List<AutomationClipSnapshot>>>{};
+  final Map<int, Map<String, _AutomationTargetMeta>> _rowAutomationTargets =
+      <int, Map<String, _AutomationTargetMeta>>{};
+  final Map<int, String> _rowSelectedAutomationTarget = <int, String>{};
+  final Map<String, double> _lastAppliedAutomationNormalized =
+      <String, double>{};
   final List<bool> _rowMuted = [];
   final List<bool> _rowSoloed = [];
   final List<bool?> _rowMuteApplied = [];
@@ -2295,6 +2737,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _pianoRollFullscreen = false;
   int? _activeMidiClipEngineId;
   bool _liveMidiEventPlaybackSupported = false;
+  Timer? _midiDevicePollTimer;
+  bool _midiDevicePollBusy = false;
+  Map<String, String> _knownMidiDevicesById = <String, String>{};
   final Map<int, int> _midiRenderSyncTokens = <int, int>{};
   final Map<int, Timer> _midiRenderDebounceTimers = <int, Timer>{};
   int _nextMidiRenderSyncToken = 0;
@@ -2307,7 +2752,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   // master rack
   bool _showMasterRack = false;
-  double _masterGain = 1.0;
+  double _masterGain = _kGainUiUnity;
   double _masterPan = 0.5;
   double? _masterGainDragStart;
   double? _masterPanDragStart;
@@ -2343,7 +2788,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _selectedChannelStart = 0;
   int _selectedChannelCount = 1;
 
-  bool _loadingDevices = true;
+  bool _loadingDevices = false;
 
   bool _metronomeEnabled = false;
   double _metronomeVolume = 0.5; // 0–1
@@ -2355,15 +2800,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _chatHasText = false;
   final TextEditingController _chatTextController = TextEditingController();
   late final InstrumentClassifier _classifier;
+  late final SpleeterStemSeparator _spleeterStemSeparator;
   final FocusNode _chatFocusNode = FocusNode();
   late final ChatPipeline _chatPipeline;
   late final MixingMagnitudePredictor _magnitudePredictor;
+  Future<void>? _aiModelsWarmupFuture;
   late final ProducerDataCollector _producerCollector;
   bool _producerDataMode = false;
   bool _showProducerCaptureUi = false;
   bool _producerUiBusy = false;
   late final ChatController _chatController;
   void Function(int row) _refreshRowFx = _noopRefreshRowFx;
+  void Function(int row) _refreshRowFxPlayback = _noopRefreshRowFx;
   bool _isThinking = false;
   late final MixChangeHighlighter _mixHighlighter = MixChangeHighlighter();
   bool _chatWarm = false;
@@ -2393,7 +2841,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _samplePreviewPlaying = false;
   int _pianoPreviewToken = 0;
   final Map<String, String> _pianoPreviewRenderCache = <String, String>{};
-  final Set<String> _pianoPreviewPrimedInstruments = <String>{};
+  List<Map<String, dynamic>> _instrumentCatalog = kBundledSfzFallbackCatalog
+      .map((e) => Map<String, dynamic>.from(e))
+      .toList(growable: true);
+  bool _instrumentCatalogReady = false;
+  final Map<String, _SfzDefinition> _sfzDefinitionCache =
+      <String, _SfzDefinition>{};
+  final LinkedHashMap<String, _DecodedStereoPcm> _sfzSampleCache =
+      LinkedHashMap<String, _DecodedStereoPcm>();
+  static const int _kMaxSfzSampleCacheEntries = 10;
 
   late MeterBus _meters;
   Timer? _meterTimer;
@@ -2447,23 +2903,183 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _setStateAndRefreshProjectSettings(VoidCallback updater) {
     if (!mounted) return;
-    setState(updater);
     final dialogSetState = _projectSettingsStateSetter;
     if (dialogSetState != null) {
+      // While the settings dialog is open, avoid rebuilding the whole editor
+      // tree for each control change. Refresh only the dialog subtree.
+      updater();
       dialogSetState(() {});
+      return;
+    }
+    setState(updater);
+  }
+
+  String _sanitizeInstrumentIdToken(String raw) {
+    final lower = raw.toLowerCase();
+    final collapsed = lower.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    return collapsed.replaceAll(RegExp(r'^_+|_+$'), '');
+  }
+
+  String _prettyInstrumentNameFromSfzPreset(String presetFileName) {
+    var stem = presetFileName.trim();
+    if (stem.toLowerCase().endsWith('.sfz')) {
+      stem = stem.substring(0, stem.length - 4);
+    }
+    stem = stem.replaceAllMapped(
+      RegExp(r'([a-z])([A-Z])'),
+      (m) => '${m.group(1)} ${m.group(2)}',
+    );
+    stem = stem.replaceAll(RegExp(r'[_\-]+'), ' ');
+    stem = stem.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (stem.isEmpty) return 'Instrument';
+    return stem
+        .split(' ')
+        .map((w) => w.isEmpty
+            ? w
+            : '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}')
+        .join(' ');
+  }
+
+  String _normalizePickerCategory(String raw) {
+    final key = raw.trim().toLowerCase();
+    switch (key) {
+      case 'strings':
+        return 'Strings';
+      case 'brass':
+        return 'Brass';
+      case 'woodwinds':
+        return 'Woodwinds';
+      case 'keys':
+        return 'Keys';
+      case 'percussion':
+        return 'Percussion';
+      case 'drum':
+      case 'drums':
+        return 'Drums';
+      default:
+        return 'Other';
+    }
+  }
+
+  Map<String, dynamic> _defaultInstrumentSpec() {
+    if (_instrumentCatalog.isNotEmpty) return _instrumentCatalog.first;
+    if (kBundledSfzFallbackCatalog.isNotEmpty) {
+      return Map<String, dynamic>.from(kBundledSfzFallbackCatalog.first);
+    }
+    return Map<String, dynamic>.from(kInstrumentCatalog.first);
+  }
+
+  bool _isSampledInstrumentSpec(Map<String, dynamic> spec) {
+    if (spec['isSampled'] == true) return true;
+    final id = (spec['id'] as String? ?? '').toLowerCase();
+    return id.startsWith('sfz.');
+  }
+
+  bool _isSampledInstrumentId(String instrumentId) {
+    final id = instrumentId.trim().toLowerCase();
+    if (id.startsWith('sfz.') || id.startsWith('sfz_asset:')) return true;
+    final spec = _findInstrumentSpecById(instrumentId);
+    if (spec == null) return false;
+    return _isSampledInstrumentSpec(spec);
+  }
+
+  Future<void> _loadBundledInstrumentCatalog() async {
+    try {
+      final raw = await rootBundle.loadString('assets/instruments/index.json');
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        return;
+      }
+
+      final pack = (decoded['pack'] as String?)?.trim();
+      final presets = decoded['presets'];
+      if (presets is! List) {
+        return;
+      }
+
+      final loaded = <Map<String, dynamic>>[];
+      for (final entry in presets) {
+        if (entry is! Map) continue;
+        final map = entry.cast<String, dynamic>();
+        final presetFile = (map['preset'] as String?)?.trim() ?? '';
+        if (presetFile.isEmpty) continue;
+        final categoryRaw = (map['category'] as String?) ?? '';
+        final pickerCategory = _normalizePickerCategory(categoryRaw);
+        final displayName = (map['name'] as String?)?.trim().isNotEmpty == true
+            ? (map['name'] as String).trim()
+            : _prettyInstrumentNameFromSfzPreset(presetFile);
+        final defaultOutputGain = pickerCategory == 'Drums' ? 0.84 : 0.72;
+        final defaultAttackMs = pickerCategory == 'Drums' ? 2.0 : 6.0;
+        final defaultReleaseMs = pickerCategory == 'Drums' ? 320.0 : 520.0;
+        final idToken = _sanitizeInstrumentIdToken(
+            '${pack ?? 'sfz'}_${presetFile.replaceAll('.sfz', '')}');
+        loaded.add(<String, dynamic>{
+          'id': 'sfz.$idToken',
+          'name': displayName,
+          'category': 'instrument',
+          'pickerCategory': pickerCategory,
+          'sourceProject': pack ?? 'Bundled SFZ',
+          'sourceLicense': 'See bundled LICENSE',
+          'isSampled': true,
+          'sfzAssetPath': 'assets/instruments/${pack ?? ''}/$presetFile',
+          'outputGain':
+              ((map['outputGain'] as num?)?.toDouble() ?? defaultOutputGain)
+                  .clamp(0.2, 2.0),
+          'attackMs': ((map['attackMs'] as num?)?.toDouble() ?? defaultAttackMs)
+              .clamp(0.0, 2400.0),
+          'releaseMs':
+              ((map['releaseMs'] as num?)?.toDouble() ?? defaultReleaseMs)
+                  .clamp(20.0, 3600.0),
+        });
+      }
+
+      if (loaded.isEmpty) {
+        return;
+      }
+      if (!mounted) {
+        _instrumentCatalog = loaded;
+        _instrumentCatalogReady = true;
+        return;
+      }
+      setState(() {
+        _instrumentCatalog = loaded;
+        _instrumentCatalogReady = true;
+      });
+    } catch (_) {
+      if (_instrumentCatalogReady) return;
+      if (!mounted) {
+        _instrumentCatalog = kBundledSfzFallbackCatalog
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList(growable: true);
+        _instrumentCatalogReady = true;
+        return;
+      }
+      setState(() {
+        _instrumentCatalog = kBundledSfzFallbackCatalog
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList(growable: true);
+        _instrumentCatalogReady = true;
+      });
     }
   }
 
   void _syncRowLocalStateToRowCount() {
     while (_rowPan.length < _rowCount) {
+      final nextRow = _rowPan.length;
       _rowPan.add(0.5);
-      _rowGain.add(1.0);
+      _rowGain.add(_kGainUiUnity);
       _rowVolumeAutomation.add([AutomationPoint(x: 0.0, volume: 0.75)]);
+      _rowPluginAutomation[nextRow] = <String, List<AutomationPoint>>{};
+      _rowAutomationClips[nextRow] = <String, List<AutomationClipSnapshot>>{};
+      _rowAutomationTargets[nextRow] = <String, _AutomationTargetMeta>{
+        'volume': _volumeAutomationTargetMeta(),
+      };
+      _rowSelectedAutomationTarget[nextRow] = 'volume';
       _rowMuted.add(false);
       _rowSoloed.add(false);
       _rowMuteApplied.add(null);
       _rowExpanded.add(false);
-      _rowGainSnapshot.add(1.0);
+      _rowGainSnapshot.add(_kGainUiUnity);
       _rowPanSnapshot.add(0.5);
       _rowAutomationSnapshot.add([]);
     }
@@ -2480,6 +3096,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _rowAutomationSnapshot.removeRange(
           _rowCount, _rowAutomationSnapshot.length);
     }
+
+    _rowPluginAutomation.removeWhere((row, _) => row < 0 || row >= _rowCount);
+    _rowAutomationClips.removeWhere((row, _) => row < 0 || row >= _rowCount);
+    _rowAutomationTargets.removeWhere((row, _) => row < 0 || row >= _rowCount);
+    _rowSelectedAutomationTarget
+        .removeWhere((row, _) => row < 0 || row >= _rowCount);
+
+    for (int row = 0; row < _rowCount; row++) {
+      _rowPluginAutomation.putIfAbsent(
+          row, () => <String, List<AutomationPoint>>{});
+      _rowAutomationClips.putIfAbsent(
+          row, () => <String, List<AutomationClipSnapshot>>{});
+      _rowAutomationTargets.putIfAbsent(
+          row,
+          () => <String, _AutomationTargetMeta>{
+                'volume': _volumeAutomationTargetMeta(),
+              });
+      _rowSelectedAutomationTarget.putIfAbsent(row, () => 'volume');
+    }
+
     if (_selectedRow >= _rowCount) {
       _selectedRow = _rowCount == 0 ? 0 : _rowCount - 1;
     }
@@ -2495,51 +3131,63 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .removeWhere((row, _) => row != -1 && (row < 0 || row >= _rowCount));
   }
 
+  Future<void> _refreshPlatformCapabilities() async {
+    final capabilities = await PlatformCapabilities.refresh();
+    if (!mounted) return;
+    setState(() {
+      _platformCapabilities = capabilities;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
     unawaited(_setIOSSystemGestureDeferral(true));
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_refreshPlatformCapabilities());
     // prewarmFFT(); // so that AI sync first run is not heavy (this was for video/audio sync)
 
     _transportTicker = Ticker((_) {
       if (!_isPlaying) return;
       _setGlobalAudioClock(_estimateTransportClockFromSample());
       unawaited(_pollTransportFromJuceIfNeeded());
+      _refreshFxUiForPlaybackTick();
 
       // ===== END / LOOP LOGIC (same as before) =====
       final endPoint = Duration(
         milliseconds: math.max(_audioOnlyOverallDuration.inMilliseconds,
             msFor128Bars(_tempo).toInt()),
       );
+      final withinEndGuard =
+          _transportUiStopwatch.elapsed < _transportEndCheckGraceUntil;
 
       final reachedEnd = _globalAudioClock >= endPoint;
       final reachedLoopEnd = _loopEnabled &&
           _globalAudioClock >= Duration(milliseconds: _loopEndMs);
 
-      if (reachedLoopEnd) {
+      if (reachedLoopEnd && !withinEndGuard) {
         if (_isRecording) {
           _transportTicker?.stop();
           _stopRecordingJuce(keepPlaying: false);
           return;
         }
-        _restartAudio(_safeAudioEditorStateSetter);
-        _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+        unawaited(_restartAudio(_safeAudioEditorStateSetter));
+        unawaited(_togglePlayPauseAudio(_safeAudioEditorStateSetter));
         return;
       }
 
-      if (reachedEnd) {
+      if (reachedEnd && !withinEndGuard) {
         if (_isRecording) return;
-        _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+        unawaited(_togglePlayPauseAudio(_safeAudioEditorStateSetter));
       }
     });
-
-    // _loadAudioDevices();
-    _loadInputDevicesFromJuce();
 
     _projectDir = widget.projectDir;
 
     _classifier = InstrumentClassifier();
+    _spleeterStemSeparator = SpleeterStemSeparator();
+    // Warm model availability early so stem separation doesn't block on first tap.
+    unawaited(_spleeterStemSeparator.prewarm(includeSession: false));
     // _classifier.debugLog = (msg) {
     //   print('msg: $msg');
     //   ScaffoldMessenger.of(context).showSnackBar(
@@ -2549,7 +3197,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     //     ),
     //   );
     // };
-    _classifier.load(); // Load once
+    // Defer AI model loads until AI features are actually used.
     _producerCollector = ProducerDataCollector();
     _producerCollector.setEnabled(_producerDataMode);
     _magnitudePredictor = kUseLearnedMagnitudePredictor
@@ -2559,7 +3207,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             magnitudeModelAsset: kMixMagnitudeRegressorAsset,
           )
         : const NoopMixingMagnitudePredictor();
-    unawaited(_magnitudePredictor.load());
 
     _chatPipeline = ChatPipeline(
       llm: CloudLlmService(
@@ -2635,12 +3282,48 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await JuceAudioEngine.initialise(); // heavy blocking native call
       JuceAudioEngine.initialiseEventListeners();
+      await _loadBundledInstrumentCatalog();
       _liveMidiEventPlaybackSupported =
           await JuceAudioEngine.supportsLiveMidiClipPlayback();
+      if (_liveMidiEventPlaybackSupported) {
+        _startMidiDeviceConnectionPolling();
+      }
       await _reloadRowsFromEngine();
       await _loadProjectIfAny();
       setState(() => _isLoadingNextScreen = false);
+      await _runInitialActionIfNeeded();
     });
+  }
+
+  Future<void> _runInitialActionIfNeeded() async {
+    if (_handledInitialAction || !mounted) return;
+    final action = widget.initialAction;
+    if (action == null) return;
+    _handledInitialAction = true;
+
+    final nextFormat = action == AudioEditorInitialAction.exportMp3
+        ? _ExportAudioFormat.mp3
+        : _ExportAudioFormat.wav;
+    final current = _audioExportSettings;
+    setState(() {
+      _audioExportSettings = _AudioExportSettings(
+        format: nextFormat,
+        sampleRate: current.sampleRate,
+        wavBitDepth: current.wavBitDepth,
+        wavDithering: current.wavDithering,
+        mp3BitrateKbps: current.mp3BitrateKbps,
+        mp3Mode: current.mp3Mode,
+        mp3VbrQuality: current.mp3VbrQuality,
+        channelMode: current.channelMode,
+        normalize: current.normalize,
+        normalizeTargetDb: current.normalizeTargetDb,
+        resampleQuality: current.resampleQuality,
+      );
+    });
+
+    await Future.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+    await _exportAndNavigate();
   }
 
   Future<void> _reloadRowsFromEngine() async {
@@ -2652,6 +3335,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final oldExpandedById = <int, bool>{};
     final oldMuteAppliedById = <int, bool?>{};
     final oldAutomationById = <int, List<AutomationPoint>>{};
+    final oldPluginAutomationById = <int, Map<String, List<AutomationPoint>>>{};
+    final oldAutomationClipsById =
+        <int, Map<String, List<AutomationClipSnapshot>>>{};
+    final oldAutomationTargetsById =
+        <int, Map<String, _AutomationTargetMeta>>{};
+    final oldSelectedAutomationTargetById = <int, String>{};
     for (int i = 0; i < oldRows.length; i++) {
       final id = oldRows[i].rowId;
       if (i < _rowPan.length) oldPanById[id] = _rowPan[i];
@@ -2664,6 +3353,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (i < _rowVolumeAutomation.length) {
         oldAutomationById[id] =
             _rowVolumeAutomation[i].map((p) => p.copy()).toList();
+      }
+      if (_rowPluginAutomation.containsKey(i)) {
+        oldPluginAutomationById[id] = _rowPluginAutomation[i]!.map(
+          (key, value) =>
+              MapEntry(key, value.map((p) => p.copy()).toList(growable: false)),
+        );
+      }
+      if (_rowAutomationClips.containsKey(i)) {
+        oldAutomationClipsById[id] = _rowAutomationClips[i]!.map(
+          (key, value) => MapEntry(
+            key,
+            value.map((c) => c.copyWith()).toList(growable: false),
+          ),
+        );
+      }
+      if (_rowAutomationTargets.containsKey(i)) {
+        oldAutomationTargetsById[id] =
+            Map<String, _AutomationTargetMeta>.from(_rowAutomationTargets[i]!);
+      }
+      if (_rowSelectedAutomationTarget.containsKey(i)) {
+        oldSelectedAutomationTargetById[id] =
+            _rowSelectedAutomationTarget[i] ?? 'volume';
       }
     }
 
@@ -2683,14 +3394,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     for (int i = 0; i < _rows.length; i++) {
       final id = _rows[i].rowId;
       _rowPan[i] = oldPanById[id] ?? _rowPan[i];
-      _rowGain[i] = oldGainById[id] ?? _rowGain[i];
+      _rowGain[i] =
+          (oldGainById[id] ?? _rowGain[i]).clamp(_kGainUiMin, _kGainUiMax);
       _rowMuted[i] = oldMutedById[id] ?? _rowMuted[i];
       _rowSoloed[i] = oldSoloById[id] ?? _rowSoloed[i];
       _rowExpanded[i] = oldExpandedById[id] ?? _rowExpanded[i];
       _rowMuteApplied[i] = oldMuteAppliedById[id];
       _rowVolumeAutomation[i] =
           oldAutomationById[id] ?? _rowVolumeAutomation[i];
+      _rowPluginAutomation[i] =
+          oldPluginAutomationById[id] ?? <String, List<AutomationPoint>>{};
+      _rowAutomationClips[i] = oldAutomationClipsById[id] ??
+          <String, List<AutomationClipSnapshot>>{};
+      _rowAutomationTargets[i] = oldAutomationTargetsById[id] ??
+          <String, _AutomationTargetMeta>{
+            'volume': _volumeAutomationTargetMeta(),
+          };
+      _rowSelectedAutomationTarget[i] =
+          oldSelectedAutomationTargetById[id] ?? 'volume';
     }
+
+    await _refreshAutomationTargetsForAllRows();
 
     if (mounted) setState(() {});
   }
@@ -2783,6 +3507,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     WidgetsBinding.instance.removeObserver(this);
     _amplitudeSub?.cancel();
     _micRecorder.dispose();
+    unawaited(_spleeterStemSeparator.dispose());
     for (var track in _audioTracks) {
       track.audioStartTimer?.cancel();
     }
@@ -2793,11 +3518,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _samplePreviewStateSub?.cancel();
     _samplePreviewPlayer.dispose();
     _stopAllSecurityScopedAccess();
+    _stopMidiDeviceConnectionPolling();
+    _midiInputPollTimer?.cancel();
+    _midiInputPollTimer = null;
+    _midiHeldNotesByKey.clear();
+    _midiRecordingClipEngineId = null;
+    if (_liveMidiEventPlaybackSupported) {
+      unawaited(JuceAudioEngine.setLiveMidiInputTargetClip(-1));
+    }
     for (final timer in _midiRenderDebounceTimers.values) {
       timer.cancel();
     }
     _midiRenderDebounceTimers.clear();
     _midiRenderSyncTokens.clear();
+    _sfzDefinitionCache.clear();
+    _sfzSampleCache.clear();
 
     _stopMeterPolling(decayToZero: false);
     _meterTimer?.cancel();
@@ -2851,6 +3586,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _reopenSampleBrowserAfterDrag = false;
       _reopenSampleBrowserExpanded = false;
       final json = await ProjectManager.readProjectJson(_projectDir);
+      final projectVersion = (json["version"] as num?)?.toInt() ?? 1;
       _projectName = (json["name"] ?? "Untitled Project") as String;
       _tempo = (((json["tempoBpm"] as num?) ?? (json["bpm"] as num?) ?? _tempo)
               .toDouble())
@@ -2902,6 +3638,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             instrumentParams[e.key] = (e.value as num).toDouble();
           }
         }
+        final defaultSpec = _defaultInstrumentSpec();
+        final defaultInstrumentId =
+            (defaultSpec['id'] as String?) ?? 'mixroom.basic_synth';
+        final defaultInstrumentName =
+            (defaultSpec['name'] as String?) ?? 'Instrument';
         final midiNotes = ((map['midiNotes'] as List?) ?? [])
             .whereType<Map>()
             .map((e) => MidiNote.fromJson(e.cast<String, dynamic>()))
@@ -2911,7 +3652,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final trimEndMs = (map["trimEndMs"] as int?) ?? 0;
         final offsetSec = ((map["offset"] as num?) ?? 0).toDouble();
         final crossfade = ((map["crossfade"] as num?) ?? 0).toDouble();
-        final gain = ((map["gain"] as num?) ?? 1.0).toDouble();
+        final gain = _normalizeLoadedGainUi(
+          (map["gain"] as num?)?.toDouble(),
+          projectVersion: projectVersion,
+        );
         final pitchSemitones =
             ((map["pitchSemitones"] as num?) ?? 0.0).toDouble();
         final parsedSourceTempoBpm =
@@ -2945,14 +3689,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final beforeCount = _audioTracks.length;
             await _addMidiTrack(
               instrumentId:
-                  instrumentId.isEmpty ? 'mixroom.basic_synth' : instrumentId,
-              instrumentName:
-                  instrumentName.isEmpty ? 'Basic Synth' : instrumentName,
+                  instrumentId.isEmpty ? defaultInstrumentId : instrumentId,
+              instrumentName: instrumentName.isEmpty
+                  ? defaultInstrumentName
+                  : instrumentName,
               instrumentParams: instrumentParams.isNotEmpty
                   ? instrumentParams
                   : _instrumentParamsFromSpec(
                       _instrumentSpecById(instrumentId.isEmpty
-                          ? 'mixroom.basic_synth'
+                          ? defaultInstrumentId
                           : instrumentId),
                     ),
               midiNotes: midiNotes,
@@ -3000,14 +3745,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             row: rowIndex,
             timeMs: offsetSec * 1000.0,
             instrumentId:
-                instrumentId.isEmpty ? 'mixroom.basic_synth' : instrumentId,
+                instrumentId.isEmpty ? defaultInstrumentId : instrumentId,
             instrumentName:
-                instrumentName.isEmpty ? 'Basic Synth' : instrumentName,
+                instrumentName.isEmpty ? defaultInstrumentName : instrumentName,
             instrumentParams: instrumentParams.isNotEmpty
                 ? instrumentParams
                 : _instrumentParamsFromSpec(
                     _instrumentSpecById(instrumentId.isEmpty
-                        ? 'mixroom.basic_synth'
+                        ? defaultInstrumentId
                         : instrumentId),
                   ),
             midiNotes: midiNotes,
@@ -3071,16 +3816,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         // Restore pan & gain
         _rowPan[r] = snap.pan;
-        _rowGain[r] = snap.gain;
+        _rowGain[r] = _normalizeLoadedGainUi(
+          snap.gain,
+          projectVersion: projectVersion,
+        );
 
         // Restore automation (deep copy!)
         _rowVolumeAutomation[r] =
             snap.volumeAutomation.map((p) => p.copy()).toList();
+        _restoreAutomationLanesForRow(
+          r,
+          snap.automationLanes,
+          selectedTargetId: snap.selectedAutomationTargetId,
+        );
+        _restoreAutomationClipsForRow(r, snap.automationClips);
 
-        await JuceAudioEngine.setRowGain(r, snap.gain);
+        await JuceAudioEngine.setRowGain(r, _rowGain[r]);
         await JuceAudioEngine.setRowPan(r, snap.pan);
-        await JuceAudioEngine.setTrackAutomationPoints(
-            r, (_rowVolumeAutomation[r]).map((p) => p.toMap()).toList());
       }
 
       // Restore FX snapshots after tracks exist
@@ -3090,6 +3842,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             (rf as Map).cast<String, dynamic>());
         await restoreRowSnapshot(snap);
       }
+      await _refreshAutomationTargetsForAllRows();
 
       final master = json["master"] as Map<String, dynamic>?;
 
@@ -3102,7 +3855,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
 
         // THEN restore gain & pan
-        final gain = (master["gain"] as num?)?.toDouble() ?? 1.0;
+        final gain = _normalizeLoadedGainUi(
+          (master["gain"] as num?)?.toDouble(),
+          projectVersion: projectVersion,
+        );
         final pan = (master["pan"] as num?)?.toDouble() ?? 0.5;
 
         _masterGain = gain;
@@ -3117,6 +3873,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await JuceAudioEngine.setTransportSeconds(0.001);
       await JuceAudioEngine.setTransportSeconds(0.0);
       await JuceAudioEngine.setMetronomeTransportMs(0.0);
+      await _syncNativeAutomationForAllRows();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         for (int row = 0; row < _rowCount; row++) {
@@ -3210,6 +3967,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           pan: _rowPan[r],
           volumeAutomation:
               _rowVolumeAutomation[r].map((p) => p.copy()).toList(),
+          automationLanes: _automationLanesForRowSave(r),
+          automationClips: _automationClipsForRowSave(r),
+          selectedAutomationTargetId: _rowSelectedAutomationTarget[r],
         );
         rowStates.add(snap.toJson());
       }
@@ -3229,7 +3989,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               })
           .toList();
       final json = <String, dynamic>{
-        "version": 1,
+        "version": 4,
         "name": _projectName,
         "createdAt": createdAt,
         "lastOpenedAt": now,
@@ -3273,93 +4033,108 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String hint = 'Project name',
   }) async {
     final controller = TextEditingController(text: initialName);
-    return showDialog<String>(
+    final focusNode = FocusNode();
+    bool focusScheduled = false;
+    final result = await showDialog<String>(
       context: context,
-      builder: (ctx) => MediaQuery.removeViewInsets(
-        context: ctx,
-        removeBottom: true,
-        child: Dialog(
-          alignment: Alignment.topCenter,
-          insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
-          backgroundColor: const Color(0xFF1A2233),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: BorderSide(color: Colors.white.withOpacity(0.10)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.drive_file_rename_outline,
-                        color: Color(0xFFB9D4FF)),
-                    const SizedBox(width: 8),
-                    Text(
-                      title,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withOpacity(0.12)),
-                  ),
-                  child: TextField(
-                    controller: controller,
-                    autofocus: true,
-                    maxLength: 50,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) =>
-                        Navigator.pop(ctx, controller.text.trim()),
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: hint,
-                      hintStyle: const TextStyle(color: Colors.white54),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 12),
-                      counterText: '',
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Cancel',
-                          style: TextStyle(color: Colors.white70)),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: () =>
-                          Navigator.pop(ctx, controller.text.trim()),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2E6EEB),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
+      builder: (ctx) {
+        if (!focusScheduled) {
+          focusScheduled = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!focusNode.canRequestFocus) return;
+            focusNode.requestFocus();
+          });
+        }
+        return MediaQuery.removeViewInsets(
+          context: ctx,
+          removeBottom: true,
+          child: Dialog(
+            alignment: Alignment.topCenter,
+            insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
+            backgroundColor: const Color(0xFF1A2233),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(color: Colors.white.withOpacity(0.10)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.drive_file_rename_outline,
+                          color: Color(0xFFB9D4FF)),
+                      const SizedBox(width: 8),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700),
                       ),
-                      child: const Text('Save'),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.12)),
                     ),
-                  ],
-                ),
-              ],
+                    child: TextField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      autofocus: false,
+                      maxLength: 50,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) =>
+                          Navigator.pop(ctx, controller.text.trim()),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: hint,
+                        hintStyle: const TextStyle(color: Colors.white54),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        counterText: '',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Cancel',
+                            style: TextStyle(color: Colors.white70)),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () =>
+                            Navigator.pop(ctx, controller.text.trim()),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2E6EEB),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Save'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
+    controller.dispose();
+    focusNode.dispose();
+    return result;
   }
 
   Future<bool> _ensureProjectNamedOnFirstExit() async {
@@ -3571,24 +4346,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
 
     if (_isPlaying) {
-      _resumeAudio(setLocalState);
+      await _resumeAudio(setLocalState);
     } else {
-      _pauseAudio(setLocalState);
+      await _pauseAudio(setLocalState);
     }
   }
 
   Future<void> _resumeAudio(StateSetter setLocalState) async {
-    JuceAudioEngine.setTransportSeconds(
-        _globalAudioClock.inMilliseconds.toDouble() / 1000.0);
-    JuceAudioEngine.setMetronomeTransportMs(
+    _transportPlayStartSyncGraceUntil =
+        _transportUiStopwatch.elapsed + _kTransportPlayStartSyncGrace;
+    _transportEndCheckGraceUntil =
+        _transportUiStopwatch.elapsed + const Duration(milliseconds: 420);
+    await JuceAudioEngine.setTransportSeconds(
+        _globalAudioClock.inMilliseconds / 1000.0);
+    await JuceAudioEngine.setMetronomeTransportMs(
         _globalAudioClock.inMilliseconds.toDouble());
-    JuceAudioEngine.play();
+    await JuceAudioEngine.play();
     _syncTransportClock(_globalAudioClock, playing: true);
-    unawaited(_pollTransportFromJuceIfNeeded(force: true));
 
     _transportTicker?.start();
 
     _startMeterPolling();
+
+    // Android can occasionally miss the first transport start edge.
+    await Future<void>.delayed(const Duration(milliseconds: 90));
+    if (!_isPlaying) return;
+    await _pollTransportFromJuceIfNeeded(force: true);
+    if (_transportRateSecPerSec <= 0.0) {
+      await JuceAudioEngine.play();
+    }
   }
 
   Future<void> _pauseAudio(StateSetter setLocalState) async {
@@ -3626,8 +4412,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       track.audioStartTimer?.cancel();
       track.currentPosition = newStartPoint;
     }
-    JuceAudioEngine.pause();
-    JuceAudioEngine.setTransportSeconds(newStartPoint.inMilliseconds / 1000.0);
+    await JuceAudioEngine.pause();
+    await JuceAudioEngine.setTransportSeconds(
+        newStartPoint.inMilliseconds / 1000.0);
 
     // Reset the global audio clock.
     setState(() {
@@ -3666,6 +4453,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _ExportResampleQuality selectedResampleQuality =
         _audioExportSettings.resampleQuality;
     bool showAdvanced = false;
+    final nativeWavOnly = _desktopNativeWavOnlyExport;
+    if (nativeWavOnly) {
+      selectedFormat = _ExportAudioFormat.wav;
+      selectedChannelMode = _ExportChannelMode.stereo;
+      selectedNormalize = false;
+      selectedResampleQuality = _ExportResampleQuality.best;
+    }
     if (!_kExportSampleRates.contains(selectedSampleRate)) {
       selectedSampleRate = _kExportSampleRates.first;
     }
@@ -3750,6 +4544,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               required _ExportAudioFormat format,
               required String label,
               required bool isLeft,
+              required bool enabled,
             }) {
               final isSelected = selectedFormat == format;
               return Expanded(
@@ -3758,14 +4553,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     left: isLeft ? const Radius.circular(12) : Radius.zero,
                     right: isLeft ? Radius.zero : const Radius.circular(12),
                   ),
-                  onTap: () => setSheetState(() => selectedFormat = format),
+                  onTap: enabled
+                      ? () => setSheetState(() => selectedFormat = format)
+                      : null,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 140),
                     height: 48,
                     decoration: BoxDecoration(
                       color: isSelected
                           ? const Color(0x553F73C8)
-                          : Colors.transparent,
+                          : (enabled
+                              ? Colors.transparent
+                              : Colors.white.withOpacity(0.04)),
                       borderRadius: BorderRadius.horizontal(
                         left: isLeft ? const Radius.circular(12) : Radius.zero,
                         right: isLeft ? Radius.zero : const Radius.circular(12),
@@ -3773,7 +4572,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       border: Border.all(
                         color: isSelected
                             ? const Color(0xFF6EA7FF)
-                            : Colors.transparent,
+                            : (enabled
+                                ? Colors.transparent
+                                : Colors.white.withOpacity(0.08)),
                         width: 1.2,
                       ),
                     ),
@@ -3785,7 +4586,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           style: TextStyle(
                             fontWeight:
                                 isSelected ? FontWeight.w800 : FontWeight.w700,
-                            color: isSelected ? Colors.white : mutedText,
+                            color: !enabled
+                                ? Colors.white38
+                                : (isSelected ? Colors.white : mutedText),
                           ),
                         ),
                         if (isSelected) ...[
@@ -3861,6 +4664,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   format: _ExportAudioFormat.wav,
                                   label: 'WAV',
                                   isLeft: true,
+                                  enabled: true,
                                 ),
                                 Container(
                                   width: 1,
@@ -3871,10 +4675,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   format: _ExportAudioFormat.mp3,
                                   label: 'MP3',
                                   isLeft: false,
+                                  enabled: !nativeWavOnly,
                                 ),
                               ],
                             ),
                           ),
+                          if (nativeWavOnly) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0x2237669C),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.09)),
+                              ),
+                              child: Text(
+                                'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.86),
+                                  fontSize: 12.2,
+                                  height: 1.3,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 10),
                           InkWell(
                             borderRadius: BorderRadius.circular(10),
@@ -3931,60 +4758,62 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       });
                                     },
                                   ),
-                                  const SizedBox(height: 10),
-                                  buildDropdownField(
-                                    label: 'Channels',
-                                    value: selectedChannelMode,
-                                    options: _ExportChannelMode.values,
-                                    textBuilder: (value) =>
-                                        value == _ExportChannelMode.stereo
-                                            ? 'Stereo'
-                                            : 'Mono',
-                                    onChanged: (value) {
-                                      if (value == null) return;
-                                      setSheetState(() {
-                                        selectedChannelMode = value;
-                                      });
-                                    },
-                                  ),
-                                  const SizedBox(height: 10),
-                                  buildDropdownField(
-                                    label: 'Resample quality',
-                                    value: selectedResampleQuality,
-                                    options: _ExportResampleQuality.values,
-                                    textBuilder: (value) {
-                                      switch (value) {
-                                        case _ExportResampleQuality.draft:
-                                          return 'Draft (fast)';
-                                        case _ExportResampleQuality.good:
-                                          return 'Good';
-                                        case _ExportResampleQuality.best:
-                                          return 'Best';
-                                      }
-                                    },
-                                    onChanged: (value) {
-                                      if (value == null) return;
-                                      setSheetState(() {
-                                        selectedResampleQuality = value;
-                                      });
-                                    },
-                                  ),
-                                  const SizedBox(height: 6),
-                                  SwitchListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    title: Text(
-                                      'Normalize loudness',
-                                      style: TextStyle(color: mutedText),
+                                  if (!nativeWavOnly) ...[
+                                    const SizedBox(height: 10),
+                                    buildDropdownField(
+                                      label: 'Channels',
+                                      value: selectedChannelMode,
+                                      options: _ExportChannelMode.values,
+                                      textBuilder: (value) =>
+                                          value == _ExportChannelMode.stereo
+                                              ? 'Stereo'
+                                              : 'Mono',
+                                      onChanged: (value) {
+                                        if (value == null) return;
+                                        setSheetState(() {
+                                          selectedChannelMode = value;
+                                        });
+                                      },
                                     ),
-                                    value: selectedNormalize,
-                                    activeColor: accent,
-                                    onChanged: (value) {
-                                      setSheetState(() {
-                                        selectedNormalize = value;
-                                      });
-                                    },
-                                  ),
-                                  if (selectedNormalize) ...[
+                                    const SizedBox(height: 10),
+                                    buildDropdownField(
+                                      label: 'Resample quality',
+                                      value: selectedResampleQuality,
+                                      options: _ExportResampleQuality.values,
+                                      textBuilder: (value) {
+                                        switch (value) {
+                                          case _ExportResampleQuality.draft:
+                                            return 'Draft (fast)';
+                                          case _ExportResampleQuality.good:
+                                            return 'Good';
+                                          case _ExportResampleQuality.best:
+                                            return 'Best';
+                                        }
+                                      },
+                                      onChanged: (value) {
+                                        if (value == null) return;
+                                        setSheetState(() {
+                                          selectedResampleQuality = value;
+                                        });
+                                      },
+                                    ),
+                                    const SizedBox(height: 6),
+                                    SwitchListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      title: Text(
+                                        'Normalize loudness',
+                                        style: TextStyle(color: mutedText),
+                                      ),
+                                      value: selectedNormalize,
+                                      activeColor: accent,
+                                      onChanged: (value) {
+                                        setSheetState(() {
+                                          selectedNormalize = value;
+                                        });
+                                      },
+                                    ),
+                                  ],
+                                  if (!nativeWavOnly && selectedNormalize) ...[
                                     const SizedBox(height: 4),
                                     buildDropdownField(
                                       label: 'Limiter ceiling (dBTP)',
@@ -4002,7 +4831,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   ],
                                   const SizedBox(height: 10),
                                   if (selectedFormat ==
-                                      _ExportAudioFormat.wav) ...[
+                                          _ExportAudioFormat.wav ||
+                                      nativeWavOnly) ...[
                                     buildDropdownField(
                                       label: 'Bit depth',
                                       value: selectedWavBitDepth,
@@ -4106,19 +4936,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     Navigator.pop(
                                       dialogContext,
                                       _AudioExportSettings(
-                                        format: selectedFormat,
+                                        format: nativeWavOnly
+                                            ? _ExportAudioFormat.wav
+                                            : selectedFormat,
                                         sampleRate: selectedSampleRate,
                                         wavBitDepth: selectedWavBitDepth,
                                         wavDithering: selectedWavDithering,
                                         mp3BitrateKbps: selectedMp3Bitrate,
                                         mp3Mode: selectedMp3Mode,
                                         mp3VbrQuality: selectedMp3VbrQuality,
-                                        channelMode: selectedChannelMode,
-                                        normalize: selectedNormalize,
+                                        channelMode: nativeWavOnly
+                                            ? _ExportChannelMode.stereo
+                                            : selectedChannelMode,
+                                        normalize: nativeWavOnly
+                                            ? false
+                                            : selectedNormalize,
                                         normalizeTargetDb:
                                             selectedNormalizeTargetDb,
-                                        resampleQuality:
-                                            selectedResampleQuality,
+                                        resampleQuality: nativeWavOnly
+                                            ? _ExportResampleQuality.best
+                                            : selectedResampleQuality,
                                       ),
                                     );
                                   },
@@ -4171,10 +5008,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  String _buildExportFilter(
-    _AudioExportSettings settings, {
-    double safetyTrimDb = 0.0,
-  }) {
+  String _buildExportFilter(_AudioExportSettings settings) {
     final List<String> filters = [_buildResampleFilter(settings)];
     if (settings.channelMode == _ExportChannelMode.mono) {
       filters.add('aformat=channel_layouts=mono');
@@ -4185,83 +5019,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       filters.add(
         'loudnorm=I=-14:LRA=11:TP=${settings.normalizeTargetDb.toStringAsFixed(1)}:linear=true',
       );
-    } else {
-      if (safetyTrimDb < -0.01) {
-        filters.add('volume=${safetyTrimDb.toStringAsFixed(2)}dB');
-      }
-      if (settings.format == _ExportAudioFormat.mp3) {
-        // MP3 encoding can accentuate near-full-scale low-end transients.
-        filters.add('alimiter=limit=0.89:level=disabled:asc=true');
-      }
     }
     return filters.join(',');
-  }
-
-  double _targetPeakDbForSafetyTrim(_AudioExportSettings settings) {
-    if (settings.format == _ExportAudioFormat.mp3) {
-      return -2.0;
-    }
-    return -1.0;
-  }
-
-  double? _parseMaxVolumeDb(String text) {
-    if (text.trim().isEmpty) return null;
-    final maxVolumeRegex = RegExp(
-      r'max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB',
-      caseSensitive: false,
-    );
-
-    double? maxVolumeDb;
-    for (final match in maxVolumeRegex.allMatches(text)) {
-      final parsed = double.tryParse(match.group(1) ?? '');
-      if (parsed != null) {
-        maxVolumeDb = parsed;
-      }
-    }
-    return maxVolumeDb;
-  }
-
-  Future<double> _computeExportSafetyTrimDb({
-    required String inputPath,
-    required _AudioExportSettings settings,
-  }) async {
-    if (settings.normalize) return 0.0;
-
-    final targetPeakDb = _targetPeakDbForSafetyTrim(settings);
-
-    try {
-      final Session session = await FFmpegKit.execute(
-        '-hide_banner -nostats -i "$inputPath" -af volumedetect -f null -',
-      );
-      final output = await session.getOutput();
-      final logsAsString = await session.getLogsAsString();
-      final List<Log> logs = await session.getLogs();
-      final combined = StringBuffer();
-      if (output != null && output.isNotEmpty) {
-        combined.writeln(output);
-      }
-      if (logsAsString.isNotEmpty) {
-        combined.writeln(logsAsString);
-      }
-      for (final log in logs) {
-        final line = log.getMessage();
-        if (line.isNotEmpty) {
-          combined.writeln(line);
-        }
-      }
-
-      final maxVolumeDb = _parseMaxVolumeDb(combined.toString());
-      if (maxVolumeDb == null) {
-        // Keep a conservative fallback headroom when analysis output is unavailable.
-        return targetPeakDb;
-      }
-
-      if (maxVolumeDb <= targetPeakDb) return 0.0;
-
-      return (targetPeakDb - maxVolumeDb).clamp(-24.0, 0.0).toDouble();
-    } catch (_) {
-      return targetPeakDb;
-    }
   }
 
   Future<String> _convertMixWithExportSettings({
@@ -4272,14 +5031,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final outPath =
         '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.${settings.fileExtension}';
 
-    final safetyTrimDb = await _computeExportSafetyTrimDb(
-      inputPath: inputPath,
-      settings: settings,
-    );
-    final filter = _buildExportFilter(
-      settings,
-      safetyTrimDb: safetyTrimDb,
-    );
+    final filter = _buildExportFilter(settings);
     final channelCount =
         settings.channelMode == _ExportChannelMode.mono ? '1' : '2';
     final List<String> ffmpegCmd;
@@ -4400,17 +5152,67 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     onProgress(0.0);
     final settings = _activeAudioExportSettings ?? _audioExportSettings;
+    if (_desktopNativeWavOnlyExport) {
+      final tempDir = await getTemporaryDirectory();
+      await _syncNativePluginAutomationForAllRows();
+      final nativeOutPath =
+          '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.wav';
+
+      try {
+        final exportedPath = await JuceAudioEngine.exportMix(
+          nativeOutPath,
+          format: 'wav',
+          sampleRate: settings.sampleRate,
+          wavBitDepth: settings.wavBitDepth,
+          wavDithering: settings.wavDithering,
+          mp3BitrateKbps: settings.mp3BitrateKbps,
+        );
+        onProgress(1.0);
+        if (exportedPath.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(L10n.translate(context, "Export failed"))),
+          );
+          return "";
+        }
+        final outFile = File(exportedPath);
+        if (!await outFile.exists() || (await outFile.length()) < 1000) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                L10n.translate(context,
+                    'Export failed: Output file missing or too small.'),
+              ),
+            ),
+          );
+          return "";
+        }
+        return exportedPath;
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+        return "";
+      }
+    }
+
     final rawRenderSampleRate = await _resolveRawRenderSampleRate(settings);
     final tempDir = await getTemporaryDirectory();
+    await _syncNativePluginAutomationForAllRows();
 
-    if (_canUseNativeWavExport(settings)) {
+    final useNativeWavDirect = _canUseNativeWavExport(settings) &&
+        settings.sampleRate == rawRenderSampleRate;
+    if (useNativeWavDirect) {
       final nativeOutPath =
           '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.wav';
       try {
         final exportedPath = await JuceAudioEngine.exportMix(
           nativeOutPath,
           format: 'wav',
-          sampleRate: rawRenderSampleRate,
+          sampleRate: settings.sampleRate,
           wavBitDepth: settings.wavBitDepth,
           wavDithering: settings.wavDithering,
           mp3BitrateKbps: settings.mp3BitrateKbps,
@@ -4671,7 +5473,379 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<void> _pollMidiDeviceConnections({bool seedOnly = false}) async {
+    if (!_liveMidiEventPlaybackSupported || _midiDevicePollBusy) return;
+    _midiDevicePollBusy = true;
+    try {
+      final devices = await JuceAudioEngine.getConnectedMidiInputDevices();
+      final nextById = <String, String>{};
+      for (final device in devices) {
+        final id = (device['id'] ?? '').trim();
+        if (id.isEmpty) continue;
+        final name = (device['name'] ?? id).trim();
+        nextById[id] = name.isEmpty ? id : name;
+      }
+
+      if (_knownMidiDevicesById.isEmpty || seedOnly) {
+        _knownMidiDevicesById = nextById;
+        return;
+      }
+
+      final added = <String>[];
+      final removed = <String>[];
+
+      for (final entry in nextById.entries) {
+        if (!_knownMidiDevicesById.containsKey(entry.key)) {
+          added.add(entry.value);
+        }
+      }
+      for (final entry in _knownMidiDevicesById.entries) {
+        if (!nextById.containsKey(entry.key)) {
+          removed.add(entry.value);
+        }
+      }
+
+      _knownMidiDevicesById = nextById;
+      if (!mounted) return;
+      if (added.isEmpty && removed.isEmpty) return;
+
+      final parts = <String>[];
+      if (added.isNotEmpty) {
+        parts.add('MIDI connected: ${added.join(', ')}');
+      }
+      if (removed.isNotEmpty) {
+        parts.add('MIDI disconnected: ${removed.join(', ')}');
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(parts.join(' | '))),
+      );
+    } catch (_) {
+      // Ignore transient bridge errors and keep polling.
+    } finally {
+      _midiDevicePollBusy = false;
+    }
+  }
+
+  void _startMidiDeviceConnectionPolling() {
+    _midiDevicePollTimer?.cancel();
+    _knownMidiDevicesById = <String, String>{};
+    unawaited(_pollMidiDeviceConnections(seedOnly: true));
+    _midiDevicePollTimer =
+        Timer.periodic(const Duration(seconds: 2), (_) async {
+      await _pollMidiDeviceConnections();
+    });
+  }
+
+  void _stopMidiDeviceConnectionPolling() {
+    _midiDevicePollTimer?.cancel();
+    _midiDevicePollTimer = null;
+    _knownMidiDevicesById = <String, String>{};
+  }
+
+  int? _activeMidiRecordingClipIndex() {
+    final activeEngineId = _activeMidiClipEngineId;
+    if (activeEngineId == null || activeEngineId < 0) return null;
+    final clipIndex = _clipIndexForEngineId(activeEngineId);
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return null;
+    if (!_audioTracks[clipIndex].isMidi) return null;
+    return clipIndex;
+  }
+
+  String _midiRecordHeldKey(int channel, int pitch) => '$channel:$pitch';
+
+  double _transportSecToClipSourceBeat(AudioTrack clip, double transportSec) {
+    final sourceTempo = _resolvedClipSourceTempoBpm(clip);
+    if (sourceTempo <= 0.0) return 0.0;
+    final safeTransportSec = transportSec.isFinite
+        ? transportSec
+        : _globalAudioClock.inMilliseconds.toDouble() / 1000.0;
+    final timelineSec = math.max(0.0, safeTransportSec - clip.offset);
+    final sourceSec = (timelineSec * _tempoPlaybackRatioForEngine(clip)) +
+        (clip.trimStart.inMilliseconds / 1000.0);
+    return math.max(0.0, sourceSec * sourceTempo / 60.0);
+  }
+
+  bool _extendMidiClipForBeat(AudioTrack clip, double endBeat) {
+    final sourceTempo = _resolvedClipSourceTempoBpm(clip);
+    if (sourceTempo <= 0.0) return false;
+
+    final trimStartSec = clip.trimStart.inMilliseconds / 1000.0;
+    final noteEndSourceSec = math.max(0.0, endBeat) * 60.0 / sourceTempo;
+    final requiredRawSec = math.max(0.001, noteEndSourceSec - trimStartSec);
+    final currentRawSec =
+        (clip.trimEnd - clip.trimStart).inMilliseconds / 1000.0;
+    if (requiredRawSec <= currentRawSec + 0.0005) return false;
+
+    clip.trimEnd = clip.trimStart +
+        Duration(milliseconds: (requiredRawSec * 1000.0).ceil());
+    return true;
+  }
+
+  bool _updateHeldMidiRecordNotes(
+    AudioTrack clip,
+    double currentBeat, {
+    bool closeAll = false,
+  }) {
+    bool changed = false;
+    final keys = _midiHeldNotesByKey.keys.toList(growable: false);
+    for (final key in keys) {
+      final stack = _midiHeldNotesByKey[key];
+      if (stack == null || stack.isEmpty) {
+        _midiHeldNotesByKey.remove(key);
+        continue;
+      }
+      for (final note in stack) {
+        final nextLength = math.max(0.03125, currentBeat - note.startBeat);
+        if ((nextLength - note.lengthBeats).abs() > 0.00001) {
+          note.lengthBeats = nextLength;
+          changed = true;
+        }
+        if (_extendMidiClipForBeat(clip, note.startBeat + note.lengthBeats)) {
+          changed = true;
+        }
+      }
+      if (closeAll) {
+        stack.clear();
+        _midiHeldNotesByKey.remove(key);
+      }
+    }
+    return changed;
+  }
+
+  Future<void> _drainMidiInputEventsForRecording({
+    bool closeHeldNotes = false,
+  }) async {
+    if (!_isMidiClipRecording || _midiRecordingClipEngineId == null) return;
+    if (_midiInputDrainBusy) {
+      if (!closeHeldNotes) return;
+      for (int attempt = 0; attempt < 8 && _midiInputDrainBusy; attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 8));
+      }
+      if (_midiInputDrainBusy) return;
+    }
+    final clipIndex = _clipIndexForEngineId(_midiRecordingClipEngineId!);
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    final clip = _audioTracks[clipIndex];
+    if (!clip.isMidi) return;
+
+    _midiInputDrainBusy = true;
+    try {
+      final events = await JuceAudioEngine.consumeLiveMidiInputEvents();
+      bool changed = false;
+      double latestTransportSec = _lastMidiRecordTransportSec;
+
+      for (final event in events) {
+        final clipId = (event['clip'] as num?)?.toInt() ?? -1;
+        if (clipId != clip.engineClipId) continue;
+
+        final type = (event['type'] as String?) ?? '';
+        final noteOn = type == 'noteOn';
+        final noteOff = type == 'noteOff';
+        if (!noteOn && !noteOff) continue;
+
+        final pitch =
+            (((event['pitch'] as num?)?.toInt() ?? 60).clamp(0, 127)).toInt();
+        final channel =
+            (((event['channel'] as num?)?.toInt() ?? 1).clamp(1, 16)).toInt();
+        final velocity =
+            ((event['velocity'] as num?)?.toDouble() ?? 1.0).clamp(0.0, 1.0);
+        final transportSec = (event['transportSec'] as num?)?.toDouble() ??
+            (_globalAudioClock.inMilliseconds.toDouble() / 1000.0);
+        latestTransportSec = math.max(latestTransportSec, transportSec);
+
+        final beat = _transportSecToClipSourceBeat(clip, transportSec);
+        final key = _midiRecordHeldKey(channel, pitch);
+
+        if (noteOn) {
+          final note = MidiNote(
+            id: 'live_rec_${clip.engineClipId}_${DateTime.now().microsecondsSinceEpoch}_${_nextMidiRecordNoteToken++}',
+            pitch: pitch,
+            startBeat: beat,
+            lengthBeats: 0.0625,
+            velocity: velocity,
+          );
+          clip.midiNotes.add(note);
+          (_midiHeldNotesByKey[key] ??= <MidiNote>[]).add(note);
+          if (_extendMidiClipForBeat(clip, note.startBeat + note.lengthBeats)) {
+            changed = true;
+          }
+          changed = true;
+          _midiRecordHasChanges = true;
+          continue;
+        }
+
+        final stack = _midiHeldNotesByKey[key];
+        if (stack == null || stack.isEmpty) continue;
+        final note = stack.removeLast();
+        if (stack.isEmpty) {
+          _midiHeldNotesByKey.remove(key);
+        }
+        final nextLength = math.max(0.03125, beat - note.startBeat);
+        if ((nextLength - note.lengthBeats).abs() > 0.00001) {
+          note.lengthBeats = nextLength;
+          changed = true;
+        }
+        if (_extendMidiClipForBeat(clip, note.startBeat + note.lengthBeats)) {
+          changed = true;
+        }
+        _midiRecordHasChanges = true;
+      }
+
+      final fallbackTransportSec =
+          _globalAudioClock.inMilliseconds.toDouble() / 1000.0;
+      final currentTransportSec =
+          math.max(latestTransportSec, fallbackTransportSec);
+      _lastMidiRecordTransportSec = currentTransportSec;
+      final currentBeat =
+          _transportSecToClipSourceBeat(clip, currentTransportSec);
+      if (_updateHeldMidiRecordNotes(
+        clip,
+        currentBeat,
+        closeAll: closeHeldNotes,
+      )) {
+        changed = true;
+        _midiRecordHasChanges = true;
+      }
+
+      if (changed) {
+        _updateOverallDurationIfNeeded();
+        if (mounted) {
+          setState(() {});
+        }
+      }
+    } finally {
+      _midiInputDrainBusy = false;
+    }
+  }
+
+  Future<void> _startMidiClipRecording(int clipIndex) async {
+    if (!_liveMidiEventPlaybackSupported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Live MIDI controller input is not supported on this platform.'),
+        ),
+      );
+      return;
+    }
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+
+    final clip = _audioTracks[clipIndex];
+    if (!clip.isMidi || clip.engineClipId < 0) return;
+
+    if (_loopEnabled) {
+      await _restartAudio(_safeAudioEditorStateSetter);
+    }
+
+    _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
+    if (!_isPlaying) {
+      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+    }
+
+    final targetOk =
+        await JuceAudioEngine.setLiveMidiInputTargetClip(clip.engineClipId);
+    if (!targetOk) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to arm selected MIDI clip.')),
+      );
+      return;
+    }
+
+    await JuceAudioEngine.consumeLiveMidiInputEvents();
+    _midiHeldNotesByKey.clear();
+    _nextMidiRecordNoteToken = 0;
+    _lastMidiRecordTransportSec =
+        _globalAudioClock.inMilliseconds.toDouble() / 1000.0;
+    _midiRecordHasChanges = false;
+    _recordingPeakTimer?.cancel();
+    _recordingPeakTimer = null;
+
+    _midiInputPollTimer?.cancel();
+    _midiInputPollTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
+      unawaited(_drainMidiInputEventsForRecording());
+    });
+
+    setState(() {
+      _selectedRow = clip.rowIndex.clamp(0, math.max(0, _rowCount - 1)).toInt();
+      _recordingFilePath = null;
+      _recordingPeaks.clear();
+      _isRecording = true;
+      _isMidiClipRecording = true;
+      _midiRecordingClipEngineId = clip.engineClipId;
+    });
+  }
+
+  Future<void> _stopMidiClipRecording({bool keepPlaying = true}) async {
+    _recordingPeakTimer?.cancel();
+    _recordingPeakTimer = null;
+    _midiInputPollTimer?.cancel();
+    _midiInputPollTimer = null;
+
+    await _drainMidiInputEventsForRecording(closeHeldNotes: true);
+
+    final recordingClipId = _midiRecordingClipEngineId;
+    final clipIndex =
+        recordingClipId == null ? -1 : _clipIndexForEngineId(recordingClipId);
+    if (clipIndex >= 0 && clipIndex < _audioTracks.length) {
+      final clip = _audioTracks[clipIndex];
+      if (clip.isMidi && _midiRecordHasChanges) {
+        clip.midiNotes.sort((a, b) {
+          final timeCmp = a.startBeat.compareTo(b.startBeat);
+          if (timeCmp != 0) return timeCmp;
+          return a.pitch.compareTo(b.pitch);
+        });
+        final updatedLive = await _updateMidiClipEventsLive(clip);
+        if (updatedLive) {
+          await _syncClipTimingToEngine(clipIndex);
+          await _syncClipMixToEngine(clip);
+          _queueMidiRenderCacheRefresh(clip);
+          _updateOverallDurationIfNeeded();
+        } else {
+          await _rerenderMidiTrack(clip);
+        }
+      }
+    }
+
+    if (_liveMidiEventPlaybackSupported) {
+      final previewClip =
+          (_activeMidiClipEngineId != null && _activeMidiClipEngineId! >= 0)
+              ? _activeMidiClipEngineId!
+              : -1;
+      await JuceAudioEngine.setLiveMidiInputTargetClip(previewClip);
+      await JuceAudioEngine.consumeLiveMidiInputEvents();
+    }
+
+    _midiHeldNotesByKey.clear();
+    _midiRecordingClipEngineId = null;
+    _isMidiClipRecording = false;
+    _midiRecordHasChanges = false;
+    _lastMidiRecordTransportSec = 0.0;
+
+    setState(() {
+      _isRecording = false;
+      _recordingPeaks.clear();
+      _recordingFilePath = null;
+    });
+
+    if (!keepPlaying && _isPlaying) {
+      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+    }
+  }
+
   Future<void> _startRecordingJuce() async {
+    final midiClipIndex = _activeMidiRecordingClipIndex();
+    if (midiClipIndex != null) {
+      await _startMidiClipRecording(midiClipIndex);
+      return;
+    }
+    await _startAudioRecordingJuce();
+  }
+
+  Future<void> _startAudioRecordingJuce() async {
+    _midiInputPollTimer?.cancel();
+    _midiInputPollTimer = null;
+    _midiHeldNotesByKey.clear();
+
     // 1) Require a selected row
     if (_rowCount <= 0 || _selectedRow < 0 || _selectedRow >= _rowCount) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -4697,14 +5871,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final filePath = p.join(audioDir.path,
         'mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav');
 
-    // 5) Start JUCE recording (NEW)
+    // 5) Start JUCE recording
     final ok = await JuceAudioEngine.startRecording(
       filePath,
       _selectedChannelStart,
-      2, //_selectedChannelCount, TODO: (TEMP TO ALLOW NANOCORTEX RECORDING) (do the 1+2, 3+4 selection stuff)
+      _selectedChannelCount,
     );
-
-    print("printing $_selectedChannelStart $_selectedChannelCount");
 
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -4716,6 +5888,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     setState(() {
       _recordingFilePath = filePath;
       _isRecording = true;
+      _isMidiClipRecording = false;
+      _midiRecordingClipEngineId = null;
     });
 
     _recordingPeaks.clear();
@@ -4734,6 +5908,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _stopRecordingJuce({bool keepPlaying = true}) async {
     if (!_isRecording) return;
+    if (_isMidiClipRecording) {
+      await _stopMidiClipRecording(keepPlaying: keepPlaying);
+      return;
+    }
+    await _stopAudioRecordingJuce(keepPlaying: keepPlaying);
+  }
+
+  Future<void> _stopAudioRecordingJuce({bool keepPlaying = true}) async {
+    if (!_isRecording) return;
+    _midiHeldNotesByKey.clear();
 
     _recordingPeakTimer?.cancel();
     _recordingPeakTimer = null;
@@ -4744,6 +5928,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_recordingFilePath == null || !File(_recordingFilePath!).existsSync()) {
       setState(() {
         _isRecording = false;
+        _isMidiClipRecording = false;
+        _midiRecordingClipEngineId = null;
         _recordingFilePath = null;
       });
 
@@ -4760,6 +5946,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     setState(() {
       _isRecording = false;
+      _isMidiClipRecording = false;
+      _midiRecordingClipEngineId = null;
     });
 
     // 2) Insert recorded clip (UNCHANGED)
@@ -4773,7 +5961,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             Duration? trimStartRequested,
             Duration? trimEndRequested,
           }) =>
-              _addAudioTrackFromFile(file, row, timeMs),
+              _addAudioTrackFromFile(
+            file,
+            row,
+            timeMs,
+            transcodeTo48k: false,
+          ),
           tracks: _audioTracks,
           file: File(_recordingFilePath!),
           row: row,
@@ -4798,6 +5991,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     double timeMs, {
     Duration? trimStartRequested,
     Duration? trimEndRequested,
+    bool transcodeTo48k = true,
   }) async {
     if (_audioTracks.length >= kNumClips) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -4833,25 +6027,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ? baseName.substring(0, baseName.lastIndexOf('.'))
         : baseName;
 
-    // --- collision-safe temp name ---
-    String candidatePath = p.join(audioDir.path, '$baseNameNoExt.wav');
+    File clipSourceFile = newFile;
+    if (transcodeTo48k) {
+      // --- collision-safe temp name ---
+      String candidatePath = p.join(audioDir.path, '$baseNameNoExt.wav');
+      int suffix = 1;
 
-    int suffix = 1;
+      // Keep incrementing if another track already uses this temp path
+      while (_audioTracks.any((t) => t.file.path == candidatePath)) {
+        candidatePath = p.join(audioDir.path, '$baseNameNoExt #$suffix.wav');
+        suffix++;
+      }
 
-    // Keep incrementing if another track already uses this temp path
-    while (_audioTracks.any((t) => t.file.path == candidatePath)) {
-      candidatePath = p.join(audioDir.path, '$baseNameNoExt #$suffix.wav');
-      suffix++;
+      // 1) Transcode to 48 kHz PCM WAV (fast, one-time cost for imports):
+      // TODO: preserve original sample rate when native engine path is fully validated.
+      await FFmpegKit.execute(
+        '-i "${newFile.path}" -ar 48000 -y "$candidatePath"',
+      );
+      clipSourceFile = File(candidatePath);
     }
-
-    final resampledPath = candidatePath;
-
-    // 1) Transcode to 48 kHz PCM WAV (fast, one‐time cost):
-    // TODO: maybe change this to preserve user's input data
-    await FFmpegKit.execute(
-      '-i "${newFile.path}" -ar 48000 -y "$resampledPath"', // DO .WAV
-    );
-    final newFile_48 = File(resampledPath);
 
     final startSec = timeMs / 1000.0;
     final requestedTrimStart = trimStartRequested ?? Duration.zero;
@@ -4865,7 +6059,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await JuceAudioEngine.loadClip(
       engineClipId,
       rowId,
-      newFile_48.path,
+      clipSourceFile.path,
       startSec: startSec,
       lengthSec: requestedLengthSec,
       inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
@@ -4877,8 +6071,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     // Create a new AudioTrack instance with a fixed audioDuration.
     final newTrack = await AudioTrack.create(
-      file: newFile_48,
-      originalFile: newFile_48, // might be unused
+      file: clipSourceFile,
+      originalFile: clipSourceFile, // might be unused
       audioDuration: dur, // Fixed duration for this track.
       trimStart: Duration.zero,
       trimEnd: dur,
@@ -5071,24 +6265,119 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Map<String, dynamic> _instrumentSpecById(String id) {
-    for (final spec in kInstrumentCatalog) {
-      if (spec['id'] == id) return spec;
+    final found = _findInstrumentSpecById(id);
+    if (found != null) return found;
+    return _defaultInstrumentSpec();
+  }
+
+  String _normalizeInstrumentToken(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  Map<String, dynamic>? _findLegacySfzSpecByToken(String id) {
+    final token = _normalizeInstrumentToken(id);
+    if (token.isEmpty) return null;
+
+    final pool = <Map<String, dynamic>>[
+      ..._instrumentCatalog,
+      ...kBundledSfzFallbackCatalog,
+    ];
+    Map<String, dynamic>? best;
+    var bestScore = 0;
+
+    for (final spec in pool) {
+      final sfzPath = (spec['sfzAssetPath'] as String?)?.trim() ?? '';
+      if (sfzPath.isEmpty) continue;
+      final stemToken = _normalizeInstrumentToken(
+        p.basenameWithoutExtension(sfzPath),
+      );
+      final nameToken =
+          _normalizeInstrumentToken((spec['name'] as String?) ?? '');
+      final idToken = _normalizeInstrumentToken((spec['id'] as String?) ?? '');
+
+      var score = 0;
+      if (token == idToken || token == stemToken || token == nameToken) {
+        score = 6;
+      } else if (stemToken.isNotEmpty &&
+          (token.contains(stemToken) || stemToken.contains(token))) {
+        score = 5;
+      } else if (nameToken.isNotEmpty &&
+          (token.contains(nameToken) || nameToken.contains(token))) {
+        score = 4;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = spec;
+      }
     }
-    return kInstrumentCatalog.first;
+    return best;
+  }
+
+  Map<String, dynamic>? _findInstrumentSpecById(String id) {
+    final trimmed = id.trim();
+    if (trimmed.isEmpty) return null;
+
+    for (final spec in _instrumentCatalog) {
+      if (spec['id'] == trimmed) return spec;
+    }
+    for (final spec in kBundledSfzFallbackCatalog) {
+      if (spec['id'] == trimmed) return spec;
+    }
+    for (final spec in kInstrumentCatalog) {
+      if (spec['id'] == trimmed) return spec;
+    }
+
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('sfz_asset:')) {
+      final sfzPath = trimmed.substring('sfz_asset:'.length).trim();
+      if (sfzPath.isNotEmpty) {
+        return <String, dynamic>{
+          'id': trimmed,
+          'name': _prettyInstrumentNameFromSfzPreset(p.basename(sfzPath)),
+          'category': 'instrument',
+          'pickerCategory': 'Other',
+          'sourceProject': 'External SFZ',
+          'sourceLicense': 'User-provided',
+          'isSampled': true,
+          'sfzAssetPath': sfzPath,
+          'outputGain': 0.72,
+          'attackMs': 6.0,
+          'releaseMs': 520.0,
+        };
+      }
+    }
+
+    if (lower.startsWith('sfz.')) {
+      final legacy = _findLegacySfzSpecByToken(trimmed);
+      if (legacy != null) return legacy;
+    }
+    return null;
   }
 
   String _instrumentNameFromId(String id) {
     final spec = _instrumentSpecById(id);
-    return (spec['name'] as String?) ?? 'Basic Synth';
+    return (spec['name'] as String?) ??
+        (_defaultInstrumentSpec()['name'] as String? ?? 'Instrument');
   }
 
   Map<String, double> _instrumentParamsFromSpec(Map<String, dynamic> spec) {
+    final sampled = _isSampledInstrumentSpec(spec);
     final params = <String, double>{};
     for (final entry in spec.entries) {
       final value = entry.value;
       if (value is num) {
         params[entry.key] = value.toDouble();
       }
+    }
+    if (sampled) {
+      params.putIfAbsent('outputGain', () => 0.72);
+      params.putIfAbsent('attackMs', () => 6.0);
+      params.putIfAbsent('releaseMs', () => 520.0);
+      params.putIfAbsent('stereoWidth', () => 0.0);
+      params['drive'] = 0.0;
+      params['noise'] = 0.0;
+      return params;
     }
     params.putIfAbsent('oscillator', () => 1.0);
     params.putIfAbsent('cutoffHz', () => 3200.0);
@@ -5100,6 +6389,161 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   List<MidiNote> _defaultMidiNotesForInstrument(String instrumentId) {
     final now = DateTime.now().microsecondsSinceEpoch;
+    if (_isSampledInstrumentId(instrumentId)) {
+      final name = _instrumentNameFromId(instrumentId).toLowerCase();
+      if (name.contains('timpani')) {
+        return <MidiNote>[
+          MidiNote(
+              id: '${now}_0',
+              pitch: 43,
+              startBeat: 0.0,
+              lengthBeats: 0.75,
+              velocity: 0.86),
+          MidiNote(
+              id: '${now}_1',
+              pitch: 46,
+              startBeat: 1.0,
+              lengthBeats: 0.75,
+              velocity: 0.80),
+          MidiNote(
+              id: '${now}_2',
+              pitch: 50,
+              startBeat: 2.0,
+              lengthBeats: 0.75,
+              velocity: 0.84),
+          MidiNote(
+              id: '${now}_3',
+              pitch: 53,
+              startBeat: 3.0,
+              lengthBeats: 1.0,
+              velocity: 0.90),
+        ];
+      }
+      if (name.contains('drum') ||
+          name.contains('kit') ||
+          name.contains('gm style perc')) {
+        return <MidiNote>[
+          MidiNote(
+              id: '${now}_0',
+              pitch: 36,
+              startBeat: 0.0,
+              lengthBeats: 0.25,
+              velocity: 0.92),
+          MidiNote(
+              id: '${now}_1',
+              pitch: 42,
+              startBeat: 0.5,
+              lengthBeats: 0.25,
+              velocity: 0.72),
+          MidiNote(
+              id: '${now}_2',
+              pitch: 38,
+              startBeat: 1.0,
+              lengthBeats: 0.25,
+              velocity: 0.85),
+          MidiNote(
+              id: '${now}_3',
+              pitch: 42,
+              startBeat: 1.5,
+              lengthBeats: 0.25,
+              velocity: 0.72),
+          MidiNote(
+              id: '${now}_4',
+              pitch: 36,
+              startBeat: 2.0,
+              lengthBeats: 0.25,
+              velocity: 0.9),
+          MidiNote(
+              id: '${now}_5',
+              pitch: 46,
+              startBeat: 2.5,
+              lengthBeats: 0.25,
+              velocity: 0.74),
+          MidiNote(
+              id: '${now}_6',
+              pitch: 38,
+              startBeat: 3.0,
+              lengthBeats: 0.25,
+              velocity: 0.88),
+          MidiNote(
+              id: '${now}_7',
+              pitch: 42,
+              startBeat: 3.5,
+              lengthBeats: 0.25,
+              velocity: 0.76),
+        ];
+      }
+      if (name.contains('marimba') ||
+          name.contains('glock') ||
+          name.contains('xylo') ||
+          name.contains('bell') ||
+          name.contains('perc')) {
+        return <MidiNote>[
+          MidiNote(
+              id: '${now}_0',
+              pitch: 60,
+              startBeat: 0.0,
+              lengthBeats: 0.5,
+              velocity: 0.90),
+          MidiNote(
+              id: '${now}_1',
+              pitch: 64,
+              startBeat: 0.5,
+              lengthBeats: 0.5,
+              velocity: 0.82),
+          MidiNote(
+              id: '${now}_2',
+              pitch: 67,
+              startBeat: 1.0,
+              lengthBeats: 0.5,
+              velocity: 0.86),
+          MidiNote(
+              id: '${now}_3',
+              pitch: 72,
+              startBeat: 1.5,
+              lengthBeats: 0.5,
+              velocity: 0.90),
+          MidiNote(
+              id: '${now}_4',
+              pitch: 67,
+              startBeat: 2.0,
+              lengthBeats: 0.5,
+              velocity: 0.84),
+          MidiNote(
+              id: '${now}_5',
+              pitch: 64,
+              startBeat: 2.5,
+              lengthBeats: 0.5,
+              velocity: 0.80),
+          MidiNote(
+              id: '${now}_6',
+              pitch: 60,
+              startBeat: 3.0,
+              lengthBeats: 1.0,
+              velocity: 0.88),
+        ];
+      }
+      return <MidiNote>[
+        MidiNote(
+            id: '${now}_0',
+            pitch: 60,
+            startBeat: 0.0,
+            lengthBeats: 4.0,
+            velocity: 0.78),
+        MidiNote(
+            id: '${now}_1',
+            pitch: 64,
+            startBeat: 0.0,
+            lengthBeats: 4.0,
+            velocity: 0.72),
+        MidiNote(
+            id: '${now}_2',
+            pitch: 67,
+            startBeat: 0.0,
+            lengthBeats: 4.0,
+            velocity: 0.72),
+      ];
+    }
     if (instrumentId == 'mixroom.bass_mono') {
       return <MidiNote>[
         MidiNote(
@@ -5937,7 +7381,566 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return File(path);
   }
 
-  Future<void> _renderInstrumentClipToFile({
+  Map<String, String> _parseSfzOpcodes(String line) {
+    final out = <String, String>{};
+    final trimmed = line.split('//').first.trim();
+    if (trimmed.isEmpty) return out;
+    final matches =
+        RegExp(r'([A-Za-z_][A-Za-z0-9_]*)=').allMatches(trimmed).toList();
+    if (matches.isEmpty) return out;
+    for (int i = 0; i < matches.length; i++) {
+      final m = matches[i];
+      final key = (m.group(1) ?? '').trim().toLowerCase();
+      final valueStart = m.end;
+      final valueEnd =
+          i + 1 < matches.length ? matches[i + 1].start : trimmed.length;
+      final value = trimmed.substring(valueStart, valueEnd).trim();
+      if (key.isEmpty || value.isEmpty) continue;
+      out[key] = value;
+    }
+    return out;
+  }
+
+  String _stripSfzQuotes(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.length >= 2 &&
+        ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+            (trimmed.startsWith('\'') && trimmed.endsWith('\'')))) {
+      return trimmed.substring(1, trimmed.length - 1).trim();
+    }
+    return trimmed;
+  }
+
+  double? _parseSfzNumberOrNote(String raw) {
+    final token = _stripSfzQuotes(raw);
+    final numeric = double.tryParse(token);
+    if (numeric != null) return numeric;
+
+    final match = RegExp(r'^([A-Ga-g])([#b]?)(-?\d+)$').firstMatch(token);
+    if (match == null) return null;
+    final step = (match.group(1) ?? '').toUpperCase();
+    final accidental = match.group(2) ?? '';
+    final octave = int.tryParse(match.group(3) ?? '');
+    if (octave == null) return null;
+
+    const semitones = <String, int>{
+      'C': 0,
+      'D': 2,
+      'E': 4,
+      'F': 5,
+      'G': 7,
+      'A': 9,
+      'B': 11,
+    };
+    var semitone = semitones[step];
+    if (semitone == null) return null;
+    if (accidental == '#') semitone += 1;
+    if (accidental == 'b') semitone -= 1;
+
+    final midi = ((octave + 1) * 12) + semitone;
+    return midi.toDouble();
+  }
+
+  _SfzParsedLine _parseSfzLine(String rawLine) {
+    final line = rawLine.split('//').first.trim();
+    if (line.isEmpty) return const _SfzParsedLine();
+
+    String? blockTag;
+    var remainder = line;
+    final tagMatch = RegExp(r'^<\s*([A-Za-z0-9_]+)\s*>').firstMatch(line);
+    if (tagMatch != null) {
+      blockTag = (tagMatch.group(1) ?? '').trim().toLowerCase();
+      remainder = line.substring(tagMatch.end).trim();
+    }
+    final opcodes = remainder.isEmpty
+        ? const <String, String>{}
+        : _parseSfzOpcodes(remainder);
+    return _SfzParsedLine(blockTag: blockTag, opcodes: opcodes);
+  }
+
+  Future<List<String>> _loadSfzExpandedLines(
+    String sfzAssetPath, {
+    Set<String>? includeStack,
+    Map<String, String>? defines,
+  }) async {
+    final normalizedPath = p.posix.normalize(sfzAssetPath);
+    final stack = includeStack ?? <String>{};
+    if (stack.contains(normalizedPath)) return const <String>[];
+    stack.add(normalizedPath);
+
+    try {
+      final text = await rootBundle.loadString(normalizedPath);
+      final dir = p.posix.dirname(normalizedPath);
+      final macroMap = defines ?? <String, String>{};
+      final out = <String>[];
+
+      for (final rawLine in const LineSplitter().convert(text)) {
+        final line = rawLine.split('//').first.trim();
+        if (line.isEmpty) continue;
+
+        final includeMatch =
+            RegExp(r'''^#include\s+["']([^"']+)["']''', caseSensitive: false)
+                .firstMatch(line);
+        if (includeMatch != null) {
+          final includeRaw =
+              _stripSfzQuotes((includeMatch.group(1) ?? '').trim());
+          if (includeRaw.isNotEmpty) {
+            final includePath = p.posix.normalize(
+              p.posix.join(dir, includeRaw.replaceAll('\\', '/')),
+            );
+            final includeLines = await _loadSfzExpandedLines(
+              includePath,
+              includeStack: stack,
+              defines: macroMap,
+            );
+            out.addAll(includeLines);
+          }
+          continue;
+        }
+
+        final defineMatch =
+            RegExp(r'^#define\s+\$?([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$')
+                .firstMatch(line);
+        if (defineMatch != null) {
+          final key = (defineMatch.group(1) ?? '').trim();
+          final value = (defineMatch.group(2) ?? '').trim();
+          if (key.isNotEmpty && value.isNotEmpty) {
+            macroMap[key] = value;
+          }
+          continue;
+        }
+
+        var expandedLine = rawLine;
+        if (macroMap.isNotEmpty) {
+          for (final entry in macroMap.entries) {
+            expandedLine = expandedLine.replaceAll(
+              '\$${entry.key}',
+              entry.value,
+            );
+          }
+        }
+        out.add(expandedLine);
+      }
+      return out;
+    } catch (_) {
+      return const <String>[];
+    } finally {
+      stack.remove(normalizedPath);
+    }
+  }
+
+  String _resolveSfzSampleAssetPath({
+    required String sfzAssetPath,
+    required String defaultPathRaw,
+    required String samplePathRaw,
+  }) {
+    final sfzDir = p.posix.dirname(sfzAssetPath);
+    final defaultPath = _stripSfzQuotes(defaultPathRaw).replaceAll('\\', '/');
+    final samplePath = _stripSfzQuotes(samplePathRaw).replaceAll('\\', '/');
+    if (samplePath.startsWith('assets/')) {
+      return p.posix.normalize(samplePath);
+    }
+    return p.posix.normalize(
+      p.posix.join(sfzDir, defaultPath, samplePath),
+    );
+  }
+
+  double _readSfzNumeric(
+      Map<String, String> values, String key, double fallback) {
+    final raw = values[key];
+    if (raw == null) return fallback;
+    return _parseSfzNumberOrNote(raw) ?? fallback;
+  }
+
+  Future<_SfzDefinition?> _sfzDefinitionForInstrument(
+      String instrumentId) async {
+    final spec = _instrumentSpecById(instrumentId);
+    if (!_isSampledInstrumentSpec(spec)) return null;
+    final sfzAssetPath = (spec['sfzAssetPath'] as String?)?.trim() ?? '';
+    if (sfzAssetPath.isEmpty) return null;
+
+    final cached = _sfzDefinitionCache[sfzAssetPath];
+    if (cached != null) return cached;
+
+    try {
+      final sfzLines = await _loadSfzExpandedLines(sfzAssetPath);
+      if (sfzLines.isEmpty) return null;
+      final control = <String, String>{};
+      final global = <String, String>{};
+      final master = <String, String>{};
+      final group = <String, String>{};
+      Map<String, String>? region;
+      String currentBlock = '';
+
+      final regions = <Map<String, String>>[];
+      for (final rawLine in sfzLines) {
+        final parsed = _parseSfzLine(rawLine);
+        final tag = parsed.blockTag;
+        if (tag != null && tag.isNotEmpty) {
+          currentBlock = tag;
+          if (tag == 'group') {
+            group.clear();
+          } else if (tag == 'master') {
+            master.clear();
+          } else if (tag == 'region') {
+            region = <String, String>{}
+              ..addAll(control)
+              ..addAll(global)
+              ..addAll(master)
+              ..addAll(group);
+            regions.add(region);
+          }
+        }
+
+        final opcodes = parsed.opcodes;
+        if (opcodes.isEmpty) continue;
+        switch (currentBlock) {
+          case 'control':
+            control.addAll(opcodes);
+            break;
+          case 'global':
+            global.addAll(opcodes);
+            break;
+          case 'master':
+            master.addAll(opcodes);
+            break;
+          case 'group':
+            group.addAll(opcodes);
+            break;
+          case 'region':
+            region ??= <String, String>{}
+              ..addAll(control)
+              ..addAll(global)
+              ..addAll(master)
+              ..addAll(group);
+            region.addAll(opcodes);
+            break;
+          default:
+            break;
+        }
+      }
+
+      final defaultPathRaw = control['default_path'] ?? '';
+      final globalAttackSec = _readSfzNumeric(global, 'ampeg_attack', 0.005);
+      final globalReleaseSec = _readSfzNumeric(global, 'ampeg_release', 0.35);
+      final globalVol = _readSfzNumeric(global, 'volume', 0.0);
+
+      final parsedRegions = <_SfzRegion>[];
+      for (final r in regions) {
+        final sampleRaw = r['sample'] ?? '';
+        if (sampleRaw.isEmpty) continue;
+        final sampleAssetPath = _resolveSfzSampleAssetPath(
+          sfzAssetPath: sfzAssetPath,
+          defaultPathRaw: r['default_path'] ?? defaultPathRaw,
+          samplePathRaw: sampleRaw,
+        );
+        final loKey = _readSfzNumeric(r, 'lokey', 0).round().clamp(0, 127);
+        final hiKey = _readSfzNumeric(r, 'hikey', 127).round().clamp(0, 127);
+        final keyCenter = _readSfzNumeric(
+          r,
+          'pitch_keycenter',
+          _readSfzNumeric(r, 'key', ((loKey + hiKey) / 2.0).roundToDouble()),
+        ).round().clamp(0, 127);
+        final loVel = _readSfzNumeric(r, 'lovel', 0).round().clamp(0, 127);
+        final hiVel = _readSfzNumeric(r, 'hivel', 127).round().clamp(0, 127);
+        final regionVolDb = _readSfzNumeric(r, 'volume', globalVol);
+        final gainLinear = math
+            .pow(
+              10.0,
+              (regionVolDb.clamp(-24.0, 12.0)) / 20.0,
+            )
+            .toDouble();
+        final attackSec = _readSfzNumeric(r, 'ampeg_attack', globalAttackSec)
+            .clamp(0.0, 4.0)
+            .toDouble();
+        final releaseSec = _readSfzNumeric(r, 'ampeg_release', globalReleaseSec)
+            .clamp(0.02, 12.0)
+            .toDouble();
+        parsedRegions.add(
+          _SfzRegion(
+            sampleAssetPath: sampleAssetPath,
+            loKey: loKey,
+            hiKey: hiKey,
+            keyCenter: keyCenter,
+            loVel: loVel,
+            hiVel: hiVel,
+            gainLinear: gainLinear,
+            attackSec: attackSec,
+            releaseSec: releaseSec,
+          ),
+        );
+      }
+
+      if (parsedRegions.isEmpty) return null;
+      final definition = _SfzDefinition(
+        sfzAssetPath: sfzAssetPath,
+        regions: parsedRegions,
+        defaultAttackSec: globalAttackSec.clamp(0.0, 4.0),
+        defaultReleaseSec: globalReleaseSec.clamp(0.02, 12.0),
+      );
+      _sfzDefinitionCache[sfzAssetPath] = definition;
+      return definition;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _SfzRegion? _pickSfzRegion(
+      _SfzDefinition definition, int pitch, int velocity) {
+    var candidates = definition.regions.where((region) {
+      return pitch >= region.loKey &&
+          pitch <= region.hiKey &&
+          velocity >= region.loVel &&
+          velocity <= region.hiVel;
+    }).toList(growable: false);
+
+    if (candidates.isEmpty) {
+      candidates = definition.regions.where((region) {
+        return pitch >= region.loKey && pitch <= region.hiKey;
+      }).toList(growable: false);
+    }
+    if (candidates.isEmpty) return null;
+
+    candidates.sort((a, b) {
+      final keyA = (pitch - a.keyCenter).abs();
+      final keyB = (pitch - b.keyCenter).abs();
+      if (keyA != keyB) return keyA.compareTo(keyB);
+      final velA = velocity < a.loVel
+          ? a.loVel - velocity
+          : velocity > a.hiVel
+              ? velocity - a.hiVel
+              : 0;
+      final velB = velocity < b.loVel
+          ? b.loVel - velocity
+          : velocity > b.hiVel
+              ? velocity - b.hiVel
+              : 0;
+      return velA.compareTo(velB);
+    });
+    return candidates.first;
+  }
+
+  int _findWavChunk(Uint8List bytes, String chunkId) {
+    for (int i = 12; i + 8 <= bytes.length;) {
+      final id = ascii.decode(bytes.sublist(i, i + 4), allowInvalid: true);
+      final size =
+          ByteData.sublistView(bytes, i + 4, i + 8).getUint32(0, Endian.little);
+      if (id == chunkId) return i;
+      i += 8 + size + (size.isOdd ? 1 : 0);
+    }
+    return -1;
+  }
+
+  _DecodedStereoPcm? _decodePcmWav(ByteData wavData) {
+    final bytes = wavData.buffer.asUint8List();
+    if (bytes.length < 44) return null;
+    final riff = ascii.decode(bytes.sublist(0, 4), allowInvalid: true);
+    final wave = ascii.decode(bytes.sublist(8, 12), allowInvalid: true);
+    if (riff != 'RIFF' || wave != 'WAVE') return null;
+
+    final fmtChunkStart = _findWavChunk(bytes, 'fmt ');
+    final dataChunkStart = _findWavChunk(bytes, 'data');
+    if (fmtChunkStart < 0 || dataChunkStart < 0) return null;
+
+    final fmtSize =
+        ByteData.sublistView(bytes, fmtChunkStart + 4, fmtChunkStart + 8)
+            .getUint32(0, Endian.little);
+    if (fmtSize < 16) return null;
+    final fmt = ByteData.sublistView(
+      bytes,
+      fmtChunkStart + 8,
+      fmtChunkStart + 8 + fmtSize,
+    );
+    final audioFormat = fmt.getUint16(0, Endian.little);
+    final channels = fmt.getUint16(2, Endian.little);
+    final sampleRate = fmt.getUint32(4, Endian.little);
+    final bitsPerSample = fmt.getUint16(14, Endian.little);
+    if (channels < 1 || channels > 2) return null;
+    if (audioFormat != 1) return null;
+    if (bitsPerSample != 16 && bitsPerSample != 24) return null;
+
+    final dataSize = ByteData.sublistView(
+      bytes,
+      dataChunkStart + 4,
+      dataChunkStart + 8,
+    ).getUint32(0, Endian.little);
+    final dataOffset = dataChunkStart + 8;
+    if (dataOffset + dataSize > bytes.length) return null;
+
+    final bytesPerSample = bitsPerSample ~/ 8;
+    final frameSize = bytesPerSample * channels;
+    if (frameSize <= 0) return null;
+    final frameCount = dataSize ~/ frameSize;
+    if (frameCount <= 0) return null;
+
+    final left = Float32List(frameCount);
+    final right = Float32List(frameCount);
+
+    int ptr = dataOffset;
+    for (int i = 0; i < frameCount; i++) {
+      double readSample() {
+        if (bitsPerSample == 16) {
+          final v = (bytes[ptr] | (bytes[ptr + 1] << 8));
+          final signed = (v & 0x8000) != 0 ? v - 0x10000 : v;
+          ptr += 2;
+          return (signed / 32768.0).clamp(-1.0, 1.0).toDouble();
+        }
+        final v = bytes[ptr] | (bytes[ptr + 1] << 8) | (bytes[ptr + 2] << 16);
+        final signed = (v & 0x800000) != 0 ? v - 0x1000000 : v;
+        ptr += 3;
+        return (signed / 8388608.0).clamp(-1.0, 1.0).toDouble();
+      }
+
+      final l = readSample();
+      final r = channels > 1 ? readSample() : l;
+      left[i] = l;
+      right[i] = r;
+    }
+
+    return _DecodedStereoPcm(
+      sampleRate: sampleRate,
+      left: left,
+      right: right,
+    );
+  }
+
+  Future<_DecodedStereoPcm?> _decodedSfzSample(String assetPath) async {
+    final cached = _sfzSampleCache.remove(assetPath);
+    if (cached != null) {
+      _sfzSampleCache[assetPath] = cached;
+      return cached;
+    }
+    try {
+      final data = await rootBundle.load(assetPath);
+      final decoded = _decodePcmWav(data);
+      if (decoded == null) return null;
+      _sfzSampleCache[assetPath] = decoded;
+      if (_sfzSampleCache.length > _kMaxSfzSampleCacheEntries) {
+        _sfzSampleCache.remove(_sfzSampleCache.keys.first);
+      }
+      return decoded;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> _renderInstrumentClipWithSfz({
+    required File outFile,
+    required String instrumentId,
+    required List<MidiNote> notes,
+    required Map<String, double> params,
+    required double bpm,
+    double minimumDurationMs = 1200.0,
+  }) async {
+    final definition = await _sfzDefinitionForInstrument(instrumentId);
+    if (definition == null || definition.regions.isEmpty) return false;
+
+    const double sampleRate = 48000.0;
+    final msPerBeat = 60000.0 / bpm.clamp(1.0, 400.0);
+    double endBeat = 4.0;
+    for (final n in notes) {
+      endBeat = math.max(endBeat, n.startBeat + n.lengthBeats);
+    }
+
+    final outputGain = (params['outputGain'] ?? 0.72).clamp(0.2, 2.0);
+    final attackOverrideSec = ((params['attackMs'] ?? -1.0) / 1000.0);
+    final releaseOverrideSec = ((params['releaseMs'] ?? -1.0) / 1000.0);
+    final tailSec = releaseOverrideSec > 0
+        ? releaseOverrideSec
+        : definition.defaultReleaseSec;
+    final totalMs = math.max(
+      minimumDurationMs,
+      endBeat * msPerBeat + tailSec * 1000.0 + 180.0,
+    );
+    final totalSamples = math.max(2048, (totalMs * sampleRate / 1000.0).ceil());
+    final left = Float32List(totalSamples);
+    final right = Float32List(totalSamples);
+
+    for (final note in notes) {
+      final safePitch = note.pitch.clamp(0, 127);
+      final safeVelocity = note.velocity.clamp(0.0, 1.0);
+      final velocityMidi = (safeVelocity * 127.0).round().clamp(0, 127);
+      final region = _pickSfzRegion(definition, safePitch, velocityMidi);
+      if (region == null) continue;
+      final sample = await _decodedSfzSample(region.sampleAssetPath);
+      if (sample == null || sample.frameCount < 2) continue;
+
+      final noteStart =
+          (note.startBeat * msPerBeat * sampleRate / 1000.0).round();
+      final sustainSamples = math.max(
+        1,
+        (note.lengthBeats * msPerBeat * sampleRate / 1000.0).round(),
+      );
+      final attackSec = attackOverrideSec > 0
+          ? attackOverrideSec
+          : region.attackSec.clamp(0.0, 2.0);
+      final releaseSec = releaseOverrideSec > 0
+          ? releaseOverrideSec
+          : region.releaseSec.clamp(0.02, 12.0);
+      final attackSamples = math.max(1, (attackSec * sampleRate).round());
+      final releaseSamples = math.max(1, (releaseSec * sampleRate).round());
+      final totalNoteSamples = sustainSamples + releaseSamples;
+
+      final semitoneOffset = safePitch - region.keyCenter;
+      final playbackRate = math.pow(2.0, semitoneOffset / 12.0).toDouble() *
+          (sample.sampleRate / sampleRate);
+
+      double samplePos = 0.0;
+      final noteGain = safeVelocity * region.gainLinear * outputGain;
+      for (int i = 0; i < totalNoteSamples; i++) {
+        final idx = noteStart + i;
+        if (idx < 0 || idx >= totalSamples) break;
+        if (samplePos >= sample.frameCount - 1) break;
+
+        double env;
+        if (i < attackSamples) {
+          env = i / attackSamples;
+        } else if (i < sustainSamples) {
+          env = 1.0;
+        } else {
+          env = 1.0 - ((i - sustainSamples) / releaseSamples);
+        }
+        env = env.clamp(0.0, 1.0);
+        if (env <= 0.0) {
+          samplePos += playbackRate;
+          continue;
+        }
+
+        final baseIndex = samplePos.floor();
+        final frac = samplePos - baseIndex;
+        final nextIndex = math.min(baseIndex + 1, sample.frameCount - 1);
+        final l = sample.left[baseIndex] * (1.0 - frac) +
+            sample.left[nextIndex] * frac;
+        final r = sample.right[baseIndex] * (1.0 - frac) +
+            sample.right[nextIndex] * frac;
+
+        left[idx] += (l * env * noteGain).toDouble();
+        right[idx] += (r * env * noteGain).toDouble();
+        samplePos += playbackRate;
+      }
+    }
+
+    double peak = 0.0;
+    for (int i = 0; i < totalSamples; i++) {
+      peak = math.max(peak, left[i].abs());
+      peak = math.max(peak, right[i].abs());
+    }
+    final normalizeGain = peak > 0.98 ? (0.98 / peak) : 1.0;
+    for (int i = 0; i < totalSamples; i++) {
+      left[i] = (left[i] * normalizeGain).clamp(-1.0, 1.0).toDouble();
+      right[i] = (right[i] * normalizeGain).clamp(-1.0, 1.0).toDouble();
+    }
+
+    await _writeStereoPcm16Wav(
+      path: outFile.path,
+      sampleRate: sampleRate.toInt(),
+      left: left,
+      right: right,
+    );
+    return true;
+  }
+
+  Future<bool> _renderInstrumentClipToFile({
     required File outFile,
     required String instrumentId,
     required String instrumentName,
@@ -5946,6 +7949,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) async {
     if (!await outFile.parent.exists()) {
       await outFile.parent.create(recursive: true);
+    }
+
+    if (_isSampledInstrumentId(instrumentId)) {
+      final renderedWithSfz = await _renderInstrumentClipWithSfz(
+        outFile: outFile,
+        instrumentId: instrumentId,
+        notes: notes,
+        params: params,
+        bpm: _tempo,
+      );
+      if (renderedWithSfz && outFile.existsSync()) {
+        return true;
+      }
+      return false;
     }
 
     final noteMaps = notes
@@ -5958,9 +7975,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             })
         .toList();
 
+    final engineInstrumentId = _liveMidiEngineInstrumentId(instrumentId);
     final renderedPath = await JuceAudioEngine.renderInstrumentClip(
       outPath: outFile.path,
-      instrumentId: instrumentId,
+      instrumentId: engineInstrumentId,
       instrumentName: instrumentName,
       bpm: _tempo,
       notes: noteMaps,
@@ -5968,7 +7986,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
 
     if (renderedPath.isNotEmpty && File(renderedPath).existsSync()) {
-      return;
+      return true;
     }
 
     await _renderInstrumentClipWithDartSynth(
@@ -5979,6 +7997,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       params: params,
       bpm: _tempo,
     );
+    return outFile.existsSync();
   }
 
   Future<void> _renderInstrumentClipWithDartSynth({
@@ -6162,6 +8181,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toList();
   }
 
+  String _liveMidiEngineInstrumentId(String instrumentId) {
+    final id = instrumentId.trim();
+    if (id.toLowerCase().startsWith('sfz_asset:')) {
+      return id;
+    }
+    final spec = _findInstrumentSpecById(id);
+    if (spec != null && _isSampledInstrumentSpec(spec)) {
+      final sfzAssetPath = (spec['sfzAssetPath'] as String?)?.trim() ?? '';
+      if (sfzAssetPath.isNotEmpty) {
+        return 'sfz_asset:$sfzAssetPath';
+      }
+    }
+    return id;
+  }
+
   Future<bool> _loadMidiClipIntoEngineLive({
     required int engineClipId,
     required int rowId,
@@ -6175,11 +8209,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required double inFileOffsetSec,
   }) async {
     if (!_liveMidiEventPlaybackSupported) return false;
+    if (_isSampledInstrumentId(instrumentId)) return false;
     if (engineClipId < 0 || rowId < 0) return false;
+    final liveInstrumentId = _liveMidiEngineInstrumentId(instrumentId);
     return JuceAudioEngine.loadMidiClip(
       engineClipId,
       rowId,
-      instrumentId: instrumentId,
+      instrumentId: liveInstrumentId,
       instrumentName: instrumentName,
       notes: _midiNotesToEnginePayload(midiNotes),
       params: Map<String, double>.from(instrumentParams),
@@ -6193,9 +8229,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _updateMidiClipEventsLive(AudioTrack clip) async {
     if (!_liveMidiEventPlaybackSupported) return false;
     if (!clip.isMidi || clip.engineClipId < 0) return false;
+    if (_isSampledInstrumentId(clip.instrumentId)) return false;
+    final liveInstrumentId = _liveMidiEngineInstrumentId(clip.instrumentId);
     return JuceAudioEngine.updateMidiClipEvents(
       clip.engineClipId,
-      instrumentId: clip.instrumentId,
+      instrumentId: liveInstrumentId,
       instrumentName: clip.instrumentName,
       notes: _midiNotesToEnginePayload(clip.midiNotes),
       params: Map<String, double>.from(clip.instrumentParams),
@@ -6220,13 +8258,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     debounceTimer = Timer(const Duration(milliseconds: 280), () {
       unawaited(() async {
         try {
-          await _renderInstrumentClipToFile(
+          final rendered = await _renderInstrumentClipToFile(
             outFile: File(filePathSnapshot),
             instrumentId: instrumentIdSnapshot,
             instrumentName: instrumentNameSnapshot,
             notes: notesSnapshot,
             params: paramsSnapshot,
           );
+          if (!rendered || !File(filePathSnapshot).existsSync()) return;
           if (_midiRenderSyncTokens[clipId] != token) return;
 
           final idx = _clipIndexForEngineId(clipId);
@@ -6297,14 +8336,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final outFile =
         renderedFile ?? await _nextInstrumentRenderFile(instrumentId);
-    if (!outFile.existsSync()) {
-      await _renderInstrumentClipToFile(
+    final shouldRefreshSampledRender =
+        renderedFile != null && _isSampledInstrumentId(instrumentId);
+    if (!outFile.existsSync() || shouldRefreshSampledRender) {
+      final rendered = await _renderInstrumentClipToFile(
         outFile: outFile,
         instrumentId: instrumentId,
         instrumentName: instrumentName,
         notes: midiNotes,
         params: instrumentParams,
       );
+      if (!rendered || !outFile.existsSync()) {
+        if (mounted) {
+          final msg = _isSampledInstrumentId(instrumentId)
+              ? 'Could not render sampled instrument. Check SFZ assets.'
+              : 'Could not render instrument clip.';
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(msg)));
+        }
+        return;
+      }
     }
 
     final requestedTrimStart = trimStartRequested ?? Duration.zero;
@@ -6678,13 +8729,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     clip.stretchToProjectTempo = true;
     clip.tempoStretchPreservePitch = true;
 
-    await _renderInstrumentClipToFile(
+    final rendered = await _renderInstrumentClipToFile(
       outFile: clip.file,
       instrumentId: clip.instrumentId,
       instrumentName: clip.instrumentName,
       notes: clip.midiNotes,
       params: clip.instrumentParams,
     );
+    if (!rendered || !clip.file.existsSync()) return;
 
     final rowId = clip.rowId >= 0 ? clip.rowId : _rowIdAt(clip.rowIndex);
     if (rowId < 0) return;
@@ -6953,11 +9005,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final ext = p.extension(exportPath).replaceAll('.', '');
-    final params = SaveFileDialogParams(
+    final savedPath = await ExportSaveDialog.saveExportedFile(
       sourceFilePath: exportPath,
-      fileName: 'export_file.$ext',
+      suggestedFileName: 'export_file.$ext',
+      desktopDialogTitle: 'Save export',
     );
-    final savedPath = await FlutterFileDialog.saveFile(params: params);
 
     if (savedPath != null) {
       // final success_str = L10n.translate(context, 'Exported file saved!');
@@ -7021,7 +9073,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _ensureCanAddAnotherClip({
     required String basicModeMessage,
   }) async {
-    if (widget.mode != "Basic" || _audioTracks.length < 3) {
+    if (_isProEntitled || _audioTracks.length < 3) {
       return true;
     }
     await showDialog(
@@ -7096,7 +9148,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    await _pausePlayback();
+    if (_isPlaying) {
+      await _pausePlayback();
+    }
     final result = await _runFilePickerRequest<FilePickerResult?>(
       () => FilePicker.platform.pickFiles(type: FileType.any),
     );
@@ -7153,10 +9207,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_filePickerInFlight) return null;
     _filePickerInFlight = true;
     try {
+      // Avoid presenting a native picker during an active Flutter route transition.
+      await SchedulerBinding.instance.endOfFrame;
       return await request();
     } on PlatformException catch (e) {
       if (e.code != 'multiple_request') rethrow;
-      await Future<void>.delayed(const Duration(milliseconds: 220));
+      await SchedulerBinding.instance.endOfFrame;
       try {
         return await request();
       } on PlatformException catch (retryError) {
@@ -7499,11 +9555,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   String _instrumentPickerCategory(Map<String, dynamic> spec) {
+    final explicit = (spec['pickerCategory'] as String?)?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return _normalizePickerCategory(explicit);
+    }
     final declared = ((spec['category'] as String?) ?? '').toLowerCase();
     final id = ((spec['id'] as String?) ?? '').toLowerCase();
     final name = ((spec['name'] as String?) ?? '').toLowerCase();
     final text = '$id $name';
 
+    if (text.contains('string') ||
+        text.contains('violin') ||
+        text.contains('cello')) {
+      return 'Strings';
+    }
+    if (text.contains('woodwind') ||
+        text.contains('flute') ||
+        text.contains('clarinet') ||
+        text.contains('oboe') ||
+        text.contains('bassoon')) {
+      return 'Woodwinds';
+    }
+    if (text.contains('perc') ||
+        text.contains('marimba') ||
+        text.contains('glock')) {
+      return 'Percussion';
+    }
     if (declared == 'drum' ||
         text.contains('drum') ||
         text.contains('kick') ||
@@ -7544,18 +9621,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return 'Other';
   }
 
+  List<Map<String, dynamic>> _activeInstrumentCatalog() {
+    if (_instrumentCatalog.isNotEmpty) return _instrumentCatalog;
+    return kBundledSfzFallbackCatalog
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList(growable: false);
+  }
+
   List<String> _instrumentPickerCategories() {
     const ordered = <String>[
       'Keys',
+      'Strings',
+      'Woodwinds',
+      'Brass',
+      'Percussion',
+      'Drums',
       'Pads',
       'Leads',
       'Bass',
       'Plucks',
-      'Brass',
-      'Drums',
       'Other',
     ];
-    final available = kInstrumentCatalog
+    final available = _activeInstrumentCatalog()
         .map(_instrumentPickerCategory)
         .toSet()
         .toList(growable: false);
@@ -7569,6 +9656,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     switch (category) {
       case 'Keys':
         return const Color(0xFF53A8FF);
+      case 'Strings':
+        return const Color(0xFF67A6FF);
+      case 'Woodwinds':
+        return const Color(0xFF4CC5AB);
+      case 'Percussion':
+        return const Color(0xFFF8B65E);
       case 'Pads':
         return const Color(0xFF4BC9B6);
       case 'Leads':
@@ -7590,6 +9683,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     switch (category) {
       case 'Keys':
         return Icons.piano_outlined;
+      case 'Strings':
+        return Icons.multitrack_audio_rounded;
+      case 'Woodwinds':
+        return Icons.air_rounded;
+      case 'Percussion':
+        return Icons.music_note_outlined;
       case 'Pads':
         return Icons.waves_rounded;
       case 'Leads':
@@ -7615,84 +9714,161 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final accent = _instrumentPickerAccent(category);
     final source = (spec['sourceProject'] as String?) ?? '';
     final name = (spec['name'] as String?) ?? 'Instrument';
+    final sampled = _isSampledInstrumentSpec(spec);
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: Ink(
-          padding: const EdgeInsets.fromLTRB(12, 11, 12, 10),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              begin: Alignment.topLeft,
+              begin: Alignment.topCenter,
               end: Alignment.bottomRight,
               colors: [
-                const Color(0xFF232D3F),
-                const Color(0xFF1A2231),
+                const Color(0xFF263245),
+                const Color(0xFF1B2433),
               ],
             ),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: accent.withValues(alpha: 0.55)),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: accent.withValues(alpha: 0.52)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Stack(
             children: [
-              Row(
-                children: [
-                  Container(
-                    width: 30,
-                    height: 30,
+              Positioned(
+                right: -22,
+                top: -26,
+                child: IgnorePointer(
+                  child: Container(
+                    width: 88,
+                    height: 88,
                     decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Icon(
-                      _instrumentPickerIcon(category),
-                      color: accent,
-                      size: 17,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      category,
-                      style: TextStyle(
-                        color: accent,
-                        fontSize: 10.6,
-                        fontWeight: FontWeight.w700,
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          accent.withValues(alpha: 0.26),
+                          Colors.transparent,
+                        ],
                       ),
                     ),
                   ),
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.20),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Icon(
+                          _instrumentPickerIcon(category),
+                          color: accent,
+                          size: 17,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        constraints: const BoxConstraints(minHeight: 19),
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(horizontal: 9),
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.17),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: accent.withValues(alpha: 0.50),
+                          ),
+                        ),
+                        child: Text(
+                          category,
+                          style: TextStyle(
+                            color: accent,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      Icon(
+                        Icons.north_east_rounded,
+                        size: 15,
+                        color: Colors.white.withValues(alpha: 0.48),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 9),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15.4,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          sampled
+                              ? (source.isEmpty
+                                  ? 'Sampled • Ready to play'
+                                  : 'Sampled • $source')
+                              : (source.isEmpty
+                                  ? 'Synth preset'
+                                  : 'Inspired by $source'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.68),
+                            fontSize: 10.9,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 7),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.28),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.13),
+                            ),
+                          ),
+                          child: Text(
+                            sampled ? 'SFZ Layered' : 'Synth Engine',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.80),
+                              fontSize: 9.8,
+                              fontWeight: FontWeight.w700,
+                              height: 1.0,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
-              ),
-              const Spacer(),
-              Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15.2,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.1,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                source.isEmpty ? 'Mixroom preset' : 'Inspired by $source',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.66),
-                  fontSize: 11.0,
-                  fontWeight: FontWeight.w500,
-                ),
               ),
             ],
           ),
@@ -7709,6 +9885,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (!mounted) return;
+    final catalog = _activeInstrumentCatalog();
+    if (catalog.isEmpty) return;
     final categories = _instrumentPickerCategories();
     final selected = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -7720,7 +9898,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final dialogWidth = math.min(560.0, viewport.width - 48.0);
             final dialogHeight =
                 math.min(480.0, math.max(320.0, viewport.height * 0.68));
-            final filtered = kInstrumentCatalog.where((spec) {
+            final filtered = catalog.where((spec) {
               if (selectedCategory == 'All') return true;
               return _instrumentPickerCategory(spec) == selectedCategory;
             }).toList(growable: false);
@@ -7755,10 +9933,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             borderRadius: BorderRadius.circular(999),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 120),
-                              height: 30,
+                              constraints: const BoxConstraints(
+                                minHeight: 30,
+                                minWidth: 74,
+                              ),
                               alignment: Alignment.center,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 13),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
                                 gradient: selected
                                     ? LinearGradient(
@@ -7789,14 +9970,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       ]
                                     : null,
                               ),
-                              child: Text(
-                                category,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: selected ? accent : Colors.white70,
-                                  fontSize: 11.3,
-                                  fontWeight: FontWeight.w700,
-                                  height: 1.0,
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      _instrumentPickerIcon(category),
+                                      size: 12.4,
+                                      color: selected ? accent : Colors.white70,
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      category,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color:
+                                            selected ? accent : Colors.white70,
+                                        fontSize: 11.1,
+                                        fontWeight: FontWeight.w700,
+                                        height: 1.0,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -7820,7 +10016,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               builder: (context, constraints) {
                                 final compact = constraints.maxWidth < 430;
                                 final crossAxisCount = compact ? 1 : 2;
-                                final cardHeight = compact ? 126.0 : 132.0;
+                                final cardHeight = compact ? 130.0 : 138.0;
                                 return GridView.builder(
                                   itemCount: filtered.length,
                                   gridDelegate:
@@ -7858,8 +10054,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (selected == null) return;
 
-    final instrumentId = (selected['id'] as String?) ?? 'mixroom.basic_synth';
-    final instrumentName = (selected['name'] as String?) ?? 'Basic Synth';
+    final defaultSpec = _defaultInstrumentSpec();
+    final instrumentId =
+        (selected['id'] as String?) ?? (defaultSpec['id'] as String?) ?? '';
+    final instrumentName = (selected['name'] as String?) ??
+        (defaultSpec['name'] as String?) ??
+        'Instrument';
     final params = _instrumentParamsFromSpec(selected);
     final notes = _defaultMidiNotesForInstrument(instrumentId);
 
@@ -8002,7 +10202,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       if (bypass) {
         // --- Gain ---
-        await JuceAudioEngine.setRowGain(row, 1.0);
+        await JuceAudioEngine.setRowGain(row, _kGainUiUnity);
 
         // --- Pan ---
         await JuceAudioEngine.setRowPan(row, 0.5);
@@ -8010,6 +10210,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         // --- Automation (flat unity) ---
         await JuceAudioEngine.setTrackAutomationPoints(
             row, _toMaps([AutomationPoint(x: 0.0, volume: 0.75)]));
+        await JuceAudioEngine.clearTrackEffectAutomationForRow(row);
       }
     }
 
@@ -8036,8 +10237,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await JuceAudioEngine.setRowPan(row, _rowPanSnapshot[row]);
 
       // Automation
-      await JuceAudioEngine.setTrackAutomationPoints(
-          row, _toMaps(_rowAutomationSnapshot[row]));
+      await _syncNativeAutomationForRow(row);
     }
 
     // --- Master FX ---
@@ -8560,7 +10760,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   double _heldPeakDbForRow(int row, MeterFrame frame) {
     final now = DateTime.now();
-    final currentPeakDb = _ampToDbFs(math.max(frame.rmsL, frame.rmsR));
+    final currentPeakDb = _ampToDbFs(math.max(frame.peakL, frame.peakR));
 
     final prevDb = _rowPeakHoldDb[row] ?? currentPeakDb;
     final lastUpdate = _rowPeakHoldLastUpdate[row] ?? now;
@@ -8588,10 +10788,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return 20 * math.log(amp) / math.ln10;
   }
 
+  static double _uiFromGainDb(double db) {
+    final clampedDb = db.clamp(_kGainDbMin, _kGainDbMax).toDouble();
+    if (clampedDb <= 0.0) {
+      final t = (clampedDb - _kGainDbMin) / (0.0 - _kGainDbMin);
+      return _kGainUiMin + ((_kGainUiUnity - _kGainUiMin) * t);
+    }
+    final t = clampedDb / _kGainDbMax;
+    return _kGainUiUnity + ((_kGainUiMax - _kGainUiUnity) * t);
+  }
+
+  double _normalizeLoadedGainUi(
+    double? rawGain, {
+    required int projectVersion,
+  }) {
+    if (rawGain == null || !rawGain.isFinite) return _kGainUiUnity;
+    final clamped = rawGain.clamp(_kGainUiMin, _kGainUiMax).toDouble();
+
+    // Backward compatibility: old projects often stored unity at 1.0 UI or at
+    // the previous linear-mapped unity (~2.727). Map both to the current
+    // piecewise unity position.
+    if (projectVersion <= 1 &&
+        ((clamped - 1.0).abs() < 0.02 ||
+            (clamped - _kLegacyLinearGainUiUnity).abs() < 0.02)) {
+      return _kGainUiUnity;
+    }
+    return clamped;
+  }
+
   Widget _buildMasterEffectsPage() {
     return MasterEffectsPanel(
       key: ValueKey("master_effects_panel"),
-      mode: widget.mode,
+      mode: _resolvedMode,
+      isProEntitled: _isProEntitled,
       getMasterEffects: () => JuceAudioEngine.getMasterEffects(),
       getMasterEffectIds: () => JuceAudioEngine.getMasterEffectIds(),
       getMasterEffectBypassState: (i) =>
@@ -8680,108 +10909,137 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Widget _buildTopBar(Duration currentClock) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Row(
-        children: [
-          // Left: back
-          _Glass(
-            radius: 24,
-            padding: EdgeInsets.zero,
-            opacity: 0.10,
-            child: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Colors.white, size: 18),
-              onPressed: _handleBackPressed,
-            ),
-          ),
-          const SizedBox(width: 10),
-          // NEW PROJECT SETTINGS BUTTON
-          _Glass(
-            radius: 22,
-            padding: EdgeInsets.zero,
-            opacity: 0.10,
-            child: IconButton(
-              icon: const Icon(Icons.settings, color: Colors.white, size: 20),
-              onPressed: _openProjectSettings,
-            ),
-          ),
-
-          const SizedBox(width: 10),
-          // CENTER: Time pill (true center on iPad)
-          Expanded(
-            child: Center(
-              child: _timePill(
-                current: _formatDuration(currentClock),
-                total: _formatDuration(_audioOnlyOverallDuration),
+  Widget _buildTopBar(Duration currentClock, _EditorLayoutSpec layoutSpec) {
+    final pluginAffordanceEnabled =
+        _platformCapabilities.supportsExternalPluginAffordances;
+    return Halo(
+      highlighter: _mixHighlighter,
+      haloKey: const HaloKey('tutorial:toolbar'),
+      borderRadius: BorderRadius.circular(26),
+      child: Padding(
+        padding: layoutSpec.topBarPadding,
+        child: Row(
+          children: [
+            // Left: back
+            _Glass(
+              radius: 24,
+              padding: EdgeInsets.zero,
+              opacity: 0.10,
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white, size: 18),
+                onPressed: _handleBackPressed,
               ),
             ),
-          ),
-
-          // CENTER: make flexible & scale down if needed
-          // Expanded(
-          //   child: Align(
-          //     alignment: Alignment.centerLeft,
-          //     child: _tempoTimePill(
-          //       tempo: _tempo,
-          //       current: _formatDuration(_globalAudioClock),
-          //       total: _formatDuration(_audioOnlyOverallDuration),
-          //     ),
-          //   ),
-          // ),
-          const SizedBox(width: 8),
-
-          // RIGHT: allow this cluster to also scale when narrow
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Row(
-              children: [
-                _Glass(
-                  radius: 22,
-                  padding: EdgeInsets.zero,
-                  opacity: 0.10,
-                  child: IconButton(
-                    icon: const Icon(Icons.settings_input_composite,
-                        color: Colors.white, size: 20),
-                    onPressed: () {
-                      _isMasterPopupOpen = !_isMasterPopupOpen;
-                      setState(() => _showMasterRack = !_showMasterRack);
-                    },
-                  ),
+            SizedBox(width: layoutSpec.topBarClusterGap),
+            // NEW PROJECT SETTINGS BUTTON
+            Halo(
+              highlighter: _mixHighlighter,
+              haloKey: const HaloKey('tutorial:project_settings'),
+              borderRadius: BorderRadius.circular(22),
+              child: _Glass(
+                radius: 22,
+                padding: EdgeInsets.zero,
+                opacity: 0.10,
+                child: IconButton(
+                  icon:
+                      const Icon(Icons.settings, color: Colors.white, size: 20),
+                  onPressed: _openProjectSettings,
                 ),
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: _exportAndNavigate,
-                  child: Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      // color: Colors.white.withOpacity(0.08),
-                      border: Border.all(color: Colors.white.withOpacity(0.1)),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.3),
-                          // blurRadius: 18,
-                          // offset: const Offset(0, 6),
-                        ),
-                        const BoxShadow(
-                          color: Color(0x22FFFFFF),
-                          // offset: Offset(0, -1),
-                          // blurRadius: 0,
-                          // spreadRadius: 1,
-                        ),
-                      ],
-                    ),
-                    child: const Icon(Icons.ios_share_rounded,
-                        color: Colors.white, size: 22),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-        ],
+
+            SizedBox(width: layoutSpec.topBarClusterGap),
+            // CENTER: Time pill (true center on iPad)
+            Expanded(
+              child: Center(
+                child: _timePill(
+                  current: _formatDuration(currentClock),
+                  total: _formatDuration(_audioOnlyOverallDuration),
+                ),
+              ),
+            ),
+
+            // CENTER: make flexible & scale down if needed
+            // Expanded(
+            //   child: Align(
+            //     alignment: Alignment.centerLeft,
+            //     child: _tempoTimePill(
+            //       tempo: _tempo,
+            //       current: _formatDuration(_globalAudioClock),
+            //       total: _formatDuration(_audioOnlyOverallDuration),
+            //     ),
+            //   ),
+            // ),
+            SizedBox(width: layoutSpec.topBarClusterGap * 0.8),
+
+            // RIGHT: allow this cluster to also scale when narrow
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                children: [
+                  Halo(
+                    highlighter: _mixHighlighter,
+                    haloKey: const HaloKey('tutorial:plugins'),
+                    borderRadius: BorderRadius.circular(22),
+                    child: _Glass(
+                      radius: 22,
+                      padding: EdgeInsets.zero,
+                      opacity: 0.10,
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.settings_input_composite,
+                          color: pluginAffordanceEnabled
+                              ? Colors.white
+                              : Colors.white38,
+                          size: 20,
+                        ),
+                        onPressed: pluginAffordanceEnabled
+                            ? () {
+                                _isMasterPopupOpen = !_isMasterPopupOpen;
+                                setState(
+                                    () => _showMasterRack = !_showMasterRack);
+                              }
+                            : () {
+                                _showSmallNotice(
+                                    'External plugins are not available on this platform.');
+                              },
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: layoutSpec.topBarClusterGap),
+                  Halo(
+                    highlighter: _mixHighlighter,
+                    haloKey: const HaloKey('tutorial:export'),
+                    borderRadius: BorderRadius.circular(24),
+                    child: GestureDetector(
+                      onTap: _exportAndNavigate,
+                      child: Container(
+                        width: layoutSpec.topBarActionButtonSize,
+                        height: layoutSpec.topBarActionButtonSize,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.1)),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.3),
+                            ),
+                            const BoxShadow(
+                              color: Color(0x22FFFFFF),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.ios_share_rounded,
+                            color: Colors.white, size: 22),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -8792,6 +11050,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() => _showTempoRollDown = false);
     }
     _isDialogOpen = true;
+    if (_inputDevices.isEmpty && !_loadingDevices) {
+      unawaited(_loadInputDevicesFromJuce());
+    }
     String draftProjectName = _projectName;
     Future<void> commitProjectName() async {
       final renamed = draftProjectName.trim();
@@ -8914,27 +11175,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           _buildInputSelector(),
                           if (_numInputChannels > 0) ...[
                             const SizedBox(height: 20),
-                            DropdownButtonFormField<int>(
-                              key: ValueKey(_numInputChannels),
-                              value: _selectedChannelStart,
-                              decoration: const InputDecoration(
-                                  labelText: 'Input Channel',
-                                  border: OutlineInputBorder()),
-                              items: List.generate(
-                                _numInputChannels,
-                                (i) => DropdownMenuItem(
-                                    value: i, child: Text('Channel ${i + 1}')),
-                              ),
-                              onChanged: _isRecording
-                                  ? null
-                                  : (v) {
-                                      if (v == null) return;
-                                      _setStateAndRefreshProjectSettings(() {
-                                        _selectedChannelStart = v;
-                                        _selectedChannelCount = 1;
-                                      });
-                                    },
-                            ),
+                            _buildInputChannelRouteSelector(),
                           ],
                           const SizedBox(height: 20),
                           if (!Platform.isIOS) ...[
@@ -8980,6 +11221,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await commitProjectName();
       _projectSettingsStateSetter = null;
       _isDialogOpen = false;
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
@@ -9084,7 +11328,58 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  List<_InputChannelRouteOption> _buildInputChannelRouteOptions(
+      int numInputChannels) {
+    if (numInputChannels <= 0) return const <_InputChannelRouteOption>[];
+
+    final options = <_InputChannelRouteOption>[
+      for (int ch = 0; ch < numInputChannels; ch++)
+        _InputChannelRouteOption(channelStart: ch, channelCount: 1),
+      for (int ch = 0; ch + 1 < numInputChannels; ch += 2)
+        _InputChannelRouteOption(channelStart: ch, channelCount: 2),
+    ];
+    return options;
+  }
+
+  _InputChannelRouteOption? _findSelectedInputChannelRouteOption(
+      List<_InputChannelRouteOption> options) {
+    for (final option in options) {
+      if (option.channelStart == _selectedChannelStart &&
+          option.channelCount == _selectedChannelCount) {
+        return option;
+      }
+    }
+    return null;
+  }
+
+  void _normalizeInputChannelSelection() {
+    if (_numInputChannels <= 0) {
+      _selectedChannelStart = 0;
+      _selectedChannelCount = 1;
+      return;
+    }
+
+    _selectedChannelStart =
+        _selectedChannelStart.clamp(0, (_numInputChannels - 1).clamp(0, 999));
+    _selectedChannelCount = _selectedChannelCount.clamp(
+        1, (_numInputChannels - _selectedChannelStart).clamp(1, 999));
+
+    final options = _buildInputChannelRouteOptions(_numInputChannels);
+    final selected = _findSelectedInputChannelRouteOption(options);
+    if (selected != null) return;
+
+    final monoFallback = options.firstWhere(
+      (option) =>
+          option.channelCount == 1 &&
+          option.channelStart == _selectedChannelStart,
+      orElse: () => options.first,
+    );
+    _selectedChannelStart = monoFallback.channelStart;
+    _selectedChannelCount = monoFallback.channelCount;
+  }
+
   Future<void> _loadInputDevicesFromJuce() async {
+    if (_loadingDevices) return;
     _setStateAndRefreshProjectSettings(() => _loadingDevices = true);
 
     final devices = await JuceAudioEngine.getInputDevices();
@@ -9096,16 +11391,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ? current
           : (devices.isNotEmpty ? devices.first : null);
       _numInputChannels = channels;
-
-      _selectedChannelStart =
-          _selectedChannelStart.clamp(0, (_numInputChannels - 1).clamp(0, 999));
-      _selectedChannelCount = _selectedChannelCount.clamp(
-          1, (_numInputChannels - _selectedChannelStart).clamp(1, 999));
+      _normalizeInputChannelSelection();
 
       _loadingDevices = false;
     });
-
-    print("loaded ${devices.toString()}  $current $_numInputChannels");
   }
 
   Future<void> _loadAudioDevices() async {
@@ -9165,6 +11454,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
     }
 
+    if (_inputDevices.isEmpty) {
+      return const Text("No input devices available",
+          style: TextStyle(color: Colors.white54));
+    }
+
     return DropdownButtonFormField<String>(
       value: _selectedDevice,
       isExpanded: true,
@@ -9198,12 +11492,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _setStateAndRefreshProjectSettings(() {
           _selectedDevice = name;
           _numInputChannels = channels;
-
-          _selectedChannelStart = _selectedChannelStart.clamp(
-              0, (_numInputChannels - 1).clamp(0, 999));
-          _selectedChannelCount = 1;
+          _normalizeInputChannelSelection();
         });
       },
+    );
+  }
+
+  Widget _buildInputChannelRouteSelector() {
+    final options = _buildInputChannelRouteOptions(_numInputChannels);
+    if (options.isEmpty) return const SizedBox.shrink();
+
+    final selected =
+        _findSelectedInputChannelRouteOption(options) ?? options.first;
+
+    return DropdownButtonFormField<_InputChannelRouteOption>(
+      key: ValueKey(_numInputChannels),
+      value: selected,
+      isExpanded: true,
+      dropdownColor: const Color(0xFF2A2F3D),
+      decoration: const InputDecoration(
+        labelText: 'Input Channel',
+        labelStyle: TextStyle(color: Colors.white70),
+        enabledBorder:
+            OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
+        focusedBorder:
+            OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+      ),
+      items: options
+          .map(
+            (option) => DropdownMenuItem<_InputChannelRouteOption>(
+              value: option,
+              child: Text(
+                option.label,
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          )
+          .toList(),
+      onChanged: _isRecording
+          ? null
+          : (option) {
+              if (option == null) return;
+              _setStateAndRefreshProjectSettings(() {
+                _selectedChannelStart = option.channelStart;
+                _selectedChannelCount = option.channelCount;
+              });
+            },
     );
   }
 
@@ -9767,6 +12101,5422 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
     return null;
+  }
+
+  Map<String, dynamic> _toActionMap(dynamic raw) {
+    return AssistantActionUtils.toActionMap(raw);
+  }
+
+  double? _toActionDouble(dynamic raw) {
+    return AssistantActionUtils.toActionDouble(raw);
+  }
+
+  int? _toActionInt(dynamic raw) {
+    return AssistantActionUtils.toActionInt(raw);
+  }
+
+  bool _toActionBool(dynamic raw, {bool fallback = false}) {
+    return AssistantActionUtils.toActionBool(raw, fallback: fallback);
+  }
+
+  Map<String, dynamic> _actionTarget(Map<String, dynamic> data) {
+    return _toActionMap(data['target']);
+  }
+
+  List<String> _actionStringList(dynamic raw) {
+    if (raw is! List) return const <String>[];
+    return raw
+        .map((e) => e.toString().trim())
+        .where((s) => s.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  int? _resolveClipIndexFromActionTarget(
+    Map<String, dynamic> data, {
+    bool requireAudio = false,
+    bool requireMidi = false,
+  }) {
+    bool passesKind(AudioTrack clip) {
+      if (requireAudio && clip.isMidi) return false;
+      if (requireMidi && !clip.isMidi) return false;
+      return true;
+    }
+
+    bool isValidIndex(int idx) =>
+        idx >= 0 && idx < _audioTracks.length && passesKind(_audioTracks[idx]);
+
+    final target = _actionTarget(data);
+    final direct = _toActionInt(data['clip_index']) ??
+        _toActionInt(target['clip_index']) ??
+        _toActionInt(data['clip']) ??
+        _toActionInt(target['clip']);
+    if (direct != null && isValidIndex(direct)) return direct;
+
+    final preferSelected = _toActionBool(
+      target['prefer_selected'] ?? data['prefer_selected'],
+      fallback: true,
+    );
+    if (preferSelected && isValidIndex(_timelinePrimarySelectedClipIndex)) {
+      return _timelinePrimarySelectedClipIndex;
+    }
+
+    final selected = _timelineSelectedClipIndices
+        .where((i) => isValidIndex(i))
+        .toList(growable: false);
+    if (preferSelected && selected.length == 1) {
+      return selected.first;
+    }
+
+    final rowIndex =
+        _toActionInt(data['row_index']) ?? _toActionInt(target['row_index']);
+    final fileContains =
+        (target['file_name_contains'] ?? data['file_name_contains'])
+            ?.toString()
+            .trim()
+            .toLowerCase();
+    final labelContains = (target['label_contains'] ?? data['label_contains'])
+        ?.toString()
+        .trim()
+        .toLowerCase();
+
+    final candidates = <int>[];
+    for (int i = 0; i < _audioTracks.length; i++) {
+      final clip = _audioTracks[i];
+      if (!passesKind(clip)) continue;
+      if (rowIndex != null && clip.rowIndex != rowIndex) continue;
+      if (fileContains != null &&
+          fileContains.isNotEmpty &&
+          !p.basename(clip.file.path).toLowerCase().contains(fileContains)) {
+        continue;
+      }
+      if (labelContains != null &&
+          labelContains.isNotEmpty &&
+          !clip.label.toLowerCase().contains(labelContains)) {
+        continue;
+      }
+      candidates.add(i);
+    }
+
+    if (candidates.length == 1) return candidates.first;
+    if (candidates.length > 1) {
+      final selectedIntersect =
+          selected.where((i) => candidates.contains(i)).toList();
+      if (selectedIntersect.length == 1) return selectedIntersect.first;
+      return null;
+    }
+
+    if (isValidIndex(_timelinePrimarySelectedClipIndex)) {
+      return _timelinePrimarySelectedClipIndex;
+    }
+
+    return null;
+  }
+
+  List<int> _resolveClipIndicesFromActionTarget(
+    Map<String, dynamic> data, {
+    bool requireAudio = false,
+    bool requireMidi = false,
+  }) {
+    bool passesKind(AudioTrack clip) {
+      if (requireAudio && clip.isMidi) return false;
+      if (requireMidi && !clip.isMidi) return false;
+      return true;
+    }
+
+    bool isValidIndex(int idx) =>
+        idx >= 0 && idx < _audioTracks.length && passesKind(_audioTracks[idx]);
+
+    final target = _actionTarget(data);
+    final out = LinkedHashSet<int>();
+
+    void add(int? idx) {
+      if (idx != null && isValidIndex(idx)) {
+        out.add(idx);
+      }
+    }
+
+    final directListRaw =
+        (data['clip_indices'] as List?) ?? (target['clip_indices'] as List?);
+    if (directListRaw != null) {
+      for (final raw in directListRaw) {
+        add(_toActionInt(raw));
+      }
+    }
+
+    final scope = (target['scope'] ?? data['scope'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (scope == 'selected' || scope == 'selection') {
+      for (final idx in _timelineSelectedClipIndices) {
+        add(idx);
+      }
+      add(_timelinePrimarySelectedClipIndex);
+    } else if (scope == 'all' ||
+        scope == 'all_audio' ||
+        scope == 'all_selected_audio') {
+      for (int i = 0; i < _audioTracks.length; i++) {
+        if (isValidIndex(i)) out.add(i);
+      }
+    }
+
+    final rowIndex =
+        _toActionInt(data['row_index']) ?? _toActionInt(target['row_index']);
+    if (rowIndex != null) {
+      for (int i = 0; i < _audioTracks.length; i++) {
+        final clip = _audioTracks[i];
+        if (clip.rowIndex != rowIndex) continue;
+        if (!passesKind(clip)) continue;
+        out.add(i);
+      }
+    }
+
+    final single = _resolveClipIndexFromActionTarget(
+      data,
+      requireAudio: requireAudio,
+      requireMidi: requireMidi,
+    );
+    add(single);
+
+    if (out.isEmpty) {
+      for (final idx in _timelineSelectedClipIndices) {
+        add(idx);
+      }
+      add(_timelinePrimarySelectedClipIndex);
+    }
+
+    final sorted = out.toList()..sort();
+    return sorted;
+  }
+
+  int? _pickPreferredClipIndex(List<int> candidates) {
+    if (candidates.isEmpty) return null;
+    final set = candidates.toSet();
+    if (set.contains(_timelinePrimarySelectedClipIndex)) {
+      return _timelinePrimarySelectedClipIndex;
+    }
+    for (final idx in _timelineSelectedClipIndices) {
+      if (set.contains(idx)) return idx;
+    }
+    final sorted = candidates.toList(growable: false)
+      ..sort((a, b) {
+        final ao =
+            (a >= 0 && a < _audioTracks.length) ? _audioTracks[a].offset : 0.0;
+        final bo =
+            (b >= 0 && b < _audioTracks.length) ? _audioTracks[b].offset : 0.0;
+        final byOffset = ao.compareTo(bo);
+        if (byOffset != 0) return byOffset;
+        return a.compareTo(b);
+      });
+    return sorted.first;
+  }
+
+  int? _resolveSingleClipIndexWithFallback(
+    Map<String, dynamic> data, {
+    bool requireAudio = false,
+    bool requireMidi = false,
+  }) {
+    final direct = _resolveClipIndexFromActionTarget(
+      data,
+      requireAudio: requireAudio,
+      requireMidi: requireMidi,
+    );
+    if (direct != null) return direct;
+    final candidates = _resolveClipIndicesFromActionTarget(
+      data,
+      requireAudio: requireAudio,
+      requireMidi: requireMidi,
+    );
+    return _pickPreferredClipIndex(candidates);
+  }
+
+  int? _resolveRowIndexFromActionTarget(
+    Map<String, dynamic> data, {
+    int? fallbackClipIndex,
+  }) {
+    final target = _actionTarget(data);
+    int? row =
+        _toActionInt(data['row_index']) ?? _toActionInt(target['row_index']);
+    if (row == null && fallbackClipIndex != null) {
+      if (fallbackClipIndex >= 0 && fallbackClipIndex < _audioTracks.length) {
+        row = _audioTracks[fallbackClipIndex].rowIndex;
+      }
+    }
+    if (row == null && _rowCount > 0) {
+      row = _selectedRow.clamp(0, _rowCount - 1);
+    }
+    if (row == null || _rowCount <= 0) return null;
+    return row.clamp(0, _rowCount - 1);
+  }
+
+  bool _isKickLikeText(String raw) {
+    final text = raw.trim().toLowerCase();
+    if (text.isEmpty) return false;
+    return text.contains('kick') ||
+        text.contains('808') ||
+        text.contains('bd') ||
+        text.contains('bassdrum') ||
+        text.contains('bass drum');
+  }
+
+  int? _resolveKickSourceClipIndexFromAction(
+    Map<String, dynamic> data, {
+    int? targetRow,
+  }) {
+    final target = _actionTarget(data);
+
+    int? parseSourceIndex() {
+      final idx = _toActionInt(
+        data['source_clip_index'] ??
+            target['source_clip_index'] ??
+            data['kick_clip_index'] ??
+            target['kick_clip_index'] ??
+            data['trigger_clip_index'] ??
+            target['trigger_clip_index'],
+      );
+      if (idx == null || idx < 0 || idx >= _audioTracks.length) return null;
+      if (_audioTracks[idx].isMidi) return null;
+      return idx;
+    }
+
+    int? fromIndex = parseSourceIndex();
+    if (fromIndex != null) return fromIndex;
+
+    int? sourceRow = _toActionInt(
+      data['source_row_index'] ??
+          target['source_row_index'] ??
+          data['kick_row_index'] ??
+          target['kick_row_index'],
+    );
+    if (sourceRow == null) {
+      final sourceRole = (data['source_role'] ??
+              target['source_role'] ??
+              data['kick_role'] ??
+              target['kick_role'] ??
+              '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (sourceRole == 'drums' || sourceRole == 'kick') {
+        sourceRow = _selectedRow;
+      }
+    }
+
+    List<int> candidatesForRow(int row) {
+      if (row < 0 || row >= _rowCount) return const <int>[];
+      final out = <int>[];
+      for (int i = 0; i < _audioTracks.length; i++) {
+        final clip = _audioTracks[i];
+        if (clip.isMidi) continue;
+        if (clip.rowIndex != row) continue;
+        out.add(i);
+      }
+      return out;
+    }
+
+    if (sourceRow != null) {
+      final pick = _pickPreferredClipIndex(candidatesForRow(sourceRow));
+      if (pick != null) return pick;
+    }
+
+    final kickNameCandidates = <int>[];
+    for (int i = 0; i < _audioTracks.length; i++) {
+      final clip = _audioTracks[i];
+      if (clip.isMidi) continue;
+      final file = p.basename(clip.file.path);
+      if (_isKickLikeText(clip.label) || _isKickLikeText(file)) {
+        kickNameCandidates.add(i);
+      }
+    }
+    final namedKickPick = _pickPreferredClipIndex(kickNameCandidates);
+    if (namedKickPick != null) return namedKickPick;
+
+    final selectedAudioCandidates = _timelineSelectedClipIndices
+        .where(
+            (i) => i >= 0 && i < _audioTracks.length && !_audioTracks[i].isMidi)
+        .toList(growable: false);
+    final selectedPick = _pickPreferredClipIndex(selectedAudioCandidates);
+    if (selectedPick != null) return selectedPick;
+
+    if (targetRow != null) {
+      final rowPick = _pickPreferredClipIndex(candidatesForRow(targetRow));
+      if (rowPick != null) return rowPick;
+    }
+
+    final anyAudio = <int>[];
+    for (int i = 0; i < _audioTracks.length; i++) {
+      if (!_audioTracks[i].isMidi) anyAudio.add(i);
+    }
+    return _pickPreferredClipIndex(anyAudio);
+  }
+
+  static const Set<String> _supportedTutorialHaloTargets = <String>{
+    'tutorial:chatbar',
+    'tutorial:toolbar',
+    'tutorial:transport:play',
+    'tutorial:transport:record',
+    'tutorial:transport:restart',
+    'tutorial:mute',
+    'tutorial:solo',
+    'tutorial:export',
+    'tutorial:project_settings',
+    'tutorial:plugins',
+    'tutorial:piano_roll',
+    'tutorial:timeline',
+  };
+
+  String _tutorialSlug(String raw) {
+    return raw
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
+  String? _normalizeTutorialTargetId(String raw) {
+    final normalized = AssistantActionUtils.normalizeTutorialTargetId(raw);
+    if (normalized == null) return null;
+    if (normalized.startsWith('row:')) {
+      return normalized;
+    }
+    if (normalized == 'tutorial:effects_tab' ||
+        normalized == 'tutorial:fx_list' ||
+        normalized == 'tutorial:add_effect' ||
+        normalized == 'tutorial:volume_tab' ||
+        normalized == 'tutorial:automation_tab') {
+      if (_rowCount <= 0) return 'tutorial:timeline';
+      final row = _selectedRow.clamp(0, _rowCount - 1);
+      switch (normalized) {
+        case 'tutorial:effects_tab':
+          return 'row:$row:effects_tab';
+        case 'tutorial:fx_list':
+          return 'row:$row:fx_list';
+        case 'tutorial:add_effect':
+          return 'row:$row:add_effect';
+        case 'tutorial:volume_tab':
+          return 'row:$row:volume_tab';
+        case 'tutorial:automation_tab':
+          return 'row:$row:automation_tab';
+      }
+    }
+    if (normalized == 'tutorial:piano_roll' &&
+        (!_showPianoRoll || _activeMidiClipEngineId == null)) {
+      return 'tutorial:timeline';
+    }
+    if (_supportedTutorialHaloTargets.contains(normalized)) {
+      return normalized;
+    }
+    if (normalized.startsWith('tutorial:')) {
+      // Never no-op tutorial actions on unknown anchors; fall back to timeline.
+      return 'tutorial:timeline';
+    }
+    return normalized;
+  }
+
+  List<String> _tutorialTargetSequenceForStep(
+    Map<String, dynamic> step,
+    Map<String, dynamic> rootData,
+  ) {
+    final out = <String>[];
+    void add(String? key) {
+      if (key == null) return;
+      final trimmed = key.trim();
+      if (trimmed.isEmpty || out.contains(trimmed)) return;
+      out.add(trimmed);
+    }
+
+    final target = _toActionMap(step['target']);
+    if (_rowCount <= 0) {
+      final rawTarget = (step['target_id'] ??
+              target['target_id'] ??
+              rootData['target_id'] ??
+              _toActionMap(rootData['target'])['target_id'] ??
+              '')
+          .toString();
+      final fallback =
+          _normalizeTutorialTargetId(rawTarget) ?? 'tutorial:timeline';
+      return <String>[fallback];
+    }
+    final row = _toActionInt(
+          step['row_index'] ??
+              target['row_index'] ??
+              rootData['row_index'] ??
+              _toActionMap(rootData['target'])['row_index'],
+        ) ??
+        _selectedRow.clamp(0, _rowCount - 1);
+
+    final effectName = (step['effect_name'] ??
+            step['plugin_name'] ??
+            target['effect_name'] ??
+            target['plugin_name'] ??
+            rootData['effect_name'] ??
+            rootData['plugin_name'])
+        .toString()
+        .trim();
+    final effectSlug = _tutorialSlug(effectName);
+    final effectLower = effectName.toLowerCase();
+    final effectIndex = _toActionInt(
+      step['effect_index'] ??
+          target['effect_index'] ??
+          rootData['effect_index'] ??
+          _toActionMap(rootData['target'])['effect_index'],
+    );
+    final paramName = (step['param_name'] ??
+            step['param_id'] ??
+            step['parameter'] ??
+            target['param_name'] ??
+            target['param_id'] ??
+            rootData['param_name'] ??
+            rootData['param_id'])
+        .toString()
+        .trim();
+    final paramSlug = _tutorialSlug(paramName);
+    final paramLower = paramName.toLowerCase();
+    final addEffect = _toActionBool(
+      step['show_add_effect'] ??
+          step['effect_missing'] ??
+          target['show_add_effect'] ??
+          target['effect_missing'] ??
+          rootData['show_add_effect'] ??
+          rootData['effect_missing'],
+      fallback: false,
+    );
+
+    final rawTarget = (step['target_id'] ??
+            target['target_id'] ??
+            rootData['target_id'] ??
+            _toActionMap(rootData['target'])['target_id'] ??
+            '')
+        .toString();
+    final normalized = _normalizeTutorialTargetId(rawTarget);
+
+    final hasFxDrill =
+        effectIndex != null || effectName.isNotEmpty || paramName.isNotEmpty;
+    if (hasFxDrill || addEffect) {
+      add('row:$row');
+      add('row:$row:effects_tab');
+      add('row:$row:fx_list');
+      if (addEffect) add('row:$row:add_effect');
+      if (effectIndex != null) add('row:$row:fx_index:$effectIndex');
+      if (effectLower.isNotEmpty) add('row:$row:fx_contains:$effectLower');
+      if (effectSlug.isNotEmpty) add('row:$row:fx_contains:$effectSlug');
+      if (paramLower.isNotEmpty) add('row:$row:param:$paramLower');
+      if (paramSlug.isNotEmpty) add('row:$row:param:$paramSlug');
+      if (effectIndex != null && paramLower.isNotEmpty) {
+        add('row:$row:fx_index:$effectIndex:param:$paramLower');
+      }
+      if (effectIndex != null && paramSlug.isNotEmpty) {
+        add('row:$row:fx_index:$effectIndex:param:$paramSlug');
+      }
+      if (effectSlug.isNotEmpty && paramSlug.isNotEmpty) {
+        add('row:$row:fx_contains:$effectSlug:param:$paramSlug');
+      }
+      if (effectLower.isNotEmpty && paramLower.isNotEmpty) {
+        add('row:$row:fx_contains:$effectLower:param:$paramLower');
+      }
+    }
+
+    if (normalized == 'tutorial:mute') {
+      add('row:$row:mute');
+    } else if (normalized == 'tutorial:solo') {
+      add('row:$row:solo');
+    } else if (normalized == 'tutorial:plugins') {
+      add('row:$row:effects_tab');
+      add('row:$row:fx_list');
+    } else if (normalized == 'tutorial:timeline') {
+      add('row:$row');
+    }
+
+    if (normalized != null && normalized.isNotEmpty) {
+      add(normalized);
+    }
+    if (out.isEmpty) {
+      add('tutorial:timeline');
+    }
+    return out;
+  }
+
+  Future<void> _applyAssistantActions(List<AssistantAction> actions) async {
+    for (final action in actions) {
+      final type = action.type.trim().toLowerCase();
+      final data = _toActionMap(action.data);
+      try {
+        switch (type) {
+          case 'tutorial':
+            await _applyTutorialAction(data);
+            break;
+          case 'clip_edit':
+            await _applyClipEditAction(data);
+            break;
+          case 'automation_edit':
+            await _applyAutomationEditAction(data);
+            break;
+          case 'midi_compose':
+            await _applyMidiComposeAction(data);
+            break;
+          case 'stem_separate':
+            await _applyStemSeparateAction(data);
+            break;
+          case 'role_override':
+            await _applyRoleOverrideAction(data);
+            break;
+          case 'clarify':
+            final q = (data['question'] ?? '').toString().trim();
+            if (q.isNotEmpty) {
+              final options = _actionStringList(data['options']);
+              if (options.isEmpty) {
+                _insertAssistantChatText(q);
+              } else {
+                _insertAssistantChatText(
+                    '$q\n\nOptions: ${options.join(' / ')}');
+              }
+            }
+            break;
+          default:
+            break;
+        }
+      } catch (e, st) {
+        debugPrint('Assistant action failed ($type): $e\n$st');
+      }
+    }
+  }
+
+  Future<void> _applyTutorialAction(Map<String, dynamic> data) async {
+    final rawSteps = (data['steps'] as List?) ?? const [];
+    final parsed = rawSteps.map(_toActionMap).toList(growable: false);
+    final steps = parsed.isEmpty
+        ? <Map<String, dynamic>>[data]
+        : parsed.take(12).toList(growable: false);
+
+    for (int i = 0; i < steps.length; i++) {
+      final step = steps[i];
+      final sequence = _tutorialTargetSequenceForStep(step, data);
+      final drilldown = _toActionBool(
+        step['drilldown'] ?? data['drilldown'],
+        fallback: true,
+      );
+      final targets = drilldown
+          ? sequence
+          : <String>[sequence.isEmpty ? 'tutorial:timeline' : sequence.last];
+      if (targets.isEmpty) continue;
+
+      final stepText = (step['text'] ?? '').toString().trim();
+      if (stepText.isNotEmpty) {
+        _showSmallNotice('Step ${i + 1}/${steps.length}: $stepText');
+      }
+
+      final baseDurationMs = (_toActionInt(step['duration_ms']) ??
+              _toActionInt(data['duration_ms']) ??
+              3200)
+          .clamp(1200, 18000);
+      final perTargetDurationMs = (targets.length <= 1)
+          ? baseDurationMs
+          : (baseDurationMs / math.min(targets.length, 3))
+              .round()
+              .clamp(1100, 4200);
+
+      for (int j = 0; j < targets.length; j++) {
+        final key = targets[j];
+        _mixHighlighter.clear();
+        _mixHighlighter.trigger(
+          [HaloKey(key)],
+          duration: Duration(milliseconds: perTargetDurationMs),
+        );
+        final pauseMs = (_toActionInt(step['pause_ms']) ??
+                (perTargetDurationMs * 0.72).round())
+            .clamp(650, 5200);
+        await Future<void>.delayed(Duration(milliseconds: pauseMs));
+      }
+    }
+  }
+
+  String _normalizeClipEditOperation(String raw) {
+    return AssistantActionUtils.normalizeClipEditOperation(raw);
+  }
+
+  String _normalizeMidiComposeOperation(String raw) {
+    return AssistantActionUtils.normalizeMidiComposeOperation(raw);
+  }
+
+  MapEntry<double, double>? _estimateAutoTrimBoundsMs(
+    AudioTrack clip, {
+    double thresholdFloor = 0.012,
+    double thresholdRatio = 0.08,
+    double paddingMs = 8.0,
+  }) {
+    return AssistantActionUtils.estimateAutoTrimBoundsMs(
+      waveform: clip.normWaveformData,
+      fullMs: _clipFullDurationMsForTrim(clip),
+      trimStartMs: clip.trimStart.inMilliseconds.toDouble(),
+      trimEndMs: clip.trimEnd.inMilliseconds.toDouble(),
+      thresholdFloor: thresholdFloor,
+      thresholdRatio: thresholdRatio,
+      paddingMs: paddingMs,
+    );
+  }
+
+  Future<void> _applyTrimActionForClip(
+    int clipIndex, {
+    required double newTrimStartMs,
+    required double newTrimEndMs,
+    double? newOffsetSec,
+  }) async {
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    final clip = _audioTracks[clipIndex];
+
+    final fullMs = _clipFullDurationMsForTrim(clip).clamp(1.0, 1e12);
+    final safeTrimStart = newTrimStartMs.clamp(0.0, fullMs - 50.0).toDouble();
+    final safeTrimEnd =
+        newTrimEndMs.clamp(safeTrimStart + 50.0, fullMs).toDouble();
+
+    await _undoManager.execute(
+      TrimClipAction(
+        tracks: _audioTracks,
+        originalIndex: clipIndex,
+        oldTrimStart: clip.trimStart,
+        oldTrimEnd: clip.trimEnd,
+        oldOffset: clip.offset,
+        newTrimStart: Duration(milliseconds: safeTrimStart.round()),
+        newTrimEnd: Duration(milliseconds: safeTrimEnd.round()),
+        newOffset: newOffsetSec,
+        onChange: () {
+          unawaited(_syncClipTimingToEngine(clipIndex));
+          _updateOverallDurationIfNeeded();
+          if (mounted) setState(() {});
+        },
+      ),
+    );
+  }
+
+  Future<void> _setProjectTempoFromDetectedClip(int clipIndex) async {
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    final clip = _audioTracks[clipIndex];
+    if (clip.isMidi) return;
+
+    final detected = await _detectClipTempoBpm(clip);
+    if (detected == null || !detected.isFinite) return;
+    final roundedTempo = detected.round().clamp(40, 240).toDouble();
+
+    _setStateAndRefreshProjectSettings(() {
+      clip.sourceTempoBpm = detected;
+      _tempo = roundedTempo;
+      _tempoStretchEnabled = true;
+    });
+    await _queueTempoEngineSync();
+  }
+
+  Future<void> _applyAutoBpmAlignAction(Map<String, dynamic> data) async {
+    final target = _actionTarget(data);
+    final clipIndices =
+        _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+    if (clipIndices.isEmpty) {
+      _insertAssistantChatText(
+          "I couldn't resolve which audio clips to align. Select clips and ask again.");
+      return;
+    }
+
+    final preservePitch = _toActionBool(data['preserve_pitch'], fallback: true);
+    final setProjectTempo = _toActionBool(
+      data['set_project_tempo'] ?? data['detect_set_project_tempo'],
+      fallback: false,
+    );
+    final explicitProjectTempo = _toActionDouble(
+        data['project_tempo_bpm'] ?? target['project_tempo_bpm']);
+
+    if (explicitProjectTempo != null && explicitProjectTempo.isFinite) {
+      final clampedTempo = _clampTempo(explicitProjectTempo);
+      if (clampedTempo != _tempo) {
+        _setStateAndRefreshProjectSettings(() => _tempo = clampedTempo);
+        await _queueTempoEngineSync();
+      }
+    } else if (setProjectTempo) {
+      final sourceIdx = _toActionInt(
+            data['project_tempo_source_clip_index'] ??
+                target['project_tempo_source_clip_index'],
+          ) ??
+          (clipIndices.contains(_timelinePrimarySelectedClipIndex)
+              ? _timelinePrimarySelectedClipIndex
+              : clipIndices.first);
+      await _setProjectTempoFromDetectedClip(sourceIdx);
+    }
+
+    for (final idx in clipIndices) {
+      await _setClipTempoFollowMode(
+        idx,
+        preservePitch: preservePitch,
+        showFeedback: false,
+      );
+    }
+    _showSmallNotice(
+        'Tempo-aligned ${clipIndices.length} clip${clipIndices.length == 1 ? '' : 's'}.');
+  }
+
+  double _clipTimelineStartMs(AudioTrack clip) => clip.offset * 1000.0;
+
+  double _clipTimelineEndMs(AudioTrack clip) =>
+      _clipTimelineStartMs(clip) + _clipTimelineDurationMs(clip);
+
+  String _normalizedClipPath(String path) => p.normalize(path);
+
+  int? _findAudioClipIndexAtTimelineMs(
+    double timelineMs, {
+    int? rowIndex,
+    String? filePath,
+    int? preferEngineClipId,
+  }) {
+    if (!timelineMs.isFinite) return null;
+    final expectedPath =
+        filePath == null ? null : _normalizedClipPath(filePath);
+    final candidates = <int>[];
+    for (int i = 0; i < _audioTracks.length; i++) {
+      final clip = _audioTracks[i];
+      if (clip.isMidi) continue;
+      if (rowIndex != null && clip.rowIndex != rowIndex) continue;
+      if (expectedPath != null &&
+          _normalizedClipPath(clip.file.path) != expectedPath) {
+        continue;
+      }
+      final startMs = _clipTimelineStartMs(clip);
+      final endMs = _clipTimelineEndMs(clip);
+      if (timelineMs < startMs - 0.5 || timelineMs > endMs + 0.5) continue;
+      candidates.add(i);
+    }
+    if (candidates.isEmpty) return null;
+    if (preferEngineClipId != null && preferEngineClipId >= 0) {
+      for (final idx in candidates) {
+        if (_audioTracks[idx].engineClipId == preferEngineClipId) {
+          return idx;
+        }
+      }
+    }
+    candidates.sort((a, b) {
+      final aStart = _clipTimelineStartMs(_audioTracks[a]);
+      final bStart = _clipTimelineStartMs(_audioTracks[b]);
+      final aDist = (aStart - timelineMs).abs();
+      final bDist = (bStart - timelineMs).abs();
+      final byDist = aDist.compareTo(bDist);
+      if (byDist != 0) return byDist;
+      return a.compareTo(b);
+    });
+    return candidates.first;
+  }
+
+  List<MapEntry<double, double>> _mergeTimelineRangesMs(
+    Iterable<MapEntry<double, double>> ranges, {
+    double minGapMs = 45.0,
+    double minLengthMs = 25.0,
+    double? minMs,
+    double? maxMs,
+  }) {
+    final normalized = <MapEntry<double, double>>[];
+    for (final r in ranges) {
+      double start = r.key;
+      double end = r.value;
+      if (!start.isFinite || !end.isFinite) continue;
+      if (end < start) {
+        final tmp = start;
+        start = end;
+        end = tmp;
+      }
+      if (minMs != null || maxMs != null) {
+        final lo = minMs ?? double.negativeInfinity;
+        final hi = maxMs ?? double.infinity;
+        start = start.clamp(lo, hi).toDouble();
+        end = end.clamp(lo, hi).toDouble();
+      }
+      if (!start.isFinite || !end.isFinite) continue;
+      if (end - start < minLengthMs) continue;
+      normalized.add(MapEntry(start, end));
+    }
+    if (normalized.isEmpty) return const <MapEntry<double, double>>[];
+    normalized.sort((a, b) => a.key.compareTo(b.key));
+
+    final merged = <MapEntry<double, double>>[];
+    double currentStart = normalized.first.key;
+    double currentEnd = normalized.first.value;
+
+    for (int i = 1; i < normalized.length; i++) {
+      final next = normalized[i];
+      if (next.key <= currentEnd + minGapMs) {
+        currentEnd = math.max(currentEnd, next.value);
+      } else {
+        merged.add(MapEntry(currentStart, currentEnd));
+        currentStart = next.key;
+        currentEnd = next.value;
+      }
+    }
+    merged.add(MapEntry(currentStart, currentEnd));
+    return merged
+        .where((r) => (r.value - r.key) >= minLengthMs)
+        .toList(growable: false);
+  }
+
+  double _quantile(List<double> values, double q) {
+    if (values.isEmpty) return 0.0;
+    final sorted = List<double>.from(values)..sort();
+    final safeQ = q.clamp(0.0, 1.0).toDouble();
+    final pos = safeQ * (sorted.length - 1);
+    final lo = pos.floor();
+    final hi = pos.ceil();
+    if (lo == hi) return sorted[lo];
+    final t = pos - lo;
+    return sorted[lo] * (1.0 - t) + sorted[hi] * t;
+  }
+
+  Future<_ClipMono16kSegment?> _decodeTrimmedClipMono16k(
+    AudioTrack clip,
+  ) async {
+    if (clip.isMidi) return null;
+    const sampleRate = 16000;
+    Float32List decoded = Float32List(0);
+    try {
+      decoded = await JuceAudioEngine.decodeAudioMono16k(clip.file.path);
+    } catch (_) {
+      return null;
+    }
+    if (decoded.isEmpty) return null;
+
+    int start = (clip.trimStart.inMilliseconds * sampleRate / 1000).round();
+    int end = (clip.trimEnd.inMilliseconds * sampleRate / 1000).round();
+    start = start.clamp(0, decoded.length);
+    end = end.clamp(start, decoded.length);
+    if (end <= start + 32) return null;
+
+    final samples = Float32List.fromList(decoded.sublist(start, end));
+    if (samples.isEmpty) return null;
+
+    final localDurationMs = samples.length * 1000.0 / sampleRate;
+    final timelineDurationMs =
+        _clipTimelineDurationMs(clip).clamp(1.0, 1.0e12).toDouble();
+    final timelineScale =
+        localDurationMs > 0.0 ? timelineDurationMs / localDurationMs : 1.0;
+    final timelineStartMs = _clipTimelineStartMs(clip);
+    final timelineEndMs = timelineStartMs + localDurationMs * timelineScale;
+
+    return _ClipMono16kSegment(
+      samples: samples,
+      sampleRate: sampleRate,
+      timelineStartMs: timelineStartMs,
+      timelineEndMs: timelineEndMs,
+      timelineMsPerLocalMs: timelineScale,
+    );
+  }
+
+  List<double> _frameRmsSeries(
+    Float32List samples, {
+    int frameSize = 320,
+    int hopSize = 160,
+  }) {
+    if (samples.length < frameSize || hopSize <= 0) return const <double>[];
+    final out = <double>[];
+    for (int i = 0; i + frameSize <= samples.length; i += hopSize) {
+      double sumSq = 0.0;
+      for (int j = 0; j < frameSize; j++) {
+        final s = samples[i + j];
+        sumSq += s * s;
+      }
+      out.add(math.sqrt(sumSq / frameSize));
+    }
+    return out;
+  }
+
+  List<MapEntry<double, double>> _rangesFromFrameMask(
+    List<bool> mask, {
+    required int frameSize,
+    required int hopSize,
+    required int sampleRate,
+    required int totalSamples,
+    double minDurationMs = 80.0,
+  }) {
+    if (mask.isEmpty) return const <MapEntry<double, double>>[];
+    final out = <MapEntry<double, double>>[];
+    int startFrame = -1;
+
+    for (int i = 0; i < mask.length; i++) {
+      final active = mask[i];
+      if (active && startFrame < 0) {
+        startFrame = i;
+      }
+      final ended = startFrame >= 0 && (!active || i == mask.length - 1);
+      if (!ended) continue;
+
+      final endExclusive = (!active) ? i : i + 1;
+      final startSample = startFrame * hopSize;
+      final endSample =
+          math.min(totalSamples, (endExclusive - 1) * hopSize + frameSize);
+      final startMs = startSample * 1000.0 / sampleRate;
+      final endMs = endSample * 1000.0 / sampleRate;
+      if (endMs - startMs >= minDurationMs) {
+        out.add(MapEntry(startMs, endMs));
+      }
+      startFrame = -1;
+    }
+
+    return out;
+  }
+
+  Future<List<MapEntry<double, double>>> _detectDialogActiveSpeechRangesForClip(
+    AudioTrack clip, {
+    double minDurationMs = 110.0,
+    double mergeGapMs = 120.0,
+    double floorRms = 0.01,
+    double thresholdMultiplier = 2.35,
+  }) async {
+    final segment = await _decodeTrimmedClipMono16k(clip);
+    if (segment == null) return const <MapEntry<double, double>>[];
+
+    const frameSize = 320;
+    const hopSize = 160;
+    final rms = _frameRmsSeries(
+      segment.samples,
+      frameSize: frameSize,
+      hopSize: hopSize,
+    );
+    if (rms.isEmpty) return const <MapEntry<double, double>>[];
+
+    final noiseFloor = _quantile(rms, 0.2);
+    final threshold =
+        math.max(floorRms, noiseFloor * thresholdMultiplier).toDouble();
+    final activeMask = rms.map((v) => v >= threshold).toList(growable: false);
+    final localRanges = _rangesFromFrameMask(
+      activeMask,
+      frameSize: frameSize,
+      hopSize: hopSize,
+      sampleRate: segment.sampleRate,
+      totalSamples: segment.samples.length,
+      minDurationMs: minDurationMs,
+    );
+    if (localRanges.isEmpty) return const <MapEntry<double, double>>[];
+
+    final localDurationMs =
+        segment.samples.length * 1000.0 / segment.sampleRate.toDouble();
+    final mergedLocal = _mergeTimelineRangesMs(
+      localRanges,
+      minGapMs: mergeGapMs,
+      minLengthMs: minDurationMs,
+      minMs: 0.0,
+      maxMs: localDurationMs,
+    );
+    if (mergedLocal.isEmpty) return const <MapEntry<double, double>>[];
+
+    final timelineRanges = mergedLocal
+        .map((r) => MapEntry(
+              segment.timelineStartMs + r.key * segment.timelineMsPerLocalMs,
+              segment.timelineStartMs + r.value * segment.timelineMsPerLocalMs,
+            ))
+        .toList(growable: false);
+    return _mergeTimelineRangesMs(
+      timelineRanges,
+      minGapMs: mergeGapMs * segment.timelineMsPerLocalMs,
+      minLengthMs: minDurationMs * segment.timelineMsPerLocalMs,
+      minMs: segment.timelineStartMs,
+      maxMs: segment.timelineEndMs,
+    );
+  }
+
+  MapEntry<double, double>? _deriveDialogPhraseRangeAroundAnchor(
+    AudioTrack clip,
+    List<MapEntry<double, double>> activeRanges,
+    double anchorMs, {
+    double prePadMs = 35.0,
+    double postPadMs = 70.0,
+  }) {
+    if (activeRanges.isEmpty) return null;
+    final clipStart = _clipTimelineStartMs(clip);
+    final clipEnd = _clipTimelineEndMs(clip);
+    final probe = anchorMs.clamp(clipStart, clipEnd).toDouble();
+
+    MapEntry<double, double>? best;
+    double bestScore = double.infinity;
+    for (final r in activeRanges) {
+      if (probe >= r.key && probe <= r.value) {
+        best = r;
+        break;
+      }
+      final center = (r.key + r.value) * 0.5;
+      final dist = (center - probe).abs();
+      if (dist < bestScore) {
+        bestScore = dist;
+        best = r;
+      }
+    }
+    if (best == null) return null;
+
+    final start = (best.key - prePadMs).clamp(clipStart, clipEnd).toDouble();
+    final end =
+        (best.value + postPadMs).clamp(start + 15.0, clipEnd).toDouble();
+    if (end - start < 20.0) return null;
+    return MapEntry(start, end);
+  }
+
+  List<MapEntry<double, double>> _dialogRangesFromActionDataForClip(
+    Map<String, dynamic> data,
+    AudioTrack clip, {
+    bool preferClipRelative = false,
+  }) {
+    final target = _actionTarget(data);
+    final clipStartMs = _clipTimelineStartMs(clip);
+    final clipEndMs = _clipTimelineEndMs(clip);
+
+    bool resolveClipRelative(Map<String, dynamic> source) {
+      final explicit = _toActionBool(
+        source['clip_relative'] ??
+            source['local_ms'] ??
+            source['relative_to_clip'],
+        fallback: false,
+      );
+      if (explicit) return true;
+      final domain = (source['time_domain'] ??
+              source['range_domain'] ??
+              source['domain'] ??
+              '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (domain == 'clip' ||
+          domain == 'local' ||
+          domain == 'clip_local' ||
+          domain == 'clip_relative') {
+        return true;
+      }
+      return false;
+    }
+
+    final out = <MapEntry<double, double>>[];
+
+    void parseRange(Map<String, dynamic> src) {
+      final clipRelative = resolveClipRelative(src);
+      double? from = _toActionDouble(
+        src['from_ms'] ?? src['start_ms'] ?? src['begin_ms'] ?? src['in_ms'],
+      );
+      double? to = _toActionDouble(
+        src['to_ms'] ?? src['end_ms'] ?? src['out_ms'],
+      );
+      final length = _toActionDouble(src['length_ms'] ?? src['duration_ms']);
+      final at = _toActionDouble(src['at_ms'] ?? src['time_ms']);
+
+      if (from == null && at != null && length != null) {
+        from = at;
+        to = at + length;
+      } else if (to == null && from != null && length != null) {
+        to = from + length;
+      }
+      if (from == null || to == null) return;
+
+      if (clipRelative) {
+        from += clipStartMs;
+        to += clipStartMs;
+      }
+      if (!from.isFinite || !to.isFinite) return;
+      out.add(MapEntry(from, to));
+    }
+
+    final rangeLists = <List?>[
+      data['ranges'] as List?,
+      target['ranges'] as List?,
+      data['regions'] as List?,
+      target['regions'] as List?,
+      data['segments'] as List?,
+      target['segments'] as List?,
+    ];
+    for (final rawList in rangeLists) {
+      if (rawList == null) continue;
+      for (final raw in rawList) {
+        final m = _toActionMap(raw);
+        if (m.isEmpty) continue;
+        parseRange(m);
+      }
+    }
+
+    final topRange = <String, dynamic>{
+      ...target,
+      ...data,
+      if (preferClipRelative) 'clip_relative': true,
+    };
+    parseRange(topRange);
+
+    return _mergeTimelineRangesMs(
+      out,
+      minGapMs: 10.0,
+      minLengthMs: 18.0,
+      minMs: clipStartMs,
+      maxMs: clipEndMs,
+    );
+  }
+
+  Future<List<MapEntry<double, double>>> _detectDialogCoughRangesForClip(
+    AudioTrack clip, {
+    double thresholdStd = 2.2,
+    double minDurationMs = 40.0,
+    double maxDurationMs = 650.0,
+    double prePadMs = 18.0,
+    double postPadMs = 120.0,
+    double minHighFreqRatio = 0.42,
+    int maxRanges = 12,
+  }) async {
+    final segment = await _decodeTrimmedClipMono16k(clip);
+    if (segment == null) return const <MapEntry<double, double>>[];
+    const frameSize = 256;
+    const hopSize = 128;
+    if (segment.samples.length < frameSize) {
+      return const <MapEntry<double, double>>[];
+    }
+
+    final low = _lowPassMono(
+      segment.samples,
+      sampleRate: segment.sampleRate,
+      cutoffHz: 900.0,
+    );
+
+    final scores = <double>[];
+    final hfRatios = <double>[];
+    for (int i = 0; i + frameSize <= segment.samples.length; i += hopSize) {
+      double absSum = 0.0;
+      double hfSum = 0.0;
+      for (int j = 0; j < frameSize; j++) {
+        final s = segment.samples[i + j];
+        absSum += s.abs();
+        hfSum += (s - low[i + j]).abs();
+      }
+      final energy = absSum / frameSize;
+      final hfRatio = hfSum / (absSum + 1e-9);
+      final score = energy * (0.35 + hfRatio);
+      scores.add(score);
+      hfRatios.add(hfRatio);
+    }
+    if (scores.length < 6) return const <MapEntry<double, double>>[];
+
+    double mean = 0.0;
+    for (final s in scores) {
+      mean += s;
+    }
+    mean /= scores.length;
+
+    double variance = 0.0;
+    for (final s in scores) {
+      final d = s - mean;
+      variance += d * d;
+    }
+    variance /= scores.length;
+    final std = math.sqrt(math.max(variance, 0.0));
+    final threshold = math.max(mean + std * thresholdStd, mean * 2.6);
+
+    final local = <MapEntry<double, double>>[];
+    int startFrame = -1;
+    for (int i = 0; i < scores.length; i++) {
+      final hit = scores[i] >= threshold;
+      if (hit && startFrame < 0) {
+        startFrame = i;
+      }
+      final ended = startFrame >= 0 && (!hit || i == scores.length - 1);
+      if (!ended) continue;
+
+      final endExclusive = (!hit) ? i : i + 1;
+      final segmentStartSample = startFrame * hopSize;
+      final segmentEndSample = math.min(
+        segment.samples.length,
+        (endExclusive - 1) * hopSize + frameSize,
+      );
+      final durMs =
+          (segmentEndSample - segmentStartSample) * 1000.0 / segment.sampleRate;
+      if (durMs >= minDurationMs && durMs <= maxDurationMs) {
+        double ratioSum = 0.0;
+        int count = 0;
+        for (int f = startFrame; f < endExclusive; f++) {
+          ratioSum += hfRatios[f];
+          count++;
+        }
+        final avgRatio = count > 0 ? ratioSum / count : 0.0;
+        if (avgRatio >= minHighFreqRatio) {
+          final startMs = segmentStartSample * 1000.0 / segment.sampleRate;
+          final endMs = segmentEndSample * 1000.0 / segment.sampleRate;
+          local.add(
+            MapEntry(
+              math.max(0.0, startMs - prePadMs),
+              endMs + postPadMs,
+            ),
+          );
+        }
+      }
+      startFrame = -1;
+    }
+
+    if (local.isEmpty) return const <MapEntry<double, double>>[];
+    final localDurationMs =
+        segment.samples.length * 1000.0 / segment.sampleRate.toDouble();
+    final mergedLocal = _mergeTimelineRangesMs(
+      local,
+      minGapMs: 70.0,
+      minLengthMs: minDurationMs,
+      minMs: 0.0,
+      maxMs: localDurationMs,
+    );
+    if (mergedLocal.isEmpty) return const <MapEntry<double, double>>[];
+
+    final timeline = mergedLocal
+        .take(maxRanges)
+        .map((r) => MapEntry(
+              segment.timelineStartMs + r.key * segment.timelineMsPerLocalMs,
+              segment.timelineStartMs + r.value * segment.timelineMsPerLocalMs,
+            ))
+        .toList(growable: false);
+
+    return _mergeTimelineRangesMs(
+      timeline,
+      minGapMs: 80.0,
+      minLengthMs: minDurationMs * segment.timelineMsPerLocalMs,
+      minMs: segment.timelineStartMs,
+      maxMs: segment.timelineEndMs,
+    );
+  }
+
+  Future<List<MapEntry<double, double>>> _detectDialogQuietRangesForClip(
+    AudioTrack clip, {
+    double quietRatio = 0.62,
+    double minDurationMs = 180.0,
+    int maxRanges = 10,
+  }) async {
+    final segment = await _decodeTrimmedClipMono16k(clip);
+    if (segment == null) return const <MapEntry<double, double>>[];
+
+    const frameSize = 320;
+    const hopSize = 160;
+    final rms = _frameRmsSeries(
+      segment.samples,
+      frameSize: frameSize,
+      hopSize: hopSize,
+    );
+    if (rms.length < 6) return const <MapEntry<double, double>>[];
+
+    final noiseFloor = _quantile(rms, 0.2);
+    final activeThreshold = math.max(0.008, noiseFloor * 2.2);
+    final activeMask = rms.map((v) => v >= activeThreshold).toList();
+    final activeRms = <double>[];
+    for (int i = 0; i < rms.length; i++) {
+      if (activeMask[i]) activeRms.add(rms[i]);
+    }
+    if (activeRms.length < 3) return const <MapEntry<double, double>>[];
+
+    final speechTargetRms = _quantile(activeRms, 0.68);
+    final quietThreshold =
+        math.max(noiseFloor * 2.0, speechTargetRms * quietRatio);
+    final quietMask = List<bool>.generate(
+      rms.length,
+      (i) => activeMask[i] && rms[i] < quietThreshold,
+      growable: false,
+    );
+    final localRanges = _rangesFromFrameMask(
+      quietMask,
+      frameSize: frameSize,
+      hopSize: hopSize,
+      sampleRate: segment.sampleRate,
+      totalSamples: segment.samples.length,
+      minDurationMs: minDurationMs,
+    );
+    if (localRanges.isEmpty) return const <MapEntry<double, double>>[];
+
+    final localDurationMs =
+        segment.samples.length * 1000.0 / segment.sampleRate.toDouble();
+    final mergedLocal = _mergeTimelineRangesMs(
+      localRanges,
+      minGapMs: 80.0,
+      minLengthMs: minDurationMs,
+      minMs: 0.0,
+      maxMs: localDurationMs,
+    );
+    if (mergedLocal.isEmpty) return const <MapEntry<double, double>>[];
+
+    final timeline = mergedLocal
+        .take(maxRanges)
+        .map((r) => MapEntry(
+              segment.timelineStartMs + r.key * segment.timelineMsPerLocalMs,
+              segment.timelineStartMs + r.value * segment.timelineMsPerLocalMs,
+            ))
+        .toList(growable: false);
+
+    return _mergeTimelineRangesMs(
+      timeline,
+      minGapMs: 90.0,
+      minLengthMs: minDurationMs * segment.timelineMsPerLocalMs,
+      minMs: segment.timelineStartMs,
+      maxMs: segment.timelineEndMs,
+    );
+  }
+
+  Future<List<MapEntry<double, double>>> _detectDialogPauseRemovalRangesForClip(
+    AudioTrack clip, {
+    double minPauseMs = 260.0,
+    double keepPauseMs = 90.0,
+    int maxRanges = 14,
+  }) async {
+    final activeRanges = await _detectDialogActiveSpeechRangesForClip(
+      clip,
+      minDurationMs: 110.0,
+      mergeGapMs: 120.0,
+    );
+    if (activeRanges.length < 2) return const <MapEntry<double, double>>[];
+
+    final clipStart = _clipTimelineStartMs(clip);
+    final clipEnd = _clipTimelineEndMs(clip);
+    final out = <MapEntry<double, double>>[];
+
+    for (int i = 1; i < activeRanges.length; i++) {
+      final prev = activeRanges[i - 1];
+      final next = activeRanges[i];
+      final pauseStart = prev.value;
+      final pauseEnd = next.key;
+      final pauseLength = pauseEnd - pauseStart;
+      if (pauseLength < minPauseMs) continue;
+
+      final keep = keepPauseMs.clamp(20.0, pauseLength - 20.0).toDouble();
+      if (pauseLength <= keep + 20.0) continue;
+
+      final removeStart =
+          (pauseStart + keep * 0.5).clamp(clipStart, clipEnd).toDouble();
+      final removeEnd =
+          (pauseEnd - keep * 0.5).clamp(removeStart + 15.0, clipEnd).toDouble();
+      if (removeEnd - removeStart >= 20.0) {
+        out.add(MapEntry(removeStart, removeEnd));
+      }
+      if (out.length >= maxRanges) break;
+    }
+
+    return _mergeTimelineRangesMs(
+      out,
+      minGapMs: 50.0,
+      minLengthMs: 20.0,
+      minMs: clipStart,
+      maxMs: clipEnd,
+    );
+  }
+
+  Future<int?> _isolateTimelineRangeAsClipSegment({
+    required double fromMs,
+    required double toMs,
+    required int rowIndex,
+    required String filePath,
+    int? preferEngineClipId,
+  }) async {
+    if (!fromMs.isFinite || !toMs.isFinite) return null;
+    double safeFrom = math.min(fromMs, toMs);
+    double safeTo = math.max(fromMs, toMs);
+    if (safeTo - safeFrom < 20.0) return null;
+
+    final midProbeInitial = (safeFrom + safeTo) * 0.5;
+    int? targetIdx = _findAudioClipIndexAtTimelineMs(
+      midProbeInitial,
+      rowIndex: rowIndex,
+      filePath: filePath,
+      preferEngineClipId: preferEngineClipId,
+    );
+    if (targetIdx == null) return null;
+
+    final targetClip = _audioTracks[targetIdx];
+    final clipStart = _clipTimelineStartMs(targetClip);
+    final clipEnd = _clipTimelineEndMs(targetClip);
+    safeFrom = safeFrom.clamp(clipStart, clipEnd - 2.0).toDouble();
+    safeTo = safeTo.clamp(safeFrom + 2.0, clipEnd).toDouble();
+    if (safeTo - safeFrom < 20.0) return null;
+
+    if (safeFrom > clipStart + 1.0) {
+      await _handleCutClipAt(targetIdx, safeFrom);
+    }
+
+    final midProbe = (safeFrom + safeTo) * 0.5;
+    int? midIdx = _findAudioClipIndexAtTimelineMs(
+      midProbe,
+      rowIndex: rowIndex,
+      filePath: filePath,
+      preferEngineClipId: preferEngineClipId,
+    );
+    if (midIdx == null) return null;
+
+    final midClip = _audioTracks[midIdx];
+    final midStart = _clipTimelineStartMs(midClip);
+    final midEnd = _clipTimelineEndMs(midClip);
+    final cutEnd = safeTo.clamp(midStart + 1.0, midEnd).toDouble();
+    if (cutEnd < midEnd - 1.0) {
+      await _handleCutClipAt(midIdx, cutEnd);
+    }
+
+    return _findAudioClipIndexAtTimelineMs(
+      midProbe,
+      rowIndex: rowIndex,
+      filePath: filePath,
+      preferEngineClipId: preferEngineClipId,
+    );
+  }
+
+  Future<bool> _removeTimelineRangeFromClip({
+    required double fromMs,
+    required double toMs,
+    required int rowIndex,
+    required String filePath,
+    int? preferEngineClipId,
+  }) async {
+    final isolatedIdx = await _isolateTimelineRangeAsClipSegment(
+      fromMs: fromMs,
+      toMs: toMs,
+      rowIndex: rowIndex,
+      filePath: filePath,
+      preferEngineClipId: preferEngineClipId,
+    );
+    if (isolatedIdx == null ||
+        isolatedIdx < 0 ||
+        isolatedIdx >= _audioTracks.length) {
+      return false;
+    }
+    await _handleDeleteClip(isolatedIdx);
+    return true;
+  }
+
+  Future<bool> _boostTimelineRangeOnClip({
+    required double fromMs,
+    required double toMs,
+    required int rowIndex,
+    required String filePath,
+    required double gainMultiplier,
+    required double maxGain,
+    int? preferEngineClipId,
+  }) async {
+    final isolatedIdx = await _isolateTimelineRangeAsClipSegment(
+      fromMs: fromMs,
+      toMs: toMs,
+      rowIndex: rowIndex,
+      filePath: filePath,
+      preferEngineClipId: preferEngineClipId,
+    );
+    if (isolatedIdx == null ||
+        isolatedIdx < 0 ||
+        isolatedIdx >= _audioTracks.length) {
+      return false;
+    }
+    final clip = _audioTracks[isolatedIdx];
+    final oldGain = clip.gain;
+    final nextGain = (oldGain * gainMultiplier).clamp(0.0, maxGain).toDouble();
+    if ((nextGain - oldGain).abs() < 0.015) return false;
+
+    await _undoManager.execute(
+      SetClipGainAction(
+        tracks: _audioTracks,
+        originalIndex: isolatedIdx,
+        oldGain: oldGain,
+        newGain: nextGain,
+        applyToState: (target, gain) {
+          target.gain = gain;
+          if (mounted) setState(() {});
+        },
+      ),
+    );
+    return true;
+  }
+
+  Future<int> _applyDialogRangeDeletesForClip(
+    AudioTrack clip,
+    List<MapEntry<double, double>> ranges, {
+    int maxEdits = 12,
+  }) async {
+    if (ranges.isEmpty) return 0;
+    final row = clip.rowIndex;
+    final filePath = clip.file.path;
+    final preferredEngine = clip.engineClipId >= 0 ? clip.engineClipId : null;
+    final ordered = List<MapEntry<double, double>>.from(ranges)
+      ..sort((a, b) => b.key.compareTo(a.key));
+
+    int applied = 0;
+    for (final range in ordered.take(maxEdits)) {
+      final ok = await _removeTimelineRangeFromClip(
+        fromMs: range.key,
+        toMs: range.value,
+        rowIndex: row,
+        filePath: filePath,
+        preferEngineClipId: preferredEngine,
+      );
+      if (ok) applied++;
+    }
+    return applied;
+  }
+
+  Future<int> _applyDialogLiftForClip(
+    AudioTrack clip,
+    List<MapEntry<double, double>> ranges, {
+    required double gainMultiplier,
+    required double maxGain,
+    int maxEdits = 8,
+  }) async {
+    if (ranges.isEmpty) return 0;
+    final row = clip.rowIndex;
+    final filePath = clip.file.path;
+    final preferredEngine = clip.engineClipId >= 0 ? clip.engineClipId : null;
+    final ordered = List<MapEntry<double, double>>.from(ranges)
+      ..sort((a, b) => b.key.compareTo(a.key));
+
+    int applied = 0;
+    for (final range in ordered.take(maxEdits)) {
+      final ok = await _boostTimelineRangeOnClip(
+        fromMs: range.key,
+        toMs: range.value,
+        rowIndex: row,
+        filePath: filePath,
+        preferEngineClipId: preferredEngine,
+        gainMultiplier: gainMultiplier,
+        maxGain: maxGain,
+      );
+      if (ok) applied++;
+    }
+    return applied;
+  }
+
+  Future<void> _applyDialogClipEditOperation(
+    Map<String, dynamic> data, {
+    required String operation,
+  }) async {
+    final target = _actionTarget(data);
+    final clipIndices =
+        _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+    if (clipIndices.isEmpty) {
+      _insertAssistantChatText(
+          "I couldn't resolve which audio clip to edit. Select a clip and ask again.");
+      return;
+    }
+
+    final maxEdits = (_toActionInt(
+              data['max_edits'] ?? target['max_edits'] ?? data['max_events'],
+            ) ??
+            10)
+        .clamp(1, 48);
+    final anchorMs = (_toActionDouble(
+              data['at_ms'] ??
+                  target['at_ms'] ??
+                  data['time_ms'] ??
+                  target['time_ms'],
+            ) ??
+            _globalAudioClock.inMilliseconds.toDouble())
+        .toDouble();
+
+    int deletedSegments = 0;
+    int liftedSegments = 0;
+    int touchedClips = 0;
+
+    for (final clipIndex in clipIndices) {
+      if (clipIndex < 0 || clipIndex >= _audioTracks.length) continue;
+      final clip = _audioTracks[clipIndex];
+      if (clip.isMidi) continue;
+
+      if (operation == 'dialog_cleanup') {
+        final manual = _dialogRangesFromActionDataForClip(
+          data,
+          clip,
+          preferClipRelative: true,
+        );
+        final detected = await _detectDialogCoughRangesForClip(
+          clip,
+          thresholdStd: (_toActionDouble(data['artifact_threshold_std'] ??
+                      target['artifact_threshold_std'] ??
+                      data['transient_threshold_std'] ??
+                      target['transient_threshold_std']) ??
+                  2.2)
+              .clamp(0.8, 4.8)
+              .toDouble(),
+          minDurationMs: (_toActionDouble(
+                      data['min_event_ms'] ?? target['min_event_ms']) ??
+                  40.0)
+              .clamp(15.0, 1200.0)
+              .toDouble(),
+          maxDurationMs: (_toActionDouble(
+                      data['max_event_ms'] ?? target['max_event_ms']) ??
+                  650.0)
+              .clamp(80.0, 2500.0)
+              .toDouble(),
+          minHighFreqRatio: (_toActionDouble(
+                      data['min_hf_ratio'] ?? target['min_hf_ratio']) ??
+                  0.42)
+              .clamp(0.2, 0.9)
+              .toDouble(),
+          maxRanges: maxEdits,
+        );
+        final ranges = manual.isNotEmpty ? manual : detected;
+        if (ranges.isEmpty) continue;
+        final removed = await _applyDialogRangeDeletesForClip(
+          clip,
+          ranges,
+          maxEdits: maxEdits,
+        );
+        if (removed > 0) {
+          deletedSegments += removed;
+          touchedClips++;
+        }
+        continue;
+      }
+
+      if (operation == 'dialog_remove_range') {
+        var ranges = _dialogRangesFromActionDataForClip(
+          data,
+          clip,
+          preferClipRelative: true,
+        );
+        if (ranges.isEmpty) {
+          final clipStart = _clipTimelineStartMs(clip);
+          final clipEnd = _clipTimelineEndMs(clip);
+          final inClip = anchorMs >= clipStart && anchorMs <= clipEnd;
+          if (!inClip && clipIndices.length > 1) {
+            continue;
+          }
+          final active = await _detectDialogActiveSpeechRangesForClip(clip);
+          final phrase = _deriveDialogPhraseRangeAroundAnchor(
+            clip,
+            active,
+            anchorMs,
+            prePadMs: (_toActionDouble(data['phrase_pre_pad_ms'] ??
+                        target['phrase_pre_pad_ms']) ??
+                    35.0)
+                .clamp(0.0, 400.0)
+                .toDouble(),
+            postPadMs: (_toActionDouble(data['phrase_post_pad_ms'] ??
+                        target['phrase_post_pad_ms']) ??
+                    70.0)
+                .clamp(0.0, 500.0)
+                .toDouble(),
+          );
+          if (phrase != null) {
+            ranges = <MapEntry<double, double>>[phrase];
+          }
+        }
+        if (ranges.isEmpty) continue;
+        final removed = await _applyDialogRangeDeletesForClip(
+          clip,
+          ranges,
+          maxEdits: maxEdits,
+        );
+        if (removed > 0) {
+          deletedSegments += removed;
+          touchedClips++;
+        }
+        continue;
+      }
+
+      if (operation == 'dialog_tighten_pauses') {
+        final ranges = await _detectDialogPauseRemovalRangesForClip(
+          clip,
+          minPauseMs: (_toActionDouble(
+                      data['min_pause_ms'] ?? target['min_pause_ms']) ??
+                  260.0)
+              .clamp(80.0, 6000.0)
+              .toDouble(),
+          keepPauseMs: (_toActionDouble(
+                      data['keep_pause_ms'] ?? target['keep_pause_ms']) ??
+                  90.0)
+              .clamp(20.0, 1400.0)
+              .toDouble(),
+          maxRanges: maxEdits,
+        );
+        if (ranges.isEmpty) continue;
+        final removed = await _applyDialogRangeDeletesForClip(
+          clip,
+          ranges,
+          maxEdits: maxEdits,
+        );
+        if (removed > 0) {
+          deletedSegments += removed;
+          touchedClips++;
+        }
+        continue;
+      }
+
+      if (operation == 'dialog_lift_quiet') {
+        var ranges = _dialogRangesFromActionDataForClip(
+          data,
+          clip,
+          preferClipRelative: true,
+        );
+        if (ranges.isEmpty) {
+          ranges = await _detectDialogQuietRangesForClip(
+            clip,
+            quietRatio: (_toActionDouble(
+                        data['quiet_ratio'] ?? target['quiet_ratio']) ??
+                    0.62)
+                .clamp(0.2, 0.95)
+                .toDouble(),
+            minDurationMs: (_toActionDouble(
+                        data['min_quiet_ms'] ?? target['min_quiet_ms']) ??
+                    180.0)
+                .clamp(40.0, 3000.0)
+                .toDouble(),
+            maxRanges: maxEdits,
+          );
+        }
+        if (ranges.isEmpty) continue;
+
+        final boostDb = (_toActionDouble(
+                  data['boost_db'] ??
+                      target['boost_db'] ??
+                      data['gain_db'] ??
+                      target['gain_db'],
+                ) ??
+                4.0)
+            .clamp(0.5, 12.0)
+            .toDouble();
+        final gainMultiplier = math.pow(10.0, boostDb / 20.0).toDouble();
+        final maxGain =
+            (_toActionDouble(data['max_gain'] ?? target['max_gain']) ?? 3.0)
+                .clamp(0.2, 3.0)
+                .toDouble();
+
+        final lifted = await _applyDialogLiftForClip(
+          clip,
+          ranges,
+          gainMultiplier: gainMultiplier,
+          maxGain: maxGain,
+          maxEdits: maxEdits,
+        );
+        if (lifted > 0) {
+          liftedSegments += lifted;
+          touchedClips++;
+        }
+      }
+    }
+
+    final totalEdits = deletedSegments + liftedSegments;
+    if (totalEdits <= 0) {
+      switch (operation) {
+        case 'dialog_cleanup':
+          _insertAssistantChatText(
+              'No clear cough/noise events were detected in the target clip.');
+          break;
+        case 'dialog_remove_range':
+          _insertAssistantChatText(
+              "I couldn't resolve a dialog segment to remove. Provide a time range or place the playhead near the sentence.");
+          break;
+        case 'dialog_tighten_pauses':
+          _insertAssistantChatText('No long pauses were found to tighten.');
+          break;
+        case 'dialog_lift_quiet':
+          _insertAssistantChatText(
+              'No quiet speech ranges were found to lift.');
+          break;
+        default:
+          break;
+      }
+      return;
+    }
+
+    if (operation == 'dialog_lift_quiet' && liftedSegments > 0) {
+      _showSmallNotice(
+          'Boosted $liftedSegments quiet segment${liftedSegments == 1 ? '' : 's'} on $touchedClips clip${touchedClips == 1 ? '' : 's'}.');
+      return;
+    }
+
+    _showSmallNotice(
+        'Edited $deletedSegments dialog segment${deletedSegments == 1 ? '' : 's'} on $touchedClips clip${touchedClips == 1 ? '' : 's'}.');
+  }
+
+  Future<void> _applyClipEditAction(Map<String, dynamic> data) async {
+    final rawOperation =
+        (data['operation'] ?? '').toString().trim().toLowerCase();
+    final operation = _normalizeClipEditOperation(
+      rawOperation,
+    );
+
+    if (operation == 'auto_bpm_align') {
+      await _applyAutoBpmAlignAction(data);
+      return;
+    }
+
+    if (operation == 'auto_trim') {
+      final clipIndices =
+          _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+      if (clipIndices.isEmpty) {
+        _insertAssistantChatText(
+            "I couldn't resolve which audio clips to trim. Select clips and ask again.");
+        return;
+      }
+
+      final thresholdFloor =
+          _toActionDouble(data['threshold_floor'])?.clamp(0.001, 1.0) ?? 0.012;
+      final thresholdRatio =
+          _toActionDouble(data['threshold_ratio'])?.clamp(0.001, 1.0) ?? 0.08;
+      final paddingMs =
+          _toActionDouble(data['padding_ms'])?.clamp(0.0, 500.0) ?? 8.0;
+      final preserveContentPosition =
+          _toActionBool(data['preserve_content_position'], fallback: true);
+
+      bool anyApplied = false;
+      for (final clipIndex in clipIndices) {
+        if (clipIndex < 0 || clipIndex >= _audioTracks.length) continue;
+        final clip = _audioTracks[clipIndex];
+        if (clip.isMidi) continue;
+
+        final explicitTrimStartMs = _toActionDouble(data['trim_start_ms']);
+        final explicitTrimEndMs = _toActionDouble(data['trim_end_ms']);
+        final estimated = _estimateAutoTrimBoundsMs(
+          clip,
+          thresholdFloor: thresholdFloor.toDouble(),
+          thresholdRatio: thresholdRatio.toDouble(),
+          paddingMs: paddingMs.toDouble(),
+        );
+
+        final nextTrimStartMs = explicitTrimStartMs ?? estimated?.key;
+        final nextTrimEndMs = explicitTrimEndMs ?? estimated?.value;
+        if (nextTrimStartMs == null || nextTrimEndMs == null) continue;
+
+        final startDeltaSec =
+            (nextTrimStartMs - clip.trimStart.inMilliseconds.toDouble()) /
+                1000.0;
+        final nextOffset = preserveContentPosition
+            ? math.max(0.0, clip.offset + startDeltaSec)
+            : null;
+
+        await _applyTrimActionForClip(
+          clipIndex,
+          newTrimStartMs: nextTrimStartMs,
+          newTrimEndMs: nextTrimEndMs,
+          newOffsetSec: nextOffset,
+        );
+        anyApplied = true;
+      }
+
+      if (!anyApplied) {
+        _insertAssistantChatText(
+            'No silence boundaries were detected for the target clip(s).');
+      }
+      return;
+    }
+
+    if (operation == 'trim') {
+      final target = _actionTarget(data);
+      final clipIndices =
+          _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+      if (clipIndices.isEmpty) {
+        _insertAssistantChatText(
+            "I couldn't resolve which audio clips to trim. Select clips and ask again.");
+        return;
+      }
+
+      final explicitTrimStartMs =
+          _toActionDouble(data['trim_start_ms'] ?? target['trim_start_ms']);
+      final explicitTrimEndMs =
+          _toActionDouble(data['trim_end_ms'] ?? target['trim_end_ms']);
+      final deltaTrimStartMs = _toActionDouble(
+          data['delta_trim_start_ms'] ?? target['delta_trim_start_ms']);
+      final deltaTrimEndMs = _toActionDouble(
+          data['delta_trim_end_ms'] ?? target['delta_trim_end_ms']);
+      final hasExplicitTrimValues = explicitTrimStartMs != null ||
+          explicitTrimEndMs != null ||
+          deltaTrimStartMs != null ||
+          deltaTrimEndMs != null;
+
+      final sideHint = (data['trim_side'] ??
+              target['trim_side'] ??
+              data['side'] ??
+              target['side'] ??
+              data['edge'] ??
+              target['edge'] ??
+              '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      final trimStartOnlyHint = sideHint.contains('start') ||
+          sideHint.contains('left') ||
+          sideHint == 'in' ||
+          sideHint == 'head' ||
+          sideHint.contains('begin');
+      final trimEndOnlyHint = sideHint.contains('end') ||
+          sideHint.contains('right') ||
+          sideHint == 'out' ||
+          sideHint == 'tail';
+
+      final thresholdFloor = _toActionDouble(
+            data['threshold_floor'] ?? target['threshold_floor'],
+          )?.clamp(0.001, 1.0) ??
+          0.012;
+      final thresholdRatio = _toActionDouble(
+            data['threshold_ratio'] ?? target['threshold_ratio'],
+          )?.clamp(0.001, 1.0) ??
+          0.08;
+      final paddingMs =
+          _toActionDouble(data['padding_ms'] ?? target['padding_ms'])
+                  ?.clamp(0.0, 500.0) ??
+              8.0;
+      final preserveContentPosition = _toActionBool(
+        data['preserve_content_position'] ??
+            target['preserve_content_position'],
+        fallback: true,
+      );
+      final fallbackTrimNudgeMs = (_toActionDouble(
+                  data['fallback_trim_ms'] ?? target['fallback_trim_ms']) ??
+              120.0)
+          .clamp(10.0, 2000.0)
+          .toDouble();
+
+      bool anyApplied = false;
+      for (final clipIndex in clipIndices) {
+        if (clipIndex < 0 || clipIndex >= _audioTracks.length) continue;
+        final clip = _audioTracks[clipIndex];
+        if (clip.isMidi) continue;
+
+        final oldTrimStartMs = clip.trimStart.inMilliseconds.toDouble();
+        final oldTrimEndMs = clip.trimEnd.inMilliseconds.toDouble();
+        double? nextTrimStartMs = explicitTrimStartMs;
+        double? nextTrimEndMs = explicitTrimEndMs;
+
+        if (nextTrimStartMs == null && deltaTrimStartMs != null) {
+          nextTrimStartMs = oldTrimStartMs + deltaTrimStartMs;
+        }
+        if (nextTrimEndMs == null && deltaTrimEndMs != null) {
+          nextTrimEndMs = oldTrimEndMs + deltaTrimEndMs;
+        }
+
+        if (!hasExplicitTrimValues &&
+            nextTrimStartMs == null &&
+            nextTrimEndMs == null) {
+          final estimated = _estimateAutoTrimBoundsMs(
+            clip,
+            thresholdFloor: thresholdFloor.toDouble(),
+            thresholdRatio: thresholdRatio.toDouble(),
+            paddingMs: paddingMs.toDouble(),
+          );
+          if (estimated != null) {
+            if (trimEndOnlyHint && !trimStartOnlyHint) {
+              nextTrimEndMs = estimated.value;
+            } else if (trimStartOnlyHint && !trimEndOnlyHint) {
+              nextTrimStartMs = estimated.key;
+            } else {
+              nextTrimStartMs = estimated.key;
+              nextTrimEndMs = estimated.value;
+            }
+          }
+        }
+
+        nextTrimStartMs ??= oldTrimStartMs;
+        nextTrimEndMs ??= oldTrimEndMs;
+
+        if ((nextTrimStartMs - oldTrimStartMs).abs() < 0.5 &&
+            (nextTrimEndMs - oldTrimEndMs).abs() < 0.5) {
+          if (trimEndOnlyHint && !trimStartOnlyHint) {
+            nextTrimEndMs = oldTrimEndMs - fallbackTrimNudgeMs;
+          } else {
+            nextTrimStartMs = oldTrimStartMs + fallbackTrimNudgeMs;
+          }
+        }
+
+        if ((nextTrimStartMs - oldTrimStartMs).abs() < 0.5 &&
+            (nextTrimEndMs - oldTrimEndMs).abs() < 0.5) {
+          continue;
+        }
+
+        final explicitNewStartMs = _toActionDouble(
+          data['new_start_ms'] ??
+              target['new_start_ms'] ??
+              data['start_ms'] ??
+              target['start_ms'],
+        );
+        final startDeltaSec = (nextTrimStartMs - oldTrimStartMs) / 1000.0;
+        final newOffsetSec = explicitNewStartMs != null
+            ? math.max(0.0, explicitNewStartMs / 1000.0)
+            : (preserveContentPosition
+                ? math.max(0.0, clip.offset + startDeltaSec)
+                : null);
+
+        await _applyTrimActionForClip(
+          clipIndex,
+          newTrimStartMs: nextTrimStartMs,
+          newTrimEndMs: nextTrimEndMs,
+          newOffsetSec: newOffsetSec,
+        );
+        anyApplied = true;
+      }
+
+      if (!anyApplied) {
+        _insertAssistantChatText(
+            'Could not trim the target clip(s). Try selecting the clip and asking again.');
+      } else {
+        _showSmallNotice(
+            'Trimmed ${clipIndices.length} clip${clipIndices.length == 1 ? '' : 's'}.');
+      }
+      return;
+    }
+
+    if (operation == 'dialog_cleanup' ||
+        operation == 'dialog_remove_range' ||
+        operation == 'dialog_tighten_pauses' ||
+        operation == 'dialog_lift_quiet') {
+      await _applyDialogClipEditOperation(
+        data,
+        operation: operation,
+      );
+      return;
+    }
+
+    int? resolveSingleClipIndex({
+      bool requireAudio = false,
+      bool requireMidi = false,
+      String failureMessage =
+          "I couldn't resolve which clip to edit. Select a clip and ask again.",
+    }) {
+      final idx = _resolveSingleClipIndexWithFallback(
+        data,
+        requireAudio: requireAudio,
+        requireMidi: requireMidi,
+      );
+      if (idx == null) {
+        _insertAssistantChatText(failureMessage);
+        return null;
+      }
+      if (idx < 0 || idx >= _audioTracks.length) return null;
+      return idx;
+    }
+
+    switch (operation) {
+      case 'cut':
+        {
+          final clipIndex = resolveSingleClipIndex(
+            failureMessage:
+                "I couldn't resolve which clip to cut. Select a clip and ask again.",
+          );
+          if (clipIndex == null) return;
+          final clip = _audioTracks[clipIndex];
+          final target = _actionTarget(data);
+          final hasMidiChopHint = (rawOperation.contains('note') ||
+                  rawOperation.contains('chop') ||
+                  rawOperation.contains('splice') ||
+                  rawOperation.contains('slice')) ||
+              data.containsKey('subdivision') ||
+              data.containsKey('subdivision_divisor') ||
+              data.containsKey('grid') ||
+              data.containsKey('resolution') ||
+              target.containsKey('subdivision') ||
+              target.containsKey('subdivision_divisor') ||
+              target.containsKey('grid') ||
+              target.containsKey('resolution');
+          if (clip.isMidi && hasMidiChopHint) {
+            final midiActionData = <String, dynamic>{
+              ...data,
+              'operation': 'chop_notes',
+              'target': <String, dynamic>{
+                ...target,
+                'clip_index': clipIndex,
+              },
+            };
+            await _applyMidiComposeAction(midiActionData);
+            break;
+          }
+          final startMs = clip.offset * 1000.0;
+          final endMs = startMs + _clipTimelineDurationMs(clip);
+          final cutMs = _toActionDouble(data['cut_ms'] ?? data['time_ms']) ??
+              ((startMs + endMs) / 2.0);
+          await _handleCutClipAt(clipIndex, cutMs);
+          _showSmallNotice('Cut clip.');
+          break;
+        }
+      case 'move':
+        {
+          final target = _actionTarget(data);
+          final clipIndices = _resolveClipIndicesFromActionTarget(data);
+          if (clipIndices.isEmpty) {
+            _insertAssistantChatText(
+                "I couldn't resolve which clip(s) to move. Select clip(s) and ask again.");
+            return;
+          }
+
+          int? clampRow(int? row) {
+            if (row == null || _rowCount <= 0) return null;
+            return row.clamp(0, _rowCount - 1);
+          }
+
+          final explicitStartMs = _toActionDouble(
+            data['new_start_ms'] ??
+                target['new_start_ms'] ??
+                data['start_ms'] ??
+                target['start_ms'],
+          );
+          final explicitDeltaMs = _toActionDouble(
+            data['delta_ms'] ??
+                target['delta_ms'] ??
+                data['offset_ms'] ??
+                target['offset_ms'] ??
+                data['shift_ms'] ??
+                target['shift_ms'],
+          );
+          final explicitDestRow = clampRow(
+            _toActionInt(
+              data['new_row_index'] ??
+                  target['new_row_index'] ??
+                  data['destination_row_index'] ??
+                  target['destination_row_index'] ??
+                  data['to_row_index'] ??
+                  target['to_row_index'],
+            ),
+          );
+          final explicitRowHint = clampRow(
+            _toActionInt(data['row_index']) ??
+                _toActionInt(target['row_index']),
+          );
+          final explicitRowDelta = _toActionInt(
+                data['delta_rows'] ??
+                    target['delta_rows'] ??
+                    data['row_delta'] ??
+                    target['row_delta'],
+              ) ??
+              0;
+          final direction = (data['direction'] ?? target['direction'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase();
+          final snapTo = (data['snap_to'] ??
+                  target['snap_to'] ??
+                  data['position'] ??
+                  target['position'] ??
+                  '')
+              .toString()
+              .trim()
+              .toLowerCase();
+
+          double moveStepMs = (_toActionDouble(
+                    data['step_ms'] ??
+                        target['step_ms'] ??
+                        data['distance_ms'] ??
+                        target['distance_ms'] ??
+                        data['amount_ms'] ??
+                        target['amount_ms'],
+                  ) ??
+                  0.0)
+              .abs();
+          if (moveStepMs < 1.0) {
+            moveStepMs = (60000.0 / _tempo.clamp(1.0, 400.0))
+                .clamp(1.0, 60000.0)
+                .toDouble();
+          }
+
+          int directionRowDelta = 0;
+          double directionStartDeltaMs = 0.0;
+          bool moveToStart = snapTo.contains('start') ||
+              snapTo.contains('begin') ||
+              snapTo == 'zero';
+          switch (direction) {
+            case 'left':
+            case 'earlier':
+            case 'back':
+            case 'backward':
+              directionStartDeltaMs = -moveStepMs;
+              break;
+            case 'right':
+            case 'later':
+            case 'forward':
+              directionStartDeltaMs = moveStepMs;
+              break;
+            case 'up':
+            case 'above':
+              directionRowDelta = -1;
+              break;
+            case 'down':
+            case 'below':
+              directionRowDelta = 1;
+              break;
+            case 'start':
+            case 'beginning':
+            case 'zero':
+              moveToStart = true;
+              break;
+            default:
+              break;
+          }
+
+          final hasHorizontalInstruction = explicitStartMs != null ||
+              explicitDeltaMs != null ||
+              directionStartDeltaMs != 0.0 ||
+              moveToStart;
+          final hasVerticalInstruction = explicitDestRow != null ||
+              explicitRowDelta != 0 ||
+              directionRowDelta != 0;
+
+          // Last-resort fallback: if move is under-specified, default to
+          // "move to timeline start" to avoid silent no-op actions.
+          if (!hasHorizontalInstruction && !hasVerticalInstruction) {
+            moveToStart = true;
+          }
+
+          bool anyApplied = false;
+          for (final clipIndex in clipIndices) {
+            if (clipIndex < 0 || clipIndex >= _audioTracks.length) continue;
+            final clip = _audioTracks[clipIndex];
+            final oldStartMs = clip.offset * 1000.0;
+            final oldRow = clip.rowIndex;
+
+            double nextStartMs = oldStartMs;
+            if (explicitStartMs != null) {
+              nextStartMs = explicitStartMs;
+            } else if (explicitDeltaMs != null) {
+              nextStartMs = oldStartMs + explicitDeltaMs;
+            } else if (directionStartDeltaMs != 0.0) {
+              nextStartMs = oldStartMs + directionStartDeltaMs;
+            } else if (moveToStart) {
+              nextStartMs = 0.0;
+            }
+            nextStartMs = math.max(0.0, nextStartMs);
+
+            int nextRow = oldRow;
+            if (explicitDestRow != null) {
+              nextRow = explicitDestRow;
+            } else if (directionRowDelta != 0) {
+              nextRow = clampRow(oldRow + directionRowDelta) ?? oldRow;
+            } else if (explicitRowDelta != 0) {
+              nextRow = clampRow(oldRow + explicitRowDelta) ?? oldRow;
+            } else if (clipIndices.length == 1 &&
+                explicitRowHint != null &&
+                explicitRowHint != oldRow) {
+              // If there is a single target clip, treat row_index as destination
+              // when no other row destination signal exists.
+              nextRow = explicitRowHint;
+            }
+
+            final rowChanged = nextRow != oldRow;
+            final startChanged = (nextStartMs - oldStartMs).abs() > 0.5;
+            if (!rowChanged && !startChanged) continue;
+
+            await _undoManager.execute(
+              MoveClipAction(
+                tracks: _audioTracks,
+                originalIndex: clipIndex,
+                oldOffset: clip.offset,
+                oldRow: clip.rowIndex,
+                newOffset: nextStartMs / 1000.0,
+                newRow: nextRow,
+                onChange: () {
+                  clip.rowId = _rowIdAt(clip.rowIndex);
+                  unawaited(_syncClipTimingToEngine(clipIndex));
+                  _updateOverallDurationIfNeeded();
+                },
+              ),
+            );
+            anyApplied = true;
+          }
+
+          if (!anyApplied) {
+            _insertAssistantChatText(
+                "I couldn't apply that move because no destination or timing change was resolved.");
+            return;
+          }
+
+          if (mounted) setState(() {});
+          _showSmallNotice(
+            'Moved ${clipIndices.length} clip${clipIndices.length == 1 ? '' : 's'}.',
+          );
+          break;
+        }
+      case 'stretch':
+        {
+          final clipIndex = resolveSingleClipIndex();
+          if (clipIndex == null) return;
+          final clip = _audioTracks[clipIndex];
+          final target = _actionTarget(data);
+          final explicitDurationMs = _toActionDouble(
+            data['timeline_duration_ms'] ??
+                data['duration_ms'] ??
+                target['timeline_duration_ms'] ??
+                target['duration_ms'] ??
+                data['new_duration_ms'] ??
+                target['new_duration_ms'],
+          );
+          final deltaDurationMs = _toActionDouble(
+            data['delta_duration_ms'] ??
+                target['delta_duration_ms'] ??
+                data['duration_delta_ms'] ??
+                target['duration_delta_ms'],
+          );
+          final factor = _toActionDouble(
+            data['factor'] ??
+                target['factor'] ??
+                data['stretch_factor'] ??
+                target['stretch_factor'] ??
+                data['scale'] ??
+                target['scale'],
+          );
+          final oldDurationMs = _clipTimelineDurationMs(clip);
+          final durationMs = explicitDurationMs ??
+              ((deltaDurationMs != null)
+                  ? (oldDurationMs + deltaDurationMs)
+                  : ((factor != null) ? (oldDurationMs * factor) : null));
+          if (durationMs == null || clip.isMidi) {
+            _insertAssistantChatText(
+                "I couldn't resolve the new clip length to stretch.");
+            return;
+          }
+          final newStartMs =
+              _toActionDouble(data['new_start_ms'] ?? data['start_ms']);
+          _handleStretchClipResize(
+            clipIndex,
+            durationMs,
+            newStartMs: newStartMs,
+          );
+          await _handleStretchClipResizeCommit(clipIndex);
+          _showSmallNotice('Stretched clip.');
+          break;
+        }
+      case 'tempo_follow':
+        {
+          final targets =
+              _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+          if (targets.isEmpty) {
+            _insertAssistantChatText(
+                "I couldn't resolve which audio clips to tempo-align.");
+            return;
+          }
+          final preservePitch =
+              _toActionBool(data['preserve_pitch'], fallback: true);
+          for (final idx in targets) {
+            await _setClipTempoFollowMode(
+              idx,
+              preservePitch: preservePitch,
+              showFeedback: false,
+            );
+          }
+          _showSmallNotice(
+              'Tempo mode updated for ${targets.length} clip${targets.length == 1 ? '' : 's'}.');
+          break;
+        }
+      case 'tempo_detect_set_project':
+        {
+          final clipIndex = resolveSingleClipIndex(requireAudio: true);
+          if (clipIndex == null) return;
+          final clip = _audioTracks[clipIndex];
+          if (clip.isMidi) return;
+          await _setProjectTempoFromDetectedClip(clipIndex);
+          final preservePitch =
+              _toActionBool(data['preserve_pitch'], fallback: true);
+          await _setClipTempoFollowMode(
+            clipIndex,
+            preservePitch: preservePitch,
+          );
+          _showSmallNotice('Detected clip tempo and updated project tempo.');
+          break;
+        }
+      case 'delete':
+        {
+          final clipIndices = _resolveClipIndicesFromActionTarget(data);
+          if (clipIndices.isEmpty) {
+            final clipIndex = resolveSingleClipIndex();
+            if (clipIndex == null) return;
+            await _handleDeleteClip(clipIndex);
+            _showSmallNotice('Deleted clip.');
+            break;
+          }
+          await _handleDeleteClips(clipIndices);
+          _showSmallNotice(
+              'Deleted ${clipIndices.length} clip${clipIndices.length == 1 ? '' : 's'}.');
+        }
+        break;
+      case 'duplicate':
+        {
+          final clipIndex = resolveSingleClipIndex();
+          if (clipIndex == null) return;
+          final clip = _audioTracks[clipIndex];
+          _handleCopyClip(clipIndex);
+          final row = _resolveRowIndexFromActionTarget(
+                data,
+                fallbackClipIndex: clipIndex,
+              ) ??
+              clip.rowIndex;
+          final pasteMs = _toActionDouble(data['paste_start_ms']) ??
+              ((clip.offset * 1000.0) + _clipTimelineDurationMs(clip));
+          await _handlePasteClipAt(row, pasteMs);
+          _showSmallNotice('Duplicated clip.');
+          break;
+        }
+      default:
+        _insertAssistantChatText(
+            'Unsupported clip edit operation "$operation".');
+        break;
+    }
+  }
+
+  double _maxAutomationTimelineMs() {
+    return math.max(1.0, _audioOnlyOverallDuration.inMilliseconds.toDouble());
+  }
+
+  String _pluginAutomationTargetId(int effectIndex, String paramId) {
+    return 'fx:$effectIndex:$paramId';
+  }
+
+  String _pluginAutomationEffectKey(String effectId, int ordinal) {
+    final base = effectId.trim().isEmpty ? 'effect' : effectId.trim();
+    final safeOrdinal = ordinal < 0 ? 0 : ordinal;
+    return '$base#$safeOrdinal';
+  }
+
+  String _encodeAutomationIdComponent(String raw) {
+    return Uri.encodeComponent(raw.trim());
+  }
+
+  String _decodeAutomationIdComponent(String raw) {
+    try {
+      return Uri.decodeComponent(raw);
+    } catch (_) {
+      return raw;
+    }
+  }
+
+  String _pluginAutomationTargetIdFromEffectKey(
+    String effectKey,
+    String paramId,
+  ) {
+    return 'fxid:${_encodeAutomationIdComponent(effectKey)}:${_encodeAutomationIdComponent(paramId)}';
+  }
+
+  _ParsedAutomationTargetId _parseAutomationTargetId(String targetId) {
+    final trimmed = targetId.trim();
+    if (trimmed == 'volume') {
+      return const _ParsedAutomationTargetId(
+        isVolume: true,
+        legacyEffectIndex: -1,
+        effectKey: '',
+        paramId: 'volume',
+      );
+    }
+
+    if (trimmed.startsWith('fxid:')) {
+      final payload = trimmed.substring('fxid:'.length);
+      final splitAt = payload.indexOf(':');
+      if (splitAt > 0) {
+        final encodedEffectKey = payload.substring(0, splitAt);
+        final encodedParamId = payload.substring(splitAt + 1);
+        return _ParsedAutomationTargetId(
+          isVolume: false,
+          legacyEffectIndex: -1,
+          effectKey: _decodeAutomationIdComponent(encodedEffectKey),
+          paramId: _decodeAutomationIdComponent(encodedParamId),
+        );
+      }
+    }
+
+    final parts = trimmed.split(':');
+    if (parts.length >= 3 && parts.first == 'fx') {
+      return _ParsedAutomationTargetId(
+        isVolume: false,
+        legacyEffectIndex: int.tryParse(parts[1]) ?? -1,
+        effectKey: '',
+        paramId: parts.sublist(2).join(':'),
+      );
+    }
+
+    return _ParsedAutomationTargetId(
+      isVolume: false,
+      legacyEffectIndex: -1,
+      effectKey: '',
+      paramId: trimmed,
+    );
+  }
+
+  List<AutomationClipSnapshot> _copyAutomationClipList(
+    List<AutomationClipSnapshot> clips,
+  ) {
+    return clips.map((c) => c.copyWith()).toList(growable: false);
+  }
+
+  String _automationTargetLabelFor(int row, String targetId) {
+    return _rowAutomationTargets[row]?[targetId]?.label ??
+        _fallbackAutomationTargetMeta(targetId).label;
+  }
+
+  _AutomationTargetMeta _volumeAutomationTargetMeta() {
+    return const _AutomationTargetMeta(
+      targetId: 'volume',
+      label: 'Volume',
+      effectIndex: -1,
+      paramId: 'volume',
+      type: 'float',
+      min: 0.0,
+      max: 1.0,
+      initialNormalized: 0.75,
+    );
+  }
+
+  _AutomationTargetMeta _fallbackAutomationTargetMeta(String targetId) {
+    if (targetId == 'volume') return _volumeAutomationTargetMeta();
+    final parsed = _parseAutomationTargetId(targetId);
+    return _AutomationTargetMeta(
+      targetId: targetId,
+      label: parsed.paramId.isNotEmpty ? parsed.paramId : targetId,
+      effectIndex: parsed.legacyEffectIndex,
+      paramId: parsed.paramId,
+      type: 'float',
+      min: 0.0,
+      max: 1.0,
+      initialNormalized: targetId == 'volume' ? 0.75 : 0.5,
+    );
+  }
+
+  double _normalizeAutomationValue(
+    double? rawValue, {
+    required double min,
+    required double max,
+    double fallback = 0.5,
+  }) {
+    if (rawValue == null) return fallback.clamp(0.0, 1.0).toDouble();
+    final span = max - min;
+    if (!span.isFinite || span.abs() < 1e-9) {
+      return fallback.clamp(0.0, 1.0).toDouble();
+    }
+    return ((rawValue - min) / span).clamp(0.0, 1.0).toDouble();
+  }
+
+  double _denormalizeAutomationValue(
+    double normalized,
+    _AutomationTargetMeta target,
+  ) {
+    if (target.isVolume) {
+      return normalized.clamp(0.0, 1.0).toDouble();
+    }
+    final span = target.max - target.min;
+    if (!span.isFinite || span.abs() < 1e-9) {
+      return target.min;
+    }
+    return target.min + span * normalized.clamp(0.0, 1.0).toDouble();
+  }
+
+  List<Map<String, dynamic>> _toNormalizedAutomationMaps(
+    List<AutomationPoint> points,
+  ) {
+    return points
+        .map((p) => <String, dynamic>{
+              'x': p.x,
+              'value': p.volume.clamp(0.0, 1.0),
+            })
+        .toList(growable: false);
+  }
+
+  Future<void> _syncNativeAutomationForRow(int row) async {
+    if (row < 0 || row >= _rowCount) return;
+
+    final resolvedVolume = _resolvedAutomationPointsForTarget(row, 'volume');
+    await JuceAudioEngine.setTrackAutomationPoints(
+      row,
+      _toMaps(resolvedVolume),
+    );
+
+    await JuceAudioEngine.clearTrackEffectAutomationForRow(row);
+
+    final rowPlugin =
+        _rowPluginAutomation[row] ?? const <String, List<AutomationPoint>>{};
+    if (rowPlugin.isEmpty) {
+      return;
+    }
+
+    final targets =
+        _rowAutomationTargets[row] ?? const <String, _AutomationTargetMeta>{};
+    for (final entry in rowPlugin.entries) {
+      final targetId = entry.key;
+      final target =
+          targets[targetId] ?? _fallbackAutomationTargetMeta(targetId);
+      if (target.isVolume) continue;
+      if (target.effectIndex < 0) continue;
+      if (target.paramId.trim().isEmpty) continue;
+
+      final safePoints = _resolvedAutomationPointsForTarget(row, targetId);
+      await JuceAudioEngine.setTrackEffectAutomationPoints(
+        row,
+        target.effectIndex,
+        target.paramId,
+        target.min,
+        target.max,
+        _toNormalizedAutomationMaps(safePoints),
+      );
+    }
+  }
+
+  Future<void> _syncNativePluginAutomationForRow(int row) async {
+    await _syncNativeAutomationForRow(row);
+  }
+
+  Future<void> _syncNativeAutomationForAllRows() async {
+    for (int row = 0; row < _rowCount; row++) {
+      await _syncNativeAutomationForRow(row);
+    }
+  }
+
+  Future<void> _syncNativePluginAutomationForAllRows() async {
+    await _syncNativeAutomationForAllRows();
+  }
+
+  Future<void> _refreshAutomationTargetsForRow(
+    int row, {
+    bool setStateWhenDone = true,
+    bool syncNativeWhenDone = true,
+  }) async {
+    if (row < 0 || row >= _rowCount) return;
+
+    final previousTargets = Map<String, _AutomationTargetMeta>.from(
+      _rowAutomationTargets[row] ?? const <String, _AutomationTargetMeta>{},
+    );
+    final discovered = <String, _AutomationTargetMeta>{
+      'volume': _volumeAutomationTargetMeta(),
+    };
+    final discoveredByEffectKeyAndParam = <String, _AutomationTargetMeta>{};
+    final discoveredByLegacyIndexAndParam = <String, _AutomationTargetMeta>{};
+    final discoveredByParam = <String, List<_AutomationTargetMeta>>{};
+
+    final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+    var effectInstanceIds =
+        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    if (effectInstanceIds.length != effects.length) {
+      effectInstanceIds = List<String>.filled(effects.length, '');
+    }
+    var effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
+    if (effectIds.length != effects.length) {
+      effectIds = List<String>.from(effects);
+    }
+    final effectOrdinalById = <String, int>{};
+    for (int effectIndex = 0; effectIndex < effects.length; effectIndex++) {
+      final params =
+          await JuceAudioEngine.getTrackPluginParameters(row, effectIndex);
+      final effectName = effects[effectIndex].trim();
+      final rawInstanceId = (effectIndex < effectInstanceIds.length
+              ? effectInstanceIds[effectIndex]
+              : '')
+          .trim();
+      final rawEffectId =
+          (effectIndex < effectIds.length ? effectIds[effectIndex] : effectName)
+              .trim();
+      final effectIdentity = rawEffectId.isNotEmpty
+          ? rawEffectId
+          : (effectName.isNotEmpty ? effectName : 'effect');
+      final effectOrdinal = effectOrdinalById.update(
+        effectIdentity,
+        (value) => value + 1,
+        ifAbsent: () => 0,
+      );
+      final effectKey = rawInstanceId.isNotEmpty
+          ? 'inst:$rawInstanceId'
+          : _pluginAutomationEffectKey(effectIdentity, effectOrdinal);
+      for (final p in params) {
+        final type = (p['type'] ?? '').toString().trim().toLowerCase();
+        if (type != 'float') continue;
+
+        final rawId = (p['id'] ?? p['name'] ?? '').toString().trim();
+        final rawName = (p['name'] ?? rawId).toString().trim();
+        if (rawId.isEmpty || rawName.isEmpty) continue;
+
+        final min = (p['min'] as num?)?.toDouble() ?? 0.0;
+        final max = (p['max'] as num?)?.toDouble() ?? 1.0;
+        final targetId =
+            _pluginAutomationTargetIdFromEffectKey(effectKey, rawId);
+        final label = effectName.isEmpty ? rawName : '$effectName • $rawName';
+        final previousTarget = previousTargets[targetId];
+        final fallbackNormalized =
+            (previousTarget?.initialNormalized ?? 0.5).clamp(0.0, 1.0);
+        final currentNormalized = _normalizeAutomationValue(
+          (p['value'] as num?)?.toDouble(),
+          min: min,
+          max: max,
+          fallback: fallbackNormalized,
+        );
+
+        discovered[targetId] = _AutomationTargetMeta(
+          targetId: targetId,
+          label: label,
+          effectIndex: effectIndex,
+          paramId: rawId,
+          type: type,
+          min: min,
+          max: max,
+          initialNormalized: currentNormalized,
+        );
+        final paramLower = rawId.toLowerCase();
+        discoveredByEffectKeyAndParam['$effectKey\u0000$paramLower'] =
+            discovered[targetId]!;
+        discoveredByLegacyIndexAndParam['$effectIndex\u0000$paramLower'] =
+            discovered[targetId]!;
+        discoveredByParam
+            .putIfAbsent(paramLower, () => <_AutomationTargetMeta>[])
+            .add(discovered[targetId]!);
+      }
+    }
+
+    _AutomationTargetMeta? resolveRemappedTarget(String originalTargetId) {
+      if (originalTargetId == 'volume') return discovered['volume'];
+      final existing = discovered[originalTargetId];
+      if (existing != null) return existing;
+
+      final previousMeta = previousTargets[originalTargetId] ??
+          _fallbackAutomationTargetMeta(originalTargetId);
+      final parsed = _parseAutomationTargetId(originalTargetId);
+      final normalizedParamId =
+          (parsed.paramId.isNotEmpty ? parsed.paramId : previousMeta.paramId)
+              .trim()
+              .toLowerCase();
+      if (normalizedParamId.isEmpty) return null;
+
+      if (parsed.effectKey.isNotEmpty) {
+        final byEffectKey = discoveredByEffectKeyAndParam[
+            '${parsed.effectKey}\u0000$normalizedParamId'];
+        if (byEffectKey != null) return byEffectKey;
+      }
+
+      if (parsed.legacyEffectIndex >= 0) {
+        final byLegacy = discoveredByLegacyIndexAndParam[
+            '${parsed.legacyEffectIndex}\u0000$normalizedParamId'];
+        if (byLegacy != null) return byLegacy;
+      }
+
+      final candidates = discoveredByParam[normalizedParamId] ??
+          const <_AutomationTargetMeta>[];
+      if (candidates.isEmpty) return null;
+
+      final previousLabelLower = previousMeta.label.trim().toLowerCase();
+      if (previousLabelLower.isNotEmpty) {
+        final byLabel = candidates
+            .where((candidate) =>
+                candidate.label.trim().toLowerCase() == previousLabelLower)
+            .toList(growable: false);
+        if (byLabel.length == 1) {
+          return byLabel.first;
+        }
+      }
+
+      if (previousMeta.effectIndex >= 0) {
+        final byEffectIndex = candidates
+            .where((candidate) =>
+                candidate.effectIndex == previousMeta.effectIndex)
+            .toList(growable: false);
+        if (byEffectIndex.length == 1) {
+          return byEffectIndex.first;
+        }
+      }
+
+      if (candidates.length == 1) {
+        return candidates.first;
+      }
+
+      return null;
+    }
+
+    final pluginByTarget = Map<String, List<AutomationPoint>>.from(
+      _rowPluginAutomation[row] ?? const <String, List<AutomationPoint>>{},
+    );
+    final remappedPlugin = <String, List<AutomationPoint>>{};
+    for (final entry in pluginByTarget.entries) {
+      final originalTargetId = entry.key;
+      if (originalTargetId == 'volume') continue;
+
+      final resolvedTarget = resolveRemappedTarget(originalTargetId);
+      if (resolvedTarget == null) continue;
+      final resolvedTargetId = resolvedTarget.targetId;
+
+      final safePoints = _sanitizeAutomationPointsForTarget(
+        row,
+        resolvedTargetId,
+        entry.value,
+      );
+      final existing =
+          remappedPlugin[resolvedTargetId] ?? const <AutomationPoint>[];
+      remappedPlugin[resolvedTargetId] = _sanitizeAutomationPointsForTarget(
+        row,
+        resolvedTargetId,
+        <AutomationPoint>[
+          ...existing.map((p) => p.copy()),
+          ...safePoints.map((p) => p.copy()),
+        ],
+      );
+    }
+
+    final clipsByTarget = Map<String, List<AutomationClipSnapshot>>.from(
+      _rowAutomationClips[row] ??
+          const <String, List<AutomationClipSnapshot>>{},
+    );
+    final remappedClips = <String, List<AutomationClipSnapshot>>{};
+    for (final entry in clipsByTarget.entries) {
+      final originalTargetId = entry.key;
+      if (originalTargetId == 'volume') {
+        remappedClips[originalTargetId] = _sanitizeAutomationClipsForTarget(
+          row,
+          originalTargetId,
+          entry.value.map((c) => c.copyWith()).toList(growable: false),
+        );
+        continue;
+      }
+
+      final resolvedTarget = resolveRemappedTarget(originalTargetId);
+      if (resolvedTarget == null) continue;
+      final resolvedTargetId = resolvedTarget.targetId;
+
+      final safeClips = _sanitizeAutomationClipsForTarget(
+        row,
+        resolvedTargetId,
+        entry.value.map((c) => c.copyWith()).toList(growable: false),
+      );
+      if (safeClips.isEmpty) continue;
+      final existing =
+          remappedClips[resolvedTargetId] ?? const <AutomationClipSnapshot>[];
+      remappedClips[resolvedTargetId] = _sanitizeAutomationClipsForTarget(
+        row,
+        resolvedTargetId,
+        <AutomationClipSnapshot>[
+          ...existing.map((c) => c.copyWith()),
+          ...safeClips.map((c) => c.copyWith()),
+        ],
+      );
+    }
+
+    _rowPluginAutomation[row] = remappedPlugin;
+    _rowAutomationClips[row] = remappedClips;
+    _rowAutomationTargets[row] = discovered;
+    final selected = _rowSelectedAutomationTarget[row];
+    if (selected == null || !discovered.containsKey(selected)) {
+      final fallback = discovered.containsKey('volume')
+          ? 'volume'
+          : (discovered.keys.isNotEmpty ? discovered.keys.first : 'volume');
+      _rowSelectedAutomationTarget[row] = fallback;
+    }
+
+    if (setStateWhenDone && mounted) {
+      setState(() {});
+    }
+
+    if (syncNativeWhenDone) {
+      await _syncNativePluginAutomationForRow(row);
+    }
+  }
+
+  Future<void> _refreshAutomationTargetsForAllRows() async {
+    for (int row = 0; row < _rowCount; row++) {
+      await _refreshAutomationTargetsForRow(
+        row,
+        setStateWhenDone: false,
+        syncNativeWhenDone: false,
+      );
+      await _syncNativePluginAutomationForRow(row);
+    }
+    if (mounted) setState(() {});
+  }
+
+  List<Map<String, dynamic>> _automationTargetsForRowUi(int row) {
+    if (row < 0 || row >= _rowCount) return const <Map<String, dynamic>>[];
+    final targets = _rowAutomationTargets[row] ??
+        <String, _AutomationTargetMeta>{
+          'volume': _volumeAutomationTargetMeta()
+        };
+    final values = targets.values.toList(growable: false)
+      ..sort((a, b) {
+        if (a.isVolume && !b.isVolume) return -1;
+        if (!a.isVolume && b.isVolume) return 1;
+        return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+      });
+    return values.map((e) => e.toUiMap()).toList(growable: false);
+  }
+
+  String _selectedAutomationTargetIdForRow(int row) {
+    if (row < 0 || row >= _rowCount) return 'volume';
+    final selected = _rowSelectedAutomationTarget[row];
+    if (selected != null &&
+        (_rowAutomationTargets[row]?.containsKey(selected) ?? false)) {
+      return selected;
+    }
+    return 'volume';
+  }
+
+  void _setSelectedAutomationTargetIdForRow(int row, String targetId) {
+    if (row < 0 || row >= _rowCount) return;
+    final targets = _rowAutomationTargets[row] ??
+        <String, _AutomationTargetMeta>{
+          'volume': _volumeAutomationTargetMeta()
+        };
+    if (!targets.containsKey(targetId)) {
+      targetId = 'volume';
+    }
+    _rowSelectedAutomationTarget[row] = targetId;
+    if (mounted) setState(() {});
+  }
+
+  List<AutomationPoint> _defaultAutomationPointsForTarget(
+    int row,
+    String targetId,
+  ) {
+    double normalized = targetId == 'volume' ? 0.75 : 0.5;
+    final target = _rowAutomationTargets[row]?[targetId];
+    if (target != null) {
+      normalized = target.initialNormalized.clamp(0.0, 1.0).toDouble();
+    }
+    return <AutomationPoint>[
+      AutomationPoint(x: 0.0, volume: normalized),
+    ];
+  }
+
+  List<AutomationClipSnapshot> _clipsForAutomationTarget(
+    int row,
+    String targetId,
+  ) {
+    if (row < 0 || row >= _rowCount) return const <AutomationClipSnapshot>[];
+    final rowMap = _rowAutomationClips[row];
+    final existing = rowMap?[targetId];
+    if (existing == null) return const <AutomationClipSnapshot>[];
+    return existing;
+  }
+
+  List<AutomationPoint> _sanitizeAutomationClipPointsRelative(
+    double lengthMs,
+    List<AutomationPoint> points, {
+    required double fallbackValue,
+  }) {
+    final safeLength = lengthMs.clamp(50.0, double.infinity).toDouble();
+    final sanitized = points
+        .map((p) => AutomationPoint(
+              x: p.x.clamp(0.0, safeLength).toDouble(),
+              volume: p.volume.clamp(0.0, 1.0).toDouble(),
+            ))
+        .toList(growable: false)
+      ..sort((a, b) => a.x.compareTo(b.x));
+
+    if (sanitized.isEmpty) {
+      final fallback = fallbackValue.clamp(0.0, 1.0).toDouble();
+      return <AutomationPoint>[
+        AutomationPoint(x: 0.0, volume: fallback),
+      ];
+    }
+    if (sanitized.length == 1) {
+      final only = sanitized.first;
+      return <AutomationPoint>[
+        AutomationPoint(x: 0.0, volume: only.volume),
+      ];
+    }
+    return sanitized;
+  }
+
+  List<AutomationClipSnapshot> _sanitizeAutomationClipsForTarget(
+    int row,
+    String targetId,
+    List<AutomationClipSnapshot> clips,
+  ) {
+    final maxMs = _maxAutomationTimelineMs();
+    final fallbackValue = targetId == 'volume' ? 0.75 : 0.5;
+    final targetLabel = _automationTargetLabelFor(row, targetId);
+    final seenIds = <String>{};
+    int idCounter = 0;
+
+    final out = <AutomationClipSnapshot>[];
+    for (final clip in clips) {
+      final safeLength = clip.lengthMs.clamp(50.0, maxMs).toDouble();
+      final maxStart = math.max(0.0, maxMs - safeLength);
+      final safeStart = clip.startMs.clamp(0.0, maxStart).toDouble();
+
+      var id = clip.id.trim();
+      if (id.isEmpty || seenIds.contains(id)) {
+        id = 'ac_${row}_${targetId}_${idCounter}_${const Uuid().v4()}';
+      }
+      idCounter++;
+      seenIds.add(id);
+
+      final safePoints = _sanitizeAutomationClipPointsRelative(
+        safeLength,
+        clip.points,
+        fallbackValue: fallbackValue,
+      );
+
+      out.add(
+        clip.copyWith(
+          id: id,
+          row: row,
+          targetId: targetId,
+          lane: math.max(0, clip.lane),
+          label: clip.label.trim().isEmpty ? targetLabel : clip.label.trim(),
+          startMs: safeStart,
+          lengthMs: safeLength,
+          points: safePoints,
+        ),
+      );
+    }
+
+    out.sort((a, b) {
+      final timeCmp = a.startMs.compareTo(b.startMs);
+      if (timeCmp != 0) return timeCmp;
+      return a.id.compareTo(b.id);
+    });
+    return out;
+  }
+
+  List<AutomationPoint> _pointsForAutomationTarget(int row, String targetId) {
+    if (row < 0 || row >= _rowCount) return const <AutomationPoint>[];
+    if (targetId == 'volume') return _rowVolumeAutomation[row];
+    final rowMap = _rowPluginAutomation[row];
+    final existing = rowMap?[targetId];
+    if (existing != null) return existing;
+    return _defaultAutomationPointsForTarget(row, targetId);
+  }
+
+  List<AutomationPoint> _sanitizeAutomationPointsForTarget(
+    int row,
+    String targetId,
+    List<AutomationPoint> points,
+  ) {
+    final maxMs = _maxAutomationTimelineMs();
+    final sanitized = points
+        .map((p) => AutomationPoint(
+              x: p.x.clamp(0.0, maxMs).toDouble(),
+              volume: p.volume.clamp(0.0, 1.0).toDouble(),
+            ))
+        .toList(growable: false)
+      ..sort((a, b) => a.x.compareTo(b.x));
+
+    if (sanitized.isEmpty) {
+      final defaults = _defaultAutomationPointsForTarget(row, targetId);
+      return defaults.map((p) => p.copy()).toList(growable: false);
+    }
+
+    if (sanitized.length == 1) {
+      final only = sanitized.first;
+      return <AutomationPoint>[
+        AutomationPoint(x: 0.0, volume: only.volume),
+      ];
+    }
+    return sanitized;
+  }
+
+  double _evaluateAutomationClipAtRelativeMs(
+    AutomationClipSnapshot clip,
+    double relativeMs, {
+    double fallback = 0.5,
+  }) {
+    final safeRel = relativeMs.clamp(0.0, clip.lengthMs).toDouble();
+    return _evaluateAutomationAtMs(clip.points, safeRel, fallback: fallback);
+  }
+
+  double _resolvedAutomationValueAtMs(
+    int row,
+    String targetId,
+    double timeMs, {
+    List<AutomationPoint>? lanePointsOverride,
+    List<AutomationClipSnapshot>? clipOverride,
+  }) {
+    final lanePoints = lanePointsOverride ??
+        _sanitizeAutomationPointsForTarget(
+          row,
+          targetId,
+          _pointsForAutomationTarget(row, targetId),
+        );
+    final baseValue = _evaluateAutomationAtMs(
+      lanePoints,
+      timeMs,
+      fallback: targetId == 'volume' ? 0.75 : 0.5,
+    );
+
+    final clips = clipOverride ??
+        _sanitizeAutomationClipsForTarget(
+          row,
+          targetId,
+          _clipsForAutomationTarget(row, targetId),
+        );
+    if (clips.isEmpty) return baseValue;
+
+    AutomationClipSnapshot? active;
+    for (final clip in clips) {
+      if (clip.muted) continue;
+      final start = clip.startMs;
+      final end = clip.startMs + clip.lengthMs;
+      if (timeMs + 1e-6 < start || timeMs - 1e-6 > end) continue;
+      if (active == null || clip.startMs >= active.startMs) {
+        active = clip;
+      }
+    }
+    if (active == null) return baseValue;
+    final rel = timeMs - active.startMs;
+    return _evaluateAutomationClipAtRelativeMs(
+      active,
+      rel,
+      fallback: baseValue,
+    );
+  }
+
+  List<AutomationPoint> _resolvedAutomationPointsForTarget(
+    int row,
+    String targetId,
+  ) {
+    final maxMs = _maxAutomationTimelineMs();
+    final lanePoints = _sanitizeAutomationPointsForTarget(
+      row,
+      targetId,
+      _pointsForAutomationTarget(row, targetId),
+    );
+    final clips = _sanitizeAutomationClipsForTarget(
+      row,
+      targetId,
+      _clipsForAutomationTarget(row, targetId),
+    );
+    if (clips.isEmpty) {
+      return lanePoints.map((p) => p.copy()).toList(growable: false);
+    }
+
+    final times = <double>{0.0, maxMs};
+    for (final p in lanePoints) {
+      times.add(p.x.clamp(0.0, maxMs).toDouble());
+    }
+    for (final clip in clips) {
+      final start = clip.startMs.clamp(0.0, maxMs).toDouble();
+      final end = (clip.startMs + clip.lengthMs).clamp(0.0, maxMs).toDouble();
+      if (end <= start) continue;
+      times.add(start);
+      times.add(end);
+      times.add((start - 0.001).clamp(0.0, maxMs).toDouble());
+      times.add((end + 0.001).clamp(0.0, maxMs).toDouble());
+      for (final p in clip.points) {
+        final abs = (clip.startMs + p.x).clamp(start, end).toDouble();
+        times.add(abs);
+      }
+    }
+
+    final sortedTimes = times.toList(growable: false)..sort();
+    final out = <AutomationPoint>[];
+    double? lastX;
+    double? lastValue;
+    for (final t in sortedTimes) {
+      final x = t.clamp(0.0, maxMs).toDouble();
+      if (lastX != null && (x - lastX).abs() < 1e-7) {
+        continue;
+      }
+      final value = _resolvedAutomationValueAtMs(
+        row,
+        targetId,
+        x,
+        lanePointsOverride: lanePoints,
+        clipOverride: clips,
+      ).clamp(0.0, 1.0);
+      if (lastValue != null && lastX != null) {
+        final unchanged = (value - lastValue).abs() < 1e-7;
+        if (unchanged && (x - lastX).abs() < 0.0005) {
+          continue;
+        }
+      }
+      out.add(AutomationPoint(x: x, volume: value.toDouble()));
+      lastX = x;
+      lastValue = value.toDouble();
+    }
+
+    return _sanitizeAutomationPointsForTarget(row, targetId, out);
+  }
+
+  double _evaluateAutomationAtMs(
+    List<AutomationPoint> points,
+    double timeMs, {
+    double fallback = 0.5,
+  }) {
+    if (points.isEmpty) return fallback;
+    if (timeMs <= points.first.x) return points.first.volume;
+    if (timeMs >= points.last.x) return points.last.volume;
+    for (int i = 0; i < points.length - 1; i++) {
+      final a = points[i];
+      final b = points[i + 1];
+      if (timeMs < a.x || timeMs > b.x) continue;
+      final span = (b.x - a.x).abs();
+      if (span < 1e-6) return b.volume;
+      final t = ((timeMs - a.x) / (b.x - a.x)).clamp(0.0, 1.0);
+      return a.volume + ((b.volume - a.volume) * t);
+    }
+    return points.last.volume;
+  }
+
+  Future<void> _syncAutomationTargetToCurrentTime(
+    int row,
+    String targetId,
+  ) async {
+    if (targetId == 'volume') return;
+    final target = _rowAutomationTargets[row]?[targetId];
+    if (target == null || target.isVolume || target.effectIndex < 0) return;
+    final timeMs = _globalAudioClock.inMilliseconds.toDouble();
+    final normalized = _resolvedAutomationValueAtMs(
+      row,
+      targetId,
+      timeMs,
+    ).clamp(0.0, 1.0);
+    final value = _denormalizeAutomationValue(normalized, target);
+    await JuceAudioEngine.setTrackEffect(
+      row,
+      target.effectIndex,
+      target.paramId,
+      value,
+    );
+    _lastAppliedAutomationNormalized['$row|$targetId'] = normalized.toDouble();
+  }
+
+  Future<void> _setAutomationTargetPointsWithUndo(
+    int row,
+    String targetId,
+    List<AutomationPoint> newPoints, {
+    List<AutomationPoint>? oldPointsOverride,
+  }) async {
+    if (row < 0 || row >= _rowCount) return;
+    if (targetId == 'volume') {
+      await _setRowAutomationWithUndo(row, newPoints);
+      return;
+    }
+
+    final oldPoints =
+        (oldPointsOverride ?? _pointsForAutomationTarget(row, targetId))
+            .map((p) => p.copy())
+            .toList(growable: false);
+    final safePoints =
+        _sanitizeAutomationPointsForTarget(row, targetId, newPoints);
+
+    await _undoManager.execute(
+      SetTargetAutomationPointsAction(
+        row: row,
+        targetId: targetId,
+        oldPoints: oldPoints,
+        newPoints: safePoints,
+        applyToState: (r, laneId, points) {
+          setState(() {
+            final rowMap = _rowPluginAutomation.putIfAbsent(
+                r, () => <String, List<AutomationPoint>>{});
+            rowMap[laneId] =
+                points.map((p) => p.copy()).toList(growable: false);
+          });
+        },
+        onApplied: (r, laneId, _) async {
+          _lastAppliedAutomationNormalized.remove('$r|$laneId');
+          await _syncNativePluginAutomationForRow(r);
+          await _syncAutomationTargetToCurrentTime(r, laneId);
+        },
+      ),
+    );
+  }
+
+  List<AutomationLaneSnapshot> _automationLanesForRowSave(int row) {
+    if (row < 0 || row >= _rowCount) return const <AutomationLaneSnapshot>[];
+    final lanes = <AutomationLaneSnapshot>[];
+
+    final volumePoints = _sanitizeAutomationPointsForTarget(
+      row,
+      'volume',
+      _rowVolumeAutomation[row],
+    );
+    lanes.add(_volumeAutomationTargetMeta().toLaneSnapshot(volumePoints));
+
+    final rowPlugin =
+        _rowPluginAutomation[row] ?? const <String, List<AutomationPoint>>{};
+    final targets =
+        _rowAutomationTargets[row] ?? const <String, _AutomationTargetMeta>{};
+    rowPlugin.forEach((targetId, points) {
+      if (targetId == 'volume') return;
+      final safePoints =
+          _sanitizeAutomationPointsForTarget(row, targetId, points);
+      if (safePoints.isEmpty) return;
+      final target =
+          targets[targetId] ?? _fallbackAutomationTargetMeta(targetId);
+      lanes.add(target.toLaneSnapshot(safePoints));
+    });
+
+    return lanes;
+  }
+
+  void _restoreAutomationLanesForRow(
+    int row,
+    List<AutomationLaneSnapshot> lanes, {
+    String? selectedTargetId,
+  }) {
+    if (row < 0 || row >= _rowCount) return;
+    final rowPlugin = <String, List<AutomationPoint>>{};
+    final rowTargets = <String, _AutomationTargetMeta>{
+      'volume': _volumeAutomationTargetMeta(),
+    };
+
+    for (final lane in lanes) {
+      final targetId = lane.targetId.trim();
+      if (targetId.isEmpty) continue;
+      final safePoints = _sanitizeAutomationPointsForTarget(
+        row,
+        targetId,
+        lane.points.map((p) => p.copy()).toList(growable: false),
+      );
+      if (targetId == 'volume') {
+        _rowVolumeAutomation[row] = safePoints;
+        continue;
+      }
+      rowPlugin[targetId] = safePoints;
+      rowTargets[targetId] = _AutomationTargetMeta.fromLaneSnapshot(lane);
+    }
+
+    _rowPluginAutomation[row] = rowPlugin;
+    _rowAutomationTargets[row] = rowTargets;
+    final fallbackTarget = rowTargets.containsKey('volume')
+        ? 'volume'
+        : (rowTargets.keys.isNotEmpty ? rowTargets.keys.first : 'volume');
+    _rowSelectedAutomationTarget[row] =
+        (selectedTargetId != null && rowTargets.containsKey(selectedTargetId))
+            ? selectedTargetId
+            : fallbackTarget;
+  }
+
+  List<AutomationClipSnapshot> _automationClipsForRowSave(int row) {
+    if (row < 0 || row >= _rowCount) {
+      return const <AutomationClipSnapshot>[];
+    }
+    final rowMap = _rowAutomationClips[row] ??
+        const <String, List<AutomationClipSnapshot>>{};
+    final out = <AutomationClipSnapshot>[];
+    for (final entry in rowMap.entries) {
+      final targetId = entry.key;
+      final safe = _sanitizeAutomationClipsForTarget(
+        row,
+        targetId,
+        entry.value,
+      );
+      out.addAll(safe.map((clip) => clip.copyWith()));
+    }
+    out.sort((a, b) {
+      final targetCmp = a.targetId.compareTo(b.targetId);
+      if (targetCmp != 0) return targetCmp;
+      final laneCmp = a.lane.compareTo(b.lane);
+      if (laneCmp != 0) return laneCmp;
+      final timeCmp = a.startMs.compareTo(b.startMs);
+      if (timeCmp != 0) return timeCmp;
+      return a.id.compareTo(b.id);
+    });
+    return out;
+  }
+
+  void _restoreAutomationClipsForRow(
+    int row,
+    List<AutomationClipSnapshot> clips,
+  ) {
+    if (row < 0 || row >= _rowCount) return;
+    final grouped = <String, List<AutomationClipSnapshot>>{};
+    for (final clip in clips) {
+      final targetId = clip.targetId.trim().isEmpty ? 'volume' : clip.targetId;
+      grouped.putIfAbsent(targetId, () => <AutomationClipSnapshot>[]).add(
+            clip.copyWith(
+              row: row,
+              targetId: targetId,
+            ),
+          );
+    }
+
+    final sanitized = <String, List<AutomationClipSnapshot>>{};
+    for (final entry in grouped.entries) {
+      sanitized[entry.key] = _sanitizeAutomationClipsForTarget(
+        row,
+        entry.key,
+        entry.value,
+      );
+    }
+    _rowAutomationClips[row] = sanitized;
+  }
+
+  Future<void> _setAutomationClipsForTargetWithUndo(
+    int row,
+    String targetId,
+    List<AutomationClipSnapshot> newClips, {
+    List<AutomationClipSnapshot>? oldClipsOverride,
+  }) async {
+    if (row < 0 || row >= _rowCount) return;
+    final oldClips = _copyAutomationClipList(
+      oldClipsOverride ?? _clipsForAutomationTarget(row, targetId),
+    );
+    final safeClips =
+        _sanitizeAutomationClipsForTarget(row, targetId, newClips);
+
+    await _undoManager.execute(
+      SetTargetAutomationClipsAction(
+        row: row,
+        targetId: targetId,
+        oldClips: oldClips,
+        newClips: safeClips,
+        applyToState: (r, laneId, clips) {
+          setState(() {
+            final rowMap = _rowAutomationClips.putIfAbsent(
+                r, () => <String, List<AutomationClipSnapshot>>{});
+            rowMap[laneId] = _copyAutomationClipList(clips);
+          });
+        },
+        onApplied: (r, _, __) async {
+          await _syncNativeAutomationForRow(r);
+        },
+      ),
+    );
+  }
+
+  List<AutomationPoint> _sanitizeAutomationPoints(
+    int row,
+    List<AutomationPoint> points,
+  ) {
+    final maxMs =
+        math.max(1.0, _audioOnlyOverallDuration.inMilliseconds.toDouble());
+    final sanitized = points
+        .map((p) => AutomationPoint(
+              x: p.x.clamp(0.0, maxMs).toDouble(),
+              volume: p.volume.clamp(0.0, 1.0).toDouble(),
+            ))
+        .toList()
+      ..sort((a, b) => a.x.compareTo(b.x));
+
+    if (sanitized.isEmpty) {
+      return <AutomationPoint>[
+        AutomationPoint(x: 0.0, volume: 1.0),
+      ];
+    }
+
+    if (sanitized.length == 1) {
+      final only = sanitized.first;
+      return <AutomationPoint>[
+        AutomationPoint(x: 0.0, volume: only.volume),
+      ];
+    }
+    return sanitized;
+  }
+
+  Future<void> _setRowAutomationWithUndo(
+    int row,
+    List<AutomationPoint> newPoints,
+  ) async {
+    if (row < 0 || row >= _rowVolumeAutomation.length) return;
+    final oldPoints = _rowVolumeAutomation[row]
+        .map((p) => AutomationPoint(x: p.x, volume: p.volume))
+        .toList(growable: false);
+    final safePoints = _sanitizeAutomationPoints(row, newPoints);
+    await _undoManager.execute(
+      SetAutomationPointsAction(
+        row: row,
+        oldPoints: oldPoints,
+        newPoints: safePoints,
+        applyToState: (r, points) {
+          setState(() {
+            _rowVolumeAutomation[r] = points
+                .map((p) => AutomationPoint(x: p.x, volume: p.volume))
+                .toList();
+          });
+        },
+        onApplied: (r, _) async {
+          await _syncNativeAutomationForRow(r);
+        },
+      ),
+    );
+  }
+
+  String? _resolveAutomationTargetIdFromAction(
+    int row,
+    Map<String, dynamic> data, {
+    bool allowVolumeFallback = true,
+  }) {
+    final target = _actionTarget(data);
+    final targets =
+        _rowAutomationTargets[row] ?? const <String, _AutomationTargetMeta>{};
+    if (targets.isEmpty) {
+      return allowVolumeFallback ? 'volume' : null;
+    }
+
+    String? pickTargetId(dynamic raw) {
+      final id = (raw ?? '').toString().trim();
+      if (id.isEmpty) return null;
+      if (targets.containsKey(id)) return id;
+      final parsed = _parseAutomationTargetId(id);
+      if (parsed.isVolume || id.toLowerCase() == 'volume') return 'volume';
+      final parsedParamLower = parsed.paramId.trim().toLowerCase();
+      if (parsedParamLower.isEmpty) return null;
+      final pluginTargets = targets.values.where((meta) => !meta.isVolume);
+      if (parsed.effectKey.isNotEmpty) {
+        final byEffectKey = pluginTargets.where((meta) {
+          final candidateParsed = _parseAutomationTargetId(meta.targetId);
+          return candidateParsed.effectKey == parsed.effectKey &&
+              meta.paramId.trim().toLowerCase() == parsedParamLower;
+        }).toList(growable: false);
+        if (byEffectKey.length == 1) {
+          return byEffectKey.first.targetId;
+        }
+      }
+      if (parsed.legacyEffectIndex >= 0) {
+        final byLegacyIndex = pluginTargets
+            .where((meta) =>
+                meta.effectIndex == parsed.legacyEffectIndex &&
+                meta.paramId.trim().toLowerCase() == parsedParamLower)
+            .toList(growable: false);
+        if (byLegacyIndex.length == 1) {
+          return byLegacyIndex.first.targetId;
+        }
+      }
+      return null;
+    }
+
+    bool matchesToken(String haystack, String needle) {
+      final h = haystack.trim().toLowerCase();
+      final n = needle.trim().toLowerCase();
+      if (h.isEmpty || n.isEmpty) return false;
+      return h.contains(n) || n.contains(h);
+    }
+
+    final explicit = pickTargetId(data['automation_target_id']) ??
+        pickTargetId(target['automation_target_id']) ??
+        pickTargetId(data['target_id']) ??
+        pickTargetId(target['target_id']) ??
+        pickTargetId(data['lane_id']) ??
+        pickTargetId(target['lane_id']);
+    if (explicit != null) return explicit;
+
+    final effectIndex = _toActionInt(data['effect_index'] ??
+        target['effect_index'] ??
+        data['effect'] ??
+        target['effect']);
+    final paramId = (data['param_id'] ??
+            target['param_id'] ??
+            data['parameter_id'] ??
+            target['parameter_id'] ??
+            data['param'] ??
+            target['param'])
+        .toString()
+        .trim();
+    final paramName = (data['param_name'] ??
+            target['param_name'] ??
+            data['parameter'] ??
+            target['parameter'] ??
+            data['name'] ??
+            target['name'])
+        .toString()
+        .trim()
+        .toLowerCase();
+    final effectName = (data['effect_name'] ??
+            target['effect_name'] ??
+            data['plugin_name'] ??
+            target['plugin_name'] ??
+            data['plugin'] ??
+            target['plugin'] ??
+            data['effect'] ??
+            target['effect'])
+        .toString()
+        .trim()
+        .toLowerCase();
+
+    if (effectIndex != null && paramId.isNotEmpty) {
+      final byDirectId = _pluginAutomationTargetId(effectIndex, paramId);
+      if (targets.containsKey(byDirectId)) return byDirectId;
+    }
+
+    int? resolvedEffectIndex = effectIndex;
+    if (resolvedEffectIndex == null && effectName.isNotEmpty) {
+      final matchingEffectIndices = targets.values
+          .where((meta) {
+            if (meta.isVolume) return false;
+            return matchesToken(meta.label, effectName) ||
+                matchesToken(meta.paramId, effectName);
+          })
+          .map((meta) => meta.effectIndex)
+          .where((i) => i >= 0)
+          .toSet()
+          .toList(growable: false);
+      if (matchingEffectIndices.length == 1) {
+        resolvedEffectIndex = matchingEffectIndices.first;
+      }
+    }
+
+    if (resolvedEffectIndex != null) {
+      final scoped = targets.values
+          .where((meta) =>
+              !meta.isVolume && meta.effectIndex == resolvedEffectIndex)
+          .toList(growable: false);
+      if (scoped.isNotEmpty) {
+        if (paramId.isNotEmpty) {
+          final lowered = paramId.toLowerCase();
+          for (final meta in scoped) {
+            if (meta.paramId.toLowerCase() == lowered) return meta.targetId;
+          }
+        }
+        if (paramName.isNotEmpty) {
+          for (final meta in scoped) {
+            final label = meta.label.toLowerCase();
+            final pid = meta.paramId.toLowerCase();
+            if (matchesToken(label, paramName) ||
+                matchesToken(pid, paramName)) {
+              return meta.targetId;
+            }
+          }
+        }
+        if (scoped.length == 1) return scoped.first.targetId;
+      }
+    }
+
+    if (paramId.isNotEmpty) {
+      final lowered = paramId.toLowerCase();
+      for (final meta in targets.values) {
+        if (meta.isVolume) continue;
+        if (meta.paramId.toLowerCase() == lowered) return meta.targetId;
+      }
+    }
+
+    if (paramName.isNotEmpty) {
+      for (final meta in targets.values) {
+        if (meta.isVolume) continue;
+        final label = meta.label.toLowerCase();
+        final pid = meta.paramId.toLowerCase();
+        if (matchesToken(label, paramName) || matchesToken(pid, paramName)) {
+          return meta.targetId;
+        }
+      }
+    }
+
+    final pluginIntent = effectName.isNotEmpty ||
+        resolvedEffectIndex != null ||
+        paramId.isNotEmpty ||
+        paramName.isNotEmpty;
+    if (pluginIntent && !allowVolumeFallback) {
+      return null;
+    }
+
+    return 'volume';
+  }
+
+  bool _isPluginAutomationIntent(Map<String, dynamic> data) {
+    final target = _actionTarget(data);
+
+    bool hasField(String key) {
+      final value = data[key] ?? target[key];
+      if (value == null) return false;
+      if (value is String) return value.trim().isNotEmpty;
+      if (value is num) return true;
+      return true;
+    }
+
+    if (hasField('automation_target_id') ||
+        hasField('target_id') ||
+        hasField('lane_id') ||
+        hasField('effect_index') ||
+        hasField('effect_name') ||
+        hasField('plugin_name') ||
+        hasField('plugin') ||
+        hasField('param_id') ||
+        hasField('parameter_id') ||
+        hasField('param_name') ||
+        hasField('parameter')) {
+      final explicitTargetId = (data['automation_target_id'] ??
+              target['automation_target_id'] ??
+              data['target_id'] ??
+              target['target_id'])
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (explicitTargetId == 'volume') return false;
+      return true;
+    }
+
+    final template = (data['template'] ??
+            target['template'] ??
+            data['pattern'] ??
+            target['pattern'] ??
+            '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (template == 'filter_sweep' ||
+        template == 'lowpass_sweep' ||
+        template == 'highpass_sweep' ||
+        template == 'reverb_tail') {
+      return true;
+    }
+
+    return false;
+  }
+
+  double _normalizedActionValueForTarget(
+    dynamic rawValue,
+    _AutomationTargetMeta target, {
+    String valueMode = '',
+    double fallback = 0.5,
+  }) {
+    final raw = _toActionDouble(rawValue);
+    if (raw == null) return fallback.clamp(0.0, 1.0).toDouble();
+    if (target.isVolume) {
+      return raw.clamp(0.0, 1.0).toDouble();
+    }
+
+    final mode = valueMode.trim().toLowerCase();
+    if (mode == 'real' || mode == 'absolute' || mode == 'native') {
+      return _normalizeAutomationValue(
+        raw,
+        min: target.min,
+        max: target.max,
+        fallback: fallback,
+      );
+    }
+    if (mode == 'normalized' || mode == '0to1') {
+      return raw.clamp(0.0, 1.0).toDouble();
+    }
+
+    if (raw < 0.0 || raw > 1.0) {
+      return _normalizeAutomationValue(
+        raw,
+        min: target.min,
+        max: target.max,
+        fallback: fallback,
+      );
+    }
+    return raw.clamp(0.0, 1.0).toDouble();
+  }
+
+  String _normalizeAutomationEditOperation(String raw) {
+    // Legacy mapping reference: 'set' || 'replace' => 'set_points'
+    switch (raw.trim().toLowerCase()) {
+      case 'set':
+      case 'replace':
+        return 'set_points';
+      case 'ramp':
+      case 'curve':
+      case 'add_curve':
+        return 'add_ramp';
+      case 'create':
+      case 'add':
+      case 'add_clip':
+      case 'new_clip':
+      case 'insert_clip':
+      case 'create_clip':
+        return 'create_clip';
+      case 'duplicate':
+      case 'duplicate_clip':
+        return 'duplicate_clip';
+      case 'move':
+      case 'move_clip':
+        return 'move_clip';
+      case 'remove_clip':
+      case 'delete_clip':
+        return 'delete_clip';
+      case 'clear_clip':
+      case 'remove_all_clips':
+      case 'clear_clips':
+        return 'clear_clips';
+      case 'mute':
+      case 'mute_clip':
+        return 'mute_clip';
+      case 'unmute':
+      case 'unmute_clip':
+        return 'unmute_clip';
+      case 'toggle_mute':
+      case 'toggle_clip_mute':
+        return 'toggle_clip_mute';
+      case 'replace_clip_points':
+        return 'set_clip_points';
+      case 'template':
+      case 'apply_template':
+      case 'generate_template':
+        return 'apply_template';
+      default:
+        return raw.trim().toLowerCase();
+    }
+  }
+
+  bool _automationClipListsEqual(
+    List<AutomationClipSnapshot> a,
+    List<AutomationClipSnapshot> b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      final x = a[i];
+      final y = b[i];
+      if (x.id != y.id ||
+          x.targetId != y.targetId ||
+          x.row != y.row ||
+          x.lane != y.lane ||
+          x.muted != y.muted ||
+          (x.startMs - y.startMs).abs() > 1e-6 ||
+          (x.lengthMs - y.lengthMs).abs() > 1e-6) {
+        return false;
+      }
+      if (x.points.length != y.points.length) return false;
+      for (int p = 0; p < x.points.length; p++) {
+        final xp = x.points[p];
+        final yp = y.points[p];
+        if ((xp.x - yp.x).abs() > 1e-6 ||
+            (xp.volume - yp.volume).abs() > 1e-6) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  double _defaultAutomationClipLengthMs() {
+    final msPerBeat = 60000.0 / _tempo.clamp(1.0, 400.0);
+    final oneBarMs = msPerBeat * 4.0;
+    final maxMs = _maxAutomationTimelineMs();
+    return oneBarMs.clamp(200.0, math.max(200.0, maxMs)).toDouble();
+  }
+
+  String _newAutomationClipId(int row, String targetId) {
+    return 'ac_${row}_${targetId}_${DateTime.now().microsecondsSinceEpoch}_${const Uuid().v4()}';
+  }
+
+  int? _resolveAutomationClipIndexFromAction(
+    int row,
+    String targetId,
+    Map<String, dynamic> data,
+  ) {
+    final clips = _clipsForAutomationTarget(row, targetId);
+    if (clips.isEmpty) return null;
+    final target = _actionTarget(data);
+    final explicitIndex = _toActionInt(data['clip_index'] ??
+        target['clip_index'] ??
+        data['automation_clip_index'] ??
+        target['automation_clip_index']);
+    if (explicitIndex != null &&
+        explicitIndex >= 0 &&
+        explicitIndex < clips.length) {
+      return explicitIndex;
+    }
+
+    final explicitId = (data['clip_id'] ??
+            target['clip_id'] ??
+            data['automation_clip_id'] ??
+            target['automation_clip_id'] ??
+            '')
+        .toString()
+        .trim();
+    if (explicitId.isNotEmpty) {
+      final idx = clips.indexWhere((clip) => clip.id == explicitId);
+      if (idx >= 0) return idx;
+    }
+
+    final atMs = _toActionDouble(
+      data['at_ms'] ??
+          target['at_ms'] ??
+          data['time_ms'] ??
+          target['time_ms'] ??
+          data['start_ms'] ??
+          target['start_ms'],
+    );
+    if (atMs != null && atMs.isFinite) {
+      for (int i = 0; i < clips.length; i++) {
+        final clip = clips[i];
+        final endMs = clip.startMs + clip.lengthMs;
+        if (atMs >= clip.startMs && atMs <= endMs) {
+          return i;
+        }
+      }
+      int nearest = 0;
+      double nearestDist = (clips.first.startMs - atMs).abs();
+      for (int i = 1; i < clips.length; i++) {
+        final dist = (clips[i].startMs - atMs).abs();
+        if (dist < nearestDist) {
+          nearest = i;
+          nearestDist = dist;
+        }
+      }
+      return nearest;
+    }
+
+    return clips.length - 1;
+  }
+
+  List<AutomationPoint> _automationTemplatePointsRelative(
+    String templateRaw,
+    double lengthMs, {
+    required double startValue,
+    required double endValue,
+    String direction = 'up',
+  }) {
+    final safeLength = lengthMs.clamp(80.0, double.infinity).toDouble();
+    final start = startValue.clamp(0.0, 1.0).toDouble();
+    final end = endValue.clamp(0.0, 1.0).toDouble();
+    final template = templateRaw.trim().toLowerCase();
+    final dirDown = direction.trim().toLowerCase() == 'down';
+
+    if (template == 'sidechain' ||
+        template == 'sidechain_pump' ||
+        template == 'pump') {
+      return <AutomationPoint>[
+        AutomationPoint(x: 0.0, volume: 1.0),
+        AutomationPoint(x: safeLength * 0.08, volume: 0.14),
+        AutomationPoint(x: safeLength * 0.36, volume: 0.78),
+        AutomationPoint(x: safeLength, volume: 1.0),
+      ];
+    }
+
+    if (template == 'reverb_tail' ||
+        template == 'tail' ||
+        template == 'decay') {
+      return <AutomationPoint>[
+        AutomationPoint(x: 0.0, volume: 0.05),
+        AutomationPoint(x: safeLength * 0.12, volume: 1.0),
+        AutomationPoint(x: safeLength * 0.45, volume: 0.56),
+        AutomationPoint(x: safeLength, volume: 0.12),
+      ];
+    }
+
+    if (template == 'filter_sweep' ||
+        template == 'sweep' ||
+        template == 'lowpass_sweep' ||
+        template == 'highpass_sweep') {
+      final from = dirDown ? 1.0 : 0.0;
+      final to = dirDown ? 0.0 : 1.0;
+      return <AutomationPoint>[
+        AutomationPoint(x: 0.0, volume: from),
+        AutomationPoint(x: safeLength, volume: to),
+      ];
+    }
+
+    return <AutomationPoint>[
+      AutomationPoint(x: 0.0, volume: start),
+      AutomationPoint(x: safeLength, volume: end),
+    ];
+  }
+
+  Future<void> _applyAutomationEditAction(Map<String, dynamic> data) async {
+    final target = _actionTarget(data);
+    final rawOperation =
+        (data['operation'] ?? '').toString().trim().toLowerCase();
+    var operation = _normalizeAutomationEditOperation(rawOperation);
+    if (operation == 'clear') {
+      final clearScope = (data['clear_scope'] ??
+              target['clear_scope'] ??
+              data['scope'] ??
+              target['scope'] ??
+              '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (clearScope.contains('clip')) {
+        operation = 'clear_clips';
+      }
+    }
+    final clipIndex = _resolveClipIndexFromActionTarget(data);
+    final row = _resolveRowIndexFromActionTarget(
+      data,
+      fallbackClipIndex: clipIndex,
+    );
+    if (row == null) {
+      _insertAssistantChatText(
+          "I couldn't resolve which track automation to edit.");
+      return;
+    }
+
+    final pluginIntent = _isPluginAutomationIntent(data);
+    final targetId = _resolveAutomationTargetIdFromAction(
+      row,
+      data,
+      allowVolumeFallback: !pluginIntent,
+    );
+    if (targetId == null || targetId.isEmpty) {
+      final hasPluginTargets = (_rowAutomationTargets[row] ?? const {})
+          .values
+          .any((meta) => !meta.isVolume);
+      if (pluginIntent) {
+        if (!hasPluginTargets) {
+          _insertAssistantChatText(
+              "That track has no automatable plugin parameters yet. Add an effect first.");
+        } else {
+          _insertAssistantChatText(
+              "I couldn't resolve which plugin parameter to automate. Specify plugin + parameter (for example: effect_name + param_name).");
+        }
+      } else {
+        _insertAssistantChatText(
+            "I couldn't resolve which automation lane to edit.");
+      }
+      return;
+    }
+    final targetMeta = _rowAutomationTargets[row]?[targetId] ??
+        _fallbackAutomationTargetMeta(targetId);
+    final valueMode = (data['value_mode'] ??
+            target['value_mode'] ??
+            data['value_domain'] ??
+            target['value_domain'] ??
+            '')
+        .toString();
+    final normalizedTemplate = (data['template'] ??
+            target['template'] ??
+            data['pattern'] ??
+            target['pattern'] ??
+            '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final defaultSpanMs = (60000.0 / _tempo.clamp(1.0, 400.0) * 4.0)
+        .clamp(120.0, _maxAutomationTimelineMs())
+        .toDouble();
+
+    Future<void> applyClipList(
+      List<AutomationClipSnapshot> nextClips, {
+      List<AutomationClipSnapshot>? beforeOverride,
+    }) async {
+      final oldClips = _copyAutomationClipList(
+        beforeOverride ?? _clipsForAutomationTarget(row, targetId),
+      );
+      final safeClips =
+          _sanitizeAutomationClipsForTarget(row, targetId, nextClips);
+      if (_automationClipListsEqual(oldClips, safeClips)) {
+        return;
+      }
+      await _setAutomationClipsForTargetWithUndo(
+        row,
+        targetId,
+        safeClips,
+        oldClipsOverride: oldClips,
+      );
+    }
+
+    if (operation == 'clear_clips') {
+      await applyClipList(const <AutomationClipSnapshot>[]);
+      _showSmallNotice('Cleared automation clips.');
+      return;
+    }
+
+    final isKickSyncedSidechainTemplate = operation == 'apply_template' &&
+        (normalizedTemplate == 'sidechain_from_kick' ||
+            normalizedTemplate == 'kick_sidechain' ||
+            normalizedTemplate == 'duck_to_kick' ||
+            normalizedTemplate == 'kick_duck');
+    if (isKickSyncedSidechainTemplate) {
+      final sourceClipIndex =
+          _resolveKickSourceClipIndexFromAction(data, targetRow: row);
+      if (sourceClipIndex == null ||
+          sourceClipIndex < 0 ||
+          sourceClipIndex >= _audioTracks.length) {
+        _insertAssistantChatText(
+            "I couldn't find a kick source clip for sidechain automation.");
+        return;
+      }
+      final sourceClip = _audioTracks[sourceClipIndex];
+      if (sourceClip.isMidi) {
+        _insertAssistantChatText(
+            'Kick-synced sidechain needs an audio source clip.');
+        return;
+      }
+
+      final lengthMs = (_toActionDouble(
+                data['length_ms'] ??
+                    target['length_ms'] ??
+                    data['duration_ms'] ??
+                    target['duration_ms'],
+              ) ??
+              (60000.0 / _tempo.clamp(1.0, 400.0)))
+          .clamp(80.0, _maxAutomationTimelineMs())
+          .toDouble();
+      final minSpacingMs = (_toActionDouble(
+                data['min_spacing_ms'] ??
+                    target['min_spacing_ms'] ??
+                    data['event_spacing_ms'] ??
+                    target['event_spacing_ms'],
+              ) ??
+              math.max(80.0, lengthMs * 0.42))
+          .clamp(40.0, 4000.0)
+          .toDouble();
+      final thresholdStd = (_toActionDouble(
+                data['transient_threshold_std'] ??
+                    target['transient_threshold_std'] ??
+                    data['transient_sensitivity'] ??
+                    target['transient_sensitivity'] ??
+                    data['sensitivity'] ??
+                    target['sensitivity'],
+              ) ??
+              1.25)
+          .clamp(0.25, 4.0)
+          .toDouble();
+      final lowpassHz = (_toActionDouble(
+                data['kick_lowpass_hz'] ??
+                    target['kick_lowpass_hz'] ??
+                    data['lowpass_hz'] ??
+                    target['lowpass_hz'],
+              ) ??
+              220.0)
+          .clamp(80.0, 1200.0)
+          .toDouble();
+      final maxEvents = (_toActionInt(
+                data['max_events'] ?? target['max_events'],
+              ) ??
+              256)
+          .clamp(1, 2048);
+      final offsetMs = (_toActionDouble(
+                data['offset_ms'] ?? target['offset_ms'],
+              ) ??
+              0.0)
+          .toDouble();
+      final fromMs = _toActionDouble(data['from_ms'] ?? target['from_ms']);
+      final toMs = _toActionDouble(data['to_ms'] ?? target['to_ms']);
+
+      var eventMs = await _detectKickTimelineOnsetsMsForClip(
+        sourceClip,
+        cutoffHz: lowpassHz,
+        thresholdStd: thresholdStd,
+        minSpacingMs: minSpacingMs,
+        maxEvents: maxEvents,
+      );
+      if (eventMs.isEmpty) {
+        _insertAssistantChatText(
+            'No kick transients were detected for automatic sidechain.');
+        return;
+      }
+
+      if (fromMs != null || toMs != null) {
+        final startWindow = (fromMs ?? 0.0).toDouble();
+        final endWindow = (toMs ?? _maxAutomationTimelineMs()).toDouble();
+        eventMs = eventMs
+            .where((x) => x >= startWindow && x <= endWindow)
+            .toList(growable: false);
+      }
+      if (eventMs.isEmpty) {
+        _insertAssistantChatText(
+            'Kick transients were found, but none were in the requested time range.');
+        return;
+      }
+
+      final recoverValue = _normalizedActionValueForTarget(
+        data['recover_value'] ??
+            data['end_value'] ??
+            data['max_value'] ??
+            target['recover_value'] ??
+            target['end_value'] ??
+            target['max_value'],
+        targetMeta,
+        valueMode: valueMode,
+        fallback: targetId == 'volume' ? 1.0 : 0.8,
+      );
+      final duckValue = _normalizedActionValueForTarget(
+        data['duck_value'] ??
+            data['min_value'] ??
+            data['depth'] ??
+            target['duck_value'] ??
+            target['min_value'] ??
+            target['depth'],
+        targetMeta,
+        valueMode: valueMode,
+        fallback: targetId == 'volume' ? 0.16 : 0.2,
+      );
+      final attackMs =
+          (_toActionDouble(data['attack_ms'] ?? target['attack_ms']) ??
+                  math.min(22.0, lengthMs * 0.2))
+              .clamp(2.0, math.max(2.0, lengthMs * 0.7))
+              .toDouble();
+      final releaseRatio =
+          (_toActionDouble(data['release_ratio'] ?? target['release_ratio']) ??
+                  0.38)
+              .clamp(0.08, 0.95)
+              .toDouble();
+      final recoveryMs =
+          (lengthMs * releaseRatio).clamp(attackMs + 1.0, lengthMs).toDouble();
+      final midValue =
+          (duckValue + (recoverValue - duckValue) * 0.58).clamp(0.0, 1.0);
+      final replaceExisting = _toActionBool(
+        data['replace_existing'] ?? target['replace_existing'],
+        fallback: false,
+      );
+
+      final before = _copyAutomationClipList(_clipsForAutomationTarget(
+        row,
+        targetId,
+      ));
+      final working = List<AutomationClipSnapshot>.from(before);
+      final requestedLane = math.max(
+        0,
+        _toActionInt(
+              data['lane_index'] ??
+                  target['lane_index'] ??
+                  data['lane'] ??
+                  target['lane'],
+            ) ??
+            0,
+      );
+      if (replaceExisting && eventMs.isNotEmpty) {
+        final regionStart = (eventMs.first + offsetMs) - lengthMs * 0.25;
+        final regionEnd = (eventMs.last + offsetMs) + lengthMs * 1.1;
+        working.removeWhere((clip) {
+          final clipEnd = clip.startMs + clip.lengthMs;
+          return clipEnd >= regionStart && clip.startMs <= regionEnd;
+        });
+      }
+
+      final maxTimelineMs = _maxAutomationTimelineMs();
+      int created = 0;
+      final label = (data['label'] ??
+              target['label'] ??
+              _automationTargetLabelFor(row, targetId))
+          .toString()
+          .trim();
+      for (final onsetMs in eventMs) {
+        final startMs = (onsetMs + offsetMs).clamp(0.0, maxTimelineMs);
+        if (startMs + 4.0 >= maxTimelineMs) continue;
+        final clippedLength =
+            math.min(lengthMs, math.max(40.0, maxTimelineMs - startMs));
+        if (clippedLength <= 40.0) continue;
+
+        final points = <AutomationPoint>[
+          AutomationPoint(x: 0.0, volume: recoverValue),
+          AutomationPoint(
+              x: attackMs.clamp(1.0, clippedLength), volume: duckValue),
+          AutomationPoint(
+              x: recoveryMs.clamp(attackMs + 1.0, clippedLength),
+              volume: midValue.toDouble()),
+          AutomationPoint(x: clippedLength, volume: recoverValue),
+        ];
+
+        working.add(
+          AutomationClipSnapshot(
+            id: _newAutomationClipId(row, targetId),
+            targetId: targetId,
+            label: label.isEmpty
+                ? _automationTargetLabelFor(row, targetId)
+                : label,
+            row: row,
+            lane: requestedLane,
+            startMs: startMs.toDouble(),
+            lengthMs: clippedLength.toDouble(),
+            muted: false,
+            points: points,
+          ),
+        );
+        created++;
+      }
+
+      if (created <= 0) {
+        _insertAssistantChatText(
+            "I couldn't place sidechain clips in the current timeline range.");
+        return;
+      }
+
+      await applyClipList(working, beforeOverride: before);
+      _showSmallNotice('Created $created kick-synced sidechain clips.');
+      return;
+    }
+
+    if (operation == 'create_clip' || operation == 'apply_template') {
+      final before = _copyAutomationClipList(_clipsForAutomationTarget(
+        row,
+        targetId,
+      ));
+      final startMs = (_toActionDouble(
+                data['start_ms'] ?? target['start_ms'] ?? data['at_ms'],
+              ) ??
+              _globalAudioClock.inMilliseconds.toDouble())
+          .clamp(0.0, _maxAutomationTimelineMs());
+      final lengthMs = (_toActionDouble(
+                data['length_ms'] ??
+                    target['length_ms'] ??
+                    data['duration_ms'] ??
+                    target['duration_ms'],
+              ) ??
+              _defaultAutomationClipLengthMs())
+          .clamp(80.0, _maxAutomationTimelineMs());
+      final startValue = _normalizedActionValueForTarget(
+        data['start_value'] ?? data['from_value'],
+        targetMeta,
+        valueMode: valueMode,
+        fallback: targetId == 'volume' ? 0.75 : 0.5,
+      );
+      final endValue = _normalizedActionValueForTarget(
+        data['end_value'] ?? data['to_value'],
+        targetMeta,
+        valueMode: valueMode,
+        fallback: targetId == 'volume' ? 0.75 : 0.5,
+      );
+      final template = normalizedTemplate;
+      final direction =
+          (data['direction'] ?? target['direction'] ?? 'up').toString();
+      final rawPoints = (data['points'] as List?) ?? const [];
+      final clipPoints = <AutomationPoint>[];
+      for (final raw in rawPoints) {
+        final m = _toActionMap(raw);
+        final x = _toActionDouble(m['x_ms'] ?? m['x'] ?? m['time_ms']);
+        final rawValue = m['value'] ??
+            m['volume'] ??
+            m['normalized_value'] ??
+            m['normalized'] ??
+            m['real_value'] ??
+            m['native_value'];
+        if (x == null || rawValue == null) continue;
+        final pointValueMode = (m['value_mode'] ?? valueMode).toString();
+        final normalized = _normalizedActionValueForTarget(
+          rawValue,
+          targetMeta,
+          valueMode: pointValueMode,
+          fallback: targetId == 'volume' ? 0.75 : 0.5,
+        );
+        clipPoints.add(
+          AutomationPoint(
+            x: x,
+            volume: normalized,
+          ),
+        );
+      }
+      final points = clipPoints.isNotEmpty
+          ? clipPoints
+          : _automationTemplatePointsRelative(
+              template.isEmpty ? 'ramp' : template,
+              lengthMs,
+              startValue: startValue,
+              endValue: endValue,
+              direction: direction,
+            );
+      final label = (data['label'] ??
+              target['label'] ??
+              _automationTargetLabelFor(row, targetId))
+          .toString()
+          .trim();
+      final muted = _toActionBool(
+        data['muted'] ?? target['muted'],
+        fallback: false,
+      );
+      final requestedLane = math.max(
+        0,
+        _toActionInt(
+              data['lane_index'] ??
+                  target['lane_index'] ??
+                  data['lane'] ??
+                  target['lane'],
+            ) ??
+            0,
+      );
+      final clip = AutomationClipSnapshot(
+        id: _newAutomationClipId(row, targetId),
+        targetId: targetId,
+        label: label.isEmpty ? _automationTargetLabelFor(row, targetId) : label,
+        row: row,
+        lane: requestedLane,
+        startMs: startMs.toDouble(),
+        lengthMs: lengthMs.toDouble(),
+        muted: muted,
+        points: points,
+      );
+      await applyClipList([...before, clip], beforeOverride: before);
+      _showSmallNotice('Created automation clip.');
+      return;
+    }
+
+    if (operation == 'duplicate_clip') {
+      final before = _copyAutomationClipList(_clipsForAutomationTarget(
+        row,
+        targetId,
+      ));
+      final sourceIndex =
+          _resolveAutomationClipIndexFromAction(row, targetId, data);
+      if (sourceIndex == null ||
+          sourceIndex < 0 ||
+          sourceIndex >= before.length) {
+        _insertAssistantChatText(
+            "I couldn't find an automation clip to duplicate.");
+        return;
+      }
+      final source = before[sourceIndex];
+      final nextStart = (_toActionDouble(
+                data['start_ms'] ??
+                    target['start_ms'] ??
+                    data['paste_start_ms'] ??
+                    target['paste_start_ms'],
+              ) ??
+              (source.startMs + source.lengthMs))
+          .toDouble();
+      final duplicated = source.copyWith(
+        id: _newAutomationClipId(row, targetId),
+        startMs: nextStart,
+      );
+      await applyClipList([...before, duplicated], beforeOverride: before);
+      _showSmallNotice('Duplicated automation clip.');
+      return;
+    }
+
+    if (operation == 'move_clip' ||
+        operation == 'delete_clip' ||
+        operation == 'mute_clip' ||
+        operation == 'unmute_clip' ||
+        operation == 'toggle_clip_mute' ||
+        operation == 'set_clip_points') {
+      final before = _copyAutomationClipList(_clipsForAutomationTarget(
+        row,
+        targetId,
+      ));
+      final clipIdx =
+          _resolveAutomationClipIndexFromAction(row, targetId, data);
+      if (clipIdx == null || clipIdx < 0 || clipIdx >= before.length) {
+        _insertAssistantChatText("I couldn't find that automation clip.");
+        return;
+      }
+
+      if (operation == 'delete_clip') {
+        final next = List<AutomationClipSnapshot>.from(before)
+          ..removeAt(clipIdx);
+        await applyClipList(next, beforeOverride: before);
+        _showSmallNotice('Deleted automation clip.');
+        return;
+      }
+
+      final working = List<AutomationClipSnapshot>.from(before);
+      final current = working[clipIdx];
+
+      if (operation == 'move_clip') {
+        final explicitStartMs = _toActionDouble(
+          data['start_ms'] ??
+              target['start_ms'] ??
+              data['new_start_ms'] ??
+              target['new_start_ms'],
+        );
+        final deltaMs = _toActionDouble(
+          data['delta_ms'] ??
+              target['delta_ms'] ??
+              data['offset_ms'] ??
+              target['offset_ms'] ??
+              data['shift_ms'] ??
+              target['shift_ms'],
+        );
+        final direction = (data['direction'] ?? target['direction'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        final stepMs = (_toActionDouble(
+                  data['step_ms'] ??
+                      target['step_ms'] ??
+                      data['amount_ms'] ??
+                      target['amount_ms'],
+                ) ??
+                (defaultSpanMs / 4.0))
+            .abs()
+            .clamp(20.0, _maxAutomationTimelineMs());
+        final directionDelta = switch (direction) {
+          'left' || 'earlier' || 'back' || 'backward' => -stepMs,
+          'right' || 'later' || 'forward' => stepMs,
+          _ => 0.0,
+        };
+        final startMs = explicitStartMs ??
+            (current.startMs + (deltaMs ?? 0.0) + directionDelta);
+        final lengthMs = _toActionDouble(
+              data['length_ms'] ??
+                  target['length_ms'] ??
+                  data['duration_ms'] ??
+                  target['duration_ms'],
+            ) ??
+            current.lengthMs;
+        final laneIndex = _toActionInt(
+          data['lane_index'] ??
+              target['lane_index'] ??
+              data['lane'] ??
+              target['lane'],
+        );
+        final nextLane =
+            laneIndex == null ? current.lane : math.max(0, laneIndex);
+        if ((startMs - current.startMs).abs() < 0.5 &&
+            (lengthMs - current.lengthMs).abs() < 0.5 &&
+            nextLane == current.lane) {
+          _insertAssistantChatText(
+              "I couldn't resolve where to move that automation clip.");
+          return;
+        }
+        working[clipIdx] = current.copyWith(
+          startMs: startMs,
+          lengthMs: lengthMs,
+          lane: nextLane,
+        );
+        await applyClipList(working, beforeOverride: before);
+        _showSmallNotice('Moved automation clip.');
+        return;
+      }
+
+      if (operation == 'mute_clip' ||
+          operation == 'unmute_clip' ||
+          operation == 'toggle_clip_mute') {
+        final nextMuted = switch (operation) {
+          'mute_clip' => true,
+          'unmute_clip' => false,
+          _ => !current.muted,
+        };
+        working[clipIdx] = current.copyWith(muted: nextMuted);
+        await applyClipList(working, beforeOverride: before);
+        _showSmallNotice(
+            nextMuted ? 'Muted automation clip.' : 'Unmuted automation clip.');
+        return;
+      }
+
+      if (operation == 'set_clip_points') {
+        final rawPoints = (data['points'] as List?) ?? const [];
+        final points = <AutomationPoint>[];
+        for (final raw in rawPoints) {
+          final m = _toActionMap(raw);
+          final x = _toActionDouble(m['x_ms'] ?? m['x'] ?? m['time_ms']);
+          final rawValue = m['value'] ??
+              m['volume'] ??
+              m['normalized_value'] ??
+              m['normalized'] ??
+              m['real_value'] ??
+              m['native_value'];
+          if (x == null || rawValue == null) continue;
+          final pointValueMode = (m['value_mode'] ?? valueMode).toString();
+          final normalized = _normalizedActionValueForTarget(
+            rawValue,
+            targetMeta,
+            valueMode: pointValueMode,
+            fallback: targetId == 'volume' ? 0.75 : 0.5,
+          );
+          points.add(AutomationPoint(x: x, volume: normalized));
+        }
+        if (points.isEmpty) {
+          _insertAssistantChatText("I need clip automation points to apply.");
+          return;
+        }
+        working[clipIdx] = current.copyWith(points: points);
+        await applyClipList(working, beforeOverride: before);
+        _showSmallNotice('Updated automation clip points.');
+        return;
+      }
+    }
+
+    if (operation == 'clear') {
+      if (targetId == 'volume') {
+        final maxMs =
+            math.max(1.0, _audioOnlyOverallDuration.inMilliseconds.toDouble());
+        await _setRowAutomationWithUndo(row, <AutomationPoint>[
+          AutomationPoint(x: 0.0, volume: 1.0),
+          AutomationPoint(x: maxMs, volume: 1.0),
+        ]);
+      } else {
+        await _setAutomationTargetPointsWithUndo(
+          row,
+          targetId,
+          _defaultAutomationPointsForTarget(row, targetId),
+        );
+      }
+      _showSmallNotice('Cleared automation lane.');
+      return;
+    }
+
+    if (operation == 'add_ramp') {
+      final rawFromMs = _toActionDouble(
+            data['from_ms'] ??
+                target['from_ms'] ??
+                data['start_ms'] ??
+                target['start_ms'],
+          ) ??
+          _globalAudioClock.inMilliseconds.toDouble();
+      final fromMs =
+          rawFromMs.clamp(0.0, _maxAutomationTimelineMs()).toDouble();
+      final rawToMs = _toActionDouble(
+            data['to_ms'] ??
+                target['to_ms'] ??
+                data['end_ms'] ??
+                target['end_ms'],
+          ) ??
+          (fromMs + defaultSpanMs);
+      final toMs = math.max(fromMs + 40.0, rawToMs);
+      final direction = (data['direction'] ?? target['direction'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+
+      final existingValue = _resolvedAutomationValueAtMs(
+        row,
+        targetId,
+        fromMs,
+      );
+      final parsedStartValue = _normalizedActionValueForTarget(
+        data['start_value'] ?? data['from_value'],
+        targetMeta,
+        valueMode: valueMode,
+        fallback: existingValue,
+      );
+      final parsedEndValue = _normalizedActionValueForTarget(
+        data['end_value'] ?? data['to_value'],
+        targetMeta,
+        valueMode: valueMode,
+        fallback: direction == 'down'
+            ? (parsedStartValue - 0.35).clamp(0.0, 1.0).toDouble()
+            : direction == 'up'
+                ? (parsedStartValue + 0.35).clamp(0.0, 1.0).toDouble()
+                : parsedStartValue,
+      );
+      final next = _pointsForAutomationTarget(row, targetId)
+          .map((p) => p.copy())
+          .toList(growable: true);
+      next.add(AutomationPoint(x: fromMs, volume: parsedStartValue));
+      next.add(AutomationPoint(x: toMs, volume: parsedEndValue));
+      await _setAutomationTargetPointsWithUndo(row, targetId, next);
+      _showSmallNotice('Added automation ramp.');
+      return;
+    }
+
+    final rawPoints = (data['points'] as List?) ?? const [];
+    final points = <AutomationPoint>[];
+    for (final raw in rawPoints) {
+      final m = _toActionMap(raw);
+      final x = _toActionDouble(m['x_ms'] ?? m['x'] ?? m['time_ms']);
+      final rawValue = m['value'] ??
+          m['volume'] ??
+          m['normalized_value'] ??
+          m['normalized'] ??
+          m['real_value'] ??
+          m['native_value'];
+      if (x == null || rawValue == null) continue;
+      final pointValueMode = (m['value_mode'] ?? valueMode).toString();
+      final normalized = _normalizedActionValueForTarget(
+        rawValue,
+        targetMeta,
+        valueMode: pointValueMode,
+        fallback: targetId == 'volume' ? 1.0 : 0.5,
+      );
+      points.add(AutomationPoint(x: x, volume: normalized));
+    }
+
+    if (points.isEmpty) {
+      if (operation == 'set_points') {
+        final fromMs = (_toActionDouble(
+                  data['from_ms'] ??
+                      target['from_ms'] ??
+                      data['start_ms'] ??
+                      target['start_ms'],
+                ) ??
+                _globalAudioClock.inMilliseconds.toDouble())
+            .clamp(0.0, _maxAutomationTimelineMs())
+            .toDouble();
+        final toMs = (_toActionDouble(
+                  data['to_ms'] ??
+                      target['to_ms'] ??
+                      data['end_ms'] ??
+                      target['end_ms'],
+                ) ??
+                (fromMs + defaultSpanMs))
+            .clamp(fromMs + 40.0, _maxAutomationTimelineMs())
+            .toDouble();
+        final direction = (data['direction'] ?? target['direction'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        final base = _resolvedAutomationValueAtMs(
+          row,
+          targetId,
+          fromMs,
+        );
+        final v0 = _normalizedActionValueForTarget(
+          data['start_value'] ?? data['from_value'] ?? data['value'],
+          targetMeta,
+          valueMode: valueMode,
+          fallback: base,
+        );
+        final v1 = _normalizedActionValueForTarget(
+          data['end_value'] ?? data['to_value'],
+          targetMeta,
+          valueMode: valueMode,
+          fallback: direction == 'down'
+              ? (v0 - 0.35).clamp(0.0, 1.0).toDouble()
+              : direction == 'up'
+                  ? (v0 + 0.35).clamp(0.0, 1.0).toDouble()
+                  : v0,
+        );
+        await _setAutomationTargetPointsWithUndo(
+            row, targetId, <AutomationPoint>[
+          AutomationPoint(x: fromMs, volume: v0),
+          AutomationPoint(x: toMs, volume: v1),
+        ]);
+        _showSmallNotice('Set automation points.');
+        return;
+      }
+      _insertAssistantChatText(
+          "I need automation points to apply (time/value pairs).");
+      return;
+    }
+
+    await _setAutomationTargetPointsWithUndo(row, targetId, points);
+    _showSmallNotice('Set automation points.');
+  }
+
+  int? _pitchClassFromToken(String token) {
+    return AssistantActionUtils.pitchClassFromToken(token);
+  }
+
+  int? _midiPitchFromRaw(dynamic raw, {int fallbackOctave = 3}) {
+    return AssistantActionUtils.midiPitchFromRaw(
+      raw,
+      fallbackOctave: fallbackOctave,
+    );
+  }
+
+  int? _rootMidiFromChordToken(String token, {int octave = 2}) {
+    return AssistantActionUtils.rootMidiFromChordToken(token, octave: octave);
+  }
+
+  List<String> _progressionTokensFromActionData(Map<String, dynamic> data) {
+    final target = _actionTarget(data);
+    final rawProgression = data['progression'] ??
+        target['progression'] ??
+        data['chords'] ??
+        target['chords'] ??
+        data['pattern'] ??
+        target['pattern'] ??
+        data['sequence'] ??
+        target['sequence'] ??
+        data['text'] ??
+        target['text'] ??
+        data['request'] ??
+        target['request'];
+    return AssistantActionUtils.progressionTokensFromRaw(rawProgression);
+  }
+
+  List<MidiNote> _fallbackMidiNotesFromProgression(Map<String, dynamic> data) {
+    final tokens = _progressionTokensFromActionData(data);
+    if (tokens.isEmpty) return const <MidiNote>[];
+
+    final beatsPerChord = _toActionDouble(
+            data['beats_per_chord'] ?? data['chord_length_beats']) ??
+        4.0;
+    final notesPerChord =
+        (_toActionInt(data['notes_per_chord']) ?? 4).clamp(1, 8).toInt();
+    final octave = (_toActionInt(data['octave']) ?? 2).clamp(-1, 8).toInt();
+    final velocity =
+        (_toActionDouble(data['velocity']) ?? 0.78).clamp(0.2, 1.0).toDouble();
+
+    return AssistantActionUtils.fallbackMidiNotesFromProgression(
+      progressionRaw: tokens,
+      beatsPerChord: beatsPerChord,
+      notesPerChord: notesPerChord,
+      octave: octave,
+      velocity: velocity,
+      noteIdPrefix: 'ai_prog',
+    );
+  }
+
+  List<MidiNote> _midiNotesFromActionData(Map<String, dynamic> data) {
+    final rawNotes = (data['notes'] as List?) ?? const [];
+    final out = <MidiNote>[];
+    int i = 0;
+    for (final raw in rawNotes) {
+      final m = _toActionMap(raw);
+      final pitch = _midiPitchFromRaw(
+        m['pitch'] ?? m['midi'] ?? m['note'] ?? m['note_name'],
+      );
+      final startBeat = _toActionDouble(
+        m['start_beat'] ?? m['startBeat'] ?? m['beat'] ?? m['start'],
+      );
+      final lengthBeats = _toActionDouble(
+              m['length_beats'] ?? m['lengthBeat'] ?? m['length']) ??
+          _toActionDouble(m['duration_beats'] ?? m['duration']);
+      final velocity = _toActionDouble(m['velocity']) ?? 0.8;
+      if (pitch == null || startBeat == null || lengthBeats == null) continue;
+      out.add(
+        MidiNote(
+          id: 'ai_note_${DateTime.now().microsecondsSinceEpoch}_${i++}',
+          pitch: pitch.clamp(0, 127).toInt(),
+          startBeat: math.max(0.0, startBeat),
+          lengthBeats: math.max(0.0625, lengthBeats),
+          velocity: velocity.clamp(0.0, 1.0).toDouble(),
+        ),
+      );
+    }
+    return out;
+  }
+
+  int _midiSubdivisionFromActionData(
+    Map<String, dynamic> data, {
+    int fallback = 16,
+  }) {
+    final target = _actionTarget(data);
+
+    int? parseSubdivision(dynamic raw) {
+      if (raw is num) return raw.round();
+      if (raw is! String) return null;
+
+      final text = raw.trim().toLowerCase();
+      if (text.isEmpty) return null;
+
+      int? out;
+      final fraction = RegExp(r'^1\s*/\s*(\d+)$').firstMatch(text);
+      if (fraction != null) {
+        out = int.tryParse(fraction.group(1) ?? '');
+      }
+      out ??= int.tryParse(text);
+      if (out == null) {
+        final embedded = RegExp(r'(\d+)').firstMatch(text);
+        if (embedded != null) {
+          out = int.tryParse(embedded.group(1) ?? '');
+        }
+      }
+      out ??= () {
+        if (text.contains('whole')) return 1;
+        if (text.contains('half')) return 2;
+        if (text.contains('quarter')) return 4;
+        if (text.contains('8th') || text.contains('eighth')) return 8;
+        if (text.contains('16th') || text.contains('sixteenth')) return 16;
+        if (text.contains('32nd') || text.contains('thirty-second')) return 32;
+        if (text.contains('64th') || text.contains('sixty-fourth')) return 64;
+        return null;
+      }();
+      if (out == null || out <= 0) return null;
+      if (text.contains('triplet')) {
+        out = math.max(1, ((out * 3.0) / 2.0).round());
+      }
+      return out;
+    }
+
+    int? resolved;
+    for (final raw in <dynamic>[
+      data['subdivision'],
+      target['subdivision'],
+      data['subdivision_divisor'],
+      target['subdivision_divisor'],
+      data['grid'],
+      target['grid'],
+      data['resolution'],
+      target['resolution'],
+      data['note_value'],
+      target['note_value'],
+    ]) {
+      final parsed = parseSubdivision(raw);
+      if (parsed != null) {
+        resolved = parsed;
+        break;
+      }
+    }
+
+    if (resolved == null) {
+      final stepBeats = _toActionDouble(
+        data['step_beats'] ??
+            target['step_beats'] ??
+            data['beats_per_slice'] ??
+            target['beats_per_slice'] ??
+            data['slice_beats'] ??
+            target['slice_beats'],
+      );
+      if (stepBeats != null && stepBeats.isFinite && stepBeats > 0.0) {
+        resolved = (4.0 / stepBeats).round();
+      }
+    }
+
+    return (resolved ?? fallback).clamp(1, 128).toInt();
+  }
+
+  List<MidiNote> _chopMidiNotesFromActionData(
+    Map<String, dynamic> data,
+    List<MidiNote> sourceNotes, {
+    int? subdivision,
+  }) {
+    final target = _actionTarget(data);
+    final safeSubdivision = subdivision ??
+        _midiSubdivisionFromActionData(
+          data,
+          fallback: 16,
+        );
+    final stepBeats = _toActionDouble(
+      data['step_beats'] ??
+          target['step_beats'] ??
+          data['beats_per_slice'] ??
+          target['beats_per_slice'] ??
+          data['slice_beats'] ??
+          target['slice_beats'],
+    );
+    final sustainRatio = (_toActionDouble(
+              data['sustain_ratio'] ??
+                  target['sustain_ratio'] ??
+                  data['gate'] ??
+                  target['gate'] ??
+                  data['length_ratio'] ??
+                  target['length_ratio'],
+            ) ??
+            1.0)
+        .clamp(0.05, 1.0)
+        .toDouble();
+    final minLengthBeats = (_toActionDouble(
+              data['min_length_beats'] ?? target['min_length_beats'],
+            ) ??
+            0.03125)
+        .clamp(0.0005, 4.0)
+        .toDouble();
+    final velocityDecayPerSlice = (_toActionDouble(
+              data['velocity_decay_per_slice'] ??
+                  target['velocity_decay_per_slice'] ??
+                  data['decay_per_slice'] ??
+                  target['decay_per_slice'] ??
+                  data['velocity_decay'] ??
+                  target['velocity_decay'] ??
+                  data['stutter_decay'] ??
+                  target['stutter_decay'],
+            ) ??
+            0.0)
+        .clamp(-1.0, 1.0)
+        .toDouble();
+    final velocityJitter = (_toActionDouble(
+              data['velocity_jitter'] ??
+                  target['velocity_jitter'] ??
+                  data['humanize_velocity_jitter'] ??
+                  target['humanize_velocity_jitter'],
+            ) ??
+            0.0)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final velocityFloor = (_toActionDouble(
+              data['velocity_floor'] ??
+                  target['velocity_floor'] ??
+                  data['min_velocity'] ??
+                  target['min_velocity'],
+            ) ??
+            0.05)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final fromBeat = _toActionDouble(
+      data['from_beat'] ?? target['from_beat'] ?? data['start_beat'],
+    );
+    final toBeat = _toActionDouble(
+      data['to_beat'] ?? target['to_beat'] ?? data['end_beat'],
+    );
+
+    return AssistantActionUtils.chopMidiNotes(
+      notes: sourceNotes,
+      subdivision: safeSubdivision,
+      stepBeats: stepBeats,
+      sustainRatio: sustainRatio,
+      minLengthBeats: minLengthBeats,
+      velocityDecayPerSlice: velocityDecayPerSlice,
+      velocityJitter: velocityJitter,
+      velocityFloor: velocityFloor,
+      fromBeat: fromBeat,
+      toBeat: toBeat,
+      noteIdPrefix: 'ai_chop',
+    );
+  }
+
+  Future<void> _applyMidiComposeAction(Map<String, dynamic> data) async {
+    final operation = _normalizeMidiComposeOperation(
+      (data['operation'] ?? '').toString().trim().toLowerCase(),
+    );
+    final target = _actionTarget(data);
+    int? clipIndex = _resolveSingleClipIndexWithFallback(
+      data,
+      requireMidi: true,
+    );
+    if (clipIndex == null) {
+      final rowHint = _resolveRowIndexFromActionTarget(data);
+      if (rowHint != null) {
+        final midiCandidates = <int>[];
+        for (int i = 0; i < _audioTracks.length; i++) {
+          final clip = _audioTracks[i];
+          if (!clip.isMidi) continue;
+          if (clip.rowIndex != rowHint) continue;
+          midiCandidates.add(i);
+        }
+        clipIndex = _pickPreferredClipIndex(midiCandidates);
+      }
+    }
+
+    if (operation == 'chop_notes') {
+      if (clipIndex == null ||
+          clipIndex < 0 ||
+          clipIndex >= _audioTracks.length) {
+        _insertAssistantChatText(
+            "I couldn't resolve which MIDI clip to chop. Select a MIDI clip and ask again.");
+        return;
+      }
+      final clip = _audioTracks[clipIndex];
+      if (!clip.isMidi) {
+        _insertAssistantChatText('The selected clip is not a MIDI clip.');
+        return;
+      }
+      if (clip.midiNotes.isEmpty) {
+        _insertAssistantChatText('The target MIDI clip has no notes to chop.');
+        return;
+      }
+
+      final oldNotes = clip.midiNotes.map((n) => n.copy()).toList();
+      final oldParams = Map<String, double>.from(clip.instrumentParams);
+      final oldInstrumentId = clip.instrumentId;
+      final oldInstrumentName = clip.instrumentName;
+      final subdivision = _midiSubdivisionFromActionData(data, fallback: 16);
+      final decayPerSlice = (_toActionDouble(
+                data['velocity_decay_per_slice'] ??
+                    data['decay_per_slice'] ??
+                    data['velocity_decay'] ??
+                    data['stutter_decay'],
+              ) ??
+              0.0)
+          .toDouble();
+      final nextNotes = _chopMidiNotesFromActionData(
+        data,
+        oldNotes,
+        subdivision: subdivision,
+      );
+
+      if (_midiNotesEqual(oldNotes, nextNotes)) {
+        _showSmallNotice('MIDI notes already match that chop grid.');
+        return;
+      }
+
+      await _undoManager.execute(
+        EditMidiClipAction(
+          tracks: _audioTracks,
+          originalIndex: clipIndex,
+          oldNotes: oldNotes,
+          newNotes: nextNotes,
+          oldInstrumentId: oldInstrumentId,
+          oldInstrumentName: oldInstrumentName,
+          oldInstrumentParams: oldParams,
+          newInstrumentId: oldInstrumentId,
+          newInstrumentName: oldInstrumentName,
+          newInstrumentParams: oldParams,
+          applyToClip: (target, notesToApply, nextInstrumentId,
+              nextInstrumentName, nextParams) async {
+            target.midiNotes = notesToApply.map((n) => n.copy()).toList();
+            target.instrumentId = nextInstrumentId;
+            target.instrumentName = nextInstrumentName;
+            target.instrumentParams = Map<String, double>.from(nextParams);
+            target.sourceTempoBpm = _clampTempo(_tempo);
+            target.stretchToProjectTempo = true;
+            target.tempoStretchPreservePitch = true;
+            final updatedLive = await _updateMidiClipEventsLive(target);
+            if (updatedLive) {
+              final clipIdx = _clipIndexForEngineId(target.engineClipId);
+              if (clipIdx >= 0) {
+                await _syncClipTimingToEngine(clipIdx);
+              }
+              await _syncClipMixToEngine(target);
+              _queueMidiRenderCacheRefresh(target);
+              _updateOverallDurationIfNeeded();
+            } else {
+              await _rerenderMidiTrack(target);
+            }
+            if (mounted) setState(() {});
+          },
+        ),
+      );
+      final withDecay = decayPerSlice.abs() > 0.0001;
+      _showSmallNotice(
+        withDecay
+            ? 'Chopped MIDI notes to 1/$subdivision with velocity decay.'
+            : 'Chopped MIDI notes to 1/$subdivision.',
+      );
+      return;
+    }
+
+    var notes = _midiNotesFromActionData(data);
+    if (notes.isEmpty) {
+      notes = _fallbackMidiNotesFromProgression(data);
+    }
+    if (notes.isEmpty) {
+      _insertAssistantChatText(
+          "I need MIDI notes (or a chord progression) to write this part.");
+      return;
+    }
+
+    if (clipIndex == null ||
+        clipIndex < 0 ||
+        clipIndex >= _audioTracks.length) {
+      final row = _resolveRowIndexFromActionTarget(data) ??
+          (_rowCount > 0 ? _selectedRow.clamp(0, _rowCount - 1) : 0);
+      final instrumentId = (data['instrument_id'] ??
+              target['instrument_id'] ??
+              'mixroom.sub_bass')
+          .toString()
+          .trim();
+      final instrumentName = (data['instrument_name'] ??
+              target['instrument_name'] ??
+              _instrumentNameFromId(instrumentId))
+          .toString()
+          .trim();
+      final startMs = _toActionDouble(data['start_ms'] ?? target['start_ms']) ??
+          _globalAudioClock.inMilliseconds.toDouble();
+
+      await _addMidiTrack(
+        instrumentId: instrumentId,
+        instrumentName: instrumentName.isEmpty ? instrumentId : instrumentName,
+        instrumentParams:
+            _instrumentParamsFromSpec(_instrumentSpecById(instrumentId)),
+        midiNotes: notes,
+        row: row,
+        timeMs: math.max(0.0, startMs),
+        label: data['label']?.toString(),
+      );
+      _showSmallNotice('Created MIDI clip from AI notes.');
+      return;
+    }
+
+    final clip = _audioTracks[clipIndex];
+    if (!clip.isMidi) {
+      _insertAssistantChatText('The selected clip is not a MIDI clip.');
+      return;
+    }
+
+    final append = _toActionBool(
+      data['append'],
+      fallback: operation.contains('append'),
+    );
+    final oldNotes = clip.midiNotes.map((n) => n.copy()).toList();
+    final oldParams = Map<String, double>.from(clip.instrumentParams);
+    final oldInstrumentId = clip.instrumentId;
+    final oldInstrumentName = clip.instrumentName;
+
+    List<MidiNote> nextNotes = notes.map((n) => n.copy()).toList();
+    if (append) {
+      double appendStartBeat =
+          _toActionDouble(data['append_start_beat']) ?? 0.0;
+      final appendAtEnd = _toActionBool(data['append_at_end'], fallback: true);
+      if (appendAtEnd && oldNotes.isNotEmpty) {
+        appendStartBeat =
+            oldNotes.map((n) => n.startBeat + n.lengthBeats).reduce(math.max);
+      }
+      nextNotes = [
+        ...oldNotes.map((n) => n.copy()),
+        ...notes.map((n) => MidiNote(
+              id: 'ai_note_${DateTime.now().microsecondsSinceEpoch}_${n.pitch}',
+              pitch: n.pitch,
+              startBeat: n.startBeat + appendStartBeat,
+              lengthBeats: n.lengthBeats,
+              velocity: n.velocity,
+            )),
+      ];
+    }
+
+    await _undoManager.execute(
+      EditMidiClipAction(
+        tracks: _audioTracks,
+        originalIndex: clipIndex,
+        oldNotes: oldNotes,
+        newNotes: nextNotes,
+        oldInstrumentId: oldInstrumentId,
+        oldInstrumentName: oldInstrumentName,
+        oldInstrumentParams: oldParams,
+        newInstrumentId: oldInstrumentId,
+        newInstrumentName: oldInstrumentName,
+        newInstrumentParams: oldParams,
+        applyToClip: (target, notesToApply, nextInstrumentId,
+            nextInstrumentName, nextParams) async {
+          target.midiNotes = notesToApply.map((n) => n.copy()).toList();
+          target.instrumentId = nextInstrumentId;
+          target.instrumentName = nextInstrumentName;
+          target.instrumentParams = Map<String, double>.from(nextParams);
+          target.sourceTempoBpm = _clampTempo(_tempo);
+          target.stretchToProjectTempo = true;
+          target.tempoStretchPreservePitch = true;
+          final updatedLive = await _updateMidiClipEventsLive(target);
+          if (updatedLive) {
+            final clipIdx = _clipIndexForEngineId(target.engineClipId);
+            if (clipIdx >= 0) {
+              await _syncClipTimingToEngine(clipIdx);
+            }
+            await _syncClipMixToEngine(target);
+            _queueMidiRenderCacheRefresh(target);
+            _updateOverallDurationIfNeeded();
+          } else {
+            await _rerenderMidiTrack(target);
+          }
+          if (mounted) setState(() {});
+        },
+      ),
+    );
+    _showSmallNotice(
+      append ? 'Appended MIDI notes.' : 'Updated MIDI notes.',
+    );
+  }
+
+  Future<void> _applyStemSeparateAction(Map<String, dynamic> data) async {
+    final target = _actionTarget(data);
+    final clipIndices =
+        _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+    if (clipIndices.isEmpty) {
+      _insertAssistantChatText(
+          "I couldn't resolve which audio clip to separate.");
+      return;
+    }
+
+    final scope = (target['scope'] ?? data['scope'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final explicitMany =
+        ((data['clip_indices'] as List?)?.isNotEmpty ?? false) ||
+            ((target['clip_indices'] as List?)?.isNotEmpty ?? false) ||
+            scope == 'all' ||
+            scope == 'all_audio' ||
+            scope == 'selected' ||
+            scope == 'selection';
+
+    final targets = explicitMany
+        ? clipIndices
+        : <int>[
+            _resolveSingleClipIndexWithFallback(
+                  data,
+                  requireAudio: true,
+                ) ??
+                clipIndices.first
+          ];
+
+    int success = 0;
+    for (final clipIndex in targets) {
+      final ok = await _performStemSeparationForClip(
+        clipIndex,
+        showInlineFailureNotice: !explicitMany,
+      );
+      if (ok) success++;
+    }
+
+    if (success <= 0) {
+      if (explicitMany) {
+        _showSmallNotice('Stem separation failed for target clips.');
+      }
+      return;
+    }
+
+    if (explicitMany && success > 1) {
+      _showSmallNotice('Created stems for $success clips.');
+    }
+  }
+
+  Future<void> _applyRoleOverrideAction(Map<String, dynamic> data) async {
+    final operation =
+        (data['operation'] ?? 'set').toString().trim().toLowerCase();
+    final row = _resolveRowIndexFromActionTarget(data);
+    if (row == null) {
+      _insertAssistantChatText(
+          "I couldn't resolve which track role to update.");
+      return;
+    }
+
+    if (operation == 'clear' ||
+        operation == 'remove' ||
+        operation == 'unset' ||
+        operation == 'delete') {
+      final cleared = _chatPipeline.clearRoleOverride(row);
+      if (cleared) {
+        _showSmallNotice('Cleared role override for Track ${row + 1}.');
+      } else {
+        _showSmallNotice('Track ${row + 1} had no role override set.');
+      }
+      return;
+    }
+
+    final target = _actionTarget(data);
+    final role = (data['role'] ?? target['role'] ?? '').toString().trim();
+    if (role.isEmpty) {
+      _insertAssistantChatText(
+          'I need a role value to apply (vocals, drums, bass, guitar, synth, other).');
+      return;
+    }
+
+    final applied = _chatPipeline.setRoleOverride(rowIndex: row, role: role);
+    if (!applied) {
+      _insertAssistantChatText(
+          'Unsupported role "$role". Use vocals, drums, bass, guitar, synth, or other.');
+      return;
+    }
+
+    final roleText = role.toLowerCase().trim();
+    _showSmallNotice('Track ${row + 1} role override set to $roleText.');
+  }
+
+  Future<void> _handleStemSeparationForClip(int clipIndex) async {
+    await _performStemSeparationForClip(clipIndex);
+  }
+
+  Future<bool> _performStemSeparationForClip(
+    int clipIndex, {
+    bool showInlineFailureNotice = true,
+  }) async {
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return false;
+    final clip = _audioTracks[clipIndex];
+    if (clip.isMidi) {
+      if (showInlineFailureNotice) {
+        _showSmallNotice('Stem separation is only available for audio clips.');
+      }
+      return false;
+    }
+    if (_audioTracks.length + 2 > kNumClips) {
+      if (showInlineFailureNotice) {
+        _showSmallNotice(
+            "Max number of audio clips reached ($kNumClips). Unable to add more clips.");
+      }
+      return false;
+    }
+
+    final sourcePath = clip.file.path;
+    final source = File(sourcePath);
+    if (!source.existsSync()) {
+      if (showInlineFailureNotice) {
+        _showSmallNotice('Selected clip file was not found.');
+      }
+      return false;
+    }
+
+    final audioDir = ProjectManager.audioDir(_projectDir);
+    await audioDir.create(recursive: true);
+    final stem = p.basenameWithoutExtension(source.path);
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final vocalFile = File(p.join(audioDir.path, '${stem}_vocals_$ts.wav'));
+    final instrumentalFile =
+        File(p.join(audioDir.path, '${stem}_instrumental_$ts.wav'));
+
+    if (showInlineFailureNotice) {
+      _showSmallNotice('Separating stems with Spleeter...');
+    }
+    try {
+      await _spleeterStemSeparator.separateVocalsInstrumental(
+        inputPath: source.path,
+        vocalsOutputPath: vocalFile.path,
+        instrumentalOutputPath: instrumentalFile.path,
+      );
+    } catch (e) {
+      debugPrint('Spleeter stem separation failed: $e');
+      if (showInlineFailureNotice) {
+        _showSmallNotice('Stem separation failed.');
+      }
+      return false;
+    }
+
+    if (!vocalFile.existsSync() || !instrumentalFile.existsSync()) {
+      if (showInlineFailureNotice) {
+        _showSmallNotice('Stem separation failed.');
+      }
+      return false;
+    }
+
+    final row = clip.rowIndex;
+    final startMs = clip.offset * 1000.0;
+    final trimStart = clip.trimStart;
+    final trimEnd = clip.trimEnd;
+
+    final addVocals = AddAudioTrackAction(
+      addTrack: ({
+        required File file,
+        required int row,
+        required double timeMs,
+        Duration? trimStartRequested,
+        Duration? trimEndRequested,
+      }) =>
+          _addAudioTrackFromProjectFile(
+        projectAudioFile: file,
+        label:
+            clip.label.trim().isEmpty ? 'Vocals Stem' : '${clip.label} Vocals',
+        row: row,
+        timeMs: timeMs,
+        trimStartRequested: trimStartRequested,
+        trimEndRequested: trimEndRequested,
+        gain: clip.gain,
+        sourceTempoBpm: clip.sourceTempoBpm,
+        stretchToProjectTempo: clip.stretchToProjectTempo,
+        tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
+      ),
+      tracks: _audioTracks,
+      file: vocalFile,
+      row: row,
+      timeMs: startMs,
+      trimStart: trimStart,
+      trimEnd: trimEnd,
+    );
+
+    final addInstrumental = AddAudioTrackAction(
+      addTrack: ({
+        required File file,
+        required int row,
+        required double timeMs,
+        Duration? trimStartRequested,
+        Duration? trimEndRequested,
+      }) =>
+          _addAudioTrackFromProjectFile(
+        projectAudioFile: file,
+        label: clip.label.trim().isEmpty
+            ? 'Instrumental Stem'
+            : '${clip.label} Instrumental',
+        row: row,
+        timeMs: timeMs,
+        trimStartRequested: trimStartRequested,
+        trimEndRequested: trimEndRequested,
+        gain: clip.gain,
+        sourceTempoBpm: clip.sourceTempoBpm,
+        stretchToProjectTempo: clip.stretchToProjectTempo,
+        tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
+      ),
+      tracks: _audioTracks,
+      file: instrumentalFile,
+      row: row,
+      timeMs: startMs,
+      trimStart: trimStart,
+      trimEnd: trimEnd,
+    );
+
+    await _undoManager.execute(
+      CompoundUndoAction('Separate stems', [addVocals, addInstrumental]),
+    );
+    if (showInlineFailureNotice) {
+      _showSmallNotice('Created vocal/instrumental stems with Spleeter.');
+    }
+    return true;
   }
 
   Future<void> applyMixingResult(MixingResult mix) async {
@@ -10461,7 +18211,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final maxRows = math.max(_rowCount, 1);
 
     final rowGain = List<double>.generate(
-        maxRows, (i) => i < _rowGain.length ? _rowGain[i] : 1.0);
+        maxRows, (i) => i < _rowGain.length ? _rowGain[i] : _kGainUiUnity);
     final rowPan = List<double>.generate(
         maxRows, (i) => i < _rowPan.length ? _rowPan[i] : 0.5);
     final rowAutomation = List<List<AutomationPoint>>.generate(maxRows, (i) {
@@ -10600,6 +18350,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _ensureAiModelsLoaded() {
+    _aiModelsWarmupFuture ??= _loadAiModels();
+    return _aiModelsWarmupFuture!;
+  }
+
+  Future<void> _loadAiModels() async {
+    await _classifier.load();
+    await _magnitudePredictor.load();
+  }
+
   Future<void> runOneButtonMix() async {
     // optional: show system “Mixing…” message
     _chatController.insertMessage(
@@ -10622,6 +18382,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       producerPreSnapshot = await _buildProducerSnapshot();
     }
 
+    await _ensureAiModelsLoaded();
     final reply = await _chatPipeline.handleUserText(
       text: prompt,
       audioTracks: _audioTracks,
@@ -10631,8 +18392,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       rowAutomation: _rowVolumeAutomation,
       masterGain0to3: _masterGain,
       masterPan0to1: _masterPan,
+      selectedClipIndices: _timelineSelectedClipIndices,
+      primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
+      selectedRowIndex: _selectedRow,
       autoApplyProposals: true, // <-- key
     );
+
+    if (kAiDebugLogs) {
+      aiDebugLog('audio-editor', 'one-button-mix reply:\n${reply.toString()}');
+      if (reply.meta != null) {
+        aiDebugLog(
+          'audio-editor',
+          'one-button-mix meta=${aiDebugShortMap(reply.meta!)}',
+        );
+      }
+    }
 
     if (reply.hasMix) {
       await applyMixingResult(reply.mixing!);
@@ -10649,6 +18423,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           llmPayload: reply.meta,
         );
       }
+    }
+
+    if (reply.hasAssistantActions) {
+      await _applyAssistantActions(reply.assistantActions);
     }
 
     _chatController.insertMessage(
@@ -10668,790 +18446,867 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool includeProducerCapture = true,
     bool includeTransport = true,
   }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (includeProducerCapture)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(_kChatChromeOpacity),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.white.withOpacity(0.14)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.science_outlined,
-                          color: Colors.white, size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _producerDataMode
-                              ? (_producerCollector.hasActiveSession
-                                  ? 'Producer Capture: ON'
-                                  : 'Producer Capture: ON (waiting for first AI step)')
-                              : 'Producer Capture: OFF',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+    const androidTransportBottomOffset = 10.0;
+    final bottomInset =
+        includeTransport && defaultTargetPlatform == TargetPlatform.android
+            ? math.max(
+                0.0,
+                MediaQuery.of(context).viewPadding.bottom -
+                    androidTransportBottomOffset,
+              )
+            : 0.0;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (includeProducerCapture)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(_kChatChromeOpacity),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white.withOpacity(0.14)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.science_outlined,
+                            color: Colors.white, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _producerDataMode
+                                ? (_producerCollector.hasActiveSession
+                                    ? 'Producer Capture: ON'
+                                    : 'Producer Capture: ON (waiting for first AI step)')
+                                : 'Producer Capture: OFF',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
-                      ),
-                      IconButton(
-                        constraints:
-                            const BoxConstraints(minWidth: 32, minHeight: 32),
-                        padding: EdgeInsets.zero,
-                        tooltip: 'Export producer session',
-                        onPressed: _producerDataMode
-                            ? () async {
-                                await _exportProducerSession();
-                                if (mounted) setState(() {});
-                              }
-                            : null,
-                        icon: Icon(
-                          Icons.ios_share_rounded,
-                          size: 17,
-                          color: _producerDataMode
-                              ? Colors.white
-                              : Colors.white.withOpacity(0.35),
+                        IconButton(
+                          constraints:
+                              const BoxConstraints(minWidth: 32, minHeight: 32),
+                          padding: EdgeInsets.zero,
+                          tooltip: 'Export producer session',
+                          onPressed: _producerDataMode
+                              ? () async {
+                                  await _exportProducerSession();
+                                  if (mounted) setState(() {});
+                                }
+                              : null,
+                          icon: Icon(
+                            Icons.ios_share_rounded,
+                            size: 17,
+                            color: _producerDataMode
+                                ? Colors.white
+                                : Colors.white.withOpacity(0.35),
+                          ),
                         ),
-                      ),
-                      Switch.adaptive(
-                        value: _producerDataMode,
-                        onChanged: _producerUiBusy
-                            ? null
-                            : (v) async {
-                                await _setProducerDataMode(v);
-                                if (mounted) setState(() {});
-                              },
-                      ),
-                    ],
+                        Switch.adaptive(
+                          value: _producerDataMode,
+                          onChanged: _producerUiBusy
+                              ? null
+                              : (v) async {
+                                  await _setProducerDataMode(v);
+                                  if (mounted) setState(() {});
+                                },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        // === Chat Field Section WITH padding ===
-        // Padding(
-        //   padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-        //   child: _Glass(
-        //     radius: 22,
-        //     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        //     opacity: 0.10,
-        //     child: Row(
-        //       children: [
-        //         Container(
-        //           width: 28,
-        //           height: 28,
-        //           decoration: BoxDecoration(
-        //             color: Colors.white.withOpacity(0.12),
-        //             borderRadius: BorderRadius.circular(10),
-        //             border: Border.all(color: Colors.white.withOpacity(0.14)),
-        //           ),
-        //           child: const Icon(Icons.chat_bubble_outline, size: 16, color: Colors.white),
-        //         ),
-        //         const SizedBox(width: 10),
-        //         Text(
-        //           'Type...',
-        //           style: TextStyle(
-        //             color: Colors.white.withOpacity(0.72),
-        //             fontSize: 15,
-        //           ),
-        //         ),
-        //       ],
-        //     ),
-        //   ),
-        // ),
-        if (includeChatBar)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // === GLASS CHAT BAR (fills available space) ===
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                  child: _ChatBar(
-                    expanded: _chatInputActive,
-                    hasText: _chatHasText,
-                    controller: _chatTextController,
-                    focusNode: _chatFocusNode,
-                    onTapBar: () {
-                      if (_sampleBrowserVisible) {
-                        unawaited(_stopSampleAudition());
-                      }
-                      if (!_chatExpanded) {
-                        setState(() {
-                          _showAddActionsPanel = false;
-                          _sampleBrowserVisible = false;
-                          _sampleBrowserExpanded = false;
-                          _sampleDragActive = false;
-                          _reopenSampleBrowserAfterDrag = false;
-                          _reopenSampleBrowserExpanded = false;
-                          _chatExpanded = true;
-                          _chatInputActive = false;
-                        });
-                        return;
-                      }
-                      if (!_chatInputActive) {
-                        setState(() {
-                          _showAddActionsPanel = false;
-                          _sampleBrowserVisible = false;
-                          _sampleBrowserExpanded = false;
-                          _sampleDragActive = false;
-                          _reopenSampleBrowserAfterDrag = false;
-                          _reopenSampleBrowserExpanded = false;
-                          _chatInputActive = true;
-                        });
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted) return;
-                          _chatFocusNode.requestFocus();
-                        });
-                        return;
-                      }
-                      if (!_chatFocusNode.hasFocus) {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted) return;
-                          _chatFocusNode.requestFocus();
-                        });
-                      }
-                    },
-                    onSubmit: () async {
-                      final text = _chatTextController.text.trim();
-                      if (text.isEmpty) return;
+          // === Chat Field Section WITH padding ===
+          // Padding(
+          //   padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          //   child: _Glass(
+          //     radius: 22,
+          //     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          //     opacity: 0.10,
+          //     child: Row(
+          //       children: [
+          //         Container(
+          //           width: 28,
+          //           height: 28,
+          //           decoration: BoxDecoration(
+          //             color: Colors.white.withOpacity(0.12),
+          //             borderRadius: BorderRadius.circular(10),
+          //             border: Border.all(color: Colors.white.withOpacity(0.14)),
+          //           ),
+          //           child: const Icon(Icons.chat_bubble_outline, size: 16, color: Colors.white),
+          //         ),
+          //         const SizedBox(width: 10),
+          //         Text(
+          //           'Type...',
+          //           style: TextStyle(
+          //             color: Colors.white.withOpacity(0.72),
+          //             fontSize: 15,
+          //           ),
+          //         ),
+          //       ],
+          //     ),
+          //   ),
+          // ),
+          if (includeChatBar)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // === GLASS CHAT BAR (fills available space) ===
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                    child: Halo(
+                      highlighter: _mixHighlighter,
+                      haloKey: const HaloKey('tutorial:chatbar'),
+                      borderRadius: BorderRadius.circular(18),
+                      child: _ChatBar(
+                        expanded: _chatInputActive,
+                        hasText: _chatHasText,
+                        controller: _chatTextController,
+                        focusNode: _chatFocusNode,
+                        onTapBar: () {
+                          if (_sampleBrowserVisible) {
+                            unawaited(_stopSampleAudition());
+                          }
+                          if (!_chatExpanded) {
+                            setState(() {
+                              _showAddActionsPanel = false;
+                              _sampleBrowserVisible = false;
+                              _sampleBrowserExpanded = false;
+                              _sampleDragActive = false;
+                              _reopenSampleBrowserAfterDrag = false;
+                              _reopenSampleBrowserExpanded = false;
+                              _chatExpanded = true;
+                              _chatInputActive = false;
+                            });
+                            return;
+                          }
+                          if (!_chatInputActive) {
+                            setState(() {
+                              _showAddActionsPanel = false;
+                              _sampleBrowserVisible = false;
+                              _sampleBrowserExpanded = false;
+                              _sampleDragActive = false;
+                              _reopenSampleBrowserAfterDrag = false;
+                              _reopenSampleBrowserExpanded = false;
+                              _chatInputActive = true;
+                            });
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (!mounted) return;
+                              _chatFocusNode.requestFocus();
+                            });
+                            return;
+                          }
+                          if (!_chatFocusNode.hasFocus) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (!mounted) return;
+                              _chatFocusNode.requestFocus();
+                            });
+                          }
+                        },
+                        onSubmit: () async {
+                          final text = _chatTextController.text.trim();
+                          if (text.isEmpty) return;
 
-                      _chatTextController.clear();
-                      _chatFocusNode.unfocus();
+                          _chatTextController.clear();
+                          _chatFocusNode.unfocus();
 
-                      final userText = text;
-                      // 1. Push user message
-                      _chatController.insertMessage(
-                        TextMessage(
-                          id: const Uuid().v4(),
-                          authorId: 'user',
-                          createdAt: DateTime.now().toUtc(),
-                          text: userText,
-                        ),
-                      );
-
-                      if (await _handleProducerCommand(userText)) {
-                        setState(() {});
-                        return;
-                      }
-
-                      Map<String, dynamic>? producerPreSnapshot;
-                      if (_producerDataMode) {
-                        producerPreSnapshot = await _buildProducerSnapshot();
-                      }
-
-                      // 2. Run pipeline
-                      ChatPipelineResult reply =
-                          await _chatPipeline.handleUserText(
-                        text: userText,
-                        audioTracks: _audioTracks,
-                        bpmFallback: _tempo,
-                        rowGain: _rowGain,
-                        rowPan: _rowPan,
-                        rowAutomation: _rowVolumeAutomation,
-                        masterGain0to3: _masterGain,
-                        masterPan0to1: _masterPan,
-                        // autoApplyProposals: true, // does not ask for approval, just execute
-                      );
-
-                      print(reply.toString());
-
-                      // await applyMixingResult(reply);
-                      if (reply.hasMix) {
-                        await applyMixingResult(reply.mixing!);
-
-                        // IMPORTANT: teach the assistant what actually changed
-                        _chatPipeline.recordAppliedMix(reply.mixing!);
-
-                        if (_producerDataMode && producerPreSnapshot != null) {
-                          final producerPostSnapshot =
-                              await _buildProducerSnapshot();
-                          await _producerCollector.recordAiStep(
-                            prompt: userText,
-                            preSnapshot: producerPreSnapshot,
-                            postSnapshot: producerPostSnapshot,
-                            resolvedActions: reply.mixing!.actions
-                                .map((a) => a.toJson())
-                                .toList(),
-                            llmPayload: reply.meta,
+                          final userText = text;
+                          // 1. Push user message
+                          _chatController.insertMessage(
+                            TextMessage(
+                              id: const Uuid().v4(),
+                              authorId: 'user',
+                              createdAt: DateTime.now().toUtc(),
+                              text: userText,
+                            ),
                           );
-                        }
-                      }
 
-                      // 3. Push assistant reply
-                      _chatController.insertMessage(
-                        TextMessage(
-                          id: const Uuid().v4(),
-                          authorId: 'assistant',
-                          createdAt: DateTime.now().toUtc(),
-                          text: reply.message!,
-                        ),
-                      );
+                          if (await _handleProducerCommand(userText)) {
+                            setState(() {});
+                            return;
+                          }
 
-                      if (!_chatExpanded) {
-                        ScaffoldMessenger.of(
-                          context,
-                        ).showSnackBar(SnackBar(
-                            content: Text(reply.message),
-                            duration: const Duration(seconds: 4)));
-                      }
+                          Map<String, dynamic>? producerPreSnapshot;
+                          if (_producerDataMode) {
+                            producerPreSnapshot =
+                                await _buildProducerSnapshot();
+                          }
 
-                      setState(() {});
-                      //TODO: refetch effects and stuff like that
+                          // 2. Run pipeline
+                          await _ensureAiModelsLoaded();
+                          ChatPipelineResult reply =
+                              await _chatPipeline.handleUserText(
+                            text: userText,
+                            audioTracks: _audioTracks,
+                            bpmFallback: _tempo,
+                            rowGain: _rowGain,
+                            rowPan: _rowPan,
+                            rowAutomation: _rowVolumeAutomation,
+                            masterGain0to3: _masterGain,
+                            masterPan0to1: _masterPan,
+                            selectedClipIndices: _timelineSelectedClipIndices,
+                            primarySelectedClipIndex:
+                                _timelinePrimarySelectedClipIndex,
+                            selectedRowIndex: _selectedRow,
+                            // autoApplyProposals: true, // does not ask for approval, just execute
+                          );
 
-                      // debugPrint('AI: $reply');
-                    },
+                          if (kAiDebugLogs) {
+                            aiDebugLog('audio-editor', reply.toString());
+                            if (reply.meta != null) {
+                              aiDebugLog(
+                                'audio-editor',
+                                'reply.meta=${aiDebugShortMap(reply.meta!)}',
+                              );
+                            }
+                          }
+
+                          // await applyMixingResult(reply);
+                          if (reply.hasMix) {
+                            await applyMixingResult(reply.mixing!);
+
+                            // IMPORTANT: teach the assistant what actually changed
+                            _chatPipeline.recordAppliedMix(reply.mixing!);
+
+                            if (_producerDataMode &&
+                                producerPreSnapshot != null) {
+                              final producerPostSnapshot =
+                                  await _buildProducerSnapshot();
+                              await _producerCollector.recordAiStep(
+                                prompt: userText,
+                                preSnapshot: producerPreSnapshot,
+                                postSnapshot: producerPostSnapshot,
+                                resolvedActions: reply.mixing!.actions
+                                    .map((a) => a.toJson())
+                                    .toList(),
+                                llmPayload: reply.meta,
+                              );
+                            }
+                          }
+
+                          if (reply.hasAssistantActions) {
+                            await _applyAssistantActions(
+                                reply.assistantActions);
+                          }
+
+                          // 3. Push assistant reply
+                          _chatController.insertMessage(
+                            TextMessage(
+                              id: const Uuid().v4(),
+                              authorId: 'assistant',
+                              createdAt: DateTime.now().toUtc(),
+                              text: reply.message!,
+                            ),
+                          );
+
+                          if (!_chatExpanded) {
+                            ScaffoldMessenger.of(
+                              context,
+                            ).showSnackBar(SnackBar(
+                                content: Text(reply.message),
+                                duration: const Duration(seconds: 4)));
+                          }
+
+                          setState(() {});
+                          //TODO: refetch effects and stuff like that
+
+                          // debugPrint('AI: $reply');
+                        },
+                      ),
+                    ),
                   ),
                 ),
-              ),
 
-              if (!_chatInputActive)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(0, 10, 16, 10),
-                  child: ClipOval(
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                      child: AnimatedScale(
-                        duration: const Duration(milliseconds: 120),
-                        curve: Curves.easeOutCubic,
-                        scale: _addButtonPressed ? 0.94 : 1.0,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 140),
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: _showAddActionsPanel
-                                ? const Color(0x33558DFF)
-                                : Colors.white.withOpacity(_kChatChromeOpacity),
-                            shape: BoxShape.circle,
-                            border: Border.all(
+                if (!_chatInputActive)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 10, 16, 10),
+                    child: ClipOval(
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                        child: AnimatedScale(
+                          duration: const Duration(milliseconds: 120),
+                          curve: Curves.easeOutCubic,
+                          scale: _addButtonPressed ? 0.94 : 1.0,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 140),
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
                               color: _showAddActionsPanel
-                                  ? const Color(0xAA8BB6FF)
-                                  : Colors.white.withOpacity(0.14),
+                                  ? const Color(0x33558DFF)
+                                  : Colors.white
+                                      .withOpacity(_kChatChromeOpacity),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: _showAddActionsPanel
+                                    ? const Color(0xAA8BB6FF)
+                                    : Colors.white.withOpacity(0.14),
+                              ),
+                              boxShadow: _showAddActionsPanel
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(0x662E6EEB)
+                                            .withOpacity(0.45),
+                                        blurRadius: 14,
+                                        spreadRadius: 1.5,
+                                      ),
+                                    ]
+                                  : const [],
                             ),
-                            boxShadow: _showAddActionsPanel
-                                ? [
-                                    BoxShadow(
-                                      color: const Color(0x662E6EEB)
-                                          .withOpacity(0.45),
-                                      blurRadius: 14,
-                                      spreadRadius: 1.5,
-                                    ),
-                                  ]
-                                : const [],
-                          ),
-                          child: InkWell(
-                            customBorder: const CircleBorder(),
-                            onHighlightChanged: (pressed) {
-                              if (!mounted) return;
-                              setState(() {
-                                _addButtonPressed = pressed;
-                              });
-                            },
-                            onTap: () {
-                              if (_sampleBrowserVisible) {
-                                _closeAddActionsPanel();
-                                unawaited(_closeSampleBrowser());
-                                return;
-                              }
-                              if (_showAddActionsPanel) {
-                                _closeAddActionsPanel();
-                              } else {
-                                _openAddActionsPanel();
-                              }
-                            },
-                            child: const Icon(Icons.add,
-                                color: Colors.white, size: 26),
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onHighlightChanged: (pressed) {
+                                if (!mounted) return;
+                                setState(() {
+                                  _addButtonPressed = pressed;
+                                });
+                              },
+                              onTap: () {
+                                if (_sampleBrowserVisible) {
+                                  _closeAddActionsPanel();
+                                  unawaited(_closeSampleBrowser());
+                                  return;
+                                }
+                                if (_showAddActionsPanel) {
+                                  _closeAddActionsPanel();
+                                } else {
+                                  _openAddActionsPanel();
+                                }
+                              },
+                              child: const Icon(Icons.add,
+                                  color: Colors.white, size: 26),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
-          ),
+              ],
+            ),
 
-        // ==== Transport Drawer =============================================
-        if (includeTransport)
-          Container(
-            width: double.infinity,
-            decoration: const BoxDecoration(color: Colors.transparent),
-            child: ClipRRect(
+          // ==== Transport Drawer =============================================
+          if (includeTransport)
+            Halo(
+              highlighter: _mixHighlighter,
+              haloKey: const HaloKey('tutorial:toolbar'),
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(28)),
-              // child: BackdropFilter(
-              // filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.07), // softer white glass
+                width: double.infinity,
+                decoration: const BoxDecoration(color: Colors.transparent),
+                child: ClipRRect(
                   borderRadius:
                       const BorderRadius.vertical(top: Radius.circular(28)),
-                  border: Border(
-                      top: BorderSide(color: Colors.white.withOpacity(0.08))),
-                  boxShadow: [
-                    BoxShadow(
-                        color: Colors.black.withOpacity(0.3),
-                        blurRadius: 30,
-                        offset: const Offset(0, -12)),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Main transport drawer
-                    SizedBox(
-                      height: 84,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          // --- Left: Undo / Redo -----------------------------------
-                          Expanded(
-                            flex: 2,
-                            child: Padding(
-                              padding: EdgeInsets.only(right: 6),
-                              child: LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final height = constraints.maxHeight * 0.6;
-                                  return Container(
-                                    height: height,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.06),
-                                      borderRadius: BorderRadius.circular(22),
-                                      border: Border.all(
-                                          color:
-                                              Colors.white.withOpacity(0.14)),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceEvenly,
-                                      children: [
-                                        Expanded(
-                                          child: Material(
-                                            color: Colors.transparent,
-                                            child: InkWell(
-                                              borderRadius:
-                                                  const BorderRadius.only(
-                                                topLeft: Radius.circular(22),
-                                                bottomLeft: Radius.circular(22),
-                                              ),
-                                              onTap: _undoManager.canUndo
-                                                  ? () async {
-                                                      final action =
-                                                          await _undoManager
-                                                              .undo();
-                                                      if (!mounted ||
-                                                          action == null)
-                                                        return;
-
-                                                      final messenger =
-                                                          ScaffoldMessenger.of(
-                                                              context);
-                                                      messenger
-                                                          .hideCurrentSnackBar();
-                                                      messenger.showSnackBar(
-                                                        SnackBar(
-                                                          content: Text(
-                                                              'Undo: ${action.description}'),
-                                                          duration:
-                                                              const Duration(
-                                                                  milliseconds:
-                                                                      1200),
-                                                        ),
-                                                      );
-
-                                                      setState(() {});
-                                                    }
-                                                  : null,
-                                              child: SizedBox.expand(
-                                                child: Center(
-                                                  child: Icon(
-                                                    Icons.undo,
-                                                    size: 20,
-                                                    color: _undoManager.canUndo
-                                                        ? Colors.white
-                                                        : Colors.white
-                                                            .withOpacity(0.3),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
+                  // child: BackdropFilter(
+                  // filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color:
+                          Colors.white.withOpacity(0.07), // softer white glass
+                      borderRadius:
+                          const BorderRadius.vertical(top: Radius.circular(28)),
+                      border: Border(
+                          top: BorderSide(
+                              color: Colors.white.withOpacity(0.08))),
+                      boxShadow: [
+                        BoxShadow(
+                            color: Colors.black.withOpacity(0.3),
+                            blurRadius: 30,
+                            offset: const Offset(0, -12)),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Main transport drawer
+                        SizedBox(
+                          height: 84,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              // --- Left: Undo / Redo -----------------------------------
+                              Expanded(
+                                flex: 2,
+                                child: Padding(
+                                  padding: EdgeInsets.only(right: 6),
+                                  child: LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final height =
+                                          constraints.maxHeight * 0.6;
+                                      return Container(
+                                        height: height,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.06),
+                                          borderRadius:
+                                              BorderRadius.circular(22),
+                                          border: Border.all(
+                                              color: Colors.white
+                                                  .withOpacity(0.14)),
                                         ),
-                                        Container(
-                                            width: 1,
-                                            height: 28,
-                                            color:
-                                                Colors.white.withOpacity(0.2)),
-                                        Expanded(
-                                          child: Material(
-                                            color: Colors.transparent,
-                                            child: InkWell(
-                                              borderRadius:
-                                                  const BorderRadius.only(
-                                                topRight: Radius.circular(22),
-                                                bottomRight:
-                                                    Radius.circular(22),
-                                              ),
-                                              onTap: _undoManager.canRedo
-                                                  ? () async {
-                                                      final action =
-                                                          await _undoManager
-                                                              .redo();
-                                                      if (!mounted ||
-                                                          action == null)
-                                                        return;
-
-                                                      final messenger =
-                                                          ScaffoldMessenger.of(
-                                                              context);
-                                                      messenger
-                                                          .hideCurrentSnackBar();
-                                                      messenger.showSnackBar(
-                                                        SnackBar(
-                                                          content: Text(
-                                                              'Redo: ${action.description}'),
-                                                          duration:
-                                                              const Duration(
-                                                                  milliseconds:
-                                                                      1200),
-                                                        ),
-                                                      );
-                                                      setState(() {});
-                                                    }
-                                                  : null,
-                                              child: SizedBox.expand(
-                                                child: Center(
-                                                  child: Icon(
-                                                    Icons.redo,
-                                                    size: 20,
-                                                    color: _undoManager.canRedo
-                                                        ? Colors.white
-                                                        : Colors.white
-                                                            .withOpacity(0.3),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceEvenly,
+                                          children: [
+                                            Expanded(
+                                              child: Material(
+                                                color: Colors.transparent,
+                                                child: InkWell(
+                                                  borderRadius:
+                                                      const BorderRadius.only(
+                                                    topLeft:
+                                                        Radius.circular(22),
+                                                    bottomLeft:
+                                                        Radius.circular(22),
                                                   ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
+                                                  onTap: _undoManager.canUndo
+                                                      ? () async {
+                                                          final action =
+                                                              await _undoManager
+                                                                  .undo();
+                                                          if (!mounted ||
+                                                              action == null)
+                                                            return;
 
-                          // --- Center Transport ------------------------------------
-                          Expanded(
-                            flex: 4,
-                            child: Padding(
-                              padding: EdgeInsets.fromLTRB(3, 0, 3, 0),
-                              child: LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final height = constraints.maxHeight * 0.6;
-                                  final iconSize = height * 0.55;
-                                  final borderRadius =
-                                      BorderRadius.circular(height / 2);
+                                                          final messenger =
+                                                              ScaffoldMessenger
+                                                                  .of(context);
+                                                          messenger
+                                                              .hideCurrentSnackBar();
+                                                          messenger
+                                                              .showSnackBar(
+                                                            SnackBar(
+                                                              content: Text(
+                                                                  'Undo: ${action.description}'),
+                                                              duration:
+                                                                  const Duration(
+                                                                      milliseconds:
+                                                                          1200),
+                                                            ),
+                                                          );
 
-                                  return Container(
-                                    height: height,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.06),
-                                      borderRadius: borderRadius,
-                                      border: Border.all(
-                                          color:
-                                              Colors.white.withOpacity(0.14)),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        _transportSegment(
-                                          icon: Icons.skip_previous,
-                                          onTap: () async {
-                                            if (_isRecording)
-                                              return; // disabled during recording
-                                            await _restartAudio(
-                                                _safeAudioEditorStateSetter);
-                                          },
-                                          radius: BorderRadius.only(
-                                            topLeft:
-                                                Radius.circular(height / 2),
-                                            bottomLeft:
-                                                Radius.circular(height / 2),
-                                          ),
-                                          iconSize: iconSize,
-                                        ),
-                                        _verticalDivider(height),
-                                        _transportSegment(
-                                          icon: _isPlaying
-                                              ? Icons.pause
-                                              : Icons.play_arrow,
-                                          onTap: () async {
-                                            if (_isRecording) {
-                                              // Pause button should also stop recording and stop playback
-                                              await _stopRecordingJuce(
-                                                  keepPlaying: false);
-                                            } else {
-                                              await _togglePlayPause();
-                                            }
-                                          },
-                                          iconSize: iconSize,
-                                        ),
-                                        _verticalDivider(height),
-                                        _transportSegment(
-                                          icon: _isRecording
-                                              ? Icons.stop_circle
-                                              : Icons.fiber_manual_record,
-                                          onTap: _onRecordPressed,
-                                          radius: BorderRadius.only(
-                                            topRight:
-                                                Radius.circular(height / 2),
-                                            bottomRight:
-                                                Radius.circular(height / 2),
-                                          ),
-                                          iconSize: iconSize,
-                                          iconColor: _isRecording
-                                              ? Colors.white
-                                              : Colors.red,
-                                          backgroundColor: _isRecording
-                                              ? const Color(0xCCFF3B30)
-                                              : Colors.transparent,
-                                          borderColor: _isRecording
-                                              ? const Color(0xFFFF8A80)
-                                              : null,
-                                          boxShadow: _isRecording
-                                              ? [
-                                                  BoxShadow(
-                                                    color: Colors.redAccent
-                                                        .withOpacity(0.45),
-                                                    blurRadius: 12,
-                                                    spreadRadius: 1.5,
-                                                  ),
-                                                ]
-                                              : null,
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-
-                          // --- Right: AI Mixer -------------------------------------------------
-                          Expanded(
-                            flex: 2,
-                            child: Padding(
-                              padding: EdgeInsets.only(left: 6),
-                              child: LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final totalHeight = constraints.maxHeight;
-                                  final pillHeight = totalHeight *
-                                      0.6; // e.g. ~42 if container is 76
-                                  final logoSize =
-                                      pillHeight * 0.9; // keep proportional
-                                  final spacing = totalHeight * 0.08;
-                                  final fontSize = totalHeight * 0.2;
-
-                                  return Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      // --- Blue glossy pill with logo only ---
-                                      // --- Blue glossy pill with logo only ---
-                                      // Wrap with Material + InkWell for proper tap + ripple on rounded pill
-                                      Material(
-                                        color: Colors.transparent,
-                                        child: InkWell(
-                                          borderRadius: BorderRadius.circular(
-                                              pillHeight / 2),
-                                          onTap: () async {
-                                            // optional: haptic
-                                            // HapticFeedback.lightImpact();
-                                            final run = await showDialog<bool>(
-                                              context: context,
-                                              builder: (_) => AlertDialog(
-                                                title: const Text(
-                                                    'One-Button Mix'),
-                                                content: const Text(
-                                                  'This will:\n'
-                                                  '• Balance levels\n'
-                                                  '• Reduce masking\n'
-                                                  '• Improve clarity\n\n'
-                                                  'You can undo everything.',
-                                                ),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () =>
-                                                        Navigator.pop(
-                                                            context, false),
-                                                    child: const Text('Cancel'),
-                                                  ),
-                                                  ElevatedButton(
-                                                    onPressed: () =>
-                                                        Navigator.pop(
-                                                            context, true),
-                                                    child: const Text('Run'),
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-
-                                            if (run != true) return;
-
-                                            ScaffoldMessenger.of(
-                                              context,
-                                            ).showSnackBar(const SnackBar(
-                                                content: Text('Mixing…')));
-
-                                            await runOneButtonMix();
-
-                                            ScaffoldMessenger.of(context)
-                                                .showSnackBar(
-                                              const SnackBar(
-                                                content: Text(
-                                                    'One-Button Mix executed. Open chat for details.'),
-                                                duration: Duration(seconds: 3),
-                                              ),
-                                            );
-                                          },
-                                          child: SizedBox(
-                                            height: pillHeight,
-                                            width: double.infinity,
-                                            child: Ink(
-                                              // height: pillHeight,
-                                              // width: pillHeight * 1.7,
-                                              decoration: BoxDecoration(
-                                                gradient: const LinearGradient(
-                                                  begin: Alignment.topLeft,
-                                                  end: Alignment.bottomRight,
-                                                  colors: [
-                                                    Color(0xFF5C7AFF),
-                                                    Color(0xFF3050FF)
-                                                  ],
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(
-                                                        pillHeight / 2),
-                                                border: Border.all(
-                                                    color: Colors.white
-                                                        .withOpacity(0.18)),
-                                                // boxShadow: [
-                                                //   BoxShadow(
-                                                //     color: const Color(0xFF4A6BFF).withOpacity(0.55),
-                                                //     blurRadius: 20,
-                                                //     offset: const Offset(0, 6),
-                                                //   ),
-                                                //   const BoxShadow(
-                                                //     color: Color(0x22FFFFFF),
-                                                //     blurRadius: 0,
-                                                //     spreadRadius: 1,
-                                                //     offset: Offset(0, -1),
-                                                //   ),
-                                                // ],
-                                              ),
-                                              child: Stack(
-                                                children: [
-                                                  Positioned.fill(
-                                                    child: DecoratedBox(
-                                                      decoration: BoxDecoration(
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(
-                                                                    pillHeight /
-                                                                        2),
-                                                        gradient:
-                                                            LinearGradient(
-                                                          begin: Alignment
-                                                              .topCenter,
-                                                          end: Alignment
-                                                              .bottomCenter,
-                                                          colors: [
-                                                            Colors.white
+                                                          setState(() {});
+                                                        }
+                                                      : null,
+                                                  child: SizedBox.expand(
+                                                    child: Center(
+                                                      child: Icon(
+                                                        Icons.undo,
+                                                        size: 20,
+                                                        color: _undoManager
+                                                                .canUndo
+                                                            ? Colors.white
+                                                            : Colors.white
                                                                 .withOpacity(
-                                                                    0.18),
-                                                            Colors.transparent,
-                                                            Colors.transparent,
-                                                            Colors.white
-                                                                .withOpacity(
-                                                                    0.12),
-                                                          ],
-                                                          stops: const [
-                                                            0.0,
-                                                            0.35,
-                                                            0.65,
-                                                            1.0
-                                                          ],
-                                                        ),
+                                                                    0.3),
                                                       ),
                                                     ),
                                                   ),
-                                                  Center(
-                                                    child: Image.asset(
-                                                      // 'assets/mixroom_logo_202.png',
-                                                      'assets/fading_w_logo_crop.png',
-                                                      // width: logoSize,
-                                                      height: pillHeight * 0.6,
-                                                      color: Colors.white,
-                                                      fit: BoxFit.fitWidth,
+                                                ),
+                                              ),
+                                            ),
+                                            Container(
+                                                width: 1,
+                                                height: 28,
+                                                color: Colors.white
+                                                    .withOpacity(0.2)),
+                                            Expanded(
+                                              child: Material(
+                                                color: Colors.transparent,
+                                                child: InkWell(
+                                                  borderRadius:
+                                                      const BorderRadius.only(
+                                                    topRight:
+                                                        Radius.circular(22),
+                                                    bottomRight:
+                                                        Radius.circular(22),
+                                                  ),
+                                                  onTap: _undoManager.canRedo
+                                                      ? () async {
+                                                          final action =
+                                                              await _undoManager
+                                                                  .redo();
+                                                          if (!mounted ||
+                                                              action == null)
+                                                            return;
+
+                                                          final messenger =
+                                                              ScaffoldMessenger
+                                                                  .of(context);
+                                                          messenger
+                                                              .hideCurrentSnackBar();
+                                                          messenger
+                                                              .showSnackBar(
+                                                            SnackBar(
+                                                              content: Text(
+                                                                  'Redo: ${action.description}'),
+                                                              duration:
+                                                                  const Duration(
+                                                                      milliseconds:
+                                                                          1200),
+                                                            ),
+                                                          );
+                                                          setState(() {});
+                                                        }
+                                                      : null,
+                                                  child: SizedBox.expand(
+                                                    child: Center(
+                                                      child: Icon(
+                                                        Icons.redo,
+                                                        size: 20,
+                                                        color: _undoManager
+                                                                .canRedo
+                                                            ? Colors.white
+                                                            : Colors.white
+                                                                .withOpacity(
+                                                                    0.3),
+                                                      ),
                                                     ),
                                                   ),
-                                                ],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+
+                              // --- Center Transport ------------------------------------
+                              Expanded(
+                                flex: 4,
+                                child: Padding(
+                                  padding: EdgeInsets.fromLTRB(3, 0, 3, 0),
+                                  child: LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final height =
+                                          constraints.maxHeight * 0.6;
+                                      final iconSize = height * 0.55;
+                                      final borderRadius =
+                                          BorderRadius.circular(height / 2);
+
+                                      return Container(
+                                        height: height,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.06),
+                                          borderRadius: borderRadius,
+                                          border: Border.all(
+                                              color: Colors.white
+                                                  .withOpacity(0.14)),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            _transportSegment(
+                                              icon: Icons.skip_previous,
+                                              onTap: () async {
+                                                if (_isRecording)
+                                                  return; // disabled during recording
+                                                await _restartAudio(
+                                                    _safeAudioEditorStateSetter);
+                                              },
+                                              radius: BorderRadius.only(
+                                                topLeft:
+                                                    Radius.circular(height / 2),
+                                                bottomLeft:
+                                                    Radius.circular(height / 2),
+                                              ),
+                                              iconSize: iconSize,
+                                              haloKey:
+                                                  'tutorial:transport:restart',
+                                            ),
+                                            _verticalDivider(height),
+                                            _transportSegment(
+                                              icon: _isPlaying
+                                                  ? Icons.pause
+                                                  : Icons.play_arrow,
+                                              onTap: () async {
+                                                if (_isRecording) {
+                                                  // Pause button should also stop recording and stop playback
+                                                  await _stopRecordingJuce(
+                                                      keepPlaying: false);
+                                                } else {
+                                                  await _togglePlayPause();
+                                                }
+                                              },
+                                              iconSize: iconSize,
+                                              haloKey:
+                                                  'tutorial:transport:play',
+                                            ),
+                                            _verticalDivider(height),
+                                            _transportSegment(
+                                              icon: _isRecording
+                                                  ? Icons.stop_circle
+                                                  : Icons.fiber_manual_record,
+                                              onTap: _onRecordPressed,
+                                              radius: BorderRadius.only(
+                                                topRight:
+                                                    Radius.circular(height / 2),
+                                                bottomRight:
+                                                    Radius.circular(height / 2),
+                                              ),
+                                              iconSize: iconSize,
+                                              iconColor: _isRecording
+                                                  ? Colors.white
+                                                  : Colors.red,
+                                              backgroundColor: _isRecording
+                                                  ? const Color(0xCCFF3B30)
+                                                  : Colors.transparent,
+                                              borderColor: _isRecording
+                                                  ? const Color(0xFFFF8A80)
+                                                  : null,
+                                              boxShadow: _isRecording
+                                                  ? [
+                                                      BoxShadow(
+                                                        color: Colors.redAccent
+                                                            .withOpacity(0.45),
+                                                        blurRadius: 12,
+                                                        spreadRadius: 1.5,
+                                                      ),
+                                                    ]
+                                                  : null,
+                                              haloKey:
+                                                  'tutorial:transport:record',
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+
+                              // --- Right: AI Mixer -------------------------------------------------
+                              Expanded(
+                                flex: 2,
+                                child: Padding(
+                                  padding: EdgeInsets.only(left: 6),
+                                  child: LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final totalHeight = constraints.maxHeight;
+                                      final pillHeight = totalHeight *
+                                          0.6; // e.g. ~42 if container is 76
+                                      final logoSize =
+                                          pillHeight * 0.9; // keep proportional
+                                      final spacing = totalHeight * 0.08;
+                                      final fontSize = totalHeight * 0.2;
+
+                                      return Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          // --- Blue glossy pill with logo only ---
+                                          // --- Blue glossy pill with logo only ---
+                                          // Wrap with Material + InkWell for proper tap + ripple on rounded pill
+                                          Material(
+                                            color: Colors.transparent,
+                                            child: InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(
+                                                      pillHeight / 2),
+                                              onTap: () async {
+                                                // optional: haptic
+                                                // HapticFeedback.lightImpact();
+                                                final run =
+                                                    await showDialog<bool>(
+                                                  context: context,
+                                                  builder: (_) => AlertDialog(
+                                                    title: const Text(
+                                                        'One-Button Mix'),
+                                                    content: const Text(
+                                                      'This will:\n'
+                                                      '• Balance levels\n'
+                                                      '• Reduce masking\n'
+                                                      '• Improve clarity\n\n'
+                                                      'You can undo everything.',
+                                                    ),
+                                                    actions: [
+                                                      TextButton(
+                                                        onPressed: () =>
+                                                            Navigator.pop(
+                                                                context, false),
+                                                        child: const Text(
+                                                            'Cancel'),
+                                                      ),
+                                                      ElevatedButton(
+                                                        onPressed: () =>
+                                                            Navigator.pop(
+                                                                context, true),
+                                                        child:
+                                                            const Text('Run'),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+
+                                                if (run != true) return;
+
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(const SnackBar(
+                                                    content: Text('Mixing…')));
+
+                                                await runOneButtonMix();
+
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                        'One-Button Mix executed. Open chat for details.'),
+                                                    duration:
+                                                        Duration(seconds: 3),
+                                                  ),
+                                                );
+                                              },
+                                              child: SizedBox(
+                                                height: pillHeight,
+                                                width: double.infinity,
+                                                child: Ink(
+                                                  // height: pillHeight,
+                                                  // width: pillHeight * 1.7,
+                                                  decoration: BoxDecoration(
+                                                    gradient:
+                                                        const LinearGradient(
+                                                      begin: Alignment.topLeft,
+                                                      end:
+                                                          Alignment.bottomRight,
+                                                      colors: [
+                                                        Color(0xFF5C7AFF),
+                                                        Color(0xFF3050FF)
+                                                      ],
+                                                    ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            pillHeight / 2),
+                                                    border: Border.all(
+                                                        color: Colors.white
+                                                            .withOpacity(0.18)),
+                                                    // boxShadow: [
+                                                    //   BoxShadow(
+                                                    //     color: const Color(0xFF4A6BFF).withOpacity(0.55),
+                                                    //     blurRadius: 20,
+                                                    //     offset: const Offset(0, 6),
+                                                    //   ),
+                                                    //   const BoxShadow(
+                                                    //     color: Color(0x22FFFFFF),
+                                                    //     blurRadius: 0,
+                                                    //     spreadRadius: 1,
+                                                    //     offset: Offset(0, -1),
+                                                    //   ),
+                                                    // ],
+                                                  ),
+                                                  child: Stack(
+                                                    children: [
+                                                      Positioned.fill(
+                                                        child: DecoratedBox(
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        pillHeight /
+                                                                            2),
+                                                            gradient:
+                                                                LinearGradient(
+                                                              begin: Alignment
+                                                                  .topCenter,
+                                                              end: Alignment
+                                                                  .bottomCenter,
+                                                              colors: [
+                                                                Colors.white
+                                                                    .withOpacity(
+                                                                        0.18),
+                                                                Colors
+                                                                    .transparent,
+                                                                Colors
+                                                                    .transparent,
+                                                                Colors.white
+                                                                    .withOpacity(
+                                                                        0.12),
+                                                              ],
+                                                              stops: const [
+                                                                0.0,
+                                                                0.35,
+                                                                0.65,
+                                                                1.0
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      Center(
+                                                        child: Image.asset(
+                                                          // 'assets/mixroom_logo_202.png',
+                                                          'assets/fading_w_logo_crop.png',
+                                                          // width: logoSize,
+                                                          height:
+                                                              pillHeight * 0.6,
+                                                          color: Colors.white,
+                                                          fit: BoxFit.fitWidth,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           ),
-                                        ),
-                                      ),
 
-                                      // SizedBox(height: spacing),
+                                          // SizedBox(height: spacing),
 
-                                      // --- Label below pill ---
-                                      // Text(
-                                      //   'AI Mixer',
-                                      //   style: TextStyle(
-                                      //     color: Colors.white,
-                                      //     fontSize: fontSize,
-                                      //     fontWeight: FontWeight.w500,
-                                      //     letterSpacing: 0.3,
-                                      //   ),
-                                      // ),
-                                    ],
-                                  );
-                                },
+                                          // --- Label below pill ---
+                                          // Text(
+                                          //   'AI Mixer',
+                                          //   style: TextStyle(
+                                          //     color: Colors.white,
+                                          //     fontSize: fontSize,
+                                          //     fontWeight: FontWeight.w500,
+                                          //     letterSpacing: 0.3,
+                                          //   ),
+                                          // ),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                ),
                               ),
-                            ),
+                            ],
                           ),
-                        ],
-                      ),
-                    ),
+                        ),
 
-                    // Bottom spacer with same translucent background
-                    ClipRRect(
-                      borderRadius: const BorderRadius.vertical(
-                          bottom: Radius.circular(0)),
-                      child: Container(
-                        height: 10, // or more
-                        width: double.infinity,
-                      ),
+                        // Bottom spacer with same translucent background
+                        ClipRRect(
+                          borderRadius: const BorderRadius.vertical(
+                              bottom: Radius.circular(0)),
+                          child: Container(
+                            height: 10, // or more
+                            width: double.infinity,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
+                  // ),
                 ),
               ),
-              // ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -11464,27 +19319,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Color? backgroundColor,
     Color? borderColor,
     List<BoxShadow>? boxShadow,
+    String? haloKey,
   }) {
     final resolvedRadius = radius ?? BorderRadius.zero;
-    return Expanded(
-      child: InkWell(
-        borderRadius: resolvedRadius,
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          decoration: BoxDecoration(
-            color: backgroundColor ?? Colors.transparent,
-            borderRadius: resolvedRadius,
-            border: borderColor != null
-                ? Border.all(color: borderColor, width: 1.2)
-                : null,
-            boxShadow: boxShadow,
-          ),
-          child: Center(
-            child: Icon(icon, size: iconSize, color: iconColor ?? Colors.white),
-          ),
+    Widget segmentChild = InkWell(
+      borderRadius: resolvedRadius,
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        decoration: BoxDecoration(
+          color: backgroundColor ?? Colors.transparent,
+          borderRadius: resolvedRadius,
+          border: borderColor != null
+              ? Border.all(color: borderColor, width: 1.2)
+              : null,
+          boxShadow: boxShadow,
+        ),
+        child: Center(
+          child: Icon(icon, size: iconSize, color: iconColor ?? Colors.white),
         ),
       ),
+    );
+
+    if (haloKey != null && haloKey.isNotEmpty) {
+      segmentChild = Halo(
+        highlighter: _mixHighlighter,
+        haloKey: HaloKey(haloKey),
+        borderRadius: resolvedRadius,
+        child: segmentChild,
+      );
+    }
+
+    return Expanded(
+      child: segmentChild,
     );
   }
 
@@ -11566,6 +19433,130 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return bpm;
   }
 
+  Float32List _lowPassMono(
+    Float32List input, {
+    int sampleRate = 16000,
+    double cutoffHz = 220.0,
+  }) {
+    if (input.isEmpty) return input;
+    final clampedCutoff = cutoffHz.clamp(20.0, sampleRate * 0.45).toDouble();
+    final alpha = math.exp(-2.0 * math.pi * clampedCutoff / sampleRate);
+    final out = Float32List(input.length);
+    double y = 0.0;
+    for (int i = 0; i < input.length; i++) {
+      y = (1.0 - alpha) * input[i] + alpha * y;
+      out[i] = y.toDouble();
+    }
+    return out;
+  }
+
+  List<double> _detectTransientTimesMsFromOnsetEnvelope(
+    List<double> onsetEnv, {
+    required double envSampleRateHz,
+    double thresholdStd = 1.25,
+    double minSpacingMs = 110.0,
+    int maxEvents = 256,
+  }) {
+    if (onsetEnv.length < 8 || envSampleRateHz <= 0.0) return const <double>[];
+    final n = onsetEnv.length;
+
+    double mean = 0.0;
+    for (final v in onsetEnv) {
+      mean += v;
+    }
+    mean /= n;
+
+    double variance = 0.0;
+    for (final v in onsetEnv) {
+      final d = v - mean;
+      variance += d * d;
+    }
+    variance /= n;
+    final std = math.sqrt(math.max(variance, 0.0));
+    final threshold =
+        math.max(mean + std * thresholdStd, mean * 1.65 + 0.000015);
+
+    final minFrames = math.max(
+      1,
+      (minSpacingMs * envSampleRateHz / 1000.0).round(),
+    );
+    int lastAccepted = -minFrames * 2;
+    final out = <double>[];
+
+    for (int i = 1; i < n - 1; i++) {
+      final v = onsetEnv[i];
+      if (v < threshold) continue;
+      if (v <= onsetEnv[i - 1] || v < onsetEnv[i + 1]) continue;
+      if (i - lastAccepted < minFrames) {
+        if (out.isNotEmpty && v > onsetEnv[lastAccepted]) {
+          out.removeLast();
+          out.add((i * 1000.0) / envSampleRateHz);
+          lastAccepted = i;
+        }
+        continue;
+      }
+      out.add((i * 1000.0) / envSampleRateHz);
+      lastAccepted = i;
+      if (out.length >= maxEvents) break;
+    }
+    return out;
+  }
+
+  Future<List<double>> _detectKickTimelineOnsetsMsForClip(
+    AudioTrack clip, {
+    double cutoffHz = 220.0,
+    double thresholdStd = 1.25,
+    double minSpacingMs = 110.0,
+    int maxEvents = 256,
+  }) async {
+    if (clip.isMidi) return const <double>[];
+
+    const int sampleRate = 16000;
+    Float32List decoded = Float32List(0);
+    try {
+      decoded = await JuceAudioEngine.decodeAudioMono16k(clip.file.path);
+    } catch (_) {
+      return const <double>[];
+    }
+    if (decoded.isEmpty) return const <double>[];
+
+    int start = (clip.trimStart.inMilliseconds * sampleRate / 1000).round();
+    int end = (clip.trimEnd.inMilliseconds * sampleRate / 1000).round();
+    start = start.clamp(0, decoded.length);
+    end = end.clamp(start, decoded.length);
+    if (end <= start) return const <double>[];
+    final segment = Float32List.sublistView(decoded, start, end);
+    final lowPassed = _lowPassMono(
+      segment,
+      sampleRate: sampleRate,
+      cutoffHz: cutoffHz,
+    );
+
+    const int frameSize = 1024;
+    const int hopSize = 256;
+    final env = _buildOnsetEnvelopeFromSamples(
+      lowPassed,
+      frameSize: frameSize,
+      hopSize: hopSize,
+    );
+    if (env.isEmpty) return const <double>[];
+    final envHz = sampleRate / hopSize;
+    final localMs = _detectTransientTimesMsFromOnsetEnvelope(
+      env,
+      envSampleRateHz: envHz,
+      thresholdStd: thresholdStd,
+      minSpacingMs: minSpacingMs,
+      maxEvents: maxEvents,
+    );
+    if (localMs.isEmpty) return const <double>[];
+
+    final clipStartMs = clip.offset * 1000.0;
+    final maxTimelineMs = _maxAutomationTimelineMs();
+    return localMs
+        .map((ms) => (clipStartMs + ms).clamp(0.0, maxTimelineMs).toDouble())
+        .toList(growable: false);
+  }
+
   Future<double?> _detectClipTempoBpm(AudioTrack clip) async {
     if (clip.isMidi) return null;
 
@@ -11617,6 +19608,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _setClipTempoFollowMode(
     int clipIndex, {
     required bool preservePitch,
+    bool showFeedback = true,
   }) async {
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
@@ -11638,7 +19630,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _updateOverallDurationIfNeeded();
     if (mounted) setState(() {});
 
-    if (!mounted) return;
+    if (!mounted || !showFeedback) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -11692,6 +19684,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
     if (clip.isMidi) return;
+    _pendingStretchUndoByClip.putIfAbsent(
+      clipIndex,
+      () => _ClipStretchSnapshot(
+        offsetSec: clip.offset,
+        sourceTempoBpm: clip.sourceTempoBpm,
+        stretchToProjectTempo: clip.stretchToProjectTempo,
+        tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
+      ),
+    );
 
     final rawSec = _rawClipDurationSec(clip);
     if (rawSec <= 0.0) return;
@@ -11718,11 +19719,46 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
     if (clip.isMidi) return;
+    final before = _pendingStretchUndoByClip.remove(clipIndex);
+    final after = _ClipStretchSnapshot(
+      offsetSec: clip.offset,
+      sourceTempoBpm: clip.sourceTempoBpm,
+      stretchToProjectTempo: clip.stretchToProjectTempo,
+      tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
+    );
 
-    await _syncClipTimingToEngine(clipIndex);
-    await _syncClipMixToEngine(clip);
-    _updateOverallDurationIfNeeded();
-    if (mounted) setState(() {});
+    if (before == null || before.approxEquals(after)) {
+      await _syncClipTimingToEngine(clipIndex);
+      await _syncClipMixToEngine(clip);
+      _updateOverallDurationIfNeeded();
+      if (mounted) setState(() {});
+      return;
+    }
+
+    await _undoManager.execute(
+      StretchClipResizeAction(
+        tracks: _audioTracks,
+        originalIndex: clipIndex,
+        oldSnapshot: before,
+        newSnapshot: after,
+        applySnapshot: (target, snapshot) async {
+          target.offset = snapshot.offsetSec;
+          target.sourceTempoBpm = snapshot.sourceTempoBpm;
+          target.stretchToProjectTempo = snapshot.stretchToProjectTempo;
+          target.tempoStretchPreservePitch = snapshot.tempoStretchPreservePitch;
+          _tempoStretchEnabled = _audioTracks
+              .where((t) => !t.isMidi)
+              .any((t) => t.stretchToProjectTempo);
+          final targetIndex = _audioTracks.indexOf(target);
+          if (targetIndex >= 0) {
+            await _syncClipTimingToEngine(targetIndex);
+          }
+          await _syncClipMixToEngine(target);
+          _updateOverallDurationIfNeeded();
+          if (mounted) setState(() {});
+        },
+      ),
+    );
   }
 
   Future<void> _handleDetectClipTempoAndSetProjectTempo(int clipIndex) async {
@@ -12128,10 +20164,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final clip = _audioTracks[clipIndex];
     if (!clip.isMidi) return;
     setState(() {
+      if (_rowCount > 0) {
+        _selectedRow = clip.rowIndex.clamp(0, _rowCount - 1).toInt();
+      }
       _activeMidiClipEngineId = clip.engineClipId;
       _showPianoRoll = true;
     });
-    unawaited(_primePianoPreviewCache(clip));
+    if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
+      unawaited(() async {
+        await JuceAudioEngine.setLiveMidiInputTargetClip(clip.engineClipId);
+        await JuceAudioEngine.consumeLiveMidiInputEvents();
+      }());
+    }
   }
 
   void _closeMidiClipEditor() {
@@ -12140,6 +20184,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _pianoRollFullscreen = false;
       _activeMidiClipEngineId = null;
     });
+    if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
+      unawaited(() async {
+        await JuceAudioEngine.setLiveMidiInputTargetClip(-1);
+        await JuceAudioEngine.consumeLiveMidiInputEvents();
+      }());
+    }
   }
 
   String _pianoPreviewCacheKey(AudioTrack clip, int pitch, double velocity) {
@@ -12170,48 +20220,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return File(p.join(tempDir.path, 'mixroom_midi_preview_$safeHash.wav'));
   }
 
-  Future<void> _primePianoPreviewCache(AudioTrack clip) async {
-    final paramKeys = clip.instrumentParams.keys.toList()..sort();
-    final paramSig = paramKeys
-        .map(
-            (k) => '$k=${(clip.instrumentParams[k] ?? 0.0).toStringAsFixed(4)}')
-        .join('|');
-    final instrumentSig =
-        '${clip.instrumentId}|${clip.instrumentName}|t=${_tempo.toStringAsFixed(3)}|$paramSig';
-    if (_pianoPreviewPrimedInstruments.contains(instrumentSig)) return;
-    _pianoPreviewPrimedInstruments.add(instrumentSig);
-
-    const primePitches = <int>[60, 64, 67];
-    const primeVelocity = 0.875;
-    for (final pitch in primePitches) {
-      try {
-        final cacheKey = _pianoPreviewCacheKey(clip, pitch, primeVelocity);
-        final existing = _pianoPreviewRenderCache[cacheKey];
-        if (existing != null && File(existing).existsSync()) continue;
-        final outFile = await _pianoPreviewRenderFile(cacheKey);
-        final previewNote = MidiNote(
-          id: 'prime_${DateTime.now().microsecondsSinceEpoch}_$pitch',
-          pitch: pitch,
-          startBeat: 0.0,
-          lengthBeats: 0.42,
-          velocity: primeVelocity,
-        );
-        await _renderInstrumentClipToFile(
-          outFile: outFile,
-          instrumentId: clip.instrumentId,
-          instrumentName: clip.instrumentName,
-          notes: <MidiNote>[previewNote],
-          params: Map<String, double>.from(clip.instrumentParams),
-        );
-        if (outFile.existsSync()) {
-          _pianoPreviewRenderCache[cacheKey] = outFile.path;
-        }
-      } catch (_) {
-        // Best effort only.
-      }
-    }
-  }
-
   Future<void> _previewPianoRollNote(int pitch, double velocity) async {
     if (_activeMidiClipEngineId == null) return;
     final idx = _clipIndexForEngineId(_activeMidiClipEngineId!);
@@ -12234,14 +20242,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           lengthBeats: 0.42,
           velocity: velocityBucket,
         );
-        await _renderInstrumentClipToFile(
+        final rendered = await _renderInstrumentClipToFile(
           outFile: outFile,
           instrumentId: clip.instrumentId,
           instrumentName: clip.instrumentName,
           notes: <MidiNote>[previewNote],
           params: Map<String, double>.from(clip.instrumentParams),
         );
-        if (!outFile.existsSync()) return;
+        if (!rendered || !outFile.existsSync()) return;
         _pianoPreviewRenderCache[cacheKey] = outFile.path;
         cachedPath = outFile.path;
         if (_pianoPreviewRenderCache.length > 48) {
@@ -12637,16 +20645,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // Reset row controls.
     _rowMuted[row] = false;
     _rowSoloed[row] = false;
-    _rowGain[row] = 1.0;
+    _rowGain[row] = _kGainUiUnity;
     _rowPan[row] = 0.5;
     _rowVolumeAutomation[row] = [AutomationPoint(x: 0.0, volume: 0.75)];
+    _rowPluginAutomation[row] = <String, List<AutomationPoint>>{};
+    _rowAutomationClips[row] = <String, List<AutomationClipSnapshot>>{};
+    _rowSelectedAutomationTarget[row] = 'volume';
 
-    await JuceAudioEngine.setRowGain(row, 1.0);
+    await JuceAudioEngine.setRowGain(row, _kGainUiUnity);
     await JuceAudioEngine.setRowPan(row, 0.5);
-    await JuceAudioEngine.setTrackAutomationPoints(
-      row,
-      _toMaps(_rowVolumeAutomation[row]),
-    );
+    await _syncNativeAutomationForRow(row);
     await _recomputeAudibleState();
     _updateOverallDurationIfNeeded();
   }
@@ -12785,6 +20793,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Widget build(BuildContext context) {
     return Consumer<LocaleProvider>(
       builder: (context, localeProvider, child) {
+        final editorLayoutSpec =
+            _EditorLayoutSpec.fromSize(MediaQuery.of(context).size);
         return Stack(
           clipBehavior: Clip.none,
           children: [
@@ -12804,597 +20814,763 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           children: [
                             // TOP ROW OF BUTTONS
                             Padding(
-                                padding: const EdgeInsets.only(bottom: 12.0),
+                                padding: EdgeInsets.only(
+                                    bottom: editorLayoutSpec.topBarBottomGap),
                                 child: ValueListenableBuilder<Duration>(
                                   valueListenable: _transportClock,
                                   builder: (_, clock, __) =>
-                                      _buildTopBar(clock),
+                                      _buildTopBar(clock, editorLayoutSpec),
                                 )),
 
                             Flexible(
                               fit: FlexFit.loose,
                               child: ValueListenableBuilder<Duration>(
                                 valueListenable: _transportClock,
-                                builder: (_, clock, __) => AudioCanvasTimeline(
-                                  rows: _rows,
-                                  clips: _audioTracks, // your list
-                                  rowGain: _rowGain,
-                                  rowPan: _rowPan,
-                                  rowVolumeAutomation: _rowVolumeAutomation,
-                                  // extractors
-                                  getStartMs: (t) =>
-                                      t.offset * 1000.0, // adjust to your model
-                                  getDurationMs: (t) =>
-                                      _clipTimelineDurationMs(t),
-                                  getTimelineDurationMs: (t) =>
-                                      _clipTimelineDurationMs(t),
-                                  getTrimStartMs: (t) =>
-                                      t.trimStart.inMilliseconds.toDouble(),
-                                  getTrimEndMs: (t) =>
-                                      t.trimEnd.inMilliseconds.toDouble(),
-                                  // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
-                                  getPeaks: (c) {
-                                    return c.normWaveformData;
-                                  },
-                                  getY: (c) =>
-                                      c.y, // store a visual Y in your model
-                                  // commit (persist in your model, then setState)
-                                  onMoveClipCommit:
-                                      (i, newStartMs, newRowIndex) async {
-                                    if (newRowIndex < 0 ||
-                                        newRowIndex >= _rowCount) return;
-                                    final clip = _audioTracks[i];
-                                    // clip.offset = newStartMs / 1000.0;
-                                    // clip.rowIndex = newRowIndex; // <-- move across rows
-                                    // setState(() {});
-                                    // JuceAudioEngine.moveClipToRow(i, newRowIndex);
-                                    // _updateOverallDurationIfNeeded();
-                                    await _undoManager.execute(
-                                      MoveClipAction(
-                                        tracks: _audioTracks,
-                                        // clip: clip,
-                                        originalIndex: i,
-                                        oldOffset: clip.offset,
-                                        oldRow: clip.rowIndex,
-                                        newOffset: newStartMs / 1000.0,
-                                        newRow: newRowIndex,
-                                        onChange: () {
-                                          clip.rowId = _rowIdAt(clip.rowIndex);
-                                          _syncClipTimingToEngine(i);
-                                          _updateOverallDurationIfNeeded();
-                                        },
-                                      ),
-                                    );
-                                    setState(() {});
-                                  },
-                                  onTrimClip: (i, s, e,
-                                      {double? newStartMs}) async {
-                                    final clip = _audioTracks[i];
-
-                                    // 1. Update the internal trim values (where in the source file we start/end)
-                                    clip.trimStart =
-                                        Duration(milliseconds: s.round());
-                                    clip.trimEnd =
-                                        Duration(milliseconds: e.round());
-
-                                    // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
-                                    // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
-                                    if (newStartMs != null) {
-                                      // newStartMs is the intended start time in milliseconds.
-                                      // Convert to seconds (assuming clip.offset is in seconds).
-                                      clip.offset = newStartMs / 1000.0;
-                                    }
-                                    // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
-                                    // await _undoManager.execute(
-                                    //   TrimClipAction(
-                                    //     clip: clip,
-                                    //     oldTrimStart: clip.trimStart,
-                                    //     oldTrimEnd: clip.trimEnd,
-                                    //     oldOffset: clip.offset,
-                                    //     newTrimStart: Duration(milliseconds: s.round()),
-                                    //     newTrimEnd: Duration(milliseconds: e.round()),
-                                    //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
-                                    //     onChange: _updateOverallDurationIfNeeded,
-                                    //   ),
-                                    // );
-                                    setState(() {});
-                                    _updateOverallDurationIfNeeded();
-                                    // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
-                                  },
-
-                                  // for the undo history
-                                  onTrimClipCommit: (i, s, e, os, oe, oo,
-                                      {double? newStartMs}) async {
-                                    // final clip = _audioTracks[i];
-                                    await _undoManager.execute(
-                                      TrimClipAction(
-                                        // clip: clip,
-                                        tracks: _audioTracks,
-                                        originalIndex: i,
-                                        oldTrimStart:
-                                            Duration(milliseconds: os.round()),
-                                        oldTrimEnd:
-                                            Duration(milliseconds: oe.round()),
-                                        oldOffset: oo / 1000.0,
-                                        newTrimStart:
-                                            Duration(milliseconds: s.round()),
-                                        newTrimEnd:
-                                            Duration(milliseconds: e.round()),
-                                        newOffset: newStartMs != null
-                                            ? newStartMs / 1000.0
-                                            : null,
-                                        onChange: () {
-                                          _syncClipTimingToEngine(i);
-                                          _updateOverallDurationIfNeeded();
-                                        },
-                                      ),
-                                    );
-                                  },
-
-                                  // selection + headers
-                                  // numRows: kNumRows,
-                                  // selectedRowIndex: _selectedRow,
-                                  onSelectRow: (row) =>
-                                      setState(() => _selectedRow = row),
-                                  // rowMuted: _rowMuted,
-                                  // rowExpanded: _rowExpanded,
-                                  recordingInProgress: _isRecording,
-                                  onToggleExpanded: (row) => setState(() =>
-                                      _rowExpanded[row] = !_rowExpanded[row]),
-                                  onAddRow: _addRow,
-                                  onInsertRowAbove: _insertRowAbove,
-                                  onInsertRowBelow: _insertRowBelow,
-                                  onDeleteRow: _deleteRow,
-                                  onMoveRow: _moveRow,
-                                  onRenameRow: _renameRow,
-                                  onSetRowIcon: _setRowIcon,
-
-                                  // transport
-                                  playheadMs: clock.inMilliseconds
-                                      .toDouble(), // your existing clock
-                                  // isPlaying: _isPlaying,
-                                  onScrubRequested: (ms) {
-                                    if (_isRecording) {
-                                      return; // do nothing while recording (hopefully no bug where you can still physically scrub but does nothing here)
-                                    }
-
-                                    final newPosition =
-                                        Duration(milliseconds: ms.toInt());
-                                    _syncTransportClock(
-                                      newPosition,
-                                      playing: _isPlaying,
-                                    );
-                                    // for (int i = 0; i < _audioTracks.length; i++) {
-                                    //   final track = _audioTracks[i];
-                                    //   final effectivePos = _calculateEffectiveAudioPositionForTrack(track, newPosition);
-                                    //   JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
-                                    //   setState(() {
-                                    //     track.currentPosition = effectivePos;
-                                    //   });
-                                    // }
-                                    JuceAudioEngine.setTransportSeconds(
-                                        ms / 1000.0);
-                                    JuceAudioEngine.setMetronomeTransportMs(ms);
-                                  },
-                                  maxDuration: _audioOnlyOverallDuration,
-                                  getFullDurationMs: (t) =>
-                                      _clipFullDurationMsForTrim(t),
-                                  isPlaying: _isPlaying,
-
-                                  // ruler/grid
-                                  bpm: _tempo,
-                                  beatsPerBar: 4,
-
-                                  // layout
-                                  // numRows: kNumRows,
-                                  height:
-                                      520, // THIS VALUE is effectively unused, the height is just natural now
-                                  // ============================
-                                  // NEW: Row FX callbacks
-                                  // ============================
-                                  getRowEffects: (row) =>
-                                      JuceAudioEngine.getTrackEffectsForRow(
-                                          row),
-                                  getRowEffectIds: (row) =>
-                                      JuceAudioEngine.getTrackEffectIdsForRow(
-                                          row),
-
-                                  getRowEffectBypassState: (row, effectIndex) =>
-                                      JuceAudioEngine.getRowEffectBypassState(
-                                          row, effectIndex),
-
-                                  insertRowEffect: (row, pathOrName) async {
-                                    final before = await JuceAudioEngine
-                                        .getTrackEffectsForRow(row);
-                                    await _undoManager.execute(
-                                      InsertEffectAction(
-                                        row: row,
-                                        pathOrName: pathOrName,
-                                        onChange: () {
-                                          setState(() {});
-                                          _refreshRowFx(row);
-                                        },
-                                      ),
-                                    );
-                                    final after = await JuceAudioEngine
-                                        .getTrackEffectsForRow(row);
-                                    if (after.length <= before.length) {
-                                      _showSmallNotice(
-                                          'Could not load this effect plugin.');
-                                      return;
-                                    }
-                                    _recordProducerManualEdit('row_fx_insert',
-                                        {'row': row, 'effect': pathOrName});
-                                  }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
-                                  // need name of effects so undo action can add it back later
-                                  removeRowEffect: (row, effectIndex, name,
-                                      applyingPreset) async {
-                                    if (applyingPreset) {
-                                      await JuceAudioEngine.removeTrackEffect(
-                                          row, effectIndex);
-                                      return;
-                                    }
-                                    await _undoManager.execute(
-                                      RemoveEffectAction(
-                                        row: row,
-                                        effectIndex: effectIndex,
-                                        pathOrName: name,
-                                        onChange: () {
-                                          setState(() {});
-                                          _refreshRowFx(row);
-                                        },
-                                      ),
-                                    );
-                                    _recordProducerManualEdit('row_fx_remove', {
-                                      'row': row,
-                                      'index': effectIndex,
-                                      'effect': name,
-                                    });
-                                  }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
-
-                                  reorderRowEffects: (row, from, to) async {
-                                    await _undoManager.execute(
-                                      ReorderEffectAction(
-                                        row: row,
-                                        from: from,
-                                        to: to,
-                                        onChange: () {
-                                          setState(() {});
-                                          _refreshRowFx(row);
-                                        },
-                                      ),
-                                    );
-                                    _recordProducerManualEdit('row_fx_reorder',
-                                        {'row': row, 'from': from, 'to': to});
-                                  }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
-
-                                  setRowEffectBypassed:
-                                      (row, effectIndex, bypass) async {
-                                    await _undoManager.execute(
-                                      BypassEffectAction(
-                                        row: row,
-                                        effectIndex: effectIndex,
-                                        oldState: !bypass,
-                                        newState: bypass,
-                                        onChange: () {
-                                          setState(() {});
-                                          _refreshRowFx(row);
-                                        },
-                                      ),
-                                    );
-                                    _recordProducerManualEdit('row_fx_bypass', {
-                                      'row': row,
-                                      'index': effectIndex,
-                                      'bypassed': bypass,
-                                    });
-                                  }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
-
-                                  getRowPluginParameters: (row, effectIndex) =>
-                                      JuceAudioEngine.getTrackPluginParameters(
-                                          row, effectIndex),
-
-                                  setRowEffectParam:
-                                      (row, effectIndex, paramId, value) =>
-                                          JuceAudioEngine.setTrackEffect(
-                                              row, effectIndex, paramId, value),
-
-                                  // for commiting to undo history
-                                  onPluginParamCommit: (row, idx, paramId,
-                                      oldValue, newValue) async {
-                                    await _undoManager.execute(
-                                      SetEffectParamAction(
-                                        row: row,
-                                        effectIndex: idx,
-                                        paramId: paramId,
-                                        oldValue: oldValue,
-                                        newValue: newValue,
-                                        onChange: () {
-                                          setState(() {});
-                                          _refreshRowFx(row);
-                                        },
-                                      ),
-                                    );
-                                    _recordProducerManualEdit('row_fx_param', {
-                                      'row': row,
-                                      'index': idx,
-                                      'param_id': paramId,
-                                      'old_value': oldValue,
-                                      'new_value': newValue,
-                                    });
-                                  },
-
-                                  onPresetCommit: (before, after) async {
-                                    await _undoManager.execute(
-                                      TrackPresetChangeAction(
-                                        before: before,
-                                        after: after,
-                                        onChange: () => setState(() {}),
-                                      ),
-                                    );
-                                    _recordProducerManualEdit(
-                                        'row_preset_commit', {
-                                      'row': before.row,
-                                      'before_count': before.effects.length,
-                                      'after_count': after.effects.length,
-                                    });
-                                  },
-
-                                  scanPlugins: () =>
-                                      JuceAudioEngine.scanPlugins(),
-
-                                  setTrackAutomationPoints: (row, points) =>
-                                      JuceAudioEngine.setTrackAutomationPoints(
-                                          row, points),
-
-                                  onAutomationCommit:
-                                      (row, oldPoints, newPoints) {
-                                    _undoManager.execute(
-                                      SetAutomationPointsAction(
-                                        row: row,
-                                        oldPoints: oldPoints,
-                                        newPoints: newPoints,
-                                        applyToState: (r, points) {
-                                          setState(() {
-                                            _rowVolumeAutomation[r] = points
-                                                .map((p) => AutomationPoint(
-                                                    x: p.x, volume: p.volume))
-                                                .toList();
-                                          });
-                                        },
-                                      ),
-                                    );
-                                    _recordProducerManualEdit(
-                                        'row_automation', {
-                                      'row': row,
-                                      'old_count': oldPoints.length,
-                                      'new_count': newPoints.length,
-                                    });
-                                  },
-
-                                  setRowGain: (row, gain0to3) =>
-                                      JuceAudioEngine.setRowGain(row, gain0to3),
-                                  onRowGainCommit: (row, oldGain, newGain) {
-                                    _undoManager.execute(
-                                      SetRowGainAction(
-                                        row: row,
-                                        oldGain: oldGain,
-                                        newGain: newGain,
-                                        applyToState: (r, g) {
-                                          setState(() {
-                                            _rowGain[r] = g;
-                                          });
-                                        },
-                                      ),
-                                    );
-                                    _recordProducerManualEdit('row_gain', {
-                                      'row': row,
-                                      'old_gain': oldGain,
-                                      'new_gain': newGain,
-                                    });
-                                  },
-
-                                  muteRow: (row, mute) async {
-                                    // await JuceAudioEngine.muteRow(row, mute);
-                                    setState(() => _rowMuted[row] = mute);
-                                    await _recomputeAudibleState(); // this handles all mute/solo logic
-
-                                    // mute not counted in the undo history
-                                    // await _undoManager.execute(
-                                    //   MuteRowAction(row, !mute, mute, () => setState(() => _rowMuted[row] = mute)),
-                                    // );
-                                  },
-
-                                  // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
-                                  rowMuted: _rowMuted,
-
-                                  soloRow: (row, solo) async {
-                                    // await JuceAudioEngine.muteRow(row, mute);
-                                    setState(() => _rowSoloed[row] = solo);
-                                    await _recomputeAudibleState(); // this handles all mute/solo logic
-                                  },
-
-                                  // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
-                                  rowSoloed: _rowSoloed,
-
-                                  setRowPan: (row, newPan) =>
-                                      JuceAudioEngine.setRowPan(row, newPan),
-                                  onRowPanCommit: (row, oldPan, newPan) {
-                                    _undoManager.execute(
-                                      SetRowPanAction(
-                                        row: row,
-                                        oldPan: oldPan,
-                                        newPan: newPan,
-                                        applyToState: (r, p) {
-                                          setState(() {
-                                            _rowPan[r] = p;
-                                          });
-                                        },
-                                      ),
-                                    );
-                                    _recordProducerManualEdit('row_pan', {
-                                      'row': row,
-                                      'old_pan': oldPan,
-                                      'new_pan': newPan,
-                                    });
-                                  },
-
-                                  setClipGain: _setClipGainLive,
-                                  onClipGainCommit:
-                                      (clipIndex, oldGain, newGain) {
-                                    _undoManager.execute(
-                                      SetClipGainAction(
-                                        tracks: _audioTracks,
-                                        originalIndex: clipIndex,
-                                        oldGain: oldGain,
-                                        newGain: newGain,
-                                        applyToState: (clip, gain) {
-                                          clip.gain = gain;
-                                          setState(() {});
-                                        },
-                                      ),
-                                    );
-                                    _recordProducerManualEdit('clip_gain', {
-                                      'clip': clipIndex,
-                                      'old_gain': oldGain,
-                                      'new_gain': newGain,
-                                    });
-                                  },
-                                  setClipPitch: _setClipPitchLive,
-                                  onClipPitchCommit:
-                                      (clipIndex, oldPitch, newPitch) {
-                                    _undoManager.execute(
-                                      SetClipPitchAction(
-                                        tracks: _audioTracks,
-                                        originalIndex: clipIndex,
-                                        oldPitch: oldPitch,
-                                        newPitch: newPitch,
-                                        applyToState: (clip, pitch) {
-                                          clip.pitchSemitones = pitch;
-                                          setState(() {});
-                                        },
-                                      ),
-                                    );
-                                    _recordProducerManualEdit('clip_pitch', {
-                                      'clip': clipIndex,
-                                      'old_pitch': oldPitch,
-                                      'new_pitch': newPitch,
-                                    });
-                                  },
-                                  onAdjustClipToTempo: _handleAdjustClipToTempo,
-                                  onStretchClipToTempoPreservePitch:
-                                      _handleStretchClipToTempoPreservePitch,
-                                  onDisableClipTempoFollow:
-                                      _handleDisableClipTempoFollow,
-                                  onDetectClipTempoAndSetProjectTempo:
-                                      _handleDetectClipTempoAndSetProjectTempo,
-                                  onStretchClip: _handleStretchClipResize,
-                                  onStretchClipCommit:
-                                      _handleStretchClipResizeCommit,
-                                  onRenameClip: (clipIndex, newLabel) async {
-                                    if (clipIndex < 0 ||
-                                        clipIndex >= _audioTracks.length) {
-                                      return;
-                                    }
-                                    final oldLabel =
-                                        _audioTracks[clipIndex].label;
-                                    final nextLabel = newLabel.trim();
-                                    if (nextLabel.isEmpty ||
-                                        oldLabel == nextLabel) {
-                                      return;
-                                    }
-
-                                    await _undoManager.execute(
-                                      SetClipLabelAction(
-                                        tracks: _audioTracks,
-                                        originalIndex: clipIndex,
-                                        oldLabel: oldLabel,
-                                        newLabel: nextLabel,
-                                        applyToState: (clip, label) {
-                                          clip.label = label;
-                                          setState(() {});
-                                        },
-                                      ),
-                                    );
-
-                                    _recordProducerManualEdit('clip_rename', {
-                                      'clip': clipIndex,
-                                      'old_label': oldLabel,
-                                      'new_label': nextLabel,
-                                    });
-                                  },
-
-                                  onCopyClip: _handleCopyClip,
-                                  onDeleteClip: _handleDeleteClip,
-                                  onCopyClips: _handleCopyClips,
-                                  onDeleteClips: _handleDeleteClips,
-                                  onCutClipAt: _handleCutClipAt,
-                                  hasCopiedClip: _copiedClip != null ||
-                                      (_copiedClipGroup?.isNotEmpty ?? false),
-                                  onPasteClipAt: _handlePasteClipAt,
-                                  onClearCopiedClip: _clearCopiedClip,
-                                  onOpenMidiClip: _openMidiClipEditor,
-                                  onSnapSettingsChanged:
-                                      (magnetEnabled, quantizeDivisionsPerBar) {
-                                    if (_timelineMagnetEnabled ==
-                                            magnetEnabled &&
-                                        _timelineQuantizeDivisionsPerBar ==
-                                            quantizeDivisionsPerBar) {
-                                      return;
-                                    }
-                                    setState(() {
-                                      _timelineMagnetEnabled = magnetEnabled;
-                                      _timelineQuantizeDivisionsPerBar =
-                                          quantizeDivisionsPerBar;
-                                    });
-                                  },
-                                  onLoopToggle: (enabled) {
-                                    setState(() => _loopEnabled = enabled);
-                                  },
-
-                                  onLoopRegionChanged: (start, end) {
-                                    setState(() {
-                                      _loopStartMs = start;
-                                      _loopEndMs = end;
-                                    });
-                                  },
-                                  isRecording: _isRecording,
-                                  recordingRowIndex: _selectedRow,
-                                  recordingStartMs: _recordingStartMs,
-                                  recordingPeaks:
-                                      _recordingPeaks, // TODO: FIX TO USE WITH JUCE
-                                  registerRowFxRefresher: (fn) {
-                                    _refreshRowFx = fn;
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback((_) {
-                                      if (!mounted) return;
-                                      for (int row = 0;
-                                          row < _rowCount;
-                                          row++) {
-                                        _refreshRowFx(row);
+                                builder: (_, clock, __) => Halo(
+                                  highlighter: _mixHighlighter,
+                                  haloKey: const HaloKey('tutorial:timeline'),
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: AudioCanvasTimeline(
+                                    rows: _rows,
+                                    clips: _audioTracks, // your list
+                                    rowGain: _rowGain,
+                                    rowPan: _rowPan,
+                                    rowVolumeAutomation: _rowVolumeAutomation,
+                                    getAutomationTargetsForRow:
+                                        _automationTargetsForRowUi,
+                                    getSelectedAutomationTargetId:
+                                        _selectedAutomationTargetIdForRow,
+                                    setSelectedAutomationTargetId:
+                                        (row, targetId) {
+                                      _setSelectedAutomationTargetIdForRow(
+                                        row,
+                                        targetId,
+                                      );
+                                      unawaited(
+                                          _syncAutomationTargetToCurrentTime(
+                                        row,
+                                        targetId,
+                                      ));
+                                    },
+                                    getAutomationPointsForTarget:
+                                        (row, targetId) =>
+                                            _pointsForAutomationTarget(
+                                      row,
+                                      targetId,
+                                    )
+                                                .map((p) => p.copy())
+                                                .toList(growable: false),
+                                    setAutomationPointsForTarget:
+                                        (row, targetId, points) {
+                                      if (row < 0 || row >= _rowCount) return;
+                                      final safePoints =
+                                          _sanitizeAutomationPointsForTarget(
+                                        row,
+                                        targetId,
+                                        points,
+                                      );
+                                      if (targetId == 'volume') {
+                                        setState(() {
+                                          _rowVolumeAutomation[row] = safePoints
+                                              .map((p) => p.copy())
+                                              .toList(growable: false);
+                                        });
+                                        unawaited(
+                                            _syncNativeAutomationForRow(row));
+                                        return;
                                       }
-                                    });
-                                  },
-                                  meters: _meters,
-                                  getRowCompressorMeter: (row, fx) =>
-                                      JuceAudioEngine.getRowCompressorMeter(
-                                          row, fx),
-                                  getRowEqWaveform: (row, fx, sampleCount) =>
-                                      JuceAudioEngine.getRowEqWaveform(row, fx,
-                                          sampleCount: sampleCount),
-                                  onExternalSampleDrop:
-                                      (data, row, timeMs) async {
-                                    await _insertAudioFileAtTimeline(
-                                      data.filePath,
-                                      row: row,
-                                      timeMs: timeMs,
-                                    );
-                                  },
-                                  onExternalSampleDragEntered: () {
-                                    _handleSampleDragExitedBrowserPanel();
-                                  },
-                                  externalSampleDragActive: _sampleDragActive,
+                                      setState(() {
+                                        final rowMap =
+                                            _rowPluginAutomation.putIfAbsent(
+                                          row,
+                                          () =>
+                                              <String, List<AutomationPoint>>{},
+                                        );
+                                        rowMap[targetId] = safePoints
+                                            .map((p) => p.copy())
+                                            .toList(growable: false);
+                                      });
+                                      unawaited(
+                                          _syncNativePluginAutomationForRow(
+                                              row));
+                                    },
+                                    getAutomationClipsForTarget:
+                                        (row, targetId) =>
+                                            _copyAutomationClipList(
+                                      _clipsForAutomationTarget(row, targetId),
+                                    ),
+                                    setAutomationClipsForTarget:
+                                        (row, targetId, clips) {
+                                      if (row < 0 || row >= _rowCount) return;
+                                      final safeClips =
+                                          _sanitizeAutomationClipsForTarget(
+                                        row,
+                                        targetId,
+                                        clips,
+                                      );
+                                      setState(() {
+                                        final rowMap =
+                                            _rowAutomationClips.putIfAbsent(
+                                          row,
+                                          () => <String,
+                                              List<AutomationClipSnapshot>>{},
+                                        );
+                                        rowMap[targetId] =
+                                            _copyAutomationClipList(safeClips);
+                                      });
+                                      unawaited(_syncNativeAutomationForRow(
+                                        row,
+                                      ));
+                                    },
+                                    onAutomationClipsCommit:
+                                        (row, targetId, oldClips, newClips) {
+                                      unawaited(
+                                          _setAutomationClipsForTargetWithUndo(
+                                        row,
+                                        targetId,
+                                        newClips,
+                                        oldClipsOverride: oldClips,
+                                      ));
+                                      _recordProducerManualEdit(
+                                          'row_automation_clips', {
+                                        'row': row,
+                                        'target_id': targetId,
+                                        'old_count': oldClips.length,
+                                        'new_count': newClips.length,
+                                      });
+                                    },
+                                    onAutomationTargetCommit:
+                                        (row, targetId, oldPoints, newPoints) {
+                                      unawaited(
+                                          _setAutomationTargetPointsWithUndo(
+                                        row,
+                                        targetId,
+                                        newPoints,
+                                        oldPointsOverride: oldPoints,
+                                      ));
+                                      _recordProducerManualEdit(
+                                          'row_automation_target', {
+                                        'row': row,
+                                        'target_id': targetId,
+                                        'old_count': oldPoints.length,
+                                        'new_count': newPoints.length,
+                                      });
+                                    },
+                                    // extractors
+                                    getStartMs: (t) =>
+                                        t.offset *
+                                        1000.0, // adjust to your model
+                                    getDurationMs: (t) =>
+                                        _clipTimelineDurationMs(t),
+                                    getTimelineDurationMs: (t) =>
+                                        _clipTimelineDurationMs(t),
+                                    getTrimStartMs: (t) =>
+                                        t.trimStart.inMilliseconds.toDouble(),
+                                    getTrimEndMs: (t) =>
+                                        t.trimEnd.inMilliseconds.toDouble(),
+                                    // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
+                                    getPeaks: (c) {
+                                      return c.normWaveformData;
+                                    },
+                                    getY: (c) =>
+                                        c.y, // store a visual Y in your model
+                                    // commit (persist in your model, then setState)
+                                    onMoveClipCommit:
+                                        (i, newStartMs, newRowIndex) async {
+                                      if (newRowIndex < 0 ||
+                                          newRowIndex >= _rowCount) return;
+                                      final clip = _audioTracks[i];
+                                      // clip.offset = newStartMs / 1000.0;
+                                      // clip.rowIndex = newRowIndex; // <-- move across rows
+                                      // setState(() {});
+                                      // JuceAudioEngine.moveClipToRow(i, newRowIndex);
+                                      // _updateOverallDurationIfNeeded();
+                                      await _undoManager.execute(
+                                        MoveClipAction(
+                                          tracks: _audioTracks,
+                                          // clip: clip,
+                                          originalIndex: i,
+                                          oldOffset: clip.offset,
+                                          oldRow: clip.rowIndex,
+                                          newOffset: newStartMs / 1000.0,
+                                          newRow: newRowIndex,
+                                          onChange: () {
+                                            clip.rowId =
+                                                _rowIdAt(clip.rowIndex);
+                                            _syncClipTimingToEngine(i);
+                                            _updateOverallDurationIfNeeded();
+                                          },
+                                        ),
+                                      );
+                                      setState(() {});
+                                    },
+                                    onTrimClip: (i, s, e,
+                                        {double? newStartMs}) async {
+                                      final clip = _audioTracks[i];
 
-                                  mode: widget.mode, // or "Basic"/"Pro" etc
+                                      // 1. Update the internal trim values (where in the source file we start/end)
+                                      clip.trimStart =
+                                          Duration(milliseconds: s.round());
+                                      clip.trimEnd =
+                                          Duration(milliseconds: e.round());
+
+                                      // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
+                                      // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
+                                      if (newStartMs != null) {
+                                        // newStartMs is the intended start time in milliseconds.
+                                        // Convert to seconds (assuming clip.offset is in seconds).
+                                        clip.offset = newStartMs / 1000.0;
+                                      }
+                                      // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
+                                      // await _undoManager.execute(
+                                      //   TrimClipAction(
+                                      //     clip: clip,
+                                      //     oldTrimStart: clip.trimStart,
+                                      //     oldTrimEnd: clip.trimEnd,
+                                      //     oldOffset: clip.offset,
+                                      //     newTrimStart: Duration(milliseconds: s.round()),
+                                      //     newTrimEnd: Duration(milliseconds: e.round()),
+                                      //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
+                                      //     onChange: _updateOverallDurationIfNeeded,
+                                      //   ),
+                                      // );
+                                      setState(() {});
+                                      _updateOverallDurationIfNeeded();
+                                      // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
+                                    },
+
+                                    // for the undo history
+                                    onTrimClipCommit: (i, s, e, os, oe, oo,
+                                        {double? newStartMs}) async {
+                                      // final clip = _audioTracks[i];
+                                      await _undoManager.execute(
+                                        TrimClipAction(
+                                          // clip: clip,
+                                          tracks: _audioTracks,
+                                          originalIndex: i,
+                                          oldTrimStart: Duration(
+                                              milliseconds: os.round()),
+                                          oldTrimEnd: Duration(
+                                              milliseconds: oe.round()),
+                                          oldOffset: oo / 1000.0,
+                                          newTrimStart:
+                                              Duration(milliseconds: s.round()),
+                                          newTrimEnd:
+                                              Duration(milliseconds: e.round()),
+                                          newOffset: newStartMs != null
+                                              ? newStartMs / 1000.0
+                                              : null,
+                                          onChange: () {
+                                            _syncClipTimingToEngine(i);
+                                            _updateOverallDurationIfNeeded();
+                                          },
+                                        ),
+                                      );
+                                    },
+
+                                    // selection + headers
+                                    // numRows: kNumRows,
+                                    // selectedRowIndex: _selectedRow,
+                                    onSelectRow: (row) =>
+                                        setState(() => _selectedRow = row),
+                                    // rowMuted: _rowMuted,
+                                    // rowExpanded: _rowExpanded,
+                                    recordingInProgress: _isRecording,
+                                    onToggleExpanded: (row) => setState(() =>
+                                        _rowExpanded[row] = !_rowExpanded[row]),
+                                    onAddRow: _addRow,
+                                    onInsertRowAbove: _insertRowAbove,
+                                    onInsertRowBelow: _insertRowBelow,
+                                    onDeleteRow: _deleteRow,
+                                    onMoveRow: _moveRow,
+                                    onRenameRow: _renameRow,
+                                    onSetRowIcon: _setRowIcon,
+
+                                    // transport
+                                    playheadMs: clock.inMilliseconds
+                                        .toDouble(), // your existing clock
+                                    // isPlaying: _isPlaying,
+                                    onScrubRequested: (ms) {
+                                      if (_isRecording) {
+                                        return; // do nothing while recording (hopefully no bug where you can still physically scrub but does nothing here)
+                                      }
+
+                                      final newPosition =
+                                          Duration(milliseconds: ms.toInt());
+                                      _syncTransportClock(
+                                        newPosition,
+                                        playing: _isPlaying,
+                                      );
+                                      // for (int i = 0; i < _audioTracks.length; i++) {
+                                      //   final track = _audioTracks[i];
+                                      //   final effectivePos = _calculateEffectiveAudioPositionForTrack(track, newPosition);
+                                      //   JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
+                                      //   setState(() {
+                                      //     track.currentPosition = effectivePos;
+                                      //   });
+                                      // }
+                                      JuceAudioEngine.setAutomationTransport(
+                                          ms / 1000.0);
+                                      JuceAudioEngine.setMetronomeTransportMs(
+                                          ms);
+                                    },
+                                    maxDuration: _audioOnlyOverallDuration,
+                                    getFullDurationMs: (t) =>
+                                        _clipFullDurationMsForTrim(t),
+                                    isPlaying: _isPlaying,
+
+                                    // ruler/grid
+                                    bpm: _tempo,
+                                    beatsPerBar: 4,
+
+                                    // layout
+                                    // numRows: kNumRows,
+                                    height:
+                                        520, // THIS VALUE is effectively unused, the height is just natural now
+                                    // ============================
+                                    // NEW: Row FX callbacks
+                                    // ============================
+                                    getRowEffects: (row) =>
+                                        JuceAudioEngine.getTrackEffectsForRow(
+                                            row),
+                                    getRowEffectIds: (row) =>
+                                        JuceAudioEngine.getTrackEffectIdsForRow(
+                                            row),
+
+                                    getRowEffectBypassState: (row,
+                                            effectIndex) =>
+                                        JuceAudioEngine.getRowEffectBypassState(
+                                            row, effectIndex),
+
+                                    insertRowEffect: (row, pathOrName) async {
+                                      final before = await JuceAudioEngine
+                                          .getTrackEffectsForRow(row);
+                                      await _undoManager.execute(
+                                        InsertEffectAction(
+                                          row: row,
+                                          pathOrName: pathOrName,
+                                          onChange: () {
+                                            setState(() {});
+                                            _refreshRowFx(row);
+                                          },
+                                        ),
+                                      );
+                                      final after = await JuceAudioEngine
+                                          .getTrackEffectsForRow(row);
+                                      if (after.length <= before.length) {
+                                        _showSmallNotice(
+                                            'Could not load this effect plugin.');
+                                        return;
+                                      }
+                                      _recordProducerManualEdit('row_fx_insert',
+                                          {'row': row, 'effect': pathOrName});
+                                      await _refreshAutomationTargetsForRow(
+                                        row,
+                                      );
+                                    }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
+                                    // need name of effects so undo action can add it back later
+                                    removeRowEffect: (row, effectIndex, name,
+                                        applyingPreset) async {
+                                      if (applyingPreset) {
+                                        await JuceAudioEngine.removeTrackEffect(
+                                            row, effectIndex);
+                                        return;
+                                      }
+                                      await _undoManager.execute(
+                                        RemoveEffectAction(
+                                          row: row,
+                                          effectIndex: effectIndex,
+                                          pathOrName: name,
+                                          onChange: () {
+                                            setState(() {});
+                                            _refreshRowFx(row);
+                                          },
+                                        ),
+                                      );
+                                      _recordProducerManualEdit(
+                                          'row_fx_remove', {
+                                        'row': row,
+                                        'index': effectIndex,
+                                        'effect': name,
+                                      });
+                                      await _refreshAutomationTargetsForRow(
+                                        row,
+                                      );
+                                    }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
+
+                                    reorderRowEffects: (row, from, to) async {
+                                      await _undoManager.execute(
+                                        ReorderEffectAction(
+                                          row: row,
+                                          from: from,
+                                          to: to,
+                                          onChange: () {
+                                            setState(() {});
+                                            _refreshRowFx(row);
+                                          },
+                                        ),
+                                      );
+                                      _recordProducerManualEdit(
+                                          'row_fx_reorder',
+                                          {'row': row, 'from': from, 'to': to});
+                                      await _refreshAutomationTargetsForRow(
+                                        row,
+                                      );
+                                    }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
+
+                                    setRowEffectBypassed:
+                                        (row, effectIndex, bypass) async {
+                                      await _undoManager.execute(
+                                        BypassEffectAction(
+                                          row: row,
+                                          effectIndex: effectIndex,
+                                          oldState: !bypass,
+                                          newState: bypass,
+                                          onChange: () {
+                                            setState(() {});
+                                            _refreshRowFx(row);
+                                          },
+                                        ),
+                                      );
+                                      _recordProducerManualEdit(
+                                          'row_fx_bypass', {
+                                        'row': row,
+                                        'index': effectIndex,
+                                        'bypassed': bypass,
+                                      });
+                                    }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
+
+                                    getRowPluginParameters:
+                                        (row, effectIndex) => JuceAudioEngine
+                                            .getTrackPluginParameters(
+                                                row, effectIndex),
+
+                                    setRowEffectParam: (row, effectIndex,
+                                            paramId, value) =>
+                                        JuceAudioEngine.setTrackEffect(
+                                            row, effectIndex, paramId, value),
+
+                                    // for commiting to undo history
+                                    onPluginParamCommit: (row, idx, paramId,
+                                        oldValue, newValue) async {
+                                      await _undoManager.execute(
+                                        SetEffectParamAction(
+                                          row: row,
+                                          effectIndex: idx,
+                                          paramId: paramId,
+                                          oldValue: oldValue,
+                                          newValue: newValue,
+                                          onChange: () {
+                                            setState(() {});
+                                            _refreshRowFx(row);
+                                          },
+                                        ),
+                                      );
+                                      _recordProducerManualEdit(
+                                          'row_fx_param', {
+                                        'row': row,
+                                        'index': idx,
+                                        'param_id': paramId,
+                                        'old_value': oldValue,
+                                        'new_value': newValue,
+                                      });
+                                    },
+
+                                    onPresetCommit: (before, after) async {
+                                      await _undoManager.execute(
+                                        TrackPresetChangeAction(
+                                          before: before,
+                                          after: after,
+                                          onChange: () => setState(() {}),
+                                        ),
+                                      );
+                                      _recordProducerManualEdit(
+                                          'row_preset_commit', {
+                                        'row': before.row,
+                                        'before_count': before.effects.length,
+                                        'after_count': after.effects.length,
+                                      });
+                                      await _refreshAutomationTargetsForRow(
+                                        before.row,
+                                      );
+                                    },
+
+                                    scanPlugins: () =>
+                                        JuceAudioEngine.scanPlugins(),
+
+                                    setTrackAutomationPoints: (row, points) =>
+                                        _syncNativeAutomationForRow(row),
+
+                                    onAutomationCommit:
+                                        (row, oldPoints, newPoints) {
+                                      _undoManager.execute(
+                                        SetAutomationPointsAction(
+                                          row: row,
+                                          oldPoints: oldPoints,
+                                          newPoints: newPoints,
+                                          applyToState: (r, points) {
+                                            setState(() {
+                                              _rowVolumeAutomation[r] = points
+                                                  .map((p) => AutomationPoint(
+                                                      x: p.x, volume: p.volume))
+                                                  .toList();
+                                            });
+                                          },
+                                          onApplied: (r, _) async {
+                                            await _syncNativeAutomationForRow(
+                                                r);
+                                          },
+                                        ),
+                                      );
+                                      _recordProducerManualEdit(
+                                          'row_automation', {
+                                        'row': row,
+                                        'old_count': oldPoints.length,
+                                        'new_count': newPoints.length,
+                                      });
+                                    },
+
+                                    setRowGain: (row, gain0to3) =>
+                                        JuceAudioEngine.setRowGain(
+                                            row, gain0to3),
+                                    onRowGainCommit: (row, oldGain, newGain) {
+                                      _undoManager.execute(
+                                        SetRowGainAction(
+                                          row: row,
+                                          oldGain: oldGain,
+                                          newGain: newGain,
+                                          applyToState: (r, g) {
+                                            setState(() {
+                                              _rowGain[r] = g;
+                                            });
+                                          },
+                                        ),
+                                      );
+                                      _recordProducerManualEdit('row_gain', {
+                                        'row': row,
+                                        'old_gain': oldGain,
+                                        'new_gain': newGain,
+                                      });
+                                    },
+
+                                    muteRow: (row, mute) async {
+                                      // await JuceAudioEngine.muteRow(row, mute);
+                                      setState(() => _rowMuted[row] = mute);
+                                      await _recomputeAudibleState(); // this handles all mute/solo logic
+
+                                      // mute not counted in the undo history
+                                      // await _undoManager.execute(
+                                      //   MuteRowAction(row, !mute, mute, () => setState(() => _rowMuted[row] = mute)),
+                                      // );
+                                    },
+
+                                    // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
+                                    rowMuted: _rowMuted,
+
+                                    soloRow: (row, solo) async {
+                                      // await JuceAudioEngine.muteRow(row, mute);
+                                      setState(() => _rowSoloed[row] = solo);
+                                      await _recomputeAudibleState(); // this handles all mute/solo logic
+                                    },
+
+                                    // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
+                                    rowSoloed: _rowSoloed,
+
+                                    setRowPan: (row, newPan) =>
+                                        JuceAudioEngine.setRowPan(row, newPan),
+                                    onRowPanCommit: (row, oldPan, newPan) {
+                                      _undoManager.execute(
+                                        SetRowPanAction(
+                                          row: row,
+                                          oldPan: oldPan,
+                                          newPan: newPan,
+                                          applyToState: (r, p) {
+                                            setState(() {
+                                              _rowPan[r] = p;
+                                            });
+                                          },
+                                        ),
+                                      );
+                                      _recordProducerManualEdit('row_pan', {
+                                        'row': row,
+                                        'old_pan': oldPan,
+                                        'new_pan': newPan,
+                                      });
+                                    },
+
+                                    setClipGain: _setClipGainLive,
+                                    onClipGainCommit:
+                                        (clipIndex, oldGain, newGain) {
+                                      _undoManager.execute(
+                                        SetClipGainAction(
+                                          tracks: _audioTracks,
+                                          originalIndex: clipIndex,
+                                          oldGain: oldGain,
+                                          newGain: newGain,
+                                          applyToState: (clip, gain) {
+                                            clip.gain = gain;
+                                            setState(() {});
+                                          },
+                                        ),
+                                      );
+                                      _recordProducerManualEdit('clip_gain', {
+                                        'clip': clipIndex,
+                                        'old_gain': oldGain,
+                                        'new_gain': newGain,
+                                      });
+                                    },
+                                    setClipPitch: _setClipPitchLive,
+                                    onClipPitchCommit:
+                                        (clipIndex, oldPitch, newPitch) {
+                                      _undoManager.execute(
+                                        SetClipPitchAction(
+                                          tracks: _audioTracks,
+                                          originalIndex: clipIndex,
+                                          oldPitch: oldPitch,
+                                          newPitch: newPitch,
+                                          applyToState: (clip, pitch) {
+                                            clip.pitchSemitones = pitch;
+                                            setState(() {});
+                                          },
+                                        ),
+                                      );
+                                      _recordProducerManualEdit('clip_pitch', {
+                                        'clip': clipIndex,
+                                        'old_pitch': oldPitch,
+                                        'new_pitch': newPitch,
+                                      });
+                                    },
+                                    onAdjustClipToTempo:
+                                        _handleAdjustClipToTempo,
+                                    onStretchClipToTempoPreservePitch:
+                                        _handleStretchClipToTempoPreservePitch,
+                                    onDisableClipTempoFollow:
+                                        _handleDisableClipTempoFollow,
+                                    onDetectClipTempoAndSetProjectTempo:
+                                        _handleDetectClipTempoAndSetProjectTempo,
+                                    onStretchClip: _handleStretchClipResize,
+                                    onStretchClipCommit:
+                                        _handleStretchClipResizeCommit,
+                                    onRenameClip: (clipIndex, newLabel) async {
+                                      if (clipIndex < 0 ||
+                                          clipIndex >= _audioTracks.length) {
+                                        return;
+                                      }
+                                      final oldLabel =
+                                          _audioTracks[clipIndex].label;
+                                      final nextLabel = newLabel.trim();
+                                      if (nextLabel.isEmpty ||
+                                          oldLabel == nextLabel) {
+                                        return;
+                                      }
+
+                                      await _undoManager.execute(
+                                        SetClipLabelAction(
+                                          tracks: _audioTracks,
+                                          originalIndex: clipIndex,
+                                          oldLabel: oldLabel,
+                                          newLabel: nextLabel,
+                                          applyToState: (clip, label) {
+                                            clip.label = label;
+                                            setState(() {});
+                                          },
+                                        ),
+                                      );
+
+                                      _recordProducerManualEdit('clip_rename', {
+                                        'clip': clipIndex,
+                                        'old_label': oldLabel,
+                                        'new_label': nextLabel,
+                                      });
+                                    },
+
+                                    onCopyClip: _handleCopyClip,
+                                    onDeleteClip: _handleDeleteClip,
+                                    onCopyClips: _handleCopyClips,
+                                    onDeleteClips: _handleDeleteClips,
+                                    onCutClipAt: _handleCutClipAt,
+                                    hasCopiedClip: _copiedClip != null ||
+                                        (_copiedClipGroup?.isNotEmpty ?? false),
+                                    onPasteClipAt: _handlePasteClipAt,
+                                    onClearCopiedClip: _clearCopiedClip,
+                                    onOpenMidiClip: _openMidiClipEditor,
+                                    onStemSeparation:
+                                        _handleStemSeparationForClip,
+                                    onSelectionChanged: (selectedClipIndices,
+                                        primaryClipIndex) {
+                                      _timelineSelectedClipIndices =
+                                          List<int>.from(selectedClipIndices);
+                                      _timelinePrimarySelectedClipIndex =
+                                          primaryClipIndex;
+                                    },
+                                    onSnapSettingsChanged: (magnetEnabled,
+                                        quantizeDivisionsPerBar) {
+                                      if (_timelineMagnetEnabled ==
+                                              magnetEnabled &&
+                                          _timelineQuantizeDivisionsPerBar ==
+                                              quantizeDivisionsPerBar) {
+                                        return;
+                                      }
+                                      setState(() {
+                                        _timelineMagnetEnabled = magnetEnabled;
+                                        _timelineQuantizeDivisionsPerBar =
+                                            quantizeDivisionsPerBar;
+                                      });
+                                    },
+                                    onLoopToggle: (enabled) {
+                                      setState(() => _loopEnabled = enabled);
+                                    },
+
+                                    onLoopRegionChanged: (start, end) {
+                                      setState(() {
+                                        _loopStartMs = start;
+                                        _loopEndMs = end;
+                                      });
+                                    },
+                                    isRecording: _isRecording,
+                                    recordingRowIndex: _selectedRow,
+                                    recordingStartMs: _recordingStartMs,
+                                    recordingPeaks:
+                                        _recordingPeaks, // TODO: FIX TO USE WITH JUCE
+                                    registerRowFxRefresher: (fn) {
+                                      _refreshRowFx = fn;
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback((_) {
+                                        if (!mounted) return;
+                                        for (int row = 0;
+                                            row < _rowCount;
+                                            row++) {
+                                          _refreshRowFx(row);
+                                        }
+                                      });
+                                    },
+                                    registerRowFxPlaybackRefresher: (fn) {
+                                      _refreshRowFxPlayback = fn;
+                                    },
+                                    meters: _meters,
+                                    getRowCompressorMeter: (row, fx) =>
+                                        JuceAudioEngine.getRowCompressorMeter(
+                                            row, fx),
+                                    getRowEqWaveform: (row, fx, sampleCount) =>
+                                        JuceAudioEngine.getRowEqWaveform(
+                                            row, fx,
+                                            sampleCount: sampleCount),
+                                    onExternalSampleDrop:
+                                        (data, row, timeMs) async {
+                                      await _insertAudioFileAtTimeline(
+                                        data.filePath,
+                                        row: row,
+                                        timeMs: timeMs,
+                                      );
+                                    },
+                                    onExternalSampleDragEntered: () {
+                                      _handleSampleDragExitedBrowserPanel();
+                                    },
+                                    externalSampleDragActive: _sampleDragActive,
+                                    tutorialHighlighter: _mixHighlighter,
+
+                                    mode: _resolvedMode,
+                                  ),
                                 ),
                               ),
                             ),
@@ -14041,23 +22217,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   right: 0,
                                   bottom: _kChatBarStackHeight,
                                   height: panelHeight,
-                                  child: PianoRollEditor(
-                                    clip: clip,
-                                    bpm: _tempo,
-                                    projectPlayheadMs:
-                                        clock.inMilliseconds.toDouble(),
-                                    isPlaying: _isPlaying,
-                                    beatsPerBar: 4,
-                                    magnetEnabled: _timelineMagnetEnabled,
-                                    quantizeDivisionsPerBar:
-                                        _timelineQuantizeDivisionsPerBar,
-                                    fullscreen: _pianoRollFullscreen,
-                                    onFullscreenChanged: (v) {
-                                      setState(() => _pianoRollFullscreen = v);
-                                    },
-                                    onClose: _closeMidiClipEditor,
-                                    onCommit: _commitMidiClipFromPianoRoll,
-                                    onPreviewNote: _previewPianoRollNote,
+                                  child: Halo(
+                                    highlighter: _mixHighlighter,
+                                    haloKey:
+                                        const HaloKey('tutorial:piano_roll'),
+                                    borderRadius: BorderRadius.circular(18),
+                                    child: PianoRollEditor(
+                                      clip: clip,
+                                      availableInstruments:
+                                          _activeInstrumentCatalog(),
+                                      bpm: _tempo,
+                                      projectPlayheadMs:
+                                          clock.inMilliseconds.toDouble(),
+                                      isPlaying: _isPlaying,
+                                      beatsPerBar: 4,
+                                      magnetEnabled: _timelineMagnetEnabled,
+                                      quantizeDivisionsPerBar:
+                                          _timelineQuantizeDivisionsPerBar,
+                                      fullscreen: _pianoRollFullscreen,
+                                      onFullscreenChanged: (v) {
+                                        setState(
+                                            () => _pianoRollFullscreen = v);
+                                      },
+                                      onClose: _closeMidiClipEditor,
+                                      onCommit: _commitMidiClipFromPianoRoll,
+                                      onPreviewNote: _previewPianoRollNote,
+                                    ),
                                   ),
                                 );
                               },
@@ -14869,6 +23054,12 @@ class ExportSuccessScreen extends StatelessWidget {
     }
   }
 
+  void _showUploadComingSoon(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Platform upload coming soon')),
+    );
+  }
+
   Future<Map<String, String>?> showUploadDialog(BuildContext context) {
     final titleController = TextEditingController(text: 'My Mixroom Video');
     final descController =
@@ -15011,45 +23202,54 @@ class ExportSuccessScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final message = isVideo
+        ? L10n.translate(context, 'Your video was exported successfully!')
+        : L10n.translate(context, 'Your audio was exported successfully!');
+    const pageBg = Color(0xFF0F172A);
+    const topBarBg = Color(0xFF0E1420);
+    const accent = Color(0xFF6C8CFF);
+
     return Consumer<LocaleProvider>(
       // Wrap SideMenu with Consumer
       builder: (context, localeProvider, child) {
         return Scaffold(
+          backgroundColor: pageBg,
           appBar: AppBar(
-            backgroundColor: const Color.fromARGB(255, 22, 22, 22),
+            backgroundColor: topBarBg,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            automaticallyImplyLeading: false,
+            title: Text(
+              L10n.translate(context, 'Export Successful'),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
+              ),
+            ),
             actions: [
-              TextButton(
-                onPressed: () {
-                  // Navigator.pushAndRemoveUntil(
-                  //   context,
-                  //   PageRouteBuilder(
-                  //     pageBuilder: (context, animation, secondaryAnimation) => HomeScreen(),
-                  //     transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                  //       const beginScale = 0.96;
-                  //       const endScale = 1.0;
-                  //       const curve = Curves.easeOutCubic;
-
-                  //       final tween = Tween<double>(begin: beginScale, end: endScale)
-                  //           .chain(CurveTween(curve: curve));
-                  //       final fadeTween = Tween<double>(begin: 0.0, end: 1.0)
-                  //           .chain(CurveTween(curve: curve));
-
-                  //       return FadeTransition(
-                  //         opacity: animation.drive(fadeTween),
-                  //         child: ScaleTransition(
-                  //           scale: animation.drive(tween),
-                  //           child: child,
-                  //         ),
-                  //       );
-                  //     },
-                  //     transitionDuration: const Duration(milliseconds: 300),
-                  //   ),
-                  //   (route) => false,
-                  // );
-                  Navigator.pop(context, true);
-                },
-                child: Text(L10n.translate(context, 'Done'),
-                    style: TextStyle(fontSize: 16, color: Colors.white)),
+              Padding(
+                padding: const EdgeInsets.only(right: 12, top: 4),
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    textStyle: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context, true);
+                  },
+                  icon:
+                      const Icon(Icons.check_circle_outline_rounded, size: 18),
+                  label: Text(L10n.translate(context, 'Done')),
+                ),
               ),
             ],
           ), //title: Text(L10n.translate(context, 'Export Successful'))),
@@ -15064,132 +23264,89 @@ class ExportSuccessScreen extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Icon(Icons.check_circle, color: Colors.green, size: 100),
+                      TweenAnimationBuilder<double>(
+                        key: ValueKey(filePath),
+                        duration: const Duration(milliseconds: 900),
+                        curve: Curves.easeOutBack,
+                        tween: Tween(begin: 0.6, end: 1.0),
+                        builder: (context, scale, child) {
+                          return Transform.scale(scale: scale, child: child);
+                        },
+                        child: Icon(
+                          Icons.task_alt_rounded,
+                          color: Colors.greenAccent,
+                          size: 96,
+                          shadows: const [
+                            Shadow(
+                              blurRadius: 12,
+                              color: Color(0x6634D399),
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 20),
                       // Text(
                       //   'Your ${isVideo ? 'video' : 'audio'} was exported successfully!',
                       //   style: Theme.of(context).textTheme.headlineSmall,
                       //   textAlign: TextAlign.center,
                       // ),
-                      isVideo
-                          ? Text(
-                              L10n.translate(context,
-                                  'Your video was exported successfully!'),
-                              style: Theme.of(context).textTheme.headlineSmall,
-                              textAlign: TextAlign.center,
-                            )
-                          : Text(
-                              L10n.translate(context,
-                                  'Your audio was exported successfully!'),
-                              style: Theme.of(context).textTheme.headlineSmall,
-                              textAlign: TextAlign.center,
-                            ),
-                      const SizedBox(height: 40),
-                      // ElevatedButton(
-                      //   onPressed: () => _shareFile(context),
-                      //   child: const Text('Share File'),
-                      // ),
-                      // const SizedBox(height: 20),
-                      Text(L10n.translate(context, 'Share directly to:')),
-                      const SizedBox(height: 20),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                        child: Wrap(
-                          spacing: 32,
-                          runSpacing: 24,
-                          alignment: WrapAlignment.start,
-                          children: [
-                            if (isVideo)
-                              _SocialButton(
-                                iconWidget: Image.asset(
-                                    'assets/youtube_icon.png',
-                                    width: 56),
-                                label: 'YouTube',
-                                onTap: () async {
-                                  final info = await showUploadDialog(context);
-                                  if (info == null) return;
-
-                                  try {
-                                    final videoId =
-                                        await YoutubeService.uploadVideo(
-                                      file: File(filePath),
-                                      title: info['title']!,
-                                      description: info['description']!,
-                                    );
-
-                                    if (videoId == null) {
-                                      print('upload failed, videoId == null');
-                                      return;
-                                    }
-
-                                    final qrThumb =
-                                        await generateThumbnailWithQR(videoId);
-                                    await YoutubeService.uploadThumbnail(
-                                        videoId, qrThumb);
-                                    showQRPopup(context, qrThumb);
-                                  } catch (e) {
-                                    print("❌ Upload failed: $e");
-                                    ScaffoldMessenger.of(
-                                      context,
-                                    ).showSnackBar(SnackBar(
-                                        content: Text('❌ Upload failed')));
-                                  }
-
-                                  // try {
-                                  //   final videoId = await YoutubeService.uploadVideo(
-                                  //     file: File(filePath),
-                                  //     title: 'My Mixroom Video',
-                                  //     description: 'Made with Mixroom 🎸🎬',
-                                  //   );
-                                  //   if(videoId == null) {
-                                  //     print('upload failed, videoId == null');
-                                  //     return;
-                                  //   }
-                                  //   final url = 'https://youtube.com/watch?v=$videoId';
-                                  //   ScaffoldMessenger.of(context).showSnackBar(
-                                  //     SnackBar(content: Text('✅ Uploaded: $url')),
-                                  //   );
-                                  // } catch (e) {
-                                  //   ScaffoldMessenger.of(context).showSnackBar(
-                                  //     SnackBar(content: Text('Upload failed: $e')),
-                                  //   );
-                                  //   print("upload error reason: $e");
-                                  // }
-                                },
-                              ),
-                            if (isVideo)
-                              _SocialButton(
-                                iconWidget: Image.asset('assets/ig_icon.png',
-                                    width: 56),
-                                label: 'Instagram',
-                                onTap: () => _openSocialMedia(
-                                    'instagram://library',
-                                    'https://www.instagram.com/'),
-                              ),
-                            if (isVideo)
-                              _SocialButton(
-                                iconWidget: Image.asset(
-                                    'assets/tiktok_icon.png',
-                                    width: 56),
-                                label: 'TikTok',
-                                onTap: () => _openSocialMedia(
-                                    'snssdk1233://upload',
-                                    'https://www.tiktok.com/upload'),
-                              ),
-                            if (!isVideo)
-                              _SocialButton(
-                                iconWidget: Image.asset(
-                                    'assets/soundcloud_icon.png',
-                                    width: 56),
-                                label: 'SoundCloud',
-                                onTap: () => _openSocialMedia(
-                                    'soundcloud://upload',
-                                    'https://soundcloud.com/upload'),
-                              ),
-                          ],
-                        ),
+                      Text(
+                        message,
+                        style:
+                            Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                        textAlign: TextAlign.center,
                       ),
+                      const SizedBox(height: 40),
+                      ExportSuccessPreviewPlayer(
+                          filePath: filePath, isVideo: isVideo),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: () => _shareFile(context),
+                              icon:
+                                  const Icon(Icons.ios_share_rounded, size: 20),
+                              label: Text(L10n.translate(context, 'share')),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
+                                backgroundColor: accent,
+                                foregroundColor: Colors.white,
+                                textStyle: const TextStyle(
+                                    fontWeight: FontWeight.w600),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _showUploadComingSoon(context),
+                              icon: const Icon(Icons.cloud_upload_rounded,
+                                  size: 20),
+                              label: const Text('Upload to platform'),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
+                                foregroundColor: Colors.white70,
+                                side: const BorderSide(
+                                  color: Color(0xFF4F5A73),
+                                ),
+                                textStyle: const TextStyle(
+                                    fontWeight: FontWeight.w600),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
                       // const SizedBox(height: 40),
                       // OutlinedButton(
                       //   onPressed: () => Navigator.popUntil(
@@ -15400,8 +23557,8 @@ class _DynamicRackContentState extends State<DynamicRackContent>
               ),
               unselectedLabelStyle: const TextStyle(
                 fontSize: 11.5,
-                fontWeight: FontWeight.w500,
-                letterSpacing: 0.1,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.15,
               ),
               overlayColor:
                   MaterialStatePropertyAll(Colors.white.withOpacity(0.03)),
@@ -16053,6 +24210,61 @@ class MoveClipAction extends EditorUndoAction {
   }
 }
 
+class _ClipStretchSnapshot {
+  final double offsetSec;
+  final double sourceTempoBpm;
+  final bool stretchToProjectTempo;
+  final bool tempoStretchPreservePitch;
+
+  const _ClipStretchSnapshot({
+    required this.offsetSec,
+    required this.sourceTempoBpm,
+    required this.stretchToProjectTempo,
+    required this.tempoStretchPreservePitch,
+  });
+
+  bool approxEquals(_ClipStretchSnapshot other) {
+    return (offsetSec - other.offsetSec).abs() < 0.00001 &&
+        (sourceTempoBpm - other.sourceTempoBpm).abs() < 0.0001 &&
+        stretchToProjectTempo == other.stretchToProjectTempo &&
+        tempoStretchPreservePitch == other.tempoStretchPreservePitch;
+  }
+}
+
+class StretchClipResizeAction extends EditorUndoAction {
+  final List<AudioTrack> tracks;
+  final int originalIndex;
+  final _ClipStretchSnapshot oldSnapshot;
+  final _ClipStretchSnapshot newSnapshot;
+  final Future<void> Function(AudioTrack clip, _ClipStretchSnapshot snapshot)
+      applySnapshot;
+
+  StretchClipResizeAction({
+    required this.tracks,
+    required this.originalIndex,
+    required this.oldSnapshot,
+    required this.newSnapshot,
+    required this.applySnapshot,
+  });
+
+  @override
+  String get description => 'Stretch clip';
+
+  @override
+  Future<void> redo() async {
+    final clip = _resolveClip(tracks, originalIndex);
+    if (clip == null) return;
+    await applySnapshot(clip, newSnapshot);
+  }
+
+  @override
+  Future<void> undo() async {
+    final clip = _resolveClip(tracks, originalIndex);
+    if (clip == null) return;
+    await applySnapshot(clip, oldSnapshot);
+  }
+}
+
 class SetClipGainAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
@@ -16267,12 +24479,14 @@ class SetAutomationPointsAction extends EditorUndoAction {
   final List<AutomationPoint> oldPoints;
   final List<AutomationPoint> newPoints;
   final void Function(int row, List<AutomationPoint> points) applyToState;
+  final Future<void> Function(int row, List<AutomationPoint> points)? onApplied;
 
   SetAutomationPointsAction({
     required this.row,
     required List<AutomationPoint> oldPoints,
     required List<AutomationPoint> newPoints,
     required this.applyToState,
+    this.onApplied,
   })  : oldPoints = oldPoints
             .map((p) => AutomationPoint(x: p.x, volume: p.volume))
             .toList(),
@@ -16285,14 +24499,113 @@ class SetAutomationPointsAction extends EditorUndoAction {
 
   @override
   Future<void> redo() async {
-    await JuceAudioEngine.setTrackAutomationPoints(row, _toMaps(newPoints));
     applyToState(row, newPoints);
+    if (onApplied != null) {
+      await onApplied!(row, newPoints);
+    }
   }
 
   @override
   Future<void> undo() async {
-    await JuceAudioEngine.setTrackAutomationPoints(row, _toMaps(oldPoints));
     applyToState(row, oldPoints);
+    if (onApplied != null) {
+      await onApplied!(row, oldPoints);
+    }
+  }
+}
+
+class SetTargetAutomationPointsAction extends EditorUndoAction {
+  final int row;
+  final String targetId;
+  final List<AutomationPoint> oldPoints;
+  final List<AutomationPoint> newPoints;
+  final void Function(int row, String targetId, List<AutomationPoint> points)
+      applyToState;
+  final Future<void> Function(
+    int row,
+    String targetId,
+    List<AutomationPoint> points,
+  )? onApplied;
+
+  SetTargetAutomationPointsAction({
+    required this.row,
+    required this.targetId,
+    required List<AutomationPoint> oldPoints,
+    required List<AutomationPoint> newPoints,
+    required this.applyToState,
+    this.onApplied,
+  })  : oldPoints = oldPoints
+            .map((p) => AutomationPoint(x: p.x, volume: p.volume))
+            .toList(growable: false),
+        newPoints = newPoints
+            .map((p) => AutomationPoint(x: p.x, volume: p.volume))
+            .toList(growable: false);
+
+  @override
+  String get description => 'Edit automation lane';
+
+  @override
+  Future<void> redo() async {
+    applyToState(row, targetId, newPoints);
+    if (onApplied != null) {
+      await onApplied!(row, targetId, newPoints);
+    }
+  }
+
+  @override
+  Future<void> undo() async {
+    applyToState(row, targetId, oldPoints);
+    if (onApplied != null) {
+      await onApplied!(row, targetId, oldPoints);
+    }
+  }
+}
+
+class SetTargetAutomationClipsAction extends EditorUndoAction {
+  final int row;
+  final String targetId;
+  final List<AutomationClipSnapshot> oldClips;
+  final List<AutomationClipSnapshot> newClips;
+  final void Function(
+    int row,
+    String targetId,
+    List<AutomationClipSnapshot> clips,
+  ) applyToState;
+  final Future<void> Function(
+    int row,
+    String targetId,
+    List<AutomationClipSnapshot> clips,
+  )? onApplied;
+
+  SetTargetAutomationClipsAction({
+    required this.row,
+    required this.targetId,
+    required List<AutomationClipSnapshot> oldClips,
+    required List<AutomationClipSnapshot> newClips,
+    required this.applyToState,
+    this.onApplied,
+  })  : oldClips =
+            oldClips.map((clip) => clip.copyWith()).toList(growable: false),
+        newClips =
+            newClips.map((clip) => clip.copyWith()).toList(growable: false);
+
+  @override
+  String get description => 'Edit automation clips';
+
+  @override
+  Future<void> redo() async {
+    applyToState(row, targetId, newClips);
+    if (onApplied != null) {
+      await onApplied!(row, targetId, newClips);
+    }
+  }
+
+  @override
+  Future<void> undo() async {
+    applyToState(row, targetId, oldClips);
+    if (onApplied != null) {
+      await onApplied!(row, targetId, oldClips);
+    }
   }
 }
 
@@ -17001,12 +25314,23 @@ class ActionSummaryMessage extends TextMessage {
 
 // NOTE: this is copied over from audio_timeline_pro.dart PrettyGainSlider. make sure no diffs
 String _gainToDb(double sliderValue) {
-  if (sliderValue <= 0.0001) return "–∞ dB";
+  const dbMin = -60.0;
+  const dbMax = 6.0;
+  const uiMax = 3.0;
+  const uiUnity = 2.0;
 
-  // Match your DSP: perceptualGain = sliderValue^2 (clamped to 9)
-  double perceptual = math.min(sliderValue * sliderValue, 9.0);
+  final clamped = sliderValue.clamp(0.0, uiMax).toDouble();
+  final double db;
 
-  double db = 20 * math.log(perceptual) / math.log(10); // log10
+  if (clamped <= uiUnity) {
+    final t = uiUnity <= 0.0 ? 0.0 : (clamped / uiUnity).clamp(0.0, 1.0);
+    db = dbMin + ((0.0 - dbMin) * t);
+  } else {
+    final t = uiMax <= uiUnity
+        ? 0.0
+        : ((clamped - uiUnity) / (uiMax - uiUnity)).clamp(0.0, 1.0);
+    db = 0.0 + ((dbMax - 0.0) * t);
+  }
 
   return db > 0
       ? "+${db.toStringAsFixed(1)} dB"

@@ -27,6 +27,28 @@ class MixAction {
   Map<String, dynamic> toJson() => {'type': type, 'data': data};
 }
 
+class AssistantAction {
+  final String type;
+  final Map<String, dynamic> data;
+
+  const AssistantAction({
+    required this.type,
+    required this.data,
+  });
+
+  Map<String, dynamic> toJson() => {'type': type, 'data': data};
+
+  factory AssistantAction.fromJson(Map<String, dynamic> json) {
+    final rawData = json['data'];
+    return AssistantAction(
+      type: (json['type'] as String?)?.trim() ?? '',
+      data: rawData is Map<String, dynamic>
+          ? rawData
+          : (rawData is Map ? Map<String, dynamic>.from(rawData) : const {}),
+    );
+  }
+}
+
 class MixingResult {
   final List<MixAction> actions;
 
@@ -74,17 +96,26 @@ class ChatPipelineResult {
   final String message;
   final MixingResult? mixing;
   final Map<String, dynamic>? meta;
+  final List<AssistantAction> assistantActions;
 
-  const ChatPipelineResult.message(this.message, {this.meta}) : mixing = null;
-  const ChatPipelineResult.mix(this.mixing, this.message, {this.meta});
+  const ChatPipelineResult.message(this.message,
+      {this.meta, this.assistantActions = const []})
+      : mixing = null;
+  const ChatPipelineResult.mix(this.mixing, this.message,
+      {this.meta, this.assistantActions = const []});
 
   bool get hasMix =>
       mixing != null && !(mixing!.isNoOp || mixing!.actions.isEmpty);
 
+  bool get hasAssistantActions => assistantActions.isNotEmpty;
+
   @override
   String toString() {
     if (mixing == null) {
-      return 'ChatPipelineResult(message: "$message")';
+      if (assistantActions.isEmpty) {
+        return 'ChatPipelineResult(message: "$message")';
+      }
+      return 'ChatPipelineResult(message: "$message", assistantActions: ${assistantActions.length})';
     }
 
     final mix = mixing!;

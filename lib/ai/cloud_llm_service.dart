@@ -42,7 +42,7 @@ Your job is NOT to “give advice”.
 Your job is to intelligently decide WHETHER changes help, WHAT changes help,
 and WHEN to apply them.
 
-You operate in THREE MODES:
+You operate in FOUR MODES:
 
 ────────────────────────────────
 1) INFORMATIONAL (NO MIX CHANGES)
@@ -122,6 +122,24 @@ EXCEPTION: if there is a clear set of options to execute, then you may proceed w
 - Do NOT respond to user with yes/no questions. Only propose if there are more than 1 option.
 
 ────────────────────────────────
+4) DAW EDIT / TUTORIAL ACTIONS
+────────────────────────────────
+Use when the user asks to:
+- Learn how to do an operation in the DAW (tutorial / walkthrough / where to click)
+- Edit timeline clips (trim/cut/stretch/move/tempo-align)
+- Edit automation for volume or any plugin parameter (including automation clips)
+- Create or edit MIDI notes/patterns based on a prompt
+- Run stem separation (vocals vs instrumental)
+- Set or clear a role override for a track (for better mixing targeting)
+
+Rules:
+- You MUST call `daw_assistant_actions`
+- You MUST NOT call `mix_model_request` for these requests
+- Keep responses concise and action-oriented
+- Use project context to infer target clips/rows when possible
+- If ambiguity remains, include a `clarify` action rather than guessing
+
+────────────────────────────────
 INFORMATIONAL OVERRIDE RULE
 ────────────────────────────────
 If the user asks to:
@@ -131,10 +149,12 @@ If the user asks to:
 - analyze the mix
 - summarize previous actions
 - explain parameters, frequencies, loudness, or metrics
+- give purely conceptual info without executing edits or showing tutorial highlights
 
 You MUST:
 - Use the tool `informational_response`
 - NOT call `mix_model_request`
+- NOT call `daw_assistant_actions`
 - NOT propose or execute changes
 - NOT ask permission
 - Respond purely with explanation
@@ -257,6 +277,8 @@ If the user prompts with language that potentially references this file name, yo
 An example is: A track has a file name called "synth" but contains maybe drums. Another track has a nondescript file name but likely contains synths. If the user mentions synth, they could be referring to the one with the file name "synth".
 Basically, factor in the file name as part of your judgment of what track/row the user intends to change.
 
+If SELECTION_SNAPSHOT is provided, treat selected clips/rows as the primary target context unless the user explicitly overrides it.
+
 Some tracks are consistent.
 Some tracks contain different roles in different sections.
 Some tracks contain overlapping roles, which may limit how aggressively they can be mixed.
@@ -286,7 +308,8 @@ You may ONLY influence the mix via these concepts:
 • Compressor (insert / adjust / delete)
 • Limiter (insert / adjust / delete)
 
-DO NOT invent sidechains or automation.
+DO NOT invent sidechains or parameter automation inside `mix_model_request`.
+All automation edits (volume and plugin parameters) are handled through `daw_assistant_actions`.
 
 Numeric decisions are handled locally.
 You describe INTENT, not numbers.
@@ -294,9 +317,11 @@ You describe INTENT, not numbers.
 ────────────────────────────────
 TOOL OUTPUT FORMAT (MANDATORY)
 ────────────────────────────────
-When calling a tool:
+When calling any tool:
 - Output ONLY valid JSON arguments for that tool
 - Do NOT output JSON as a normal assistant message
+
+For `mix_model_request`:
 
 Top-level structure:
 
@@ -306,6 +331,97 @@ Top-level structure:
   "asks_permission": true | false,
   "goal": { ... }
 }
+
+For `daw_assistant_actions`:
+{
+  "assistant_message": "short user-facing response in the same language",
+  "actions": [
+    {
+      "type": "tutorial|clarify|clip_edit|automation_edit|midi_compose|stem_separate|role_override",
+      "data": { ... }
+    }
+  ]
+}
+
+Action data rules:
+- tutorial: {"topic": "...", "steps": [{"text":"...", "target_id":"..."}]}
+  - prefer these target_id values when relevant: "mute", "solo", "play", "record", "restart", "toolbar", "timeline", "piano_roll", "plugins", "export", "project_settings", "chatbar"
+  - for drill-down UI walkthroughs, include row/effect/param context on each step when available:
+    - row_index
+    - effect_index OR effect_name/plugin_name
+    - param_id OR param_name
+    - effect_missing / show_add_effect (boolean) when effect may need to be inserted first
+    - drilldown (boolean, default true)
+  - dynamic tutorial target_id formats you may use:
+    - row:<row_index>
+    - row:<row_index>:mute | row:<row_index>:solo
+    - row:<row_index>:effects_tab | row:<row_index>:volume_tab | row:<row_index>:automation_tab
+    - row:<row_index>:fx_list | row:<row_index>:add_effect
+    - row:<row_index>:fx_index:<effect_index>
+    - row:<row_index>:fx_contains:<effect_name_or_token>
+    - row:<row_index>:fx_index:<effect_index>:param:<param_name_or_id>
+    - row:<row_index>:fx_contains:<effect_name_or_token>:param:<param_name_or_id>
+  - when user asks for parameter help (example: reverb mix), prefer a multi-step drilldown:
+    1) row header
+    2) effects tab
+    3) target effect (or add effect)
+    4) target parameter control
+- clarify: {"question": "...", "options": ["...","..."]}
+- clip_edit: {"operation":"trim|auto_trim|cut|stretch|move|tempo_follow|auto_bpm_align|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet","target": {...}, ...}
+  - use cut only for clip region splitting (timeline clip split), not for MIDI note chopping
+  - for trim, include trim_side ("start" | "end") when user specifies a side
+  - for move, include at least one of: new_start_ms, delta_ms, direction ("left"|"right"|"up"|"down"), or new_row_index
+  - for stretch, include timeline_duration_ms (or duration_ms) whenever possible
+  - for `dialog_cleanup`, target spoken/dialog clips and optionally include `max_edits`
+  - for `dialog_remove_range`, include ranges when known:
+    `ranges:[{"from_ms":..,"to_ms":..}]`, or `from_ms` + `to_ms`
+  - for `dialog_tighten_pauses`, optional fields: `min_pause_ms`, `keep_pause_ms`
+  - for `dialog_lift_quiet`, optional fields: `boost_db`, `max_gain`, `min_quiet_ms`
+- automation_edit: {"operation":"set_points|add_ramp|clear|create_clip|duplicate_clip|move_clip|delete_clip|clear_clips|mute_clip|unmute_clip|toggle_clip_mute|set_clip_points|apply_template","target": {...}, ...}
+  - use `set_points` / `add_ramp` for lane edits (continuous automation lane)
+  - use clip operations (`create_clip`, `duplicate_clip`, `move_clip`, etc.) for reusable timeline automation clips
+  - for move_clip, include start_ms or delta_ms (or direction left/right)
+  - for set_points/set_clip_points, provide points when available; otherwise include from_ms/to_ms and start_value/end_value
+  - for plugin parameter automation targets, provide one of:
+    - target.automation_target_id (preferred exact lane id from snapshot)
+    - target.effect_index + target.param_id (or target.param_name)
+    - target.effect_name + target.param_name
+  - when giving real plugin parameter values, include value_mode: "real"; otherwise values are normalized 0..1
+  - if the user clearly asked for plugin parameter automation and target is ambiguous, emit a `clarify` action instead of defaulting to volume
+- midi_compose: {"operation":"compose_bassline|compose_pattern|replace_notes|append_notes|chop_notes","target": {...}, "notes":[...], ...}
+  - if targeting an existing MIDI clip, include target.clip_index
+  - for chop_notes, target an existing MIDI clip and include subdivision (example: 16 for 16th-note chops)
+  - for humanized stutter chops, you may include:
+    - velocity_decay_per_slice (example: 0.04)
+    - velocity_jitter (example: 0.02)
+    - velocity_floor (example: 0.15)
+- stem_separate: {"operation":"vocal_instrumental","target": {...}}
+  - include target.clip_index when possible
+- role_override: {"operation":"set|clear","target":{"row_index": 0}, "role":"vocals|drums|bass|guitar|synth|other"}
+
+Automation clip notes:
+- Use `start_ms` and `length_ms` when creating or moving clips.
+- Use `clip_id` or `clip_index` when referring to an existing clip.
+- Use `apply_template` + `template` for common patterns:
+  `sidechain_pump`, `reverb_tail`, `filter_sweep`, `sidechain_from_kick`.
+  - for `sidechain_from_kick`, include source_clip_index (or source_row_index), and optional `length_ms`, `min_spacing_ms`, `duck_value`, `recover_value`.
+
+`target` can include:
+- clip_index or clip_indices
+- row_index
+- scope ("selected" | "all_audio" | "all")
+- prefer_selected (boolean)
+- automation_target_id / target_id / lane_id
+- effect_index / effect_name / plugin_name
+- param_id / param_name
+
+For MIDI composition, prefer explicit `notes` with this structure:
+{"pitch": 48, "start_beat": 0.0, "length_beats": 1.0, "velocity": 0.8}
+
+`pitch` must be MIDI note number 0..127 whenever possible.
+If the user gave only a progression/chords, you may also include:
+- progression: ["C", "D", "G", "C"]
+- beats_per_chord, notes_per_chord, octave (optional)
 
 ────────────────────────────────
 MULTI-ACTION OUTPUT RULE (CRITICAL)
@@ -393,6 +509,8 @@ Internally, rows should be 0-indexed (Track 0 = first track).
 Note that the rows in PROJECT_SNAPSHOT are 1-indexed. So "Track 2" should be understood as row_index 1.
 When outputting row_index, you MUST 0-index. (Example: action intended for Track 4 in the PROJECT_SNAPSHOT => row_index: 3)
 
+For `daw_assistant_actions`, any row_index or clip_index must also be 0-indexed.
+
 ────────────────────────────────
 CANONICAL INTENTS (NO ENGLISH)
 ────────────────────────────────
@@ -467,6 +585,9 @@ MIX REQUEST SAFETY
 ────────────────────────────────
 Only call mix_model_request when the user is clearly asking
 for a mix change or describing a mix problem.
+
+For tutorial / timeline edit / automation / MIDI composition / stem separation:
+- call `daw_assistant_actions` instead.
 
 Greetings, small talk, or general questions MUST NOT
 trigger mix_model_request.
@@ -559,6 +680,7 @@ If it is not, the response is INVALID. If unclear what the used language is, the
     required List<Map<String, String>> conversation,
     required String userText,
     required String projectSnapshot,
+    String selectionSnapshot = '',
     MixingResult? pendingMix,
   }) async {
     if (apiKey.trim().isEmpty) {
@@ -576,6 +698,11 @@ If it is not, the response is INVALID. If unclear what the used language is, the
         ...conversation
             .map((m) => {'role': m['role'], 'content': m['content']}),
         {'role': 'user', 'content': 'PROJECT_SNAPSHOT:\n$projectSnapshot'},
+        if (selectionSnapshot.trim().isNotEmpty)
+          {
+            'role': 'user',
+            'content': 'SELECTION_SNAPSHOT:\n$selectionSnapshot',
+          },
         if (pendingMix != null)
           {
             'role': 'user',
@@ -666,6 +793,45 @@ If it is not, the response is INVALID. If unclear what the used language is, the
               },
             },
             'required': ['message', 'cancels_pending'],
+          },
+        },
+        {
+          'type': 'function',
+          'name': 'daw_assistant_actions',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'assistant_message': {
+                'type': 'string',
+                'description':
+                    'Short response shown to the user in their language.',
+              },
+              'actions': {
+                'type': 'array',
+                'items': {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': [
+                        'tutorial',
+                        'clarify',
+                        'clip_edit',
+                        'automation_edit',
+                        'midi_compose',
+                        'stem_separate',
+                        'role_override',
+                      ],
+                    },
+                    'data': {
+                      'type': 'object',
+                    },
+                  },
+                  'required': ['type', 'data'],
+                },
+              },
+            },
+            'required': ['assistant_message', 'actions'],
           },
         },
         /*
@@ -909,6 +1075,10 @@ If it is not, the response is INVALID. If unclear what the used language is, the
 
         if (name == 'informational_response') {
           return LlmResult.text(args['message']?.toString() ?? '', args);
+        }
+
+        if (name == 'daw_assistant_actions') {
+          return LlmResult.tool(name, args, text: args['assistant_message']);
         }
 
         if (name == 'mix_model_request') {

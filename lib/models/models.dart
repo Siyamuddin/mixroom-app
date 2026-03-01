@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 
+const double kDefaultGainUi = 2.0;
+
 enum ClipKind { audio, midi }
 
 extension ClipKindWire on ClipKind {
@@ -102,7 +104,7 @@ class AudioTrack {
     List<AutomationPoint>? volumeAutomation,
     Duration? currentPosition,
     this.normWaveformData = const [],
-    this.gain = 1.0,
+    this.gain = kDefaultGainUi,
     this.pitchSemitones = 0.0,
     this.sourceTempoBpm = 0.0,
     this.stretchToProjectTempo = false,
@@ -141,7 +143,7 @@ class AudioTrack {
     bool audioStarted = false,
     List<AutomationPoint>? volumeAutomation,
     Duration? currentPosition,
-    double gain = 1.0,
+    double gain = kDefaultGainUi,
     double pitchSemitones = 0.0,
     double sourceTempoBpm = 0.0,
     bool stretchToProjectTempo = false,
@@ -250,6 +252,153 @@ class MasterEffectsSnapshot {
   MasterEffectsSnapshot(this.effects);
 }
 
+class AutomationLaneSnapshot {
+  final String targetId;
+  final String label;
+  final int effectIndex;
+  final String paramId;
+  final String type;
+  final double min;
+  final double max;
+  final List<AutomationPoint> points;
+
+  const AutomationLaneSnapshot({
+    required this.targetId,
+    required this.label,
+    required this.effectIndex,
+    required this.paramId,
+    required this.type,
+    required this.min,
+    required this.max,
+    required this.points,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      "targetId": targetId,
+      "label": label,
+      "effectIndex": effectIndex,
+      "paramId": paramId,
+      "type": type,
+      "min": min,
+      "max": max,
+      "points": points.map((p) => p.toJson()).toList(),
+    };
+  }
+
+  static AutomationLaneSnapshot fromJson(Map<String, dynamic> json) {
+    final rawTargetId = (json["targetId"] ?? '').toString().trim();
+    final rawLabel = (json["label"] ?? '').toString().trim();
+    final effectIndex = (json["effectIndex"] as num?)?.toInt() ?? -1;
+    final paramId = (json["paramId"] ?? '').toString();
+    final type = (json["type"] ?? 'float').toString();
+    final min = (json["min"] as num?)?.toDouble() ?? 0.0;
+    final max = (json["max"] as num?)?.toDouble() ?? 1.0;
+    final points = ((json["points"] as List?) ?? const [])
+        .map((e) =>
+            AutomationPointJson.fromJson((e as Map).cast<String, dynamic>()))
+        .toList(growable: false);
+
+    return AutomationLaneSnapshot(
+      targetId: rawTargetId.isNotEmpty ? rawTargetId : 'volume',
+      label: rawLabel.isNotEmpty ? rawLabel : 'Volume',
+      effectIndex: effectIndex,
+      paramId: paramId,
+      type: type,
+      min: min,
+      max: max,
+      points: points,
+    );
+  }
+}
+
+class AutomationClipSnapshot {
+  final String id;
+  final String targetId;
+  final String label;
+  final int row;
+  final int lane;
+  final double startMs;
+  final double lengthMs;
+  final bool muted;
+  final List<AutomationPoint> points; // relative to clip start
+
+  const AutomationClipSnapshot({
+    required this.id,
+    required this.targetId,
+    required this.label,
+    required this.row,
+    this.lane = 0,
+    required this.startMs,
+    required this.lengthMs,
+    required this.muted,
+    required this.points,
+  });
+
+  AutomationClipSnapshot copyWith({
+    String? id,
+    String? targetId,
+    String? label,
+    int? row,
+    int? lane,
+    double? startMs,
+    double? lengthMs,
+    bool? muted,
+    List<AutomationPoint>? points,
+  }) {
+    return AutomationClipSnapshot(
+      id: id ?? this.id,
+      targetId: targetId ?? this.targetId,
+      label: label ?? this.label,
+      row: row ?? this.row,
+      lane: lane ?? this.lane,
+      startMs: startMs ?? this.startMs,
+      lengthMs: lengthMs ?? this.lengthMs,
+      muted: muted ?? this.muted,
+      points:
+          (points ?? this.points).map((p) => p.copy()).toList(growable: false),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      "id": id,
+      "targetId": targetId,
+      "label": label,
+      "row": row,
+      "lane": lane,
+      "startMs": startMs,
+      "lengthMs": lengthMs,
+      "muted": muted,
+      "points": points.map((p) => p.toJson()).toList(growable: false),
+    };
+  }
+
+  static AutomationClipSnapshot fromJson(Map<String, dynamic> json) {
+    final targetId = (json["targetId"] ?? '').toString().trim();
+    final startMs = (json["startMs"] as num?)?.toDouble() ?? 0.0;
+    final lengthMs = (json["lengthMs"] as num?)?.toDouble() ?? 1000.0;
+    final fallbackId =
+        'clip_${targetId.isEmpty ? 'volume' : targetId}_${startMs.round()}';
+    return AutomationClipSnapshot(
+      id: ((json["id"] as String?) ?? '').trim().isEmpty
+          ? fallbackId
+          : (json["id"] as String).trim(),
+      targetId: targetId.isEmpty ? 'volume' : targetId,
+      label: (json["label"] as String?)?.trim() ?? '',
+      row: (json["row"] as num?)?.toInt() ?? 0,
+      lane: (((json["lane"] as num?)?.toInt() ?? 0).clamp(0, 1 << 20)).toInt(),
+      startMs: startMs,
+      lengthMs: lengthMs,
+      muted: (json["muted"] as bool?) ?? false,
+      points: ((json["points"] as List?) ?? const [])
+          .map((e) =>
+              AutomationPointJson.fromJson((e as Map).cast<String, dynamic>()))
+          .toList(growable: false),
+    );
+  }
+}
+
 extension AudioTrackSerialization on AudioTrack {
   Map<String, dynamic> toJson(String fileName) {
     return {
@@ -283,12 +432,18 @@ class RowStateSnapshot {
   final double gain; // row/bus gain
   final double pan; // row/bus pan (-1..1 or 0..1 depending on your app)
   final List<AutomationPoint> volumeAutomation; // row-level automation
+  final List<AutomationLaneSnapshot> automationLanes;
+  final List<AutomationClipSnapshot> automationClips;
+  final String? selectedAutomationTargetId;
 
   RowStateSnapshot({
     required this.row,
     required this.gain,
     required this.pan,
     required this.volumeAutomation,
+    this.automationLanes = const <AutomationLaneSnapshot>[],
+    this.automationClips = const <AutomationClipSnapshot>[],
+    this.selectedAutomationTargetId,
   });
 
   Map<String, dynamic> toJson() {
@@ -297,18 +452,34 @@ class RowStateSnapshot {
       "gain": gain,
       "pan": pan,
       "volumeAutomation": volumeAutomation.map((e) => e.toJson()).toList(),
+      "automationLanes": automationLanes.map((e) => e.toJson()).toList(),
+      "automationClips": automationClips.map((e) => e.toJson()).toList(),
+      "selectedAutomationTargetId": selectedAutomationTargetId,
     };
   }
 
   static RowStateSnapshot fromJson(Map<String, dynamic> json) {
+    final lanes = ((json["automationLanes"] as List?) ?? const [])
+        .map((e) =>
+            AutomationLaneSnapshot.fromJson((e as Map).cast<String, dynamic>()))
+        .toList(growable: false);
+    final clips = ((json["automationClips"] as List?) ?? const [])
+        .map((e) =>
+            AutomationClipSnapshot.fromJson((e as Map).cast<String, dynamic>()))
+        .toList(growable: false);
+
     return RowStateSnapshot(
       row: (json["row"] as int?) ?? 0,
-      gain: ((json["gain"] as num?) ?? 1.0).toDouble(),
+      gain: ((json["gain"] as num?) ?? kDefaultGainUi).toDouble(),
       pan: ((json["pan"] as num?) ?? 0.5).toDouble(),
       volumeAutomation: ((json["volumeAutomation"] as List?) ?? [])
           .map((e) =>
               AutomationPointJson.fromJson((e as Map).cast<String, dynamic>()))
           .toList(),
+      automationLanes: lanes,
+      automationClips: clips,
+      selectedAutomationTargetId:
+          (json["selectedAutomationTargetId"] as String?)?.trim(),
     );
   }
 }

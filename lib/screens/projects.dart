@@ -1,13 +1,18 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/helpers/project_manager.dart';
+import 'package:mixroom/helpers/subscription_service.dart';
+import 'package:mixroom/models/subscription_models.dart';
 import 'package:mixroom/screens/audio_editor.dart';
+import 'package:provider/provider.dart';
 
 class _NoSwipeMaterialPageRoute<T> extends MaterialPageRoute<T> {
   _NoSwipeMaterialPageRoute({required super.builder});
@@ -28,6 +33,7 @@ const double kActionCardHeight = 72;
 class _ProjectsScreenState extends State<ProjectsScreen> {
   List<ProjectMeta> _projects = [];
   bool _loading = true;
+  bool _filePickerInFlight = false;
   StreamSubscription<String>? _importSub;
 
   @override
@@ -63,9 +69,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     setState(() => _loading = false);
   }
 
-  Future<void> _openProject(Directory dir) async {
+  Future<void> _openProject(
+    Directory dir, {
+    AudioEditorInitialAction? initialAction,
+  }) async {
+    final resolvedMode = _resolvedEditorMode();
+    final isProEntitled = _isProEntitled();
+
     // 1. Show loading spinner immediately
-    showLoadingDialog(context, message: 'Opening project…');
+    showLoadingDialog(
+      context,
+      message: initialAction == null ? 'Opening project…' : 'Preparing export…',
+    );
 
     // 2. Let UI render the dialog
     // TODO: also an arbitrary delay to hide the blocking UI lag involved in opening the project
@@ -75,7 +90,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     await Navigator.push(
       context,
       _NoSwipeMaterialPageRoute(
-        builder: (_) => AudioEditorScreen(mode: "Pro", projectDir: dir),
+        builder: (_) => AudioEditorScreen(
+          mode: resolvedMode,
+          projectDir: dir,
+          isProEntitled: isProEntitled,
+          initialAction: initialAction,
+        ),
       ),
     );
 
@@ -90,6 +110,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _newProject() async {
     if (!await ProjectManager.canCreateNew()) return;
+    final resolvedMode = _resolvedEditorMode();
+    final isProEntitled = _isProEntitled();
 
     showLoadingDialog(context, message: 'Creating project…');
 
@@ -102,7 +124,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     await Navigator.push(
       context,
       _NoSwipeMaterialPageRoute(
-        builder: (_) => AudioEditorScreen(mode: "Pro", projectDir: dir),
+        builder: (_) => AudioEditorScreen(
+          mode: resolvedMode,
+          projectDir: dir,
+          isProEntitled: isProEntitled,
+        ),
       ),
     );
 
@@ -113,11 +139,50 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     await _refresh();
   }
 
+  Future<FilePickerResult?> _pickFilesSafely({
+    required FileType type,
+    bool withData = false,
+  }) async {
+    if (_filePickerInFlight) return null;
+    _filePickerInFlight = true;
+    try {
+      // Avoid presenting a native picker during an active Flutter route transition.
+      await SchedulerBinding.instance.endOfFrame;
+      return await FilePicker.platform.pickFiles(
+        type: type,
+        withData: withData,
+      );
+    } on PlatformException catch (e) {
+      if (e.code != 'multiple_request') rethrow;
+      await SchedulerBinding.instance.endOfFrame;
+      try {
+        return await FilePicker.platform.pickFiles(
+          type: type,
+          withData: withData,
+        );
+      } on PlatformException catch (retryError) {
+        if (retryError.code == 'multiple_request') return null;
+        rethrow;
+      }
+    } finally {
+      _filePickerInFlight = false;
+    }
+  }
+
   Future<void> _renameProject(ProjectMeta meta) async {
     final controller = TextEditingController(text: meta.name);
+    final focusNode = FocusNode();
+    bool focusScheduled = false;
     final res = await showDialog<String>(
       context: context,
       builder: (ctx) {
+        if (!focusScheduled) {
+          focusScheduled = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!focusNode.canRequestFocus) return;
+            focusNode.requestFocus();
+          });
+        }
         final theme = Theme.of(ctx);
         final cs = theme.colorScheme;
         return MediaQuery.removeViewInsets(
@@ -154,7 +219,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     ),
                     child: TextField(
                       controller: controller,
-                      autofocus: true,
+                      focusNode: focusNode,
+                      autofocus: false,
                       textInputAction: TextInputAction.done,
                       onSubmitted: (_) =>
                           Navigator.pop(ctx, controller.text.trim()),
@@ -198,6 +264,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         );
       },
     );
+    controller.dispose();
+    focusNode.dispose();
 
     if (res == null) return;
     final newName = res.trim();
@@ -277,6 +345,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
+  Future<void> _startProjectExport(
+    ProjectMeta meta,
+    AudioEditorInitialAction action,
+  ) async {
+    await _openProject(meta.dir, initialAction: action);
+  }
+
   Future<void> _importProjectFromIncomingFile(File bundleFile) async {
     final canCreate = await ProjectManager.canCreateNew();
 
@@ -311,10 +386,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
 
       // Open imported project immediately (optional)
+      final resolvedMode = _resolvedEditorMode();
+      final isProEntitled = _isProEntitled();
       await Navigator.push(
         context,
         _NoSwipeMaterialPageRoute(
-          builder: (_) => AudioEditorScreen(mode: "Pro", projectDir: newDir),
+          builder: (_) => AudioEditorScreen(
+            mode: resolvedMode,
+            projectDir: newDir,
+            isProEntitled: isProEntitled,
+          ),
         ),
       );
 
@@ -329,35 +410,61 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
+  String _resolvedEditorMode() {
+    return _isProEntitled() ? "Pro" : "Basic";
+  }
+
+  bool _isProEntitled() {
+    try {
+      return context
+          .read<SubscriptionService>()
+          .canUseCapability(SubscriptionCapability.proEditor);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  String _formatLastOpened(DateTime dateTime) {
+    return DateFormat('MMM d, h:mm a').format(dateTime.toLocal());
+  }
+
   Widget _compactActionCard({
     required IconData icon,
     required String title,
     String? subtitle,
     required VoidCallback? onTap,
   }) {
+    final isCompactLabel = subtitle == null;
     return _GlassCard(
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          padding: EdgeInsets.symmetric(
+            horizontal: isCompactLabel ? 10 : 14,
+            vertical: 14,
+          ),
           child: Row(
             children: [
-              Icon(icon, color: Colors.white),
-              const SizedBox(width: 12),
+              Icon(icon, color: Colors.white, size: isCompactLabel ? 20 : 24),
+              SizedBox(width: isCompactLabel ? 8 : 12),
               Expanded(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: isCompactLabel ? 14 : 15,
+                        ),
                       ),
                     ),
                     if (subtitle != null) ...[
@@ -406,21 +513,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
-
-        // IMPORTANT: remove default title handling
-        title: null,
-        centerTitle: true,
-
-        flexibleSpace: SafeArea(
-          bottom: false,
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 22),
-              child: Image.asset('assets/mixroom_logo202_home.png',
-                  height: 28, fit: BoxFit.contain),
-            ),
-          ),
+        toolbarHeight: 62,
+        title: Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Image.asset('assets/short_white.png',
+              height: 28, fit: BoxFit.contain),
         ),
+        centerTitle: true,
       ),
 
       body: Padding(
@@ -470,7 +569,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                 return;
                               }
 
-                              final res = await FilePicker.platform.pickFiles(
+                              final res = await _pickFilesSafely(
                                 type: FileType.any,
                                 // allowedExtensions: ['mixroom', 'zip'], // allow zip just in case
                                 withData: false,
@@ -501,6 +600,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                               final p = _projects[i];
                               return _GlassCard(
                                 child: ListTile(
+                                  contentPadding:
+                                      const EdgeInsetsDirectional.only(
+                                    start: 10,
+                                    end: 8,
+                                  ),
+                                  horizontalTitleGap: 10,
+                                  minLeadingWidth: 30,
                                   shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(18)),
                                   leading: const Icon(Icons.folder_open_rounded,
@@ -512,36 +618,92 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                         fontWeight: FontWeight.w600),
                                   ),
                                   subtitle: Text(
-                                    "Last opened: ${DateFormat('yyyy-MM-dd HH:mm').format(p.lastOpenedAt.toLocal())}", //${p.lastOpenedAt.toLocal()}",
+                                    "Last opened: ${_formatLastOpened(p.lastOpenedAt)}",
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
-                                        color: Colors.white60, fontSize: 12),
+                                        color: Colors.white60, fontSize: 11),
                                   ),
                                   onTap: () => _openProject(p.dir),
-                                  trailing: PopupMenuButton<String>(
-                                    icon: const Icon(Icons.more_vert,
-                                        color: Colors.white70),
-                                    onSelected: (v) async {
-                                      if (v == "open")
-                                        await _openProject(p.dir);
-                                      if (v == "share") await _shareProject(p);
-                                      if (v == "rename")
-                                        await _renameProject(p);
-                                      if (v == "delete")
-                                        await _deleteProject(p);
-                                    },
-                                    itemBuilder: (_) => const [
-                                      PopupMenuItem(
-                                          value: "open", child: Text("Open")),
-                                      PopupMenuItem(
-                                          value: "share",
-                                          child: Text("Share (.mixroom)")),
-                                      PopupMenuItem(
-                                          value: "rename",
-                                          child: Text("Rename")),
-                                      PopupMenuItem(
-                                          value: "delete",
-                                          child: Text("Delete")),
-                                    ],
+                                  trailing: SizedBox(
+                                    width: 108,
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        PopupMenuButton<String>(
+                                          tooltip: "Edit",
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 4),
+                                          constraints: const BoxConstraints(
+                                            minWidth: 40,
+                                          ),
+                                          icon: const Icon(Icons.edit_outlined,
+                                              size: 23, color: Colors.white70),
+                                          iconSize: 23,
+                                          onSelected: (v) async {
+                                            if (v == "rename") {
+                                              await _renameProject(p);
+                                            }
+                                            if (v == "delete") {
+                                              await _deleteProject(p);
+                                            }
+                                          },
+                                          itemBuilder: (_) => const [
+                                            PopupMenuItem(
+                                                value: "rename",
+                                                child: Text("Rename")),
+                                            PopupMenuItem(
+                                                value: "delete",
+                                                child: Text("Delete")),
+                                          ],
+                                        ),
+                                        const SizedBox(width: 8),
+                                        PopupMenuButton<String>(
+                                          tooltip: "Share / Export",
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 4),
+                                          constraints: const BoxConstraints(
+                                            minWidth: 40,
+                                          ),
+                                          icon: const Icon(Icons.ios_share_rounded,
+                                              size: 23, color: Colors.white70),
+                                          iconSize: 23,
+                                          onSelected: (v) async {
+                                            if (v == "share_mixroom") {
+                                              await _shareProject(p);
+                                            }
+                                            if (v == "export_wav") {
+                                              await _startProjectExport(
+                                                  p,
+                                                  AudioEditorInitialAction
+                                                      .exportWav);
+                                            }
+                                            if (v == "export_mp3") {
+                                              await _startProjectExport(
+                                                  p,
+                                                  AudioEditorInitialAction
+                                                      .exportMp3);
+                                            }
+                                          },
+                                          itemBuilder: (_) => const [
+                                            PopupMenuItem(
+                                              value: "share_mixroom",
+                                              child: Text("Share (.mixroom)"),
+                                            ),
+                                            PopupMenuItem(
+                                              value: "export_wav",
+                                              child: Text("Export WAV"),
+                                            ),
+                                            PopupMenuItem(
+                                              value: "export_mp3",
+                                              child: Text("Export MP3"),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               );

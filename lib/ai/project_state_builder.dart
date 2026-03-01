@@ -12,7 +12,7 @@ class ProjectStateBuilder {
   final InstrumentClassifier classifier;
   final int maxRows;
 
-  ProjectStateBuilder({required this.classifier, this.maxRows = 5});
+  ProjectStateBuilder({required this.classifier, this.maxRows = 0});
 
   Future<ProjectState> build({
     required List<AudioTrack> audioTracks,
@@ -24,15 +24,54 @@ class ProjectStateBuilder {
     double masterPan0to1 = 0.5,
     Map<int, String> roleOverrides = const {},
   }) async {
-    final clipsByRow = List.generate(maxRows, (_) => <ClipState>[]);
+    int inferredRows = 0;
+    if (rowGain.length > inferredRows) inferredRows = rowGain.length;
+    if (rowPan.length > inferredRows) inferredRows = rowPan.length;
+    if (rowAutomation.length > inferredRows)
+      inferredRows = rowAutomation.length;
+    if (roleOverrides.isNotEmpty) {
+      final overrideMax = roleOverrides.keys
+          .where((k) => k >= 0)
+          .fold<int>(-1, (acc, v) => math.max(acc, v));
+      if (overrideMax >= 0)
+        inferredRows = math.max(inferredRows, overrideMax + 1);
+    }
+    for (final t in audioTracks) {
+      if (t.rowIndex >= 0) {
+        inferredRows = math.max(inferredRows, t.rowIndex + 1);
+      }
+    }
+    final effectiveMaxRows = math.max(1, math.max(maxRows, inferredRows));
+
+    double gainForRow(int row) {
+      if (row < 0 || row >= rowGain.length) return kDefaultGainUi;
+      return rowGain[row].clamp(0.0, 3.0).toDouble();
+    }
+
+    double panForRow(int row) {
+      if (row < 0 || row >= rowPan.length) return 0.5;
+      return rowPan[row].clamp(0.0, 1.0).toDouble();
+    }
+
+    List<AutomationPoint> automationForRow(int row) {
+      if (row < 0 || row >= rowAutomation.length) {
+        return <AutomationPoint>[
+          AutomationPoint(x: 0.0, volume: 1.0),
+          AutomationPoint(x: 1.0, volume: 1.0),
+        ];
+      }
+      return rowAutomation[row];
+    }
+
+    final clipsByRow = List.generate(effectiveMaxRows, (_) => <ClipState>[]);
 
     // Keep duration per clip for roleConsistency weighting
-    final clipDurMsByRow = List.generate(maxRows, (_) => <double>[]);
+    final clipDurMsByRow = List.generate(effectiveMaxRows, (_) => <double>[]);
 
     for (final t in audioTracks) {
       final fileName = t.file.path.split('/').last.split('.').first;
       final row = t.rowIndex;
-      if (row < 0 || row >= maxRows) continue;
+      if (row < 0 || row >= effectiveMaxRows) continue;
 
       final startMs = t.offset * 1000.0;
       final durMs =
@@ -49,11 +88,12 @@ class ProjectStateBuilder {
       clipDurMsByRow[row].add(durMs);
     }
 
-    final overlap = List.generate(maxRows, (_) => List.filled(maxRows, 0));
-    final overlapRatio =
-        List.generate(maxRows, (_) => List<double>.filled(maxRows, 0.0));
-    for (var i = 0; i < maxRows; i++) {
-      for (var j = 0; j < maxRows; j++) {
+    final overlap = List.generate(
+        effectiveMaxRows, (_) => List.filled(effectiveMaxRows, 0));
+    final overlapRatio = List.generate(
+        effectiveMaxRows, (_) => List<double>.filled(effectiveMaxRows, 0.0));
+    for (var i = 0; i < effectiveMaxRows; i++) {
+      for (var j = 0; j < effectiveMaxRows; j++) {
         if (i == j) continue;
         final ratio = _rowsOverlapRatio(clipsByRow[i], clipsByRow[j]);
         overlapRatio[i][j] = ratio;
@@ -67,7 +107,7 @@ class ProjectStateBuilder {
     final stereoStatsCache = <String, Map<String, double>>{};
 
     final rows = <RowState>[];
-    for (var row = 0; row < maxRows; row++) {
+    for (var row = 0; row < effectiveMaxRows; row++) {
       final effects = <EffectState>[];
 
       final names = await JuceAudioEngine.getTrackEffectsForRow(row);
@@ -87,9 +127,9 @@ class ProjectStateBuilder {
         );
       }
 
-      final gain0to3 = rowGain[row];
-      final pan = rowPan[row];
-      final automation = rowAutomation[row];
+      final gain0to3 = gainForRow(row);
+      final pan = panForRow(row);
+      final automation = automationForRow(row);
 
       final rowTracks = audioTracks.where((t) => t.rowIndex == row).toList();
       final hasAudio = rowTracks.isNotEmpty;
@@ -297,7 +337,7 @@ class ProjectStateBuilder {
         bpm: bpm,
         masterGain0to3: masterGain0to3,
         masterPan0to1: masterPan0to1,
-        maxRows: maxRows,
+        maxRows: effectiveMaxRows,
         rows: rows,
         masterEffects: masterEffects,
         overlapMatrix: overlap,

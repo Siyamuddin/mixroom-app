@@ -47,9 +47,9 @@ class MainActivity : FlutterActivity() {
 
     val action = intent.action
 
-    val uri: Uri? = when (action) {
+    val uri = when (action) {
       Intent.ACTION_VIEW -> intent.data
-      Intent.ACTION_SEND -> intent.getParcelableExtra(Intent.EXTRA_STREAM)
+      Intent.ACTION_SEND -> intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
       else -> null
     } ?: return
 

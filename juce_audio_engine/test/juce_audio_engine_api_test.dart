@@ -19,6 +19,25 @@ void main() {
           return <Map<String, dynamic>>[
             <String, dynamic>{'rowId': 7, 'name': 'Drums', 'iconId': 1},
           ];
+        case 'getEngineCapabilities':
+          return <String, dynamic>{
+            'externalPluginHosting': true,
+            'supportedPluginFormats': <String>['AU', 'VST3'],
+            'nativePluginEditor': false,
+          };
+        case 'scanPlugins':
+          return <Map<String, dynamic>>[
+            <String, dynamic>{
+              'path': '/tmp/SomePlugin.vst3',
+              'format': 'VST3',
+            },
+            <String, dynamic>{
+              'id': 'au:com.test:unit',
+              'name': 'Test Unit',
+              'manufacturer': 'Mixroom',
+              'category': 'Effect',
+            },
+          ];
         case 'getTransportSeconds':
           return 12.5;
         case 'addRow':
@@ -65,11 +84,11 @@ void main() {
     );
   });
 
-  test('setAutomationTransport routes to setTransportSeconds', () async {
+  test('setAutomationTransport routes to setAutomationTransport', () async {
     await JuceAudioEngine.setAutomationTransport(3.0);
 
     expect(calls, hasLength(1));
-    expect(calls.single.method, 'setTransportSeconds');
+    expect(calls.single.method, 'setAutomationTransport');
     expect(calls.single.arguments, <String, dynamic>{'timeSeconds': 3.0});
   });
 
@@ -102,6 +121,32 @@ void main() {
     expect(calls[1].method, 'getTransportSeconds');
     expect(calls[2].method, 'seekTransport');
     expect(calls[2].arguments, <String, dynamic>{'timeSeconds': 11.0});
+  });
+
+  test('capabilities + plugin scan normalization', () async {
+    final caps = await JuceAudioEngine.getEngineCapabilities();
+    final plugins = await JuceAudioEngine.scanPlugins();
+
+    expect(caps.externalPluginHosting, isTrue);
+    expect(caps.supportedPluginFormats, <String>['AU', 'VST3']);
+    expect(caps.nativePluginEditor, isFalse);
+
+    expect(plugins, <Map<String, dynamic>>[
+      <String, dynamic>{
+        'id': '/tmp/SomePlugin.vst3',
+        'name': '/tmp/SomePlugin.vst3',
+        'format': 'VST3',
+      },
+      <String, dynamic>{
+        'id': 'au:com.test:unit',
+        'name': 'Test Unit',
+        'manufacturer': 'Mixroom',
+        'category': 'Effect',
+      },
+    ]);
+
+    expect(calls[0].method, 'getEngineCapabilities');
+    expect(calls[1].method, 'scanPlugins');
   });
 
   test('live midi capability and payloads', () async {

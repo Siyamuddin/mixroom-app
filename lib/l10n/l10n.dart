@@ -1,44 +1,50 @@
 // lib/l10n/l10n.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:mixroom/l10n/locale_config.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/main.dart';
 
 class L10n {
   /// Supported locales
-  static final List<Locale> supportedLocales = [
-    const Locale('en'), // English
-    const Locale('ko'), // Korean
-    const Locale('zh'), // Chinese
-    const Locale('ja'), // Japanese
-  ];
+  static const List<Locale> supportedLocales = LocaleConfig.supportedLocales;
 
-  // static Locale getDeviceLocale(BuildContext context) {
-  //   final deviceLocale = Localizations.localeOf(context);
-  //   final providerLocale = Provider.of<LocaleProvider>(context).locale; // Remove listen: false to get the current value
-
-  //   if (providerLocale != null) {
-  //     return providerLocale;
-  //   } else if (deviceLocale.languageCode != null) {
-  //     return Locale(deviceLocale.languageCode);
-  //   } else {
-  //     return const Locale('en');
-  //   }
-  // }
+  static Locale resolveSupportedLocale(Locale? locale) {
+    return LocaleConfig.resolveLocale(locale);
+  }
 
   static Locale getDeviceLocale(BuildContext context) {
-    return const Locale('en'); // TODO: TEMP FOR CES
     try {
       // Always use listen: false for utility functions
       final providerLocale =
           Provider.of<LocaleProvider>(context, listen: false).locale;
-      if (providerLocale != null) return providerLocale;
+      if (providerLocale != null) {
+        return LocaleConfig.resolveLocale(providerLocale);
+      }
 
-      final deviceLocale = Localizations.localeOf(context);
-      return Locale(deviceLocale.languageCode);
-    } catch (e) {
-      return const Locale('en'); // Fallback
+      final localizationsLocale = Localizations.maybeLocaleOf(context);
+      if (localizationsLocale != null) {
+        return LocaleConfig.resolveLocale(localizationsLocale);
+      }
+
+      final platformLocale = WidgetsBinding.instance.platformDispatcher.locale;
+      return LocaleConfig.resolveLocale(platformLocale);
+    } catch (_) {
+      return LocaleConfig.fallbackLocale; // Fallback
     }
+  }
+
+  static String languageName(Locale locale) {
+    final code = locale.languageCode;
+    return LocaleConfig.languageNames[code] ?? code.toUpperCase();
+  }
+
+  static String languageFlag(Locale locale) {
+    return languageFlagFromCode(locale.languageCode);
+  }
+
+  static String languageFlagFromCode(String languageCode) {
+    return LocaleConfig.languageFlags[languageCode] ?? '🌐';
   }
 
   /// Simple translation map (replace with your ARB-generated translations)
@@ -176,6 +182,101 @@ class L10n {
       'Notifications': 'Notifications',
       'No new notifications': 'No new notifications',
       'Welcome to Mixroom': 'Welcome to Mixroom',
+      'Language': 'Language',
+      'Please enter a valid email address.':
+          'Please enter a valid email address.',
+      'Password should be at least 8 characters.':
+          'Password should be at least 8 characters.',
+      'Passwords do not match.': 'Passwords do not match.',
+      'Please enter your name.': 'Please enter your name.',
+      'Please select your birthday.': 'Please select your birthday.',
+      'Please enter your password.': 'Please enter your password.',
+      'Please choose what you use Mixroom for.':
+          'Please choose what you use Mixroom for.',
+      'Authentication is powered by AWS Cognito.':
+          'Authentication is powered by AWS Cognito.',
+      'Email': 'Email',
+      'Continue': 'Continue',
+      'Enter password': 'Enter password',
+      'Forgot password?': 'Forgot password?',
+      'Signing In...': 'Signing In...',
+      'Sign In': 'Sign In',
+      'Creating...': 'Creating...',
+      'Create Account': 'Create Account',
+      'At least 8 characters': 'At least 8 characters',
+      'Use at least 8 characters.': 'Use at least 8 characters.',
+      'Confirm Password': 'Confirm Password',
+      'Re-enter password': 'Re-enter password',
+      'Name': 'Name',
+      'Your name': 'Your name',
+      'What will you use Mixroom for?': 'What will you use Mixroom for?',
+      'Select one': 'Select one',
+      'Enter a valid email address.': 'Enter a valid email address.',
+      'Enter the verification code.': 'Enter the verification code.',
+      'Email verified. You are now signed in.':
+          'Email verified. You are now signed in.',
+      'Verification code resent.': 'Verification code resent.',
+      'Verify your email': 'Verify your email',
+      'Enter the verification code sent by AWS Cognito.':
+          'Enter the verification code sent by AWS Cognito.',
+      'Verification Code': 'Verification Code',
+      'Enter code': 'Enter code',
+      'Resend code': 'Resend code',
+      'Verifying...': 'Verifying...',
+      'Verify Email': 'Verify Email',
+      'Verification code sent.': 'Verification code sent.',
+      'Password updated. You can sign in now.':
+          'Password updated. You can sign in now.',
+      'Reset your password': 'Reset your password',
+      'Enter verification code': 'Enter verification code',
+      'We will send a verification code to your email.':
+          'We will send a verification code to your email.',
+      'Use the code from email and set a new password.':
+          'Use the code from email and set a new password.',
+      'New Password': 'New Password',
+      'Confirm New Password': 'Confirm New Password',
+      'Send Reset Code': 'Send Reset Code',
+      'Update Password': 'Update Password',
+      'Fast, AI-assisted music production.':
+          'Fast, AI-assisted music production.',
+      'Or continue with': 'Or continue with',
+      'Continue with Google': 'Continue with Google',
+      'Continue with Apple': 'Continue with Apple',
+      'Continue with KakaoTalk': 'Continue with KakaoTalk',
+      'Step {current} of {total}': 'Step {current} of {total}',
+      'Change': 'Change',
+      'Select birthday': 'Select birthday',
+      'Log Out': 'Log Out',
+      'Delete Account': 'Delete Account',
+      'Delete account?': 'Delete account?',
+      'This permanently deletes your account session from this app. This action cannot be undone.':
+          'This permanently deletes your account session from this app. This action cannot be undone.',
+      'Account': 'Account',
+      'Name cannot be empty.': 'Name cannot be empty.',
+      'Account updated.': 'Account updated.',
+      'Verification email sent.': 'Verification email sent.',
+      'Not provided': 'Not provided',
+      'Save Changes': 'Save Changes',
+      'Email not verified': 'Email not verified',
+      'Please verify your email for better account security.':
+          'Please verify your email for better account security.',
+      'Sending...': 'Sending...',
+      'Resend verification email': 'Resend verification email',
+      'Edit': 'Edit',
+      'Birthday': 'Birthday',
+      'Using Mixroom for': 'Using Mixroom for',
+      'Provider': 'Provider',
+      'Google': 'Google',
+      'Apple': 'Apple',
+      'KakaoTalk': 'KakaoTalk',
+      'Joined': 'Joined',
+      'Music enthusiast': 'Music enthusiast',
+      'Beginner producer': 'Beginner producer',
+      'For work': 'For work',
+      'Songwriting': 'Songwriting',
+      'Mix/master practice': 'Mix/master practice',
+      'Account data sync target: AWS Cognito user attributes.':
+          'Account data sync target: AWS Cognito user attributes.',
     },
     'ko': {
       'hello': '안녕하세요',
@@ -303,6 +404,94 @@ class L10n {
       'Notifications': '알림',
       'No new notifications': '새 알림이 없습니다',
       'Welcome to Mixroom': '믹스룸에 오신 것을 환영합니다',
+      'Language': '언어',
+      'Please enter a valid email address.': '유효한 이메일 주소를 입력해주세요.',
+      'Password should be at least 8 characters.': '비밀번호는 8자 이상이어야 합니다.',
+      'Passwords do not match.': '비밀번호가 일치하지 않습니다.',
+      'Please enter your name.': '이름을 입력해주세요.',
+      'Please select your birthday.': '생년월일을 선택해주세요.',
+      'Please enter your password.': '비밀번호를 입력해주세요.',
+      'Please choose what you use Mixroom for.': 'Mixroom 사용 목적을 선택해주세요.',
+      'Authentication is powered by AWS Cognito.': '인증은 AWS Cognito로 제공됩니다.',
+      'Email': '이메일',
+      'Continue': '계속',
+      'Enter password': '비밀번호 입력',
+      'Forgot password?': '비밀번호를 잊으셨나요?',
+      'Signing In...': '로그인 중...',
+      'Sign In': '로그인',
+      'Creating...': '생성 중...',
+      'Create Account': '계정 만들기',
+      'At least 8 characters': '최소 8자',
+      'Use at least 8 characters.': '최소 8자를 사용하세요.',
+      'Confirm Password': '비밀번호 확인',
+      'Re-enter password': '비밀번호 다시 입력',
+      'Name': '이름',
+      'Your name': '이름',
+      'What will you use Mixroom for?': 'Mixroom을 어떤 용도로 사용하시나요?',
+      'Select one': '하나를 선택하세요',
+      'Enter a valid email address.': '유효한 이메일 주소를 입력하세요.',
+      'Enter the verification code.': '인증 코드를 입력하세요.',
+      'Email verified. You are now signed in.': '이메일 인증이 완료되었습니다. 이제 로그인되었습니다.',
+      'Verification code resent.': '인증 코드를 다시 보냈습니다.',
+      'Verify your email': '이메일 인증',
+      'Enter the verification code sent by AWS Cognito.':
+          'AWS Cognito에서 전송한 인증 코드를 입력하세요.',
+      'Verification Code': '인증 코드',
+      'Enter code': '코드 입력',
+      'Resend code': '코드 다시 보내기',
+      'Verifying...': '인증 중...',
+      'Verify Email': '이메일 인증하기',
+      'Verification code sent.': '인증 코드를 보냈습니다.',
+      'Password updated. You can sign in now.':
+          '비밀번호가 변경되었습니다. 이제 로그인할 수 있습니다.',
+      'Reset your password': '비밀번호 재설정',
+      'Enter verification code': '인증 코드 입력',
+      'We will send a verification code to your email.': '이메일로 인증 코드를 보내드립니다.',
+      'Use the code from email and set a new password.':
+          '이메일로 받은 코드를 입력하고 새 비밀번호를 설정하세요.',
+      'New Password': '새 비밀번호',
+      'Confirm New Password': '새 비밀번호 확인',
+      'Send Reset Code': '재설정 코드 보내기',
+      'Update Password': '비밀번호 변경',
+      'Fast, AI-assisted music production.': '빠른 AI 보조 음악 제작.',
+      'Or continue with': '또는 다음으로 계속',
+      'Continue with Google': 'Google로 계속하기',
+      'Continue with Apple': 'Apple로 계속하기',
+      'Continue with KakaoTalk': 'KakaoTalk으로 계속하기',
+      'Step {current} of {total}': '{total}단계 중 {current}단계',
+      'Change': '변경',
+      'Select birthday': '생년월일 선택',
+      'Log Out': '로그아웃',
+      'Delete Account': '계정 삭제',
+      'Delete account?': '계정을 삭제하시겠습니까?',
+      'This permanently deletes your account session from this app. This action cannot be undone.':
+          '이 앱에서 계정 세션이 영구적으로 삭제됩니다. 되돌릴 수 없습니다.',
+      'Account': '계정',
+      'Name cannot be empty.': '이름은 비워둘 수 없습니다.',
+      'Account updated.': '계정 정보가 업데이트되었습니다.',
+      'Verification email sent.': '인증 이메일을 보냈습니다.',
+      'Not provided': '미입력',
+      'Save Changes': '변경사항 저장',
+      'Email not verified': '이메일 미인증',
+      'Please verify your email for better account security.':
+          '계정 보안을 위해 이메일 인증을 완료해주세요.',
+      'Sending...': '전송 중...',
+      'Resend verification email': '인증 이메일 다시 보내기',
+      'Edit': '편집',
+      'Birthday': '생년월일',
+      'Using Mixroom for': 'Mixroom 사용 목적',
+      'Provider': '제공자',
+      'Google': 'Google',
+      'Apple': 'Apple',
+      'KakaoTalk': '카카오톡',
+      'Joined': '가입일',
+      'Music enthusiast': '음악 애호가',
+      'Beginner producer': '초보 프로듀서',
+      'For work': '업무용',
+      'Songwriting': '작곡',
+      'Mix/master practice': '믹싱/마스터링 연습',
+      'Account data sync target: AWS Cognito user attributes.':
+          '계정 데이터 동기화 대상: AWS Cognito 사용자 속성.',
     },
     'zh': {
       'hello': '你好',
@@ -553,6 +742,93 @@ class L10n {
       'Notifications': '通知',
       'No new notifications': '新しい通知はありません',
       'Welcome to Mixroom': 'Mixroomへようこそ',
+      'Language': '言語',
+      'Please enter a valid email address.': '有効なメールアドレスを入力してください。',
+      'Password should be at least 8 characters.': 'パスワードは8文字以上で入力してください。',
+      'Passwords do not match.': 'パスワードが一致しません。',
+      'Please enter your name.': '名前を入力してください。',
+      'Please select your birthday.': '生年月日を選択してください。',
+      'Please enter your password.': 'パスワードを入力してください。',
+      'Please choose what you use Mixroom for.': 'Mixroomの利用目的を選択してください。',
+      'Authentication is powered by AWS Cognito.': '認証はAWS Cognitoを利用しています。',
+      'Email': 'メール',
+      'Continue': '続行',
+      'Enter password': 'パスワードを入力',
+      'Forgot password?': 'パスワードをお忘れですか？',
+      'Signing In...': 'サインイン中...',
+      'Sign In': 'サインイン',
+      'Creating...': '作成中...',
+      'Create Account': 'アカウント作成',
+      'At least 8 characters': '8文字以上',
+      'Use at least 8 characters.': '8文字以上で入力してください。',
+      'Confirm Password': 'パスワード確認',
+      'Re-enter password': 'パスワードを再入力',
+      'Name': '名前',
+      'Your name': 'あなたの名前',
+      'What will you use Mixroom for?': 'Mixroomを何に使いますか？',
+      'Select one': '1つ選択',
+      'Enter a valid email address.': '有効なメールアドレスを入力してください。',
+      'Enter the verification code.': '認証コードを入力してください。',
+      'Email verified. You are now signed in.': 'メール認証が完了しました。サインインしました。',
+      'Verification code resent.': '認証コードを再送しました。',
+      'Verify your email': 'メール認証',
+      'Enter the verification code sent by AWS Cognito.':
+          'AWS Cognitoから送信された認証コードを入力してください。',
+      'Verification Code': '認証コード',
+      'Enter code': 'コードを入力',
+      'Resend code': 'コードを再送',
+      'Verifying...': '認証中...',
+      'Verify Email': 'メールを認証',
+      'Verification code sent.': '認証コードを送信しました。',
+      'Password updated. You can sign in now.': 'パスワードが更新されました。サインインできます。',
+      'Reset your password': 'パスワードをリセット',
+      'Enter verification code': '認証コードを入力',
+      'We will send a verification code to your email.': 'メールに認証コードを送信します。',
+      'Use the code from email and set a new password.':
+          'メールのコードを使って新しいパスワードを設定してください。',
+      'New Password': '新しいパスワード',
+      'Confirm New Password': '新しいパスワード確認',
+      'Send Reset Code': 'リセットコードを送信',
+      'Update Password': 'パスワードを更新',
+      'Fast, AI-assisted music production.': '高速なAI支援の音楽制作。',
+      'Or continue with': 'または次で続行',
+      'Continue with Google': 'Googleで続行',
+      'Continue with Apple': 'Appleで続行',
+      'Continue with KakaoTalk': 'KakaoTalkで続行',
+      'Step {current} of {total}': 'ステップ {current} / {total}',
+      'Change': '変更',
+      'Select birthday': '生年月日を選択',
+      'Log Out': 'ログアウト',
+      'Delete Account': 'アカウント削除',
+      'Delete account?': 'アカウントを削除しますか？',
+      'This permanently deletes your account session from this app. This action cannot be undone.':
+          'このアプリからアカウントセッションが完全に削除されます。この操作は取り消せません。',
+      'Account': 'アカウント',
+      'Name cannot be empty.': '名前は空にできません。',
+      'Account updated.': 'アカウント情報を更新しました。',
+      'Verification email sent.': '確認メールを送信しました。',
+      'Not provided': '未設定',
+      'Save Changes': '変更を保存',
+      'Email not verified': 'メール未認証',
+      'Please verify your email for better account security.':
+          'アカウントの安全性向上のため、メール認証を完了してください。',
+      'Sending...': '送信中...',
+      'Resend verification email': '確認メールを再送',
+      'Edit': '編集',
+      'Birthday': '生年月日',
+      'Using Mixroom for': 'Mixroomの利用目的',
+      'Provider': 'プロバイダー',
+      'Google': 'Google',
+      'Apple': 'Apple',
+      'KakaoTalk': 'KakaoTalk',
+      'Joined': '登録日',
+      'Music enthusiast': '音楽愛好家',
+      'Beginner producer': '初心者プロデューサー',
+      'For work': '仕事用',
+      'Songwriting': '作曲',
+      'Mix/master practice': 'ミックス/マスタリング練習',
+      'Account data sync target: AWS Cognito user attributes.':
+          'アカウントデータ同期先: AWS Cognito ユーザー属性。',
     },
   };
 
@@ -565,12 +841,14 @@ class L10n {
   }
 
   static Future<void> setLocale(BuildContext context, Locale newLocale) async {
+    final resolvedLocale = resolveSupportedLocale(newLocale);
+    final appState = context.findAncestorStateOfType<MyAppState>();
+
     // Save to provider and persistent storage
     await Provider.of<LocaleProvider>(context, listen: false)
-        .setLocale(newLocale);
+        .setLocale(resolvedLocale);
 
     // Directly access the state of MyApp and update the locale
-    final appState = context.findAncestorStateOfType<MyAppState>();
-    appState?.setAppLocale(newLocale);
+    appState?.setAppLocale(resolvedLocale);
   }
 }

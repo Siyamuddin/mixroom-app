@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'ai_debug.dart';
 import 'cloud_llm_service.dart';
 import 'project_state_builder.dart';
 import 'local_mixing_model.dart';
@@ -40,6 +41,9 @@ class ChatPipeline {
     required double bpmFallback,
     double masterGain0to3 = 1.0,
     double masterPan0to1 = 0.5,
+    List<int> selectedClipIndices = const [],
+    int primarySelectedClipIndex = -1,
+    int? selectedRowIndex,
     bool autoApplyProposals = false,
   }) async {
     final userText = text.trim();
@@ -47,17 +51,6 @@ class ChatPipeline {
       return const ChatPipelineResult.message(
         "Let me know what you would like to change, and I'll do my best to help.",
       );
-    }
-
-    // Quick local: role labeling
-    final override = _parseRoleOverride(userText);
-    if (override != null) {
-      _roleOverrides[override.rowIndex] = override.role;
-      final msg =
-          "Got it — I'll treat Track ${override.rowIndex + 1} as **${override.role}**.";
-      _push('user', userText);
-      _push('assistant', msg);
-      return ChatPipelineResult.message(msg);
     }
 
     // If user says "undo", don't call LLM
@@ -70,7 +63,10 @@ class ChatPipeline {
 
     onThinkingChanged?.call(true);
     try {
-      print("building project");
+      aiDebugLog(
+        'pipeline',
+        'start text="$userText" autoApplyProposals=$autoApplyProposals selectedRow=$selectedRowIndex primaryClip=$primarySelectedClipIndex clips=${selectedClipIndices.length}',
+      );
       // 1) Build project snapshot (local)
       final project = await projectBuilder.build(
         audioTracks: audioTracks,
@@ -84,16 +80,27 @@ class ChatPipeline {
       );
 
       final snapshot = _projectSnapshot(project);
+      final selectionSnapshot = _selectionSnapshot(
+        project: project,
+        audioTracks: audioTracks,
+        selectedClipIndices: selectedClipIndices,
+        primarySelectedClipIndex: primarySelectedClipIndex,
+        selectedRowIndex: selectedRowIndex,
+      );
 
       // final hasAudio = audioTracks.isNotEmpty;
       final hasAudio = project.rows.any((r) => r.hasAudio);
-      print("sending to LLM");
+      aiDebugLog(
+        'pipeline',
+        'project built rows=${project.rows.length} rowsWithAudio=${project.rows.where((r) => r.hasAudio).length} bpm=${project.bpm.toStringAsFixed(1)} hasAudio=$hasAudio',
+      );
 
       // 2) Ask LLM (do NOT push userText yet to avoid duplicating inside request)
       final llmRes = await llm.send(
         conversation: _conversation,
         userText: userText,
         projectSnapshot: snapshot,
+        selectionSnapshot: selectionSnapshot,
         pendingMix: _pendingMix,
       );
       final llmMeta = <String, dynamic>{
@@ -101,14 +108,17 @@ class ChatPipeline {
         if (llmRes.toolArgs != null) 'tool_args': llmRes.toolArgs,
       };
 
-      print("LLM done");
+      aiDebugLog(
+        'pipeline',
+        'llm tool=${llmRes.toolName} hasText=${(llmRes.text?.trim().isNotEmpty ?? false)}',
+      );
 
       // 2.1) Informational tool call: always respond, regardless of audio
       if (llmRes.toolName == 'informational_response') {
         final args = llmRes.toolArgs ?? {};
-        print("info");
+        aiDebugLog('pipeline', 'informational_response');
         if (args['cancels_pending'] == true) {
-          print("canceled pending mix");
+          aiDebugLog('pipeline', 'pending mix cancelled by informational tool');
           _pendingMix = null;
         }
 
@@ -116,6 +126,32 @@ class ChatPipeline {
         _push('user', userText);
         _push('assistant', msg);
         return ChatPipelineResult.message(msg, meta: llmMeta);
+      }
+
+      // 2.1b) General DAW editor / tutorial actions (single-chatbar workflow).
+      if (llmRes.toolName == 'daw_assistant_actions') {
+        final args = llmRes.toolArgs ?? {};
+        final msg =
+            (args['assistant_message']?.toString().trim().isNotEmpty == true)
+                ? args['assistant_message'].toString().trim()
+                : (llmRes.text?.trim().isNotEmpty == true
+                    ? llmRes.text!.trim()
+                    : "Done.");
+
+        final rawActions = (args['actions'] as List?) ?? const [];
+        final assistantActions = rawActions
+            .whereType<Map>()
+            .map((e) => AssistantAction.fromJson(Map<String, dynamic>.from(e)))
+            .where((a) => a.type.isNotEmpty)
+            .toList(growable: false);
+
+        _push('user', userText);
+        _push('assistant', msg);
+        return ChatPipelineResult.message(
+          msg,
+          meta: <String, dynamic>{...llmMeta, 'daw_actions': args},
+          assistantActions: assistantActions,
+        );
       }
 
       // 2.2) Style preset request (bypass mix logic entirely)
@@ -200,6 +236,11 @@ class ChatPipeline {
       bool fallbackUsed = false;
       final Set<String> fallbackReasons = <String>{};
 
+      aiDebugLog(
+        'pipeline',
+        'mix request mode=$rawMode llmActions=${actions.length} learnedEnabled=${magnitudePredictor.isEnabled} learnedReady=${magnitudePredictor.isReady}',
+      );
+
       for (final action in actions) {
         // Safety: each action MUST have a goal
         if (!action.containsKey('goal')) continue;
@@ -212,11 +253,33 @@ class ChatPipeline {
           continue; // skip malformed action
         }
 
+        aiDebugLog(
+          'mix-plan',
+          'goal intensity=${goal.intensity.toStringAsFixed(2)} scope=${goal.target.scope} intents=${_intentSummary(goal)}',
+        );
+
         final mix = mixModel.run(
             project: project,
             goal: goal,
             strict: strict,
             roleOverrides: _roleOverrides);
+
+        aiDebugLog(
+          'mix-plan',
+          'heuristic actions=${mix.actions.length} notes=${mix.notes.length}',
+        );
+        if (kAiDebugVerbose && mix.actions.isNotEmpty) {
+          for (int i = 0; i < mix.actions.length; i++) {
+            final a = mix.actions[i];
+            aiDebugLog(
+              'mix-plan',
+              'heuristic[$i] ${a.type} ${aiDebugShortMap(a.data)}',
+            );
+          }
+        }
+        if (mix.notes.isNotEmpty) {
+          aiDebugLog('mix-plan', 'notes: ${mix.notes.take(4).join(' | ')}');
+        }
 
         var resolvedActions = mix.actions;
         if (resolvedActions.isNotEmpty) {
@@ -234,6 +297,19 @@ class ChatPipeline {
               fallbackReasons.add(refineResult.fallbackReason!);
             }
           }
+          aiDebugLog(
+            'mix-plan',
+            'magnitude refine -> actions=${resolvedActions.length} fallback=${refineResult.fallbackUsed} reason=${refineResult.fallbackReason ?? '-'}',
+          );
+          if (kAiDebugVerbose && resolvedActions.isNotEmpty) {
+            for (int i = 0; i < resolvedActions.length; i++) {
+              final a = resolvedActions[i];
+              aiDebugLog(
+                'mix-plan',
+                'refined[$i] ${a.type} ${aiDebugShortMap(a.data)}',
+              );
+            }
+          }
         }
 
         if (resolvedActions.isNotEmpty) {
@@ -249,6 +325,10 @@ class ChatPipeline {
         modelMeta['learned_magnitude_fallback_reasons'] =
             fallbackReasons.toList();
       }
+      aiDebugLog(
+        'pipeline',
+        'mergedActions=${mergedActions.length} fallbackUsed=$fallbackUsed fallbackReasons=${fallbackReasons.join(",")}',
+      );
       if (fallbackUsed) {
         if (!magnitudePredictor.isEnabled) {
           mergedNotes
@@ -267,6 +347,7 @@ class ChatPipeline {
             ? _appendNotes(assistantMessage, mergedNotes)
             : "No mix changes were applied.";
 
+        aiDebugLog('pipeline', 'no-op result');
         _push('assistant', msg);
         return ChatPipelineResult.message(msg, meta: modelMeta);
       }
@@ -288,6 +369,8 @@ class ChatPipeline {
             ? _appendNotes(assistantMessage, mergedMix.notes)
             : mergedMix.summary;
 
+        aiDebugLog(
+            'pipeline', 'execute result actions=${mergedMix.actions.length}');
         _push('assistant', msg);
         return ChatPipelineResult.mix(mergedMix, msg, meta: modelMeta);
       }
@@ -298,6 +381,8 @@ class ChatPipeline {
             assistantMessage.isNotEmpty ? assistantMessage : mergedMix.summary,
             mergedMix.notes);
 
+        aiDebugLog('pipeline',
+            'auto-apply proposal actions=${mergedMix.actions.length}');
         _push('assistant', msg);
         return ChatPipelineResult.mix(mergedMix, msg, meta: modelMeta);
       }
@@ -314,11 +399,21 @@ class ChatPipeline {
         msg = "$msg\n\nApply these changes? (yes / no)";
       }
 
+      aiDebugLog(
+          'pipeline', 'proposal result actions=${mergedMix.actions.length}');
       _push('assistant', msg);
       return ChatPipelineResult.message(msg, meta: modelMeta);
     } finally {
       onThinkingChanged?.call(false);
     }
+  }
+
+  String _intentSummary(GoalVector goal) {
+    if (goal.intents.isEmpty) return '(none)';
+    return goal.intents
+        .map((i) =>
+            '${i.kind}:${(i.confidence * 100.0).toStringAsFixed(0)}${i.direction != null ? "/${i.direction}" : ""}${i.descriptor != null ? "/${i.descriptor}" : ""}')
+        .join(', ');
   }
 
   /// Call this AFTER your UI successfully applies a mix,
@@ -327,6 +422,51 @@ class ChatPipeline {
     if (mix.isNoOp || mix.actions.isEmpty) return;
     final msg = "Applied: ${mix.summary}";
     _push('assistant', msg);
+  }
+
+  static const Set<String> _supportedRoleOverrideValues = <String>{
+    'vocals',
+    'drums',
+    'bass',
+    'guitar',
+    'synth',
+    'other',
+  };
+
+  String? _normalizeRoleOverrideValue(String rawRole) {
+    final role = rawRole.trim().toLowerCase();
+    if (role.isEmpty) return null;
+    switch (role) {
+      case 'vocal':
+      case 'vox':
+      case 'lead_vocal':
+      case 'lead vocals':
+        return 'vocals';
+      case 'drum':
+      case 'percussion':
+        return 'drums';
+      case 'keys':
+      case 'piano':
+      case 'keyboard':
+        return 'synth';
+      default:
+        return _supportedRoleOverrideValues.contains(role) ? role : null;
+    }
+  }
+
+  bool setRoleOverride({
+    required int rowIndex,
+    required String role,
+  }) {
+    final normalizedRole = _normalizeRoleOverrideValue(role);
+    if (normalizedRole == null || rowIndex < 0) return false;
+    _roleOverrides[rowIndex] = normalizedRole;
+    return true;
+  }
+
+  bool clearRoleOverride(int rowIndex) {
+    if (rowIndex < 0) return false;
+    return _roleOverrides.remove(rowIndex) != null;
   }
 
   void _push(String role, String content) {
@@ -356,41 +496,6 @@ class ChatPipeline {
     }
 
     return intensity < 0.05 && bestConf < 0.20;
-  }
-
-  bool _looksLikeUndo(String t) {
-    final s = t.toLowerCase();
-    return s.contains('undo') || s.contains('revert') || s.contains('go back');
-  }
-
-  _RoleOverride? _parseRoleOverride(String text) {
-    final m =
-        RegExp(r'(track|row)\s*(\d+)\s*(is|=|:)\s*(.+)$', caseSensitive: false)
-            .firstMatch(text);
-    if (m == null) return null;
-    final n = int.tryParse(m.group(2) ?? '');
-    if (n == null || n <= 0) return null;
-
-    final rhs = (m.group(4) ?? '').toLowerCase();
-    String? role;
-
-    if (rhs.contains('vocal') || rhs.contains('lead') || rhs.contains('vox'))
-      role = 'vocals';
-    else if (rhs.contains('drum') ||
-        rhs.contains('kick') ||
-        rhs.contains('snare') ||
-        rhs.contains('hat'))
-      role = 'drums';
-    else if (rhs.contains('bass'))
-      role = 'bass';
-    else if (rhs.contains('guitar'))
-      role = 'guitar';
-    else if (rhs.contains('synth') ||
-        rhs.contains('keys') ||
-        rhs.contains('piano')) role = 'synth';
-
-    if (role == null) return null;
-    return _RoleOverride(rowIndex: n - 1, role: role);
   }
 
   String _appendNotes(String base, List<String> notes) {
@@ -428,6 +533,33 @@ class ChatPipeline {
     return b.toString().trim();
   }
 
+  String _automationTargetsSnapshotForRow(
+    RowState row, {
+    int maxFx = 6,
+    int maxParamsPerFx = 8,
+  }) {
+    final chunks = <String>['volume'];
+    final effects = row.effects.take(maxFx);
+    for (final fx in effects) {
+      final floatParams = fx.parameters
+          .where((p) => p.type.trim().toLowerCase() == 'float')
+          .take(maxParamsPerFx)
+          .toList(growable: false);
+      if (floatParams.isEmpty) continue;
+      final params = floatParams
+          .map((p) {
+            final pid = p.id.trim().isEmpty ? p.name.trim() : p.id.trim();
+            final pname = p.name.trim().isEmpty ? pid : p.name.trim();
+            return '$pname[$pid]';
+          })
+          .where((s) => s.trim().isNotEmpty)
+          .join(', ');
+      if (params.isEmpty) continue;
+      chunks.add('fx${fx.effectIndex}:${fx.name}{$params}');
+    }
+    return chunks.join(' | ');
+  }
+
   String _projectSnapshot(ProjectState p) {
     final b = StringBuffer();
     b.writeln('bpm=${p.bpm.toStringAsFixed(2)}');
@@ -440,6 +572,7 @@ class ChatPipeline {
           .map((e) => '${e.key}:${(e.value * 100).round()}%')
           .join(', ');
       final fx = r.effects.map((e) => e.name).join(', ');
+      final automationTargets = _automationTargetsSnapshotForRow(r);
 
       final overlaps = <String>[];
       for (int j = 0; j < p.maxRows; j++) {
@@ -472,16 +605,53 @@ class ChatPipeline {
         'spectral{centroid_hz=$centroid zcr=$zcr hf_rms=$hfRms sibil=$sibil bassy=$bassy} '
         'dynamics{st_rms_p95=$stRmsP95 transient_density=$transientDensity} '
         'overlaps=${overlaps.isEmpty ? "none" : overlaps.join(",")} '
-        'fx=[$fx]', // TODO: paste all parameters within each fx rather than just name
+        'fx=[$fx] '
+        'automation_targets=[$automationTargets]',
       );
     }
 
     return b.toString().trim();
   }
-}
 
-class _RoleOverride {
-  final int rowIndex;
-  final String role;
-  _RoleOverride({required this.rowIndex, required this.role});
+  String _selectionSnapshot({
+    required ProjectState project,
+    required List<AudioTrack> audioTracks,
+    required List<int> selectedClipIndices,
+    required int primarySelectedClipIndex,
+    required int? selectedRowIndex,
+  }) {
+    final out = StringBuffer();
+    final validClipIndices =
+        selectedClipIndices.where((i) => i >= 0).toSet().toList()..sort();
+
+    out.writeln('selected_row_index=${selectedRowIndex ?? -1}');
+    out.writeln('selected_clip_indices=${validClipIndices.join(",")}');
+    out.writeln('primary_selected_clip_index=$primarySelectedClipIndex');
+    if (selectedRowIndex != null &&
+        selectedRowIndex >= 0 &&
+        selectedRowIndex < project.rows.length) {
+      final row = project.rows[selectedRowIndex];
+      out.writeln(
+          'selected_row_automation_targets=${_automationTargetsSnapshotForRow(row)}');
+    }
+
+    final Set<int> requested = {
+      ...validClipIndices,
+      if (primarySelectedClipIndex >= 0) primarySelectedClipIndex,
+    };
+    final requestedSorted = requested.toList()..sort();
+    for (final clipIndex in requestedSorted) {
+      if (clipIndex < 0 || clipIndex >= audioTracks.length) continue;
+      final clip = audioTracks[clipIndex];
+      final rawStartMs = clip.offset * 1000.0;
+      final rawEndMs = rawStartMs +
+          (clip.trimEnd - clip.trimStart).inMilliseconds.toDouble();
+      final fileName = clip.file.path.split('/').last;
+      out.writeln(
+        'selected_clip[$clipIndex]{row=${clip.rowIndex},clip_kind=${clip.clipKind.wireName},start_ms=${rawStartMs.toStringAsFixed(1)},end_ms=${rawEndMs.toStringAsFixed(1)},file=$fileName,label=${clip.label}}',
+      );
+    }
+
+    return out.toString().trim();
+  }
 }

@@ -1,7 +1,13 @@
 #import "JuceAudioEnginePlugin.h"
 #import "JuceBridge.h"
 #import "JuceLogBridge.h"  // Add this import
+#import <TargetConditionals.h>
+
+#if __has_include(<Flutter/Flutter.h>)
 #import <Flutter/Flutter.h>
+#elif __has_include(<FlutterMacOS/FlutterMacOS.h>)
+#import <FlutterMacOS/FlutterMacOS.h>
+#endif
 
 @interface JuceAudioEnginePlugin ()
 @property (nonatomic, copy) FlutterEventSink eventSink;
@@ -15,6 +21,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 
 + (instancetype)sharedInstance {
     return _sharedInstance;
+}
+
+- (BOOL)hasActiveLogListener {
+    return self.eventSink != nil;
 }
 
 - (void)sendFlutterLog:(NSString*)message {
@@ -70,7 +80,11 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     if ([call.method isEqualToString:@"initialise"]) {
         [JuceBridge initialiseEngineObjC]; result(nil);
     } else if ([call.method isEqualToString:@"getPlatformVersion"]) {
+#if TARGET_OS_OSX
+        result([@"macOS " stringByAppendingString:NSProcessInfo.processInfo.operatingSystemVersionString]);
+#else
         result([@"iOS " stringByAppendingString:UIDevice.currentDevice.systemVersion]);
+#endif
 
     // ----------------------------------------
     // LEGACY / CLIP-INDEXED API (still used)
@@ -141,6 +155,20 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"scanPlugins"]) {
         NSArray* plugins = [JuceBridge scanPluginsObjC];
         result(plugins);
+    } else if ([call.method isEqualToString:@"getEngineCapabilities"]) {
+#if TARGET_OS_OSX
+        result(@{
+            @"externalPluginHosting": @YES,
+            @"supportedPluginFormats": @[@"AU", @"VST3"],
+            @"nativePluginEditor": @NO
+        });
+#else
+        result(@{
+            @"externalPluginHosting": @NO,
+            @"supportedPluginFormats": @[],
+            @"nativePluginEditor": @NO
+        });
+#endif
     } else if ([call.method isEqualToString:@"exportMix"]) {
         NSString* out = [JuceBridge exportMixObjC:args[@"outPath"] settings:args];
         result(out);
@@ -251,6 +279,13 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                            params:params
                                    sourceTempoBpm:sourceTempoBpm];
         result(@(ok));
+    } else if ([call.method isEqualToString:@"setLiveMidiInputTargetClip"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        result(@([JuceBridge setLiveMidiInputTargetClipObjC:clip]));
+    } else if ([call.method isEqualToString:@"consumeLiveMidiInputEvents"]) {
+        result([JuceBridge consumeLiveMidiInputEventsObjC]);
+    } else if ([call.method isEqualToString:@"getConnectedMidiInputDevices"]) {
+        result([JuceBridge getConnectedMidiInputDevicesObjC]);
     } else if ([call.method isEqualToString:@"loadClip"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         NSInteger rowId  = [args[@"rowId"] integerValue];
@@ -390,6 +425,9 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"getTrackEffectIdsForRow"]) {
         NSInteger row = [args[@"row"] integerValue];
         result([JuceBridge getTrackEffectIdsForRowObjC:row]);
+    } else if ([call.method isEqualToString:@"getTrackEffectInstanceIdsForRow"]) {
+        NSInteger row = [args[@"row"] integerValue];
+        result([JuceBridge getTrackEffectInstanceIdsForRowObjC:row]);
     } else if ([call.method isEqualToString:@"setTrackEffect"]) {
         NSInteger row    = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
@@ -416,6 +454,24 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSArray *points = args[@"points"];
         NSInteger row   = [args[@"row"] integerValue];
         [JuceBridge setTrackAutomationPointsObjC:row points:points];
+        result(nil);
+    } else if ([call.method isEqualToString:@"setTrackEffectAutomationPoints"]) {
+        NSArray *points = args[@"points"];
+        NSInteger row = [args[@"row"] integerValue];
+        NSInteger effect = [args[@"effect"] integerValue];
+        NSString *param = args[@"paramId"];
+        double minValue = [args[@"min"] doubleValue];
+        double maxValue = [args[@"max"] doubleValue];
+        [JuceBridge setTrackEffectAutomationPointsObjC:row
+                                           effectIndex:effect
+                                               paramId:param
+                                              minValue:minValue
+                                              maxValue:maxValue
+                                                points:points];
+        result(nil);
+    } else if ([call.method isEqualToString:@"clearTrackEffectAutomationForRow"]) {
+        NSInteger row = [args[@"row"] integerValue];
+        [JuceBridge clearTrackEffectAutomationForRowObjC:row];
         result(nil);
     } else if ([call.method isEqualToString:@"setRowGain"]) {
         NSInteger row = [args[@"row"] integerValue];

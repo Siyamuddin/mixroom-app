@@ -672,7 +672,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         label: p.basenameWithoutExtension(fileName),
         duration: _durationByFile[filePath],
       ),
-      dragAnchorStrategy: (draggable, context, position) => const Offset(42, 54),
+      dragAnchorStrategy: (draggable, context, position) => const Offset(42, 48),
       delay: const Duration(milliseconds: 135),
       onDragStarted: () {
         _dragOutsideNotified = false;

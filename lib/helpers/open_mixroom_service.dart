@@ -23,11 +23,22 @@ class OpenMixroomService {
       }
     });
 
-    // ask native for cold start path
-    final initial = (await _ch.invokeMethod<String>('getInitialMixroomPath'))?.trim();
-    if (initial != null && initial.isNotEmpty) {
-      _pendingInitialPath ??= initial;
-      _controller.add(initial);
+    try {
+      // Ask native for cold start path, but never block startup indefinitely.
+      final initial = (await _ch
+              .invokeMethod<String>('getInitialMixroomPath')
+              .timeout(const Duration(seconds: 2)))
+          ?.trim();
+      if (initial != null && initial.isNotEmpty) {
+        _pendingInitialPath ??= initial;
+        _controller.add(initial);
+      }
+    } on TimeoutException {
+      // Channel not ready yet; continue app startup.
+    } on MissingPluginException {
+      // Channel can bind slightly later in app lifecycle; continue startup.
+    } on PlatformException {
+      // Ignore transient startup channel errors.
     }
   }
 

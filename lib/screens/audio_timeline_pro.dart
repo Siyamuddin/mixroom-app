@@ -11,6 +11,9 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
 import 'package:mixroom/widgets/sample_browser_panel.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
+import 'package:mixroom/helpers/halo.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
+import 'package:mixroom/helpers/mix_change_highlighter.dart';
 
 class _QuantizePreset {
   final int divisionsPerBar;
@@ -54,6 +57,29 @@ enum _TimelineTool {
 
 enum _InlineClipControlKind {
   settings,
+}
+
+class _EditorLayoutSpec {
+  final double bottomInteractionPadding;
+
+  const _EditorLayoutSpec({
+    required this.bottomInteractionPadding,
+  });
+
+  factory _EditorLayoutSpec.fromSize(Size size) {
+    final isDesktop = PlatformCapabilities.current.isDesktop;
+    final width = size.width;
+    if (!isDesktop) {
+      return const _EditorLayoutSpec(bottomInteractionPadding: 96.0);
+    }
+    if (width >= 1700) {
+      return const _EditorLayoutSpec(bottomInteractionPadding: 128.0);
+    }
+    if (width >= 1360) {
+      return const _EditorLayoutSpec(bottomInteractionPadding: 116.0);
+    }
+    return const _EditorLayoutSpec(bottomInteractionPadding: 104.0);
+  }
 }
 
 extension _TimelineToolUi on _TimelineTool {
@@ -108,6 +134,26 @@ class AudioCanvasTimeline extends StatefulWidget {
   final List<bool> rowMuted;
   final List<bool> rowSoloed;
   final List<List<AutomationPoint>> rowVolumeAutomation;
+  final List<Map<String, dynamic>> Function(int row) getAutomationTargetsForRow;
+  final String Function(int row) getSelectedAutomationTargetId;
+  final void Function(int row, String targetId) setSelectedAutomationTargetId;
+  final List<AutomationPoint> Function(int row, String targetId)
+      getAutomationPointsForTarget;
+  final void Function(int row, String targetId, List<AutomationPoint> points)
+      setAutomationPointsForTarget;
+  final List<AutomationClipSnapshot> Function(int row, String targetId)
+      getAutomationClipsForTarget;
+  final void Function(
+          int row, String targetId, List<AutomationClipSnapshot> clips)
+      setAutomationClipsForTarget;
+  final void Function(int row, String targetId, List<AutomationPoint> oldPoints,
+      List<AutomationPoint> newPoints)? onAutomationTargetCommit;
+  final void Function(
+    int row,
+    String targetId,
+    List<AutomationClipSnapshot> oldClips,
+    List<AutomationClipSnapshot> newClips,
+  )? onAutomationClipsCommit;
 
   final double Function(AudioTrack) getStartMs;
   final double Function(AudioTrack)
@@ -205,6 +251,9 @@ class AudioCanvasTimeline extends StatefulWidget {
   final Future<void> Function(List<int> clipIndices)? onDeleteClips;
   final Future<void> Function(int clipIndex, double cutTimeMs)? onCutClipAt;
   final void Function(int clipIndex)? onOpenMidiClip;
+  final Future<void> Function(int clipIndex)? onStemSeparation;
+  final void Function(List<int> selectedClipIndices, int primaryClipIndex)?
+      onSelectionChanged;
   final void Function(int loopStartMs, int loopEndMs)? onLoopRegionChanged;
   final void Function(bool enabled)? onLoopToggle;
   final void Function(int row, int effectIndex, String paramId,
@@ -213,6 +262,8 @@ class AudioCanvasTimeline extends StatefulWidget {
       onPresetCommit;
   final void Function(void Function(int row) refreshRowFx)?
       registerRowFxRefresher;
+  final void Function(void Function(int row) refreshRowFxPlayback)?
+      registerRowFxPlaybackRefresher;
   final void Function(bool magnetEnabled, int quantizeDivisionsPerBar)?
       onSnapSettingsChanged;
 
@@ -225,6 +276,7 @@ class AudioCanvasTimeline extends StatefulWidget {
       onExternalSampleDrop;
   final VoidCallback? onExternalSampleDragEntered;
   final bool externalSampleDragActive;
+  final MixChangeHighlighter? tutorialHighlighter;
 
   final String mode; // "Basic" or "Pro"
 
@@ -236,6 +288,15 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.rowMuted,
     required this.rowSoloed,
     required this.rowVolumeAutomation,
+    required this.getAutomationTargetsForRow,
+    required this.getSelectedAutomationTargetId,
+    required this.setSelectedAutomationTargetId,
+    required this.getAutomationPointsForTarget,
+    required this.setAutomationPointsForTarget,
+    required this.getAutomationClipsForTarget,
+    required this.setAutomationClipsForTarget,
+    required this.onAutomationTargetCommit,
+    this.onAutomationClipsCommit,
     required this.clips,
     required this.getStartMs,
     required this.getDurationMs,
@@ -307,12 +368,15 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onDeleteClips,
     this.onCutClipAt,
     this.onOpenMidiClip,
+    this.onStemSeparation,
+    this.onSelectionChanged,
     this.onLoopRegionChanged,
     this.onLoopToggle,
     required this.mode,
     this.onPluginParamCommit,
     this.onPresetCommit,
     this.registerRowFxRefresher,
+    this.registerRowFxPlaybackRefresher,
     this.onSnapSettingsChanged,
     required this.meters,
     required this.getRowCompressorMeter,
@@ -320,6 +384,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onExternalSampleDrop,
     this.onExternalSampleDragEntered,
     this.externalSampleDragActive = false,
+    this.tutorialHighlighter,
   }) : super(key: key);
   @override
   State<AudioCanvasTimeline> createState() => _AudioCanvasTimelineState();
@@ -327,17 +392,39 @@ class AudioCanvasTimeline extends StatefulWidget {
 
 class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double kRowHeight = 80.0;
-  static const double kExpandedRowHeight = kRowHeight *
-      3; // try to make this dynamic to fit in all the stuff in the expanded area (risk of vertical overflow if too small)
+  static const double kExpandedRowHeight = (kRowHeight * 3) +
+      24.0; // keep extra headroom to avoid expanded-tab vertical overflow
+  // Effects panel min height should be driven by left header content.
+  static const double _kHeaderTabButtonHeight = 34.0;
+  static const double _kHeaderTabGap = 6.0;
+  static const double _kHeaderMeterHeight = 82.0;
+  static const double _kHeaderTabsMinHeight = 12.0 + // top spacers
+      8.0 + // vertical padding around tab stack
+      (_kHeaderTabButtonHeight * 3.0) +
+      (_kHeaderTabGap * 2.0) +
+      8.0 + // meter top spacing
+      _kHeaderMeterHeight;
+  // Match Volume tab baseline, but never go below measured header needs.
+  static const double _kEffectsPanelMinHeight =
+      (_kHeaderTabsMinHeight > kExpandedRowHeight)
+          ? _kHeaderTabsMinHeight
+          : kExpandedRowHeight;
   static const double kHeaderFooterHeight = 48.0;
   static const double kBottomInteractionPadding = 96.0;
   final List<double> _effectsPanelHeights = <double>[];
+  _EditorLayoutSpec _editorLayoutSpec = const _EditorLayoutSpec(
+      bottomInteractionPadding: kBottomInteractionPadding);
 
   static const double kHeaderWidth = 80.0;
   static const double kRulerHeight = 40.0;
   static const double kTrimHandleWidth = 12.0;
   static const double kTrimHitboxPadding =
       20.0; // === FIX ===: New constant for larger hitbox
+  static const double _kTimelineAutomationLaneInset = 2.0;
+  static const double _kTimelineAutomationLaneGap = 2.0;
+  static const double _kTimelineAutomationLaneExpandedHeight =
+      kRowHeight - (_kTimelineAutomationLaneInset * 2.0);
+  static const double _kTimelineAutomationLaneCollapsedHeight = 20.0;
   double _pixelsPerMs = 0.1; // Initial zoom level
   double _scrollOffsetMs = 0.0;
   int _selectedClipIndex = -1;
@@ -345,7 +432,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   int _selectedRowIndex = 0;
   // final List<bool> _rowMuted = List.filled(kNumRows, false);
   final List<bool> _rowExpanded = <bool>[];
-  final List<int> _expandedTab = <int>[]; // 0 = Volume, 1 = Effects
+  final List<int> _expandedTab =
+      <int>[]; // 0 = Volume, 1 = Effects, 2 = Automation
   final List<double> _rowYPositions = [];
 
   // === FIX ===: Unified drag/trim state
@@ -390,6 +478,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   int? _automationDragIndex;
   Offset? _automationDragStart;
   double? _automationFingerOffsetY;
+  List<AutomationClipSnapshot>? _automationPointEditBeforeClips;
+  String? _automationPointEditTargetId;
+  final Map<String, String> _selectedAutomationClipByLane = <String, String>{};
+  List<AutomationClipSnapshot>? _automationClipDragBefore;
+  int? _automationClipDragRow;
+  String? _automationClipDragTargetId;
+  String? _automationClipDragId;
+  String? _automationClipDragMode;
+  double _automationClipDragDxAccum = 0.0;
+  AutomationClipSnapshot? _automationClipDragOrigin;
+  final Map<int, int> _extraAutomationTimelineLanesByRow = <int, int>{};
+  final Map<int, bool> _collapsedAutomationTimelineByRow = <int, bool>{};
+  final Map<int, int> _automationLaneFocusByRow = <int, int>{};
 
   bool _pendingDrag = false;
   Offset? _pendingLocalDown;
@@ -449,6 +550,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   // for updating the UI of the effects when JUCE state has changed
   final Map<int, VoidCallback> _rowEffectRefreshers = {};
+  final Map<int, VoidCallback> _rowEffectPlaybackRefreshers = {};
   Timer? _headerHoldTimer;
   Timer? _magnetHoldTimer;
   static const Duration _rowMenuHoldDelay = Duration(milliseconds: 140);
@@ -664,6 +766,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onTimelinePointerCancel(PointerCancelEvent event) {
+    if (_interactionMode == 'automation_clip') {
+      final row = _automationClipDragRow;
+      final targetId = _automationClipDragTargetId;
+      if (row != null && targetId != null) {
+        _endAutomationClipDrag(row, targetId);
+      }
+      setState(() {
+        _interactionMode = '';
+        _isUserInteracting = false;
+        _dragStartGlobalOffset = null;
+      });
+      return;
+    }
     if (_activeTool == _TimelineTool.cut) {
       _clearCutPreview();
       return;
@@ -838,6 +953,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _selectedClipIndex = -1;
     _selectedClipIndices.clear();
     _clipPopupMs = null;
+    _emitSelectionChanged();
   }
 
   void _setSingleClipSelection(int clipIndex, {double? popupMs}) {
@@ -851,6 +967,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       ..clear()
       ..add(clipIndex);
     _clipPopupMs = popupMs;
+    _emitSelectionChanged();
   }
 
   void _clearInlineClipControlState() {
@@ -913,22 +1030,300 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _selectedClipIndex = -1;
       _clipPopupMs = null;
     }
+    _emitSelectionChanged();
   }
 
   int? _rowForLocalY(double localY) {
     if (_rowCount <= 0) return null;
     double currentY = 0;
     for (int i = 0; i < _rowCount; i++) {
-      double rowTotalHeight = kRowHeight;
-      if (_rowExpanded[i]) {
-        rowTotalHeight += (_expandedTab[i] == 0)
-            ? kExpandedRowHeight
-            : _effectsPanelHeights[i];
-      }
+      final rowTotalHeight = _rowBlockHeightForIndex(i);
       if (localY >= currentY && localY < currentY + rowTotalHeight) {
         return i;
       }
       currentY += rowTotalHeight;
+    }
+    return null;
+  }
+
+  double _rowTopForIndex(int row) {
+    if (row < 0 || row >= _rowCount) return 0.0;
+    double y = 0.0;
+    for (int i = 0; i < row; i++) {
+      y += _rowBlockHeightForIndex(i);
+    }
+    return y;
+  }
+
+  List<String> _automationTargetIdsForRow(int row) {
+    final ids = <String>{'volume'};
+    if (row < 0 || row >= _rowCount) return ids.toList(growable: false);
+    final selected = widget.getSelectedAutomationTargetId(row).trim();
+    if (selected.isNotEmpty) ids.add(selected);
+    for (final target in widget.getAutomationTargetsForRow(row)) {
+      final id = (target['id'] ?? '').toString().trim();
+      if (id.isNotEmpty) ids.add(id);
+    }
+    return ids.toList(growable: false);
+  }
+
+  int _automationClipLaneCountForRow(int row) {
+    if (row < 0 || row >= _rowCount) return 0;
+    var maxLane = -1;
+    for (final targetId in _automationTargetIdsForRow(row)) {
+      final clips = widget.getAutomationClipsForTarget(row, targetId);
+      for (final clip in clips) {
+        final lane = math.max(0, clip.lane);
+        if (lane > maxLane) maxLane = lane;
+      }
+    }
+    return maxLane + 1;
+  }
+
+  int _automationLaneCountForRow(int row) {
+    if (row < 0 || row >= _rowCount) return 0;
+    final fromClips = _automationClipLaneCountForRow(row);
+    final extra = math.max(0, _extraAutomationTimelineLanesByRow[row] ?? 0);
+    return math.max(fromClips + extra, 0);
+  }
+
+  bool _isAutomationTimelineCollapsedForRow(int row) {
+    return _collapsedAutomationTimelineByRow[row] == true;
+  }
+
+  int _automationTimelineVisibleLaneCountForRow(int row) {
+    final laneCount = _automationLaneCountForRow(row);
+    if (laneCount <= 0) return 0;
+    if (_isAutomationTimelineCollapsedForRow(row)) {
+      return 1;
+    }
+    return laneCount;
+  }
+
+  double _automationTimelineSingleLaneHeightForRow(int row) {
+    return _isAutomationTimelineCollapsedForRow(row)
+        ? _kTimelineAutomationLaneCollapsedHeight
+        : _kTimelineAutomationLaneExpandedHeight;
+  }
+
+  int _normalizedAutomationLaneForRow(int row, int lane) {
+    final laneCount = _automationLaneCountForRow(row);
+    if (laneCount <= 0) return 0;
+    return lane.clamp(0, laneCount - 1).toInt();
+  }
+
+  int _focusedAutomationLaneForRow(int row) {
+    final laneCount = _automationLaneCountForRow(row);
+    if (laneCount <= 0) return 0;
+    final focused = _automationLaneFocusByRow[row] ?? 0;
+    return focused.clamp(0, laneCount - 1).toInt();
+  }
+
+  void _setFocusedAutomationLaneForRow(int row, int lane) {
+    final normalized = _normalizedAutomationLaneForRow(row, lane);
+    if ((_automationLaneFocusByRow[row] ?? 0) == normalized) return;
+    _automationLaneFocusByRow[row] = normalized;
+  }
+
+  void _addAutomationTimelineLaneForRow(int row) {
+    if (row < 0 || row >= _rowCount) return;
+    final before = _automationLaneCountForRow(row);
+    _extraAutomationTimelineLanesByRow[row] =
+        math.max(0, _extraAutomationTimelineLanesByRow[row] ?? 0) + 1;
+    final after = _automationLaneCountForRow(row);
+    _setFocusedAutomationLaneForRow(row, math.max(0, after - 1));
+    if (after != before) {
+      setState(() {});
+    }
+  }
+
+  void _toggleAutomationTimelineCollapseForRow(int row) {
+    if (row < 0 || row >= _rowCount) return;
+    final collapsed = _isAutomationTimelineCollapsedForRow(row);
+    _collapsedAutomationTimelineByRow[row] = !collapsed;
+    setState(() {});
+  }
+
+  void _swapAutomationTimelineLanesForRow(int row, int a, int b) {
+    if (row < 0 || row >= _rowCount || a == b) return;
+    final laneCount = _automationLaneCountForRow(row);
+    if (laneCount <= 1) return;
+    final from = a.clamp(0, laneCount - 1).toInt();
+    final to = b.clamp(0, laneCount - 1).toInt();
+    if (from == to) return;
+
+    var changed = false;
+    for (final targetId in _automationTargetIdsForRow(row)) {
+      final before = _cloneAutomationClips(
+        widget.getAutomationClipsForTarget(row, targetId),
+      );
+      if (before.isEmpty) continue;
+      var targetChanged = false;
+      final next = before.map((clip) {
+        final lane = math.max(0, clip.lane);
+        if (lane == from) {
+          targetChanged = true;
+          return clip.copyWith(lane: to);
+        }
+        if (lane == to) {
+          targetChanged = true;
+          return clip.copyWith(lane: from);
+        }
+        return clip.copyWith();
+      }).toList(growable: false);
+      if (!targetChanged) continue;
+      changed = true;
+      _applyAutomationClipsWithCommit(row, targetId, before, next);
+    }
+    if (!changed) return;
+    _setFocusedAutomationLaneForRow(row, to);
+    setState(() {});
+  }
+
+  double _automationTimelineLaneHeightForRow(int row) {
+    final laneCount = _automationTimelineVisibleLaneCountForRow(row);
+    if (laneCount <= 0) return 0.0;
+    final laneHeight = _automationTimelineSingleLaneHeightForRow(row);
+    final totalGap = (laneCount - 1) * _kTimelineAutomationLaneGap;
+    return (_kTimelineAutomationLaneInset * 2) +
+        (laneCount * laneHeight) +
+        totalGap;
+  }
+
+  double _automationTimelineLaneTopForRowLane(int row, int lane) {
+    final rowTop = _rowTopForIndex(row);
+    final clampedLane = math.max(0, lane);
+    final laneHeight = _automationTimelineSingleLaneHeightForRow(row);
+    return rowTop +
+        kRowHeight +
+        _kTimelineAutomationLaneInset +
+        (clampedLane * (laneHeight + _kTimelineAutomationLaneGap));
+  }
+
+  int _timelineAutomationLaneIndexAtLocalY(int row, double localY) {
+    final laneCount = _automationLaneCountForRow(row);
+    if (laneCount <= 0) return 0;
+    if (_isAutomationTimelineCollapsedForRow(row)) return 0;
+    final firstLaneTop = _automationTimelineLaneTopForRowLane(row, 0);
+    final laneHeight = _automationTimelineSingleLaneHeightForRow(row);
+    final totalHeight = (laneCount * laneHeight) +
+        math.max(0, laneCount - 1) * _kTimelineAutomationLaneGap;
+    final relative =
+        (localY - firstLaneTop).clamp(0.0, math.max(0.0, totalHeight - 0.0001));
+    final lane = (relative / (laneHeight + _kTimelineAutomationLaneGap))
+        .floor()
+        .clamp(0, laneCount - 1)
+        .toInt();
+    return lane;
+  }
+
+  double _expandedPanelHeightForRow(int row) {
+    if (row < 0 || row >= _rowCount || !_rowExpanded[row]) return 0.0;
+    return _isFixedHeightExpandedTab(_expandedTab[row])
+        ? kExpandedRowHeight
+        : _effectsPanelHeights[row];
+  }
+
+  double _rowBlockHeightForIndex(int row) {
+    return kRowHeight +
+        _automationTimelineLaneHeightForRow(row) +
+        _expandedPanelHeightForRow(row);
+  }
+
+  bool _isLocalYInMainTrackLane(int row, double localY) {
+    final rowTop = _rowTopForIndex(row);
+    return localY >= rowTop && localY < rowTop + kRowHeight;
+  }
+
+  Map<String, String> _automationTargetLabelsForRow(int row) {
+    final labels = <String, String>{'volume': 'Volume'};
+    for (final target in widget.getAutomationTargetsForRow(row)) {
+      final id = (target['id'] ?? '').toString().trim();
+      if (id.isEmpty) continue;
+      final label = (target['label'] ?? id).toString().trim();
+      labels[id] = label.isEmpty ? id : label;
+    }
+    return labels;
+  }
+
+  List<_TimelineAutomationClipVisual> _timelineAutomationClipVisuals() {
+    if (_rowCount <= 0) return const <_TimelineAutomationClipVisual>[];
+    final visuals = <_TimelineAutomationClipVisual>[];
+    const minWidthPx = 14.0;
+
+    for (int row = 0; row < _rowCount; row++) {
+      final laneCount = _automationLaneCountForRow(row);
+      if (laneCount <= 0) continue;
+      final labelsById = _automationTargetLabelsForRow(row);
+      final clipHeight = _automationTimelineSingleLaneHeightForRow(row);
+      final visibleLaneCount = _automationTimelineVisibleLaneCountForRow(row);
+      final collapseToSingleLane = visibleLaneCount == 1 && laneCount > 1;
+
+      for (final targetId in _automationTargetIdsForRow(row)) {
+        if (targetId.trim().isEmpty) continue;
+        final targetLabel = labelsById[targetId] ?? targetId;
+        final selectedClipId = _selectedAutomationClipIdFor(row, targetId);
+        final laneClips = widget.getAutomationClipsForTarget(row, targetId);
+        if (laneClips.isEmpty) continue;
+
+        for (final clip in laneClips) {
+          final laneIndex = collapseToSingleLane
+              ? 0
+              : _normalizedAutomationLaneForRow(row, clip.lane);
+          final laneTop = _automationTimelineLaneTopForRowLane(row, laneIndex);
+          final left = (clip.startMs - _scrollOffsetMs) * _pixelsPerMs;
+          final width = math.max(minWidthPx, clip.lengthMs * _pixelsPerMs);
+          final rect =
+              Rect.fromLTWH(left, laneTop, width, math.max(8.0, clipHeight));
+          visuals.add(
+            _TimelineAutomationClipVisual(
+              row: row,
+              targetId: targetId,
+              targetLabel: targetLabel,
+              clip: clip,
+              laneIndex: laneIndex,
+              rect: rect,
+              isSelected: clip.id == selectedClipId,
+            ),
+          );
+        }
+      }
+    }
+
+    visuals.sort((a, b) {
+      final rowCmp = a.row.compareTo(b.row);
+      if (rowCmp != 0) return rowCmp;
+      final laneCmp = a.laneIndex.compareTo(b.laneIndex);
+      if (laneCmp != 0) return laneCmp;
+      final startCmp = a.clip.startMs.compareTo(b.clip.startMs);
+      if (startCmp != 0) return startCmp;
+      if (a.isSelected != b.isSelected) {
+        return a.isSelected ? 1 : -1;
+      }
+      return a.clip.id.compareTo(b.clip.id);
+    });
+    return visuals;
+  }
+
+  _TimelineAutomationClipVisual? _timelineAutomationClipAt(Offset localPos) {
+    final visuals = _timelineAutomationClipVisuals();
+    for (int i = visuals.length - 1; i >= 0; i--) {
+      final visual = visuals[i];
+      if (visual.rect.contains(localPos)) {
+        return visual;
+      }
+    }
+    return null;
+  }
+
+  AutomationClipSnapshot? _activeDraggedAutomationClip() {
+    final row = _automationClipDragRow;
+    final targetId = _automationClipDragTargetId;
+    final clipId = _automationClipDragId;
+    if (row == null || targetId == null || clipId == null) return null;
+    final laneClips = widget.getAutomationClipsForTarget(row, targetId);
+    for (final clip in laneClips) {
+      if (clip.id == clipId) return clip;
     }
     return null;
   }
@@ -1055,10 +1450,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_selectedClipIndices.isEmpty) {
       _selectedClipIndex = -1;
       _clipPopupMs = null;
+      _emitSelectionChanged();
       return;
     }
     _selectedClipIndex = _selectedClipIndices.reduce((a, b) => a > b ? a : b);
     _clipPopupMs = null;
+    _emitSelectionChanged();
+  }
+
+  void _emitSelectionChanged() {
+    final selected = _activeSelectedClipIndices();
+    final primary = selected.isEmpty
+        ? -1
+        : (selected.contains(_selectedClipIndex)
+            ? _selectedClipIndex
+            : selected.last);
+    widget.onSelectionChanged?.call(selected, primary);
   }
 
   Future<void> _deleteSelectedClips() async {
@@ -1282,7 +1689,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   double _volumeToPyHelper(double v, int row) {
-    final expandedOffset = _rowYPositions[row] + kRowHeight;
+    final expandedOffset = _rowTopForIndex(row) +
+        kRowHeight +
+        _automationTimelineLaneHeightForRow(row);
     final usableHeight = kExpandedRowHeight - 24;
     return expandedOffset + 12 + (1 - v) * usableHeight;
   }
@@ -1303,7 +1712,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       });
     });
     widget.registerRowFxRefresher?.call(_refreshRowFx);
+    widget.registerRowFxPlaybackRefresher?.call(_refreshRowFxPlayback);
     _notifySnapSettingsChanged();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _emitSelectionChanged();
+    });
   }
 
   @override
@@ -1343,6 +1757,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     } else if (oldWidget.rows.length != widget.rows.length) {
       _syncRowUiState();
     }
+    _selectedAutomationClipByLane.removeWhere((laneKey, clipId) {
+      final parts = laneKey.split('|');
+      if (parts.length < 2) return true;
+      final row = int.tryParse(parts.first);
+      if (row == null || row < 0 || row >= _rowCount) return true;
+      final targetId = parts.sublist(1).join('|');
+      if (targetId.isEmpty) return true;
+      final clips = widget.getAutomationClipsForTarget(row, targetId);
+      return !clips.any((clip) => clip.id == clipId);
+    });
     if (widget.onExternalSampleDrop == null &&
         (_externalSampleDropRow != null ||
             _externalSampleDropStartMs != null ||
@@ -1472,7 +1896,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     while (_rowExpanded.length < _rowCount) {
       _rowExpanded.add(false);
       _expandedTab.add(0);
-      _effectsPanelHeights.add(kExpandedRowHeight);
+      _effectsPanelHeights.add(_kEffectsPanelMinHeight);
     }
     if (_rowExpanded.length > _rowCount) {
       _rowExpanded.removeRange(_rowCount, _rowExpanded.length);
@@ -1482,12 +1906,21 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_selectedRowIndex >= _rowCount) {
       _selectedRowIndex = _rowCount == 0 ? -1 : _rowCount - 1;
     }
+    _extraAutomationTimelineLanesByRow
+        .removeWhere((row, _) => row < 0 || row >= _rowCount);
+    _collapsedAutomationTimelineByRow
+        .removeWhere((row, _) => row < 0 || row >= _rowCount);
+    _automationLaneFocusByRow
+        .removeWhere((row, _) => row < 0 || row >= _rowCount);
   }
 
   void _reconcileRowUiStateByRowId(List<TimelineRow> oldRows) {
     final oldExpandedById = <int, bool>{};
     final oldTabById = <int, int>{};
     final oldEffectsHeightById = <int, double>{};
+    final oldExtraAutomationLanesById = <int, int>{};
+    final oldCollapsedAutomationById = <int, bool>{};
+    final oldAutomationLaneFocusById = <int, int>{};
 
     for (int i = 0; i < oldRows.length; i++) {
       final id = oldRows[i].rowId;
@@ -1496,6 +1929,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       if (i < _effectsPanelHeights.length) {
         oldEffectsHeightById[id] = _effectsPanelHeights[i];
       }
+      oldExtraAutomationLanesById[id] =
+          math.max(0, _extraAutomationTimelineLanesByRow[i] ?? 0);
+      oldCollapsedAutomationById[id] =
+          _collapsedAutomationTimelineByRow[i] == true;
+      oldAutomationLaneFocusById[id] =
+          math.max(0, _automationLaneFocusByRow[i] ?? 0);
     }
 
     final selectedRowId =
@@ -1520,8 +1959,39 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       ..clear()
       ..addAll(
         widget.rows
-            .map((r) => oldEffectsHeightById[r.rowId] ?? kExpandedRowHeight)
+            .map(
+                (r) => oldEffectsHeightById[r.rowId] ?? _kEffectsPanelMinHeight)
             .toList(growable: false),
+      );
+    _extraAutomationTimelineLanesByRow
+      ..clear()
+      ..addEntries(
+        widget.rows.asMap().entries.where((entry) {
+          final rowId = entry.value.rowId;
+          return (oldExtraAutomationLanesById[rowId] ?? 0) > 0;
+        }).map((entry) {
+          final rowId = entry.value.rowId;
+          return MapEntry(entry.key, oldExtraAutomationLanesById[rowId] ?? 0);
+        }),
+      );
+    _collapsedAutomationTimelineByRow
+      ..clear()
+      ..addEntries(
+        widget.rows.asMap().entries.where((entry) {
+          final rowId = entry.value.rowId;
+          return oldCollapsedAutomationById[rowId] == true;
+        }).map((entry) {
+          final rowId = entry.value.rowId;
+          return MapEntry(entry.key, oldCollapsedAutomationById[rowId] == true);
+        }),
+      );
+    _automationLaneFocusByRow
+      ..clear()
+      ..addEntries(
+        widget.rows.asMap().entries.map((entry) {
+          final rowId = entry.value.rowId;
+          return MapEntry(entry.key, oldAutomationLaneFocusById[rowId] ?? 0);
+        }),
       );
 
     _selectedRowIndex = (selectedRowId == null)
@@ -1550,6 +2020,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
   }
 
+  void _refreshRowFxPlayback(int row) {
+    if (row < 0 || row >= _rowCount) return;
+    final rowId = widget.rows[row].rowId;
+    final refresh = _rowEffectPlaybackRefreshers[rowId];
+    if (refresh != null) {
+      refresh();
+    }
+  }
+
   // Helper to get the viewport width (the drawable timeline area)
   double _getViewportWidth(BuildContext context) {
     return MediaQuery.of(context).size.width - kHeaderWidth;
@@ -1560,22 +2039,23 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return _getViewportWidth(context) / 2;
   }
 
+  bool _isFixedHeightExpandedTab(int tab) {
+    return tab == 0 || tab == 2;
+  }
+
   double get _totalTimelineHeight {
-    double total = _rowCount * kRowHeight;
+    double total = 0.0;
     for (int i = 0; i < _rowCount; i++) {
-      if (_rowExpanded[i]) {
-        // total += kExpandedRowHeight;
-        total += (_expandedTab[i] == 0)
-            ? kExpandedRowHeight // volume tab always fixed
-            : _effectsPanelHeights[i]; // effects tab dynamic
-      }
+      total += _rowBlockHeightForIndex(i);
     }
     return total;
   }
 
   double get _timelinePaintHeight => math.max(_totalTimelineHeight, kRowHeight);
   double get _scrollContentHeight =>
-      _timelinePaintHeight + kHeaderFooterHeight + kBottomInteractionPadding;
+      _timelinePaintHeight +
+      kHeaderFooterHeight +
+      _editorLayoutSpec.bottomInteractionPadding;
 
   void _recalculateRowYPositions() {
     _rowYPositions.clear();
@@ -1583,12 +2063,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     double y = 0;
     for (int i = 0; i < _rowCount; i++) {
       _rowYPositions.add(y);
-      y += kRowHeight;
-      if (_rowExpanded[i]) {
-        y += (_expandedTab[i] == 0)
-            ? kExpandedRowHeight
-            : _effectsPanelHeights[i];
-      }
+      y += _rowBlockHeightForIndex(i);
     }
   }
 
@@ -1598,13 +2073,695 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return verticalPadding + (1 - volume) * usable;
   }
 
+  bool _isAutomationLaneTabForRow(int row) {
+    if (row < 0 || row >= _rowCount) return false;
+    return _expandedTab[row] == 0 || _expandedTab[row] == 2;
+  }
+
+  String _activeAutomationTargetIdForRow(int row) {
+    if (_expandedTab[row] == 2) {
+      return widget.getSelectedAutomationTargetId(row);
+    }
+    return 'volume';
+  }
+
+  List<AutomationPoint> _activeAutomationPointsForRow(int row) {
+    final targetId = _activeAutomationTargetIdForRow(row);
+    final selectedClip = _selectedAutomationClipForTarget(row, targetId);
+    if (selectedClip != null) {
+      return _automationClipPointsToAbsolute(selectedClip);
+    }
+    if (targetId == 'volume') {
+      return widget.rowVolumeAutomation[row];
+    }
+    return widget.getAutomationPointsForTarget(row, targetId);
+  }
+
+  void _setActiveAutomationPointsForRow(
+    int row,
+    String targetId,
+    List<AutomationPoint> points,
+  ) {
+    if (_selectedAutomationClipForTarget(row, targetId) != null) {
+      _setSelectedAutomationClipPointsForTarget(
+        row,
+        targetId,
+        points,
+      );
+      return;
+    }
+    if (targetId == 'volume') {
+      widget.rowVolumeAutomation[row] = points;
+      widget.setTrackAutomationPoints(
+        row,
+        points.map((p) => p.toMap()).toList(),
+      );
+      return;
+    }
+    widget.setAutomationPointsForTarget(row, targetId, points);
+  }
+
+  double _normalizeValueToAutomationRange(
+    double value, {
+    required double min,
+    required double max,
+    double fallback = 0.5,
+  }) {
+    final span = max - min;
+    if (!span.isFinite || span.abs() < 1e-9) {
+      return fallback.clamp(0.0, 1.0).toDouble();
+    }
+    return ((value - min) / span).clamp(0.0, 1.0).toDouble();
+  }
+
+  double _automationTargetInitialNormalized(
+    String targetId,
+    Map<String, dynamic>? targetMeta,
+  ) {
+    final fallback = targetId == 'volume' ? 0.75 : 0.5;
+    final fromInitial = (targetMeta?['initialNormalized'] as num?)?.toDouble();
+    if (fromInitial != null && fromInitial.isFinite) {
+      return fromInitial.clamp(0.0, 1.0).toDouble();
+    }
+
+    final min = (targetMeta?['min'] as num?)?.toDouble() ?? 0.0;
+    final max = (targetMeta?['max'] as num?)?.toDouble() ?? 1.0;
+    final fromRawValue = (targetMeta?['value'] as num?)?.toDouble();
+    if (fromRawValue != null && fromRawValue.isFinite) {
+      return _normalizeValueToAutomationRange(
+        fromRawValue,
+        min: min,
+        max: max,
+        fallback: fallback,
+      );
+    }
+
+    return fallback;
+  }
+
+  List<AutomationPoint> _defaultAutomationLanePoints(double normalizedValue) {
+    final value = normalizedValue.clamp(0.0, 1.0).toDouble();
+    return <AutomationPoint>[
+      AutomationPoint(x: 0.0, volume: value),
+    ];
+  }
+
+  bool _automationPointListsEqual(
+    List<AutomationPoint> a,
+    List<AutomationPoint> b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if ((a[i].x - b[i].x).abs() > 1e-6 ||
+          (a[i].volume - b[i].volume).abs() > 1e-6) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool _automationLaneLooksDefault(
+    List<AutomationPoint> points,
+    double defaultNormalized,
+  ) {
+    if (points.isEmpty) return true;
+    final value = defaultNormalized.clamp(0.0, 1.0).toDouble();
+    bool near(double a, double b, {double eps = 1e-3}) => (a - b).abs() <= eps;
+    if (points.length == 1) {
+      return near(points.first.x, 0.0, eps: 1.0) &&
+          near(points.first.volume, value);
+    }
+    if (points.length == 2) {
+      final sorted = [...points]..sort((a, b) => a.x.compareTo(b.x));
+      final start = sorted.first;
+      final end = sorted.last;
+      final nearStart = near(start.x, 0.0, eps: 1.0);
+      final nearEnd = near(end.x, _maxDurationMs, eps: 2.0);
+      return nearStart &&
+          nearEnd &&
+          near(start.volume, value) &&
+          near(end.volume, value);
+    }
+    return false;
+  }
+
+  bool _automationTargetHasEdits(
+    int row,
+    String targetId, {
+    required double defaultNormalized,
+  }) {
+    final clips = widget.getAutomationClipsForTarget(row, targetId);
+    if (clips.isNotEmpty) return true;
+    final points = targetId == 'volume'
+        ? widget.rowVolumeAutomation[row]
+        : widget.getAutomationPointsForTarget(row, targetId);
+    return !_automationLaneLooksDefault(points, defaultNormalized);
+  }
+
+  void _resetAutomationLaneForTarget(
+    int row,
+    String targetId, {
+    required double defaultNormalized,
+  }) {
+    final oldPoints = (targetId == 'volume'
+            ? widget.rowVolumeAutomation[row]
+            : widget.getAutomationPointsForTarget(row, targetId))
+        .map((p) => p.copy())
+        .toList(growable: false);
+    final nextPoints = _defaultAutomationLanePoints(defaultNormalized);
+    final pointsChanged = !_automationPointListsEqual(oldPoints, nextPoints);
+
+    final oldClips = _cloneAutomationClips(
+      widget.getAutomationClipsForTarget(row, targetId),
+    );
+    final clipsChanged = oldClips.isNotEmpty;
+
+    if (!pointsChanged && !clipsChanged) return;
+
+    if (pointsChanged) {
+      _setActiveAutomationPointsForRow(row, targetId, nextPoints);
+      if (targetId == 'volume') {
+        widget.onAutomationCommit?.call(row, oldPoints, nextPoints);
+      } else {
+        widget.onAutomationTargetCommit
+            ?.call(row, targetId, oldPoints, nextPoints);
+      }
+    }
+
+    if (clipsChanged) {
+      widget.setAutomationClipsForTarget(
+        row,
+        targetId,
+        const <AutomationClipSnapshot>[],
+      );
+      widget.onAutomationClipsCommit?.call(
+        row,
+        targetId,
+        oldClips,
+        const <AutomationClipSnapshot>[],
+      );
+    }
+
+    _setSelectedAutomationClipFor(row, targetId, null);
+    setState(() {});
+  }
+
+  String _automationLaneKey(int row, String targetId) => '$row|$targetId';
+
+  List<AutomationClipSnapshot> _cloneAutomationClips(
+    List<AutomationClipSnapshot> clips,
+  ) {
+    return clips.map((clip) => clip.copyWith()).toList(growable: false);
+  }
+
+  bool _automationClipListsEqual(
+    List<AutomationClipSnapshot> a,
+    List<AutomationClipSnapshot> b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      final x = a[i];
+      final y = b[i];
+      if (x.id != y.id ||
+          x.targetId != y.targetId ||
+          x.row != y.row ||
+          x.lane != y.lane ||
+          x.muted != y.muted ||
+          (x.startMs - y.startMs).abs() > 1e-6 ||
+          (x.lengthMs - y.lengthMs).abs() > 1e-6) {
+        return false;
+      }
+      if (x.points.length != y.points.length) return false;
+      for (int p = 0; p < x.points.length; p++) {
+        final xp = x.points[p];
+        final yp = y.points[p];
+        if ((xp.x - yp.x).abs() > 1e-6 ||
+            (xp.volume - yp.volume).abs() > 1e-6) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  String? _selectedAutomationClipIdFor(int row, String targetId) {
+    return _selectedAutomationClipByLane[_automationLaneKey(row, targetId)];
+  }
+
+  int? _selectedAutomationClipIndexFor(
+    int row,
+    String targetId,
+    List<AutomationClipSnapshot> clips,
+  ) {
+    if (clips.isEmpty) return null;
+    final id = _selectedAutomationClipIdFor(row, targetId);
+    if (id != null && id.isNotEmpty) {
+      final index = clips.indexWhere((clip) => clip.id == id);
+      if (index >= 0) return index;
+    }
+    return null;
+  }
+
+  void _setSelectedAutomationClipFor(
+    int row,
+    String targetId,
+    String? clipId, {
+    int? lane,
+  }) {
+    final key = _automationLaneKey(row, targetId);
+    if (clipId == null || clipId.isEmpty) {
+      _selectedAutomationClipByLane.remove(key);
+      return;
+    }
+    _selectedAutomationClipByLane[key] = clipId;
+    if (lane != null) {
+      _setFocusedAutomationLaneForRow(row, lane);
+    }
+  }
+
+  AutomationClipSnapshot? _selectedAutomationClipForTarget(
+    int row,
+    String targetId, {
+    List<AutomationClipSnapshot>? clipsOverride,
+  }) {
+    final clips = _cloneAutomationClips(
+        clipsOverride ?? widget.getAutomationClipsForTarget(row, targetId));
+    final selectedIndex = _selectedAutomationClipIndexFor(row, targetId, clips);
+    if (selectedIndex == null ||
+        selectedIndex < 0 ||
+        selectedIndex >= clips.length) {
+      return null;
+    }
+    final selected = clips[selectedIndex];
+    _setFocusedAutomationLaneForRow(row, selected.lane);
+    return selected;
+  }
+
+  List<AutomationPoint> _automationClipPointsToAbsolute(
+    AutomationClipSnapshot clip,
+  ) {
+    final start = clip.startMs;
+    final end = clip.startMs + clip.lengthMs;
+    final points = clip.points
+        .map(
+          (p) => AutomationPoint(
+            x: (start + p.x).clamp(start, end).toDouble(),
+            volume: p.volume.clamp(0.0, 1.0).toDouble(),
+          ),
+        )
+        .toList(growable: false)
+      ..sort((a, b) => a.x.compareTo(b.x));
+    if (points.isEmpty) {
+      return <AutomationPoint>[AutomationPoint(x: start, volume: 0.5)];
+    }
+    return points;
+  }
+
+  List<AutomationPoint> _automationClipPointsToRelative(
+    AutomationClipSnapshot clip,
+    List<AutomationPoint> absolutePoints,
+  ) {
+    final points = absolutePoints
+        .map(
+          (p) => AutomationPoint(
+            x: (p.x - clip.startMs).clamp(0.0, clip.lengthMs).toDouble(),
+            volume: p.volume.clamp(0.0, 1.0).toDouble(),
+          ),
+        )
+        .toList(growable: false)
+      ..sort((a, b) => a.x.compareTo(b.x));
+    if (points.isEmpty) {
+      final fallback = clip.points.isNotEmpty
+          ? clip.points.first.volume.clamp(0.0, 1.0).toDouble()
+          : 0.5;
+      return <AutomationPoint>[AutomationPoint(x: 0.0, volume: fallback)];
+    }
+    return points;
+  }
+
+  bool _setSelectedAutomationClipPointsForTarget(
+    int row,
+    String targetId,
+    List<AutomationPoint> absolutePoints, {
+    List<AutomationClipSnapshot>? clipsOverride,
+  }) {
+    final current = _cloneAutomationClips(
+      clipsOverride ?? widget.getAutomationClipsForTarget(row, targetId),
+    );
+    final selectedIndex =
+        _selectedAutomationClipIndexFor(row, targetId, current);
+    if (selectedIndex == null ||
+        selectedIndex < 0 ||
+        selectedIndex >= current.length) {
+      return false;
+    }
+    final selected = current[selectedIndex];
+    final relative = _automationClipPointsToRelative(selected, absolutePoints);
+    if (_automationPointListsEqual(selected.points, relative)) {
+      return false;
+    }
+    current[selectedIndex] = selected.copyWith(points: relative);
+    widget.setAutomationClipsForTarget(row, targetId, current);
+    _setSelectedAutomationClipFor(
+      row,
+      targetId,
+      current[selectedIndex].id,
+      lane: current[selectedIndex].lane,
+    );
+    return true;
+  }
+
+  void _focusAutomationEditorForRow(int row, String targetId) {
+    if (row < 0 || row >= _rowCount) return;
+    _selectedRowIndex = row;
+    widget.onSelectRow(row);
+    for (int i = 0; i < _rowCount; i++) {
+      _rowExpanded[i] = i == row;
+    }
+    _expandedTab[row] = 2;
+    if (targetId.trim().isNotEmpty) {
+      widget.setSelectedAutomationTargetId(row, targetId);
+    }
+  }
+
+  double _defaultAutomationClipLengthMs() {
+    final oneBar = _msPerBar().clamp(120.0, _maxDurationMs);
+    return oneBar.toDouble();
+  }
+
+  List<AutomationPoint> _defaultAutomationClipPointsForTarget(
+    String targetId,
+    double? initialNormalized,
+  ) {
+    final fallback = targetId == 'volume' ? 0.75 : 0.5;
+    final value = (initialNormalized ?? fallback).clamp(0.0, 1.0).toDouble();
+    return <AutomationPoint>[
+      AutomationPoint(x: 0.0, volume: value),
+    ];
+  }
+
+  void _applyAutomationClipsWithCommit(
+    int row,
+    String targetId,
+    List<AutomationClipSnapshot> oldClips,
+    List<AutomationClipSnapshot> nextClips,
+  ) {
+    final clonedOld = _cloneAutomationClips(oldClips);
+    final clonedNext = _cloneAutomationClips(nextClips);
+    if (_automationClipListsEqual(clonedOld, clonedNext)) {
+      return;
+    }
+    widget.setAutomationClipsForTarget(row, targetId, clonedNext);
+    widget.onAutomationClipsCommit?.call(row, targetId, clonedOld, clonedNext);
+    setState(() {});
+  }
+
+  void _insertAutomationClipForActiveTarget(
+    int row,
+    String targetId,
+    String targetLabel,
+    double initialNormalized,
+  ) {
+    final before = _cloneAutomationClips(
+      widget.getAutomationClipsForTarget(row, targetId),
+    );
+    final startRaw = _magnetEnabled
+        ? _segmentStartMsForTap(widget.playheadMs)
+        : widget.playheadMs;
+    final startMs = startRaw.clamp(0.0, _maxDurationMs).toDouble();
+    final lengthMs = _defaultAutomationClipLengthMs();
+    final lane = _focusedAutomationLaneForRow(row);
+    final id =
+        'ui_clip_${DateTime.now().microsecondsSinceEpoch}_${row}_${targetId}';
+    final newClip = AutomationClipSnapshot(
+      id: id,
+      targetId: targetId,
+      label: targetLabel.trim().isEmpty ? targetId : targetLabel,
+      row: row,
+      lane: lane,
+      startMs: startMs,
+      lengthMs: lengthMs,
+      muted: false,
+      points: _defaultAutomationClipPointsForTarget(
+        targetId,
+        initialNormalized,
+      ),
+    );
+    final next = [...before, newClip];
+    _setSelectedAutomationClipFor(row, targetId, id, lane: lane);
+    _applyAutomationClipsWithCommit(row, targetId, before, next);
+  }
+
+  void _duplicateSelectedAutomationClipForTarget(
+    int row,
+    String targetId,
+  ) {
+    final before = _cloneAutomationClips(
+      widget.getAutomationClipsForTarget(row, targetId),
+    );
+    final selectedIndex =
+        _selectedAutomationClipIndexFor(row, targetId, before);
+    if (selectedIndex == null) return;
+    final clip = before[selectedIndex];
+    final startMs = (clip.startMs + clip.lengthMs).clamp(0.0, _maxDurationMs);
+    final duplicate = clip.copyWith(
+      id: 'ui_clip_${DateTime.now().microsecondsSinceEpoch}_${row}_${targetId}',
+      startMs: startMs.toDouble(),
+    );
+    final next = [...before, duplicate];
+    _setSelectedAutomationClipFor(
+      row,
+      targetId,
+      duplicate.id,
+      lane: duplicate.lane,
+    );
+    _applyAutomationClipsWithCommit(row, targetId, before, next);
+  }
+
+  void _deleteSelectedAutomationClipForTarget(
+    int row,
+    String targetId,
+  ) {
+    final before = _cloneAutomationClips(
+      widget.getAutomationClipsForTarget(row, targetId),
+    );
+    final selectedIndex =
+        _selectedAutomationClipIndexFor(row, targetId, before);
+    if (selectedIndex == null) return;
+    final next = List<AutomationClipSnapshot>.from(before)
+      ..removeAt(selectedIndex);
+    _setSelectedAutomationClipFor(
+      row,
+      targetId,
+      next.isNotEmpty ? next.last.id : null,
+      lane: next.isNotEmpty ? next.last.lane : null,
+    );
+    _applyAutomationClipsWithCommit(row, targetId, before, next);
+  }
+
+  void _toggleMuteSelectedAutomationClipForTarget(
+    int row,
+    String targetId,
+  ) {
+    final before = _cloneAutomationClips(
+      widget.getAutomationClipsForTarget(row, targetId),
+    );
+    final selectedIndex =
+        _selectedAutomationClipIndexFor(row, targetId, before);
+    if (selectedIndex == null) return;
+    final next = List<AutomationClipSnapshot>.from(before);
+    final selected = next[selectedIndex];
+    next[selectedIndex] = selected.copyWith(muted: !selected.muted);
+    _setSelectedAutomationClipFor(
+      row,
+      targetId,
+      next[selectedIndex].id,
+      lane: next[selectedIndex].lane,
+    );
+    _applyAutomationClipsWithCommit(row, targetId, before, next);
+  }
+
+  static const double _kAutomationClipMinLengthMs = 50.0;
+  static const double _kAutomationClipResizeHandleWidthPx = 12.0;
+
+  List<AutomationPoint> _shiftAutomationClipPoints(
+    List<AutomationPoint> points,
+    double startDeltaMs,
+  ) {
+    if (startDeltaMs.abs() < 1e-7) {
+      return points.map((p) => p.copy()).toList(growable: false);
+    }
+    return points
+        .map(
+          (p) => AutomationPoint(
+            x: p.x - startDeltaMs,
+            volume: p.volume,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  void _beginAutomationClipDrag(
+    int row,
+    String targetId,
+    AutomationClipSnapshot clip,
+    Offset localPos,
+    double clipWidthPx,
+  ) {
+    _automationClipDragBefore = _cloneAutomationClips(
+      widget.getAutomationClipsForTarget(row, targetId),
+    );
+    _automationClipDragRow = row;
+    _automationClipDragTargetId = targetId;
+    _automationClipDragId = clip.id;
+    _automationClipDragDxAccum = 0.0;
+    _automationClipDragOrigin = clip.copyWith();
+    final handleWidth = math.min(
+      _kAutomationClipResizeHandleWidthPx,
+      clipWidthPx * 0.4,
+    );
+    if (clipWidthPx <= (handleWidth * 2.0)) {
+      _automationClipDragMode = 'move';
+    } else {
+      final onLeftHandle = localPos.dx <= handleWidth;
+      final onRightHandle = localPos.dx >= (clipWidthPx - handleWidth);
+      if (onLeftHandle && !onRightHandle) {
+        _automationClipDragMode = 'trim_start';
+      } else if (onRightHandle) {
+        _automationClipDragMode = 'trim_end';
+      } else {
+        _automationClipDragMode = 'move';
+      }
+    }
+    _setSelectedAutomationClipFor(
+      row,
+      targetId,
+      clip.id,
+      lane: clip.lane,
+    );
+  }
+
+  void _updateAutomationClipDrag(
+    int row,
+    String targetId,
+    AutomationClipSnapshot clip,
+    double deltaPx,
+    Offset localPos,
+  ) {
+    if (_automationClipDragRow != row ||
+        _automationClipDragTargetId != targetId ||
+        _automationClipDragId != clip.id) {
+      return;
+    }
+    final mode = _automationClipDragMode;
+    final origin = _automationClipDragOrigin;
+    if (mode == null || origin == null) return;
+
+    final current = _cloneAutomationClips(
+      widget.getAutomationClipsForTarget(row, targetId),
+    );
+    final index = current.indexWhere((c) => c.id == clip.id);
+    if (index < 0) return;
+    _automationClipDragDxAccum += deltaPx;
+    final deltaMs = _automationClipDragDxAccum / _pixelsPerMs;
+
+    if (mode == 'move') {
+      var nextStart = origin.startMs + deltaMs;
+      if (_magnetEnabled) {
+        nextStart = _segmentStartMsForTap(nextStart);
+      }
+      nextStart = nextStart.clamp(0.0, _maxDurationMs).toDouble();
+      final nextLane = _isAutomationTimelineCollapsedForRow(row)
+          ? math.max(0, origin.lane)
+          : _timelineAutomationLaneIndexAtLocalY(row, localPos.dy);
+      current[index] = origin.copyWith(
+        startMs: nextStart,
+        lane: nextLane,
+      );
+    } else if (mode == 'trim_end') {
+      var nextEndMs = origin.startMs + origin.lengthMs + deltaMs;
+      if (_magnetEnabled) {
+        nextEndMs = _segmentStartMsForTap(nextEndMs);
+      }
+      final minEndMs = origin.startMs + _kAutomationClipMinLengthMs;
+      nextEndMs = nextEndMs.clamp(minEndMs, _maxDurationMs).toDouble();
+      final nextLength = (nextEndMs - origin.startMs)
+          .clamp(_kAutomationClipMinLengthMs, _maxDurationMs)
+          .toDouble();
+      current[index] = origin.copyWith(lengthMs: nextLength);
+    } else if (mode == 'trim_start') {
+      var nextStart = origin.startMs + deltaMs;
+      if (_magnetEnabled) {
+        nextStart = _segmentStartMsForTap(nextStart);
+      }
+      final maxStart =
+          origin.startMs + origin.lengthMs - _kAutomationClipMinLengthMs;
+      nextStart = nextStart.clamp(0.0, maxStart).toDouble();
+      var nextLength = (origin.startMs + origin.lengthMs) - nextStart;
+      nextLength = nextLength
+          .clamp(_kAutomationClipMinLengthMs, _maxDurationMs - nextStart)
+          .toDouble();
+      final startDelta = nextStart - origin.startMs;
+      final shiftedPoints =
+          _shiftAutomationClipPoints(origin.points, startDelta);
+      current[index] = origin.copyWith(
+        startMs: nextStart,
+        lengthMs: nextLength,
+        points: shiftedPoints,
+      );
+    }
+
+    widget.setAutomationClipsForTarget(row, targetId, current);
+    _setFocusedAutomationLaneForRow(row, current[index].lane);
+    setState(() {});
+  }
+
+  void _endAutomationClipDrag(int row, String targetId) {
+    final before = _automationClipDragBefore;
+    final dragRow = _automationClipDragRow;
+    final dragTarget = _automationClipDragTargetId;
+    final dragged = _activeDraggedAutomationClip();
+    if (before != null && dragRow == row && dragTarget == targetId) {
+      final after = _cloneAutomationClips(
+        widget.getAutomationClipsForTarget(row, targetId),
+      );
+      if (!_automationClipListsEqual(before, after)) {
+        widget.onAutomationClipsCommit?.call(row, targetId, before, after);
+      }
+    }
+    if (dragged != null) {
+      _setFocusedAutomationLaneForRow(row, dragged.lane);
+    }
+    _automationClipDragBefore = null;
+    _automationClipDragRow = null;
+    _automationClipDragTargetId = null;
+    _automationClipDragId = null;
+    _automationClipDragMode = null;
+    _automationClipDragDxAccum = 0.0;
+    _automationClipDragOrigin = null;
+  }
+
   // ======================================================
   // AUTOMATION DRAG PRIORITY HANDLERS (inside timeline state)
   // ======================================================
 
   void _automationPanStart(int row, Offset pos, double laneHeight) {
-    _automationBefore =
-        widget.rowVolumeAutomation[row].map((p) => p.copy()).toList();
+    if (!_isAutomationLaneTabForRow(row)) return;
+    final targetId = _activeAutomationTargetIdForRow(row);
+    final selectedClip = _selectedAutomationClipForTarget(row, targetId);
+    if (selectedClip != null) {
+      _automationPointEditBeforeClips = _cloneAutomationClips(
+        widget.getAutomationClipsForTarget(row, targetId),
+      );
+      _automationPointEditTargetId = targetId;
+    } else {
+      _automationPointEditBeforeClips = null;
+      _automationPointEditTargetId = null;
+    }
+    final lane = _activeAutomationPointsForRow(row);
+    _automationBefore = lane.map((p) => p.copy()).toList();
 
     // GIVE AUTOMATION PRIORITY RIGHT AWAY
     setState(() {
@@ -1613,9 +2770,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     });
 
     if (!_rowExpanded[row]) return;
-    if (_expandedTab[row] != 0) return;
-
-    final lane = widget.rowVolumeAutomation[row];
 
     for (int i = 0; i < lane.length; i++) {
       final p = lane[i];
@@ -1648,8 +2802,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _automationPanUpdate(int row, Offset pos) {
     if (_interactionMode != 'automation') return;
     if (_automationDragIndex == null) return;
+    if (!_isAutomationLaneTabForRow(row)) return;
+    final targetId = _activeAutomationTargetIdForRow(row);
 
-    final points = List<AutomationPoint>.from(widget.rowVolumeAutomation[row]);
+    final points =
+        List<AutomationPoint>.from(_activeAutomationPointsForRow(row));
     final p = points[_automationDragIndex!];
 
     // ===== 1. Convert finger X → absolute timeMs =====
@@ -1697,7 +2854,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         1 - ((effectiveFingerY - verticalPadding) / usableHeight);
     p.volume = normalized.clamp(0.0, 1.0);
 
-    if (_magnetEnabled) {
+    if (_magnetEnabled && targetId == 'volume') {
       if ((p.volume - 0.75).abs() < 0.03) {
         // small epsilon
         p.volume = 0.75;
@@ -1705,25 +2862,42 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
 
     // Save
-    widget.rowVolumeAutomation[row] = points;
-    widget.setTrackAutomationPoints(
-      row,
-      points.map((p) => p.toMap()).toList(),
-    ); // careful of doing on update, maybe better to do once on end
+    _setActiveAutomationPointsForRow(row, targetId, points);
     setState(() {});
   }
 
   void _automationPanEnd(int row) {
     if (_interactionMode == 'automation') {
+      final targetId = _activeAutomationTargetIdForRow(row);
       final before = _automationBefore;
-      final after = widget.rowVolumeAutomation[row];
+      final after = _activeAutomationPointsForRow(row);
+      final beforeClips = _automationPointEditBeforeClips;
+      final beforeClipTargetId = _automationPointEditTargetId;
 
-      if (before != null && widget.onAutomationCommit != null) {
-        widget.onAutomationCommit!(
-            row, before, after.map((p) => p.copy()).toList());
+      if (beforeClips != null &&
+          beforeClipTargetId == targetId &&
+          _selectedAutomationClipForTarget(row, targetId) != null) {
+        final afterClips = _cloneAutomationClips(
+          widget.getAutomationClipsForTarget(row, targetId),
+        );
+        if (!_automationClipListsEqual(beforeClips, afterClips)) {
+          widget.onAutomationClipsCommit
+              ?.call(row, targetId, beforeClips, afterClips);
+        }
+      } else if (before != null) {
+        final copiedAfter = after.map((p) => p.copy()).toList(growable: false);
+        if (targetId == 'volume') {
+          if (widget.onAutomationCommit != null) {
+            widget.onAutomationCommit!(row, before, copiedAfter);
+          }
+        } else if (widget.onAutomationTargetCommit != null) {
+          widget.onAutomationTargetCommit!(row, targetId, before, copiedAfter);
+        }
       }
 
       _automationBefore = null;
+      _automationPointEditBeforeClips = null;
+      _automationPointEditTargetId = null;
       setState(() {
         _automationDragRow = null;
         _automationDragIndex = null;
@@ -1732,6 +2906,42 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _automationFingerOffsetY = null;
       });
     }
+  }
+
+  void _automationLaneBackgroundPanStart() {
+    if (_interactionMode == 'automation' ||
+        _interactionMode == 'automation_clip') {
+      return;
+    }
+    _clearPastePopup();
+    setState(() {
+      _isUserInteracting = true;
+      _interactionMode = 'pan';
+      _initialPixelsPerMs = _pixelsPerMs;
+      _initialScrollMs = _scrollOffsetMs;
+    });
+  }
+
+  void _automationLaneBackgroundPanUpdate(double deltaDx) {
+    if (_interactionMode != 'pan') return;
+    setState(() {
+      _scrollOffsetMs -= deltaDx / _pixelsPerMs;
+      _clampScroll();
+      final playheadPx = _getPlayheadPx(context);
+      widget.onScrubRequested(_scrollOffsetMs + playheadPx / _pixelsPerMs);
+    });
+  }
+
+  void _automationLaneBackgroundPanEnd() {
+    if (_interactionMode != 'pan') return;
+    final playheadPx = _getPlayheadPx(context);
+    widget.onScrubRequested(_scrollOffsetMs + playheadPx / _pixelsPerMs);
+    setState(() {
+      _isUserInteracting = false;
+      _interactionMode = '';
+      _initialPixelsPerMs = null;
+      _initialScrollMs = null;
+    });
   }
 
   Widget _buildInlineClipSheet(Widget child) {
@@ -2211,6 +3421,29 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   ),
                 ),
               ),
+              if (widget.onStemSeparation != null) ...[
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await widget.onStemSeparation!(clipIndex);
+                      if (mounted) setState(() {});
+                    },
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 28),
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      visualDensity: VisualDensity.compact,
+                      side: const BorderSide(color: Colors.white24),
+                    ),
+                    icon: const Icon(Icons.library_music_outlined, size: 14),
+                    label: const Text(
+                      'Separate Vocals / Instrumental',
+                      style: TextStyle(fontSize: 10.5),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ],
         ),
@@ -2225,37 +3458,52 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         ? clip.label.trim()
         : (clip.isMidi ? 'MIDI Clip' : 'Audio Clip');
     final controller = TextEditingController(text: initialName);
+    final focusNode = FocusNode();
+    bool focusScheduled = false;
 
     final nextName = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A2233),
-        title: const Text('Rename Clip', style: TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 48,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => Navigator.pop(ctx, controller.text.trim()),
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: 'Clip name',
-            hintStyle: TextStyle(color: Colors.white54),
-            counterText: '',
+      builder: (ctx) {
+        if (!focusScheduled) {
+          focusScheduled = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!focusNode.canRequestFocus) return;
+            focusNode.requestFocus();
+          });
+        }
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A2233),
+          title:
+              const Text('Rename Clip', style: TextStyle(color: Colors.white)),
+          content: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            autofocus: false,
+            maxLength: 48,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => Navigator.pop(ctx, controller.text.trim()),
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: 'Clip name',
+              hintStyle: TextStyle(color: Colors.white54),
+              counterText: '',
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Rename'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Rename'),
+            ),
+          ],
+        );
+      },
     );
+    controller.dispose();
+    focusNode.dispose();
 
     if (!mounted || nextName == null || nextName.isEmpty) return;
     if (nextName == clip.label) return;
@@ -2590,6 +3838,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   @override
   Widget build(BuildContext context) {
+    _editorLayoutSpec = _EditorLayoutSpec.fromSize(MediaQuery.of(context).size);
     // Calculate viewport
     final viewportWidth = _getViewportWidth(context);
     final playheadPx = _getPlayheadPx(context);
@@ -2632,10 +3881,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     final List<double> expandedHeights = List.generate(_rowCount, (i) {
       if (!_rowExpanded[i]) return 0.0;
-      return (_expandedTab[i] == 0)
+      return _isFixedHeightExpandedTab(_expandedTab[i])
           ? kExpandedRowHeight
           : _effectsPanelHeights[i];
     });
+    final List<double> automationLaneHeights = List.generate(
+      _rowCount,
+      (i) => _automationTimelineLaneHeightForRow(i),
+    );
+    final timelineAutomationClipVisuals = _timelineAutomationClipVisuals();
 
     return Container(
       constraints: const BoxConstraints(),
@@ -2654,7 +3908,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   controller: _verticalScrollController,
                   physics: _isUserInteracting &&
                               (_interactionMode == 'drag' ||
-                                  _interactionMode == 'automation') ||
+                                  _interactionMode == 'automation' ||
+                                  _interactionMode == 'automation_clip') ||
                           _activeTool == _TimelineTool.delete
                       ? const NeverScrollableScrollPhysics() // DISABLE V-SCROLL DURING DRAG
                       : const ClampingScrollPhysics(),
@@ -2734,6 +3989,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                             effectsPanelHeights:
                                                 _effectsPanelHeights,
                                             expandedHeights: expandedHeights,
+                                            automationLaneHeights:
+                                                automationLaneHeights,
                                             isRecording: widget.isRecording,
                                             recordingRowIndex:
                                                 widget.recordingRowIndex,
@@ -2760,6 +4017,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                             cutPreviewClipIndex:
                                                 _cutPreviewClipIndex,
                                             cutPreviewMs: _cutPreviewMs,
+                                            automationClipVisuals:
+                                                timelineAutomationClipVisuals,
                                           ),
                                           size: Size(
                                             viewportWidth,
@@ -2893,7 +4152,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     for (int row = 0; row < _rowCount; row++) {
       if (!_rowExpanded[row]) continue;
 
-      final double topY = _rowYPositions[row] + kRowHeight;
+      final double topY = _rowYPositions[row] +
+          kRowHeight +
+          _automationTimelineLaneHeightForRow(row);
       list.add(
         Positioned(
           key: ValueKey('expanded_row_${widget.rows[row].rowId}'),
@@ -2903,9 +4164,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           // height: (_expandedTab[row] == 0) ? kExpandedRowHeight : _effectsPanelHeights[row],
           // child:
           // _expandedTab[row] == 0 ? _buildVolumePanel(row) : _buildEffectsPanel(row),
-          height: _expandedTab[row] == 0
+          height: _isFixedHeightExpandedTab(_expandedTab[row])
               ? kExpandedRowHeight
-              : null, //_effectsPanelHeights[row],
+              : null,
           child: ClipRect(
             // prevents overflow painting
             child: Container(
@@ -2921,7 +4182,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               // padding: const EdgeInsets.only(bottom: 0),
               child: _expandedTab[row] == 0
                   ? _buildVolumePanel(row)
-                  : _buildEffectsPanel(row),
+                  : (_expandedTab[row] == 1
+                      ? _buildEffectsPanel(row)
+                      : _buildAutomationPanel(row)),
             ),
           ),
         ),
@@ -2989,8 +4252,20 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   Widget _buildTabButton(int row, int tab, String label) {
     final bool selected = _expandedTab[row] == tab;
+    final List<HaloKey> haloKeys = <HaloKey>[
+      HaloKey('row:$row:tabs'),
+      HaloKey('row:$row:tab:$tab'),
+    ];
+    if (tab == 0) {
+      haloKeys.add(HaloKey('row:$row:volume_tab'));
+      haloKeys.add(HaloKey('row:$row:mixer'));
+    } else if (tab == 1) {
+      haloKeys.add(HaloKey('row:$row:effects_tab'));
+    } else if (tab == 2) {
+      haloKeys.add(HaloKey('row:$row:automation_tab'));
+    }
 
-    return GestureDetector(
+    Widget tabButton = GestureDetector(
       onTap: () {
         setState(() {
           _expandedTab[row] = tab;
@@ -2998,7 +4273,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       },
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
-        height: 34,
+        width: double.infinity,
+        height: _kHeaderTabButtonHeight,
 
         // Force full width of header but never overflow text
         child: ClipRRect(
@@ -3039,21 +4315,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 width: 1.2,
               ),
             ),
-
             alignment: Alignment.center,
-
-            // === This makes the text shrink but never wrap ===
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                label,
-                maxLines: 1, // Never wrap
-                overflow: TextOverflow.visible, // No ellipsis
-                softWrap: false, // NEVER wrap to next line
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: selected ? Colors.white : Colors.white70,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              // === This makes the text shrink but never wrap ===
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1, // Never wrap
+                  overflow: TextOverflow.visible, // No ellipsis
+                  softWrap: false, // NEVER wrap to next line
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? Colors.white : Colors.white70,
+                  ),
                 ),
               ),
             ),
@@ -3061,10 +4338,20 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         ),
       ),
     );
+
+    if (widget.tutorialHighlighter != null) {
+      tabButton = MultiHalo(
+        highlighter: widget.tutorialHighlighter!,
+        haloKeys: haloKeys,
+        borderRadius: BorderRadius.circular(20),
+        child: tabButton,
+      );
+    }
+    return tabButton;
   }
 
   Widget _buildVolumePanel(int row) {
-    return Padding(
+    Widget panel = Padding(
       padding: const EdgeInsets.all(
           0), // const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Column(
@@ -3084,37 +4371,42 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               builder: (context, constraints) {
                 final double laneHeight = constraints.maxHeight;
 
-                return GestureDetector(
-                  dragStartBehavior: DragStartBehavior.down,
-                  behavior: HitTestBehavior.opaque,
-                  child: _AutomationLane(
-                    rowIndex: row,
-                    points: widget.rowVolumeAutomation[row],
-                    pixelsPerMs: _pixelsPerMs,
-                    scrollOffsetMs: _scrollOffsetMs,
-                    laneHeight: laneHeight,
-                    timelineDurationMs: _maxDurationMs,
-                    onChanged: (pts) {
-                      final before = widget.rowVolumeAutomation[row];
-                      widget.onAutomationCommit!(
-                        // for updating undo/redo history
-                        row,
-                        before,
-                        pts.map((p) => p.copy()).toList(),
-                      );
+                return _AutomationLane(
+                  rowIndex: row,
+                  points: widget.rowVolumeAutomation[row],
+                  pixelsPerMs: _pixelsPerMs,
+                  scrollOffsetMs: _scrollOffsetMs,
+                  laneHeight: laneHeight,
+                  timelineDurationMs: _maxDurationMs,
+                  targetLabel: 'Volume',
+                  targetParamId: 'volume',
+                  targetMin: 0.0,
+                  targetMax: 1.0,
+                  isVolumeLane: true,
+                  onChanged: (pts) {
+                    final before = widget.rowVolumeAutomation[row];
+                    widget.onAutomationCommit!(
+                      // for updating undo/redo history
+                      row,
+                      before,
+                      pts.map((p) => p.copy()).toList(),
+                    );
 
-                      setState(() => widget.rowVolumeAutomation[row] = pts);
-                      widget.setTrackAutomationPoints(
-                        row,
-                        pts.map((p) => p.toMap()).toList(),
-                      ); // careful of doing on update, maybe better to do once on end
-                    },
-                    onPanStartExternal: (pos) =>
-                        _automationPanStart(row, pos, laneHeight),
-                    onPanUpdateExternal: (pos) =>
-                        _automationPanUpdate(row, pos),
-                    onPanEndExternal: () => _automationPanEnd(row),
-                  ),
+                    setState(() => widget.rowVolumeAutomation[row] = pts);
+                    widget.setTrackAutomationPoints(
+                      row,
+                      pts.map((p) => p.toMap()).toList(),
+                    ); // careful of doing on update, maybe better to do once on end
+                  },
+                  onPanStartExternal: (pos) =>
+                      _automationPanStart(row, pos, laneHeight),
+                  onPanUpdateExternal: (pos) => _automationPanUpdate(row, pos),
+                  onPanEndExternal: () => _automationPanEnd(row),
+                  onBackgroundPanStartExternal:
+                      _automationLaneBackgroundPanStart,
+                  onBackgroundPanUpdateExternal:
+                      _automationLaneBackgroundPanUpdate,
+                  onBackgroundPanEndExternal: _automationLaneBackgroundPanEnd,
                 );
               },
             ),
@@ -3192,7 +4484,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     },
                     onChanged: (v) {
                       setState(() => widget.rowGain[row] = v);
-                      widget.setRowGain(row, v); // send to JUCE 0.0 → 3.0
+                      widget.setRowGain(row, v);
                     },
                     onChangeEnd: (v) {
                       widget.onRowGainCommit!(
@@ -3206,6 +4498,481 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           ),
 
           // const SizedBox(height: 6),
+        ],
+      ),
+    );
+    if (widget.tutorialHighlighter != null) {
+      panel = MultiHalo(
+        highlighter: widget.tutorialHighlighter!,
+        haloKeys: <HaloKey>[
+          HaloKey('row:$row:mixer'),
+          HaloKey('row:$row:volume_tab'),
+        ],
+        borderRadius: BorderRadius.circular(10),
+        child: panel,
+      );
+    }
+    return panel;
+  }
+
+  Widget _buildAutomationPanel(int row) {
+    final targets = widget.getAutomationTargetsForRow(row);
+    final fallbackTargetId = targets.isNotEmpty
+        ? (targets.first['id']?.toString() ?? 'volume')
+        : 'volume';
+    final selectedTargetId = widget.getSelectedAutomationTargetId(row);
+    final hasSelected = targets.any(
+      (t) => (t['id']?.toString() ?? '') == selectedTargetId,
+    );
+    final activeTargetId = hasSelected ? selectedTargetId : fallbackTargetId;
+
+    if (!hasSelected && activeTargetId.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        widget.setSelectedAutomationTargetId(row, activeTargetId);
+      });
+    }
+
+    final lanePoints = activeTargetId == 'volume'
+        ? widget.rowVolumeAutomation[row]
+        : widget.getAutomationPointsForTarget(row, activeTargetId);
+    final laneClips = _cloneAutomationClips(
+      widget.getAutomationClipsForTarget(row, activeTargetId),
+    );
+    final selectedClipIndex =
+        _selectedAutomationClipIndexFor(row, activeTargetId, laneClips);
+    final selectedClip =
+        selectedClipIndex == null ? null : laneClips[selectedClipIndex];
+    if (selectedClip != null) {
+      _setFocusedAutomationLaneForRow(row, selectedClip.lane);
+    }
+    final clipPointsAbsolute = selectedClip == null
+        ? const <AutomationPoint>[]
+        : _automationClipPointsToAbsolute(selectedClip);
+    final editorPoints = selectedClip == null ? lanePoints : clipPointsAbsolute;
+    final activeTarget = targets.firstWhere(
+      (t) => (t['id']?.toString() ?? '') == activeTargetId,
+      orElse: () => <String, dynamic>{},
+    );
+    final targetLabel =
+        (activeTarget['label'] ?? activeTargetId).toString().trim();
+    final targetParamId =
+        (activeTarget['paramId'] ?? activeTargetId).toString().trim();
+    final targetMin = (activeTarget['min'] as num?)?.toDouble() ?? 0.0;
+    final targetMax = (activeTarget['max'] as num?)?.toDouble() ?? 1.0;
+    final isVolumeTarget =
+        (activeTarget['isVolume'] == true) || activeTargetId == 'volume';
+    final dropdownTargets = targets.isEmpty
+        ? const <Map<String, dynamic>>[
+            {'id': 'volume', 'label': 'Volume', 'initialNormalized': 0.75}
+          ]
+        : targets;
+    final screenWidth = MediaQuery.of(context).size.width;
+    const dropdownTextStyle = TextStyle(
+      color: Colors.white,
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+    );
+    final textPainter = TextPainter(
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    );
+    double longestLabelWidth = 0.0;
+    for (final target in dropdownTargets) {
+      final label = (target['label'] ?? target['id'] ?? 'Volume').toString();
+      textPainter.text = TextSpan(text: label, style: dropdownTextStyle);
+      textPainter.layout();
+      if (textPainter.width > longestLabelWidth) {
+        longestLabelWidth = textPainter.width;
+      }
+    }
+    // Label + edited dot + row padding, capped so menu never spans full width.
+    final dropdownMenuWidth = (longestLabelWidth + 92.0).clamp(
+      220.0,
+      screenWidth * 0.72,
+    );
+    final targetMetaById = <String, Map<String, dynamic>>{
+      for (final target in dropdownTargets)
+        (target['id'] ?? 'volume').toString(): target,
+    };
+    final targetDefaultById = <String, double>{};
+    final targetEditedById = <String, bool>{};
+    for (final entry in targetMetaById.entries) {
+      final targetId = entry.key;
+      final defaultNormalized =
+          _automationTargetInitialNormalized(targetId, entry.value);
+      targetDefaultById[targetId] = defaultNormalized;
+      targetEditedById[targetId] = _automationTargetHasEdits(
+        row,
+        targetId,
+        defaultNormalized: defaultNormalized,
+      );
+    }
+    final activeTargetDefaultNormalized = targetDefaultById[activeTargetId] ??
+        _automationTargetInitialNormalized(activeTargetId, activeTarget);
+    final activeTargetEdited = targetEditedById[activeTargetId] ?? false;
+    final statusTargetName =
+        (targetLabel.isEmpty ? activeTargetId : targetLabel).trim();
+    final statusText =
+        '$statusTargetName (${selectedClip == null ? 'Lane' : 'Clip'})';
+    Widget editedMarker(bool edited) {
+      return Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: edited ? const Color(0xFFFFC857) : Colors.transparent,
+          border: Border.all(
+            color: edited
+                ? const Color(0xFFFFE29D)
+                : Colors.white.withOpacity(0.18),
+            width: edited ? 0.8 : 0.6,
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration:
+          BoxDecoration(color: const Color(0xFF151A26).withOpacity(0.9)),
+      child: Column(
+        children: [
+          Container(
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.2),
+              border: Border(
+                bottom: BorderSide(color: Colors.white.withOpacity(0.06)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: activeTargetId,
+                      isExpanded: true,
+                      isDense: true,
+                      menuWidth: dropdownMenuWidth,
+                      menuMaxHeight: 420,
+                      itemHeight: null,
+                      dropdownColor: const Color(0xFF21283B),
+                      style: dropdownTextStyle,
+                      selectedItemBuilder: (context) => dropdownTargets.map(
+                        (target) {
+                          final id = (target['id'] ?? 'volume').toString();
+                          final edited = targetEditedById[id] ?? false;
+                          return Align(
+                            alignment: Alignment.centerLeft,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    (target['label'] ??
+                                            target['id'] ??
+                                            'Volume')
+                                        .toString(),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    softWrap: false,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                editedMarker(edited),
+                              ],
+                            ),
+                          );
+                        },
+                      ).toList(growable: false),
+                      items: dropdownTargets.map(
+                        (target) {
+                          final id = (target['id'] ?? 'volume').toString();
+                          final edited = targetEditedById[id] ?? false;
+                          return DropdownMenuItem<String>(
+                            value: id,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: SizedBox(
+                                width: dropdownMenuWidth,
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        (target['label'] ??
+                                                target['id'] ??
+                                                'Volume')
+                                            .toString(),
+                                        softWrap: true,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 3),
+                                      child: editedMarker(edited),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ).toList(growable: false),
+                      onChanged: (nextId) {
+                        if (nextId == null) return;
+                        widget.setSelectedAutomationTargetId(row, nextId);
+                        setState(() {});
+                      },
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Reset automation lane',
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 30,
+                    height: 30,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  color: activeTargetEdited
+                      ? const Color(0xFFFFB9A3)
+                      : Colors.white24,
+                  onPressed: activeTargetEdited
+                      ? () => _resetAutomationLaneForTarget(
+                            row,
+                            activeTargetId,
+                            defaultNormalized: activeTargetDefaultNormalized,
+                          )
+                      : null,
+                  icon: const Icon(Icons.restart_alt_rounded),
+                ),
+                IconButton(
+                  tooltip: 'Add automation clip',
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 30,
+                    height: 30,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  color: Colors.white70,
+                  onPressed: () => _insertAutomationClipForActiveTarget(
+                    row,
+                    activeTargetId,
+                    targetLabel,
+                    activeTargetDefaultNormalized,
+                  ),
+                  icon: const Icon(Icons.add_box_outlined),
+                ),
+                IconButton(
+                  tooltip: selectedClip == null
+                      ? (laneClips.isEmpty
+                          ? 'No automation clip to edit'
+                          : 'Switch to clip editing')
+                      : 'Switch to lane editing',
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 30,
+                    height: 30,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  color: laneClips.isEmpty
+                      ? Colors.white24
+                      : (selectedClip == null
+                          ? Colors.white70
+                          : const Color(0xFF8EC5FF)),
+                  onPressed: laneClips.isEmpty
+                      ? null
+                      : () {
+                          if (selectedClip == null) {
+                            final clipToSelect = laneClips.last;
+                            _setSelectedAutomationClipFor(
+                              row,
+                              activeTargetId,
+                              clipToSelect.id,
+                              lane: clipToSelect.lane,
+                            );
+                          } else {
+                            _setSelectedAutomationClipFor(
+                              row,
+                              activeTargetId,
+                              null,
+                            );
+                          }
+                          setState(() {});
+                        },
+                  icon: Icon(
+                    selectedClip == null
+                        ? Icons.polyline_rounded
+                        : Icons.show_chart_rounded,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Duplicate selected clip',
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 30,
+                    height: 30,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  color: laneClips.isEmpty ? Colors.white24 : Colors.white70,
+                  onPressed: laneClips.isEmpty
+                      ? null
+                      : () => _duplicateSelectedAutomationClipForTarget(
+                            row,
+                            activeTargetId,
+                          ),
+                  icon: const Icon(Icons.copy_outlined),
+                ),
+                IconButton(
+                  tooltip: selectedClip?.muted == true
+                      ? 'Unmute selected clip'
+                      : 'Mute selected clip',
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 30,
+                    height: 30,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  color: selectedClip == null
+                      ? Colors.white24
+                      : (selectedClip.muted
+                          ? const Color(0xFFFFC9A4)
+                          : Colors.white70),
+                  onPressed: selectedClip == null
+                      ? null
+                      : () => _toggleMuteSelectedAutomationClipForTarget(
+                            row,
+                            activeTargetId,
+                          ),
+                  icon: Icon(
+                    selectedClip?.muted == true
+                        ? Icons.volume_off_outlined
+                        : Icons.volume_mute_outlined,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Delete selected clip',
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 30,
+                    height: 30,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  color: selectedClip == null
+                      ? Colors.white24
+                      : const Color(0xFFFF9FA0),
+                  onPressed: selectedClip == null
+                      ? null
+                      : () => _deleteSelectedAutomationClipForTarget(
+                            row,
+                            activeTargetId,
+                          ),
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            height: 30,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.12),
+              border: Border(
+                bottom: BorderSide(color: Colors.white.withOpacity(0.05)),
+              ),
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                statusText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.58),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final laneHeight = constraints.maxHeight;
+                return _AutomationLane(
+                  rowIndex: row,
+                  points: editorPoints,
+                  pixelsPerMs: _pixelsPerMs,
+                  scrollOffsetMs: _scrollOffsetMs,
+                  laneHeight: laneHeight,
+                  timelineDurationMs: _maxDurationMs,
+                  targetLabel:
+                      targetLabel.isEmpty ? activeTargetId : targetLabel,
+                  targetParamId:
+                      targetParamId.isEmpty ? activeTargetId : targetParamId,
+                  targetMin: targetMin,
+                  targetMax: targetMax,
+                  isVolumeLane: isVolumeTarget,
+                  onChanged: (pts) {
+                    final copiedAfter =
+                        pts.map((p) => p.copy()).toList(growable: false);
+                    if (selectedClip != null) {
+                      final beforeClips = _cloneAutomationClips(
+                        widget.getAutomationClipsForTarget(row, activeTargetId),
+                      );
+                      final changed = _setSelectedAutomationClipPointsForTarget(
+                        row,
+                        activeTargetId,
+                        copiedAfter,
+                        clipsOverride: beforeClips,
+                      );
+                      if (changed) {
+                        final afterClips = _cloneAutomationClips(
+                          widget.getAutomationClipsForTarget(
+                              row, activeTargetId),
+                        );
+                        widget.onAutomationClipsCommit?.call(
+                            row, activeTargetId, beforeClips, afterClips);
+                      }
+                    } else {
+                      final before = lanePoints
+                          .map((p) => p.copy())
+                          .toList(growable: false);
+                      _setActiveAutomationPointsForRow(
+                        row,
+                        activeTargetId,
+                        copiedAfter,
+                      );
+                      if (activeTargetId == 'volume') {
+                        widget.onAutomationCommit
+                            ?.call(row, before, copiedAfter);
+                      } else {
+                        widget.onAutomationTargetCommit
+                            ?.call(row, activeTargetId, before, copiedAfter);
+                      }
+                    }
+                    setState(() {});
+                  },
+                  onPanStartExternal: (pos) =>
+                      _automationPanStart(row, pos, laneHeight),
+                  onPanUpdateExternal: (pos) => _automationPanUpdate(row, pos),
+                  onPanEndExternal: () => _automationPanEnd(row),
+                  onBackgroundPanStartExternal:
+                      _automationLaneBackgroundPanStart,
+                  onBackgroundPanUpdateExternal:
+                      _automationLaneBackgroundPanUpdate,
+                  onBackgroundPanEndExternal: _automationLaneBackgroundPanEnd,
+                );
+              },
+            ),
+          ),
         ],
       ),
     );
@@ -3223,19 +4990,20 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   // }
 
   Widget _buildEffectsPanel(int row) {
-    return Container(
+    Widget panel = Container(
       decoration:
           BoxDecoration(color: const Color(0xFF151A26).withOpacity(0.9)),
       child: RowEffectsPanel(
         key: ValueKey("effect_panel_row_${widget.rows[row].rowId}"),
         rowIndex: row,
         mode: widget.mode,
+        isProEntitled: widget.mode == 'Pro',
+        minHeight: _kEffectsPanelMinHeight,
         onHeightChanged: (h) {
           if (mounted) {
             setState(() {
-              // print("row $row set to $h $kExpandedRowHeight");
-              _effectsPanelHeights[row] = h;
-              // _effectsPanelHeights[row] = math.max(h, kExpandedRowHeight);
+              // Keep effects tab at least as tall as the header-side tab stack.
+              _effectsPanelHeights[row] = math.max(h, _kEffectsPanelMinHeight);
             });
           }
         },
@@ -3255,12 +5023,29 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         registerRefresh: (refreshFn) {
           _rowEffectRefreshers[widget.rows[row].rowId] = refreshFn;
         },
+        registerPlaybackRefresh: (refreshFn) {
+          _rowEffectPlaybackRefreshers[widget.rows[row].rowId] = refreshFn;
+        },
         projectBpm: widget.bpm,
         meters: widget.meters,
         getRowCompressorMeter: widget.getRowCompressorMeter,
         getRowEqWaveform: widget.getRowEqWaveform,
+        tutorialHighlighter: widget.tutorialHighlighter,
       ),
     );
+    if (widget.tutorialHighlighter != null) {
+      panel = MultiHalo(
+        highlighter: widget.tutorialHighlighter!,
+        haloKeys: <HaloKey>[
+          HaloKey('row:$row:effects_tab'),
+          HaloKey('row:$row:fx_list'),
+          HaloKey('row:$row:effects_panel'),
+        ],
+        borderRadius: BorderRadius.circular(10),
+        child: panel,
+      );
+    }
+    return panel;
   }
 
   Widget _buildToggleButtonSvg({
@@ -3375,7 +5160,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _loopDragRegionEndAnchorMs = null;
   }
 
-  void _onRulerTapDown(TapDownDetails d) {}
+  void _onRulerTapDown(TapDownDetails d) {
+    if (_selectedClipIndex < 0 && _selectedClipIndices.isEmpty) return;
+    setState(() {
+      _clearClipSelection();
+    });
+  }
 
   void _onRulerTapUp(TapUpDetails d) {
     final tappedMsRaw = _rulerMsFromLocalX(d.localPosition.dx);
@@ -3709,6 +5499,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   Future<void> _showRowMenu(int row) async {
+    if (_selectedClipIndex >= 0 || _selectedClipIndices.isNotEmpty) {
+      setState(() {
+        _clearClipSelection();
+      });
+    }
     await AppHaptics.impact(AppHapticImpact.medium);
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -3781,93 +5576,108 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     if (action == 'rename') {
       final controller = TextEditingController(text: widget.rows[row].name);
+      final focusNode = FocusNode();
+      bool focusScheduled = false;
       final name = await showDialog<String>(
         context: context,
-        builder: (ctx) => MediaQuery.removeViewInsets(
-          context: ctx,
-          removeBottom: true,
-          child: Dialog(
-            alignment: Alignment.topCenter,
-            insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
-            backgroundColor: const Color(0xFF1A2233),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-              side: BorderSide(color: Colors.white.withOpacity(0.10)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.drive_file_rename_outline,
-                          color: Color(0xFFB9D4FF)),
-                      SizedBox(width: 8),
-                      Text(
-                        'Rename Row',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.06),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.12)),
-                    ),
-                    child: TextField(
-                      controller: controller,
-                      autofocus: true,
-                      maxLength: 32,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) =>
-                          Navigator.pop(ctx, controller.text.trim()),
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        hintText: 'Row name',
-                        hintStyle: TextStyle(color: Colors.white54),
-                        border: InputBorder.none,
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                        counterText: '',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Cancel',
-                            style: TextStyle(color: Colors.white70)),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: () =>
-                            Navigator.pop(ctx, controller.text.trim()),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2E6EEB),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+        builder: (ctx) {
+          if (!focusScheduled) {
+            focusScheduled = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!focusNode.canRequestFocus) return;
+              focusNode.requestFocus();
+            });
+          }
+          return MediaQuery.removeViewInsets(
+            context: ctx,
+            removeBottom: true,
+            child: Dialog(
+              alignment: Alignment.topCenter,
+              insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
+              backgroundColor: const Color(0xFF1A2233),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+                side: BorderSide(color: Colors.white.withOpacity(0.10)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.drive_file_rename_outline,
+                            color: Color(0xFFB9D4FF)),
+                        SizedBox(width: 8),
+                        Text(
+                          'Rename Row',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700),
                         ),
-                        child: const Text('Save'),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(12),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.12)),
                       ),
-                    ],
-                  ),
-                ],
+                      child: TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        autofocus: false,
+                        maxLength: 32,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) =>
+                            Navigator.pop(ctx, controller.text.trim()),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          hintText: 'Row name',
+                          hintStyle: TextStyle(color: Colors.white54),
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 12),
+                          counterText: '',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('Cancel',
+                              style: TextStyle(color: Colors.white70)),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () =>
+                              Navigator.pop(ctx, controller.text.trim()),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2E6EEB),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: const Text('Save'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       );
+      controller.dispose();
+      focusNode.dispose();
       if (name != null && name.isNotEmpty) {
         await widget.onRenameRow(row, name);
       }
@@ -3928,15 +5738,56 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           final isSelected = row == _selectedRowIndex;
           final isMuted = widget.rowMuted[row];
           final isExpanded = _rowExpanded[row];
+          final showsAutomationLane =
+              _automationTimelineLaneHeightForRow(row) > 0.0;
 
           return Column(
             children: [
               _buildOneTrackHeader(row, isSelected, isMuted),
+              if (showsAutomationLane)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _toggleAutomationTimelineCollapseForRow(row),
+                  child: Container(
+                    height: _automationTimelineLaneHeightForRow(row),
+                    width: dynamicWidth,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E2434),
+                      border: Border(
+                        bottom:
+                            BorderSide(color: Colors.white.withOpacity(0.07)),
+                      ),
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _isAutomationTimelineCollapsedForRow(row)
+                          ? Icon(
+                              Icons.unfold_more_rounded,
+                              size: 14,
+                              color: Colors.white.withOpacity(0.7),
+                            )
+                          : FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: const Text(
+                                'Automation',
+                                maxLines: 1,
+                                softWrap: false,
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
               if (isExpanded)
                 SizedBox(
-                  height: (_expandedTab[row] == 0)
-                      ? kExpandedRowHeight
-                      : _effectsPanelHeights[row],
+                  height: _expandedPanelHeightForRow(row),
                   width: dynamicWidth,
                   child: _buildHeaderTabs(row),
                 ),
@@ -3956,13 +5807,91 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             ),
           ),
         ),
-        const SizedBox(height: kBottomInteractionPadding),
+        SizedBox(height: _editorLayoutSpec.bottomInteractionPadding),
       ],
     );
   }
 
   Widget _buildOneTrackHeader(int row, bool isSelected, bool isMuted) {
-    return Listener(
+    Widget muteButton = GestureDetector(
+      onTap: () => setState(() {
+        bool newVal = !widget.rowMuted[row];
+        widget.muteRow(row, newVal);
+      }),
+      child: Container(
+        width: 24,
+        height: 24,
+        decoration: BoxDecoration(
+          color: isMuted ? const Color(0xFF5B6B8C) : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Colors.white30),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          'M',
+          style: TextStyle(
+            color: isMuted ? Colors.white : Colors.white38,
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+
+    if (widget.tutorialHighlighter != null) {
+      muteButton = MultiHalo(
+        highlighter: widget.tutorialHighlighter!,
+        haloKeys: <HaloKey>[
+          const HaloKey('tutorial:mute'),
+          HaloKey('row:$row:mute'),
+          HaloKey('row:$row:header:mute'),
+        ],
+        borderRadius: BorderRadius.circular(4),
+        child: muteButton,
+      );
+    }
+
+    Widget soloButton = GestureDetector(
+      onTap: () {
+        bool newVal = !widget.rowSoloed[row];
+        widget.soloRow(row, newVal);
+      },
+      child: Container(
+        width: 24,
+        height: 24,
+        decoration: BoxDecoration(
+          color: widget.rowSoloed[row]
+              ? const Color(0xFFFFB000)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Colors.white30),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          'S',
+          style: TextStyle(
+            color: widget.rowSoloed[row] ? Colors.black : Colors.white38,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+
+    if (widget.tutorialHighlighter != null) {
+      soloButton = MultiHalo(
+        highlighter: widget.tutorialHighlighter!,
+        haloKeys: <HaloKey>[
+          const HaloKey('tutorial:solo'),
+          HaloKey('row:$row:solo'),
+          HaloKey('row:$row:header:solo'),
+        ],
+        borderRadius: BorderRadius.circular(4),
+        child: soloButton,
+      );
+    }
+
+    Widget header = Listener(
       behavior: HitTestBehavior.opaque,
       onPointerDown: (e) => _startRowMenuHold(row, e.localPosition, e.pointer),
       onPointerMove: _onHeaderPointerMove,
@@ -4003,68 +5932,31 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             Positioned(
               top: 0,
               right: 0,
-              child: GestureDetector(
-                onTap: () => setState(() {
-                  bool newVal = !widget.rowMuted[row];
-                  widget.muteRow(row, newVal);
-                }),
-                child: Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    color:
-                        isMuted ? const Color(0xFF5B6B8C) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.white30),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    'M',
-                    style: TextStyle(
-                      color: isMuted ? Colors.white : Colors.white38,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
+              child: muteButton,
             ),
             // === Solo button (bottom-right) ===
             Positioned(
               bottom: 0,
               right: 0,
-              child: GestureDetector(
-                onTap: () {
-                  bool newVal = !widget.rowSoloed[row];
-                  widget.soloRow(row, newVal);
-                },
-                child: Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    color: widget.rowSoloed[row]
-                        ? const Color(0xFFFFB000)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.white30),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    'S',
-                    style: TextStyle(
-                      color:
-                          widget.rowSoloed[row] ? Colors.black : Colors.white38,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
+              child: soloButton,
             ),
           ],
         ),
       ),
     );
+
+    if (widget.tutorialHighlighter != null) {
+      header = MultiHalo(
+        highlighter: widget.tutorialHighlighter!,
+        haloKeys: <HaloKey>[
+          HaloKey('row:$row'),
+          HaloKey('row:$row:header'),
+        ],
+        borderRadius: BorderRadius.circular(6),
+        child: header,
+      );
+    }
+    return header;
   }
 
   // Widget _buildHeaderTabs(int row) {
@@ -4102,48 +5994,65 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         color: Color.fromARGB(255, 30, 41, 65),
         border: Border(bottom: BorderSide(color: Color(0xFF1A1F2E), width: 1)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 6),
-
-          const SizedBox(height: 6),
-
-          // === TABS ===
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildTabButton(row, 0, "Volume"),
-                const SizedBox(height: 6),
-                _buildTabButton(row, 1, "Effects"),
-              ],
-            ),
-          ),
-
-          // === METERING ===
-          Align(
-            alignment: Alignment.center,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: AnimatedBuilder(
-                animation: widget.meters,
-                builder: (_, __) {
-                  final f = widget.meters.rows[row];
-                  return MiniStereoMeterPro(frame: f);
-                },
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final boundedHeight = constraints.maxHeight.isFinite
+              ? constraints.maxHeight
+              : _kEffectsPanelMinHeight;
+          return SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: boundedHeight),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 6),
+                  const SizedBox(height: 6),
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildTabButton(row, 0, "Volume"),
+                        const SizedBox(height: 6),
+                        _buildTabButton(row, 1, "Effects"),
+                        const SizedBox(height: 6),
+                        _buildTabButton(row, 2, "Automation"),
+                      ],
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.center,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: AnimatedBuilder(
+                        animation: widget.meters,
+                        builder: (_, __) {
+                          final f = widget.meters.rows[row];
+                          return MiniStereoMeterPro(
+                            frame: f,
+                            height: _kHeaderMeterHeight,
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 
   // === FIX ===: New unified gesture handlers
   void _onScaleStart(ScaleStartDetails details) {
-    if (_interactionMode == 'automation') return;
+    if (_interactionMode == 'automation' ||
+        _interactionMode == 'automation_clip') {
+      return;
+    }
     if (_activeTool == _TimelineTool.cut &&
         _getClipIndexAt(details.localFocalPoint) != null) {
       _isUserInteracting = false;
@@ -4244,6 +6153,21 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     if (!_isUserInteracting) return;
 
+    if (_interactionMode == 'automation_clip') {
+      final row = _automationClipDragRow;
+      final targetId = _automationClipDragTargetId;
+      final draggedClip = _activeDraggedAutomationClip();
+      if (row != null && targetId != null && draggedClip != null) {
+        _updateAutomationClipDrag(
+          row,
+          targetId,
+          draggedClip,
+          details.focalPointDelta.dx,
+          details.localFocalPoint,
+        );
+      }
+      return;
+    }
     if (_interactionMode == 'automation') return;
 
     if (_interactionMode == 'paint') {
@@ -4271,6 +6195,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onScaleEnd(ScaleEndDetails details) async {
+    if (_interactionMode == 'automation_clip') {
+      final row = _automationClipDragRow;
+      final targetId = _automationClipDragTargetId;
+      if (row != null && targetId != null) {
+        _endAutomationClipDrag(row, targetId);
+      }
+      setState(() {
+        _interactionMode = '';
+        _isUserInteracting = false;
+        _dragStartGlobalOffset = null;
+      });
+      return;
+    }
     if (_interactionMode == 'automation') {
       setState(() {
         _interactionMode = '';
@@ -4380,7 +6317,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _activeTool != _TimelineTool.stretch) {
       return;
     }
-    if (_interactionMode == 'automation') return;
+    if (_interactionMode == 'automation' ||
+        _interactionMode == 'automation_clip') {
+      return;
+    }
     if (_getClipIndexAt(details.localPosition) != null) return;
     setState(() {
       _selectionBoxActive = true;
@@ -4423,14 +6363,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
       // Calculate TOTAL delta from drag start (for row)
       final totalDx = details.focalPoint.dx - _dragStartGlobalOffset!.dx;
-      final totalDy = details.focalPoint.dy -
-          _dragStartGlobalOffset!.dy; // === FIX ===: Use totalDy for row
 
       // Convert to delta in Ms
       final deltaMs = totalDx / _pixelsPerMs;
-      final deltaRows = (totalDy / kRowHeight).round();
       _dragDeltaMs = deltaMs;
-      _dragDeltaRows = deltaRows;
 
       // Convert total vertical displacement to row index
       // Use the *original* row index to calculate the new one based on total vertical drag
@@ -4444,7 +6380,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       final originalStartMs = draggingGroup
           ? (_dragGroupStartMs[draggedIndex] ?? widget.getStartMs(draggedClip))
           : widget.getStartMs(draggedClip);
-      final newRow = originalRow + deltaRows;
+      final hoveredRow = _rowForLocalY(details.localFocalPoint.dy);
+      int newRow = hoveredRow ??
+          (details.localFocalPoint.dy < 0 ? 0 : math.max(0, _rowCount - 1));
+      _dragDeltaRows = newRow - originalRow;
 
       // Update the *temporary* drag state
       // The painter will use these values to draw the ghost clip
@@ -4649,17 +6588,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     final x = (startMs - _scrollOffsetMs) * _pixelsPerMs;
     final width = (trimEnd - trimStart) * _pixelsPerMs;
-    double yOffset = 0;
-    for (int i = 0; i < row; i++) {
-      yOffset += kRowHeight;
-
-      if (_rowExpanded[i]) {
-        // Use dynamic height
-        yOffset += (_expandedTab[i] == 0)
-            ? kExpandedRowHeight
-            : _effectsPanelHeights[i];
-      }
-    }
+    final yOffset = _rowTopForIndex(row);
 
     final y = yOffset + 2;
     const height = kRowHeight - 4;
@@ -4675,7 +6604,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     // Calculate the time (in Ms) and row index corresponding to the tap
     final tapMs = _scrollOffsetMs + localX / _pixelsPerMs;
     if (_rowCount == 0) return null;
-    final tapRow = (localY / kRowHeight).floor().clamp(0, _rowCount - 1);
+    final tapRow = _rowForLocalY(localY);
+    if (tapRow == null || !_isLocalYInMainTrackLane(tapRow, localY)) {
+      return null;
+    }
 
     // Iterate backwards to prioritize clips drawn later (higher index clips are usually drawn on top)
     for (int i = widget.clips.length - 1; i >= 0; i--) {
@@ -4697,39 +6629,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final localX = localPosition.dx;
     final localY = localPosition.dy;
     final tapMs = _scrollOffsetMs + localX / _pixelsPerMs;
-
-    double currentY = 0;
-    int tapRow = -1;
-
-    // Find the row index by iterating through the visual layout
-    for (int i = 0; i < _rowCount; i++) {
-      double rowTotalHeight = kRowHeight;
-      if (_rowExpanded[i]) {
-        // Use dynamic height
-        rowTotalHeight += (_expandedTab[i] == 0)
-            ? kExpandedRowHeight
-            : _effectsPanelHeights[i];
-      }
-
-      // maybe this was working just fine before (have here just in case)
-      // if (localY >= currentY && localY < currentY + kRowHeight) {
-      //   // Tapped in the non-expanded *main* track area
-      //   tapRow = i;
-      //   break;
-      // } else if (localY >= currentY + kRowHeight && _rowExpanded[i] && localY < currentY + rowTotalHeight) {
-      //   // Tapped in the *expanded* track area - still belongs to track 'i'
-      //   tapRow = i;
-      //   break;
-      // }
-
-      if (localY >= currentY && localY < currentY + rowTotalHeight) {
-        tapRow = i;
-        break;
-      }
-      currentY += rowTotalHeight;
+    final tapRow = _rowForLocalY(localY);
+    if (tapRow == null || !_isLocalYInMainTrackLane(tapRow, localY)) {
+      return null;
     }
-
-    if (tapRow == -1) return null;
 
     // Iterate backwards to prioritize clips drawn later
     // for (int i = widget.clips.length - 1; i >= 0; i--) {
@@ -4766,7 +6669,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     // "Top" = drawn last. Your painter draws in list order,
     // so higher index wins.
-    int topIndex = candidates.reduce((a, b) => a > b ? a : b);
+    final int topIndex = candidates.reduce((a, b) => a > b ? a : b);
 
     // Optional: if you want the *currently selected clip* to win
     // when it’s part of the overlap stack (DAW-style sticky selection),
@@ -4780,7 +6683,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _handleTapDown(TapDownDetails details) {
-    if (_interactionMode == 'automation') return;
+    if (_interactionMode == 'automation' ||
+        _interactionMode == 'automation_clip') {
+      return;
+    }
     if (_activeTool == _TimelineTool.cut ||
         _activeTool == _TimelineTool.delete) {
       return;
@@ -4805,9 +6711,51 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     });
 
     final localPos = details.localPosition;
+    final tappedAutomationClip = _timelineAutomationClipAt(localPos);
+    if (tappedAutomationClip != null) {
+      widget.setSelectedAutomationTargetId(
+        tappedAutomationClip.row,
+        tappedAutomationClip.targetId,
+      );
+      setState(() {
+        _clearClipSelection();
+        _activeTrimHandleX = null;
+        _trimClipIndex = null;
+        _stretchClipIndex = null;
+        _stretchStartTimelineDurationMs = null;
+        _stretchOriginalStartMs = null;
+        _stretchStartAnchorX = null;
+        _stretchDurationUpdateMs = null;
+        _isUserInteracting = true;
+        _interactionMode = 'automation_clip';
+        _beginAutomationClipDrag(
+          tappedAutomationClip.row,
+          tappedAutomationClip.targetId,
+          tappedAutomationClip.clip,
+          localPos - tappedAutomationClip.rect.topLeft,
+          tappedAutomationClip.rect.width,
+        );
+        _dragStartGlobalOffset = details.globalPosition;
+      });
+      return;
+    }
     final tappedClipIndex = _getClipIndexAt(localPos);
 
-    if (tappedClipIndex == null) return;
+    if (tappedClipIndex == null) {
+      if (_selectedClipIndex >= 0 || _selectedClipIndices.isNotEmpty) {
+        setState(() {
+          _clearClipSelection();
+          _activeTrimHandleX = null;
+          _trimClipIndex = null;
+          _stretchClipIndex = null;
+          _stretchStartTimelineDurationMs = null;
+          _stretchOriginalStartMs = null;
+          _stretchStartAnchorX = null;
+          _stretchDurationUpdateMs = null;
+        });
+      }
+      return;
+    }
     final wasAlreadySelected = _selectedClipIndices.contains(tappedClipIndex);
     final clipRect = _getClipRect(tappedClipIndex);
     if (clipRect == null) {
@@ -4890,6 +6838,20 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   void _onTimelineTap(TapUpDetails details) {
     if (_interactionMode == 'automation') return;
+    if (_interactionMode == 'automation_clip') {
+      final row = _automationClipDragRow;
+      final targetId = _automationClipDragTargetId;
+      if (row != null && targetId != null) {
+        _endAutomationClipDrag(row, targetId);
+        _focusAutomationEditorForRow(row, targetId);
+      }
+      setState(() {
+        _interactionMode = '';
+        _isUserInteracting = false;
+        _dragStartGlobalOffset = null;
+      });
+      return;
+    }
 
     if (_activeTool == _TimelineTool.cut) {
       // Cut commits on raw pointer-up so drag-to-preview release also cuts.
@@ -5050,6 +7012,26 @@ class _ClipOverlapSpan {
   });
 }
 
+class _TimelineAutomationClipVisual {
+  final int row;
+  final String targetId;
+  final String targetLabel;
+  final AutomationClipSnapshot clip;
+  final int laneIndex;
+  final Rect rect;
+  final bool isSelected;
+
+  const _TimelineAutomationClipVisual({
+    required this.row,
+    required this.targetId,
+    required this.targetLabel,
+    required this.clip,
+    required this.laneIndex,
+    required this.rect,
+    required this.isSelected,
+  });
+}
+
 // === Custom painter for the timeline ===
 class _TimelinePainter extends CustomPainter {
   final List<AudioTrack> clips;
@@ -5078,6 +7060,7 @@ class _TimelinePainter extends CustomPainter {
   final List<int> expandedTab;
   final List<double> effectsPanelHeights;
   final List<double> expandedHeights;
+  final List<double> automationLaneHeights;
   final bool isRecording;
   final int? recordingRowIndex;
   final double recordingStartMs;
@@ -5093,12 +7076,15 @@ class _TimelinePainter extends CustomPainter {
   final double? sampleDropPreviewEndMs;
   final int? cutPreviewClipIndex;
   final double? cutPreviewMs;
+  final List<_TimelineAutomationClipVisual> automationClipVisuals;
   final int _clipDataHash;
+  final int _automationClipHash;
   final int _selectedClipIndicesHash;
   final int _rowExpandedHash;
   final int _expandedTabHash;
   final int _effectsPanelHeightsHash;
   final int _expandedHeightsHash;
+  final int _automationLaneHeightsHash;
   final int _recordingPeaksHash;
 
   _TimelinePainter({
@@ -5127,6 +7113,7 @@ class _TimelinePainter extends CustomPainter {
     required this.expandedTab,
     required this.effectsPanelHeights,
     required this.expandedHeights,
+    required this.automationLaneHeights,
     required this.isRecording,
     required this.recordingRowIndex,
     required this.recordingStartMs,
@@ -5142,6 +7129,7 @@ class _TimelinePainter extends CustomPainter {
     required this.sampleDropPreviewEndMs,
     required this.cutPreviewClipIndex,
     required this.cutPreviewMs,
+    required this.automationClipVisuals,
   })  : _clipDataHash = _computeClipDataHash(
           clips: clips,
           getStartMs: getStartMs,
@@ -5151,11 +7139,13 @@ class _TimelinePainter extends CustomPainter {
           getFullDurationMs: getFullDurationMs,
           getPeaks: getPeaks,
         ),
+        _automationClipHash = _computeAutomationClipHash(automationClipVisuals),
         _selectedClipIndicesHash = _hashList(selectedClipIndices),
         _rowExpandedHash = _hashList(rowExpanded),
         _expandedTabHash = _hashList(expandedTab),
         _effectsPanelHeightsHash = _hashDoubleList(effectsPanelHeights),
         _expandedHeightsHash = _hashDoubleList(expandedHeights),
+        _automationLaneHeightsHash = _hashDoubleList(automationLaneHeights),
         _recordingPeaksHash = _hashDoubleList(recordingPeaks);
 
   static int _computeClipDataHash({
@@ -5180,6 +7170,25 @@ class _TimelinePainter extends CustomPainter {
       hash = _hashCombine(hash, _quantizeDouble(getFullDurationMs(clip)));
       hash = _hashCombine(hash, peaks.length);
       hash = _hashCombine(hash, identityHashCode(peaks));
+    }
+    return _hashFinish(hash);
+  }
+
+  static int _computeAutomationClipHash(
+    List<_TimelineAutomationClipVisual> clips,
+  ) {
+    var hash = 0;
+    for (final visual in clips) {
+      hash = _hashCombine(hash, visual.row);
+      hash = _hashCombine(hash, visual.laneIndex);
+      hash = _hashCombine(hash, visual.targetId);
+      hash = _hashCombine(hash, visual.clip.id);
+      hash = _hashCombine(hash, visual.clip.muted);
+      hash = _hashCombine(hash, visual.isSelected);
+      hash = _hashCombine(hash, _quantizeDouble(visual.rect.left));
+      hash = _hashCombine(hash, _quantizeDouble(visual.rect.top));
+      hash = _hashCombine(hash, _quantizeDouble(visual.rect.width));
+      hash = _hashCombine(hash, _quantizeDouble(visual.rect.height));
     }
     return _hashFinish(hash);
   }
@@ -5217,6 +7226,27 @@ class _TimelinePainter extends CustomPainter {
     return 0x1fffffff & (hash + ((0x00003fff & hash) << 15));
   }
 
+  double _automationLaneHeightForRow(int row) {
+    if (row < 0 || row >= automationLaneHeights.length) return 0.0;
+    return automationLaneHeights[row];
+  }
+
+  double _rowBlockHeight(int row) {
+    final expanded =
+        row >= 0 && row < expandedHeights.length ? expandedHeights[row] : 0.0;
+    return _AudioCanvasTimelineState.kRowHeight +
+        _automationLaneHeightForRow(row) +
+        expanded;
+  }
+
+  double _rowTopForIndex(int row) {
+    double y = 0.0;
+    for (int i = 0; i < row; i++) {
+      y += _rowBlockHeight(i);
+    }
+    return y;
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
@@ -5230,11 +7260,10 @@ class _TimelinePainter extends CustomPainter {
     // Draw row backgrounds
     for (int row = 0; row < rowExpanded.length; row++) {
       final rowHeight = _AudioCanvasTimelineState.kRowHeight;
+      final automationLaneHeight = _automationLaneHeightForRow(row);
       final isExpanded = rowExpanded[row];
-      // final expandedHeight = isExpanded ? kExpandedRowHeight : 0;
       final expandedHeight = expandedHeights[row];
-
-      final totalRowHeight = rowHeight + expandedHeight;
+      final totalRowHeight = rowHeight + automationLaneHeight + expandedHeight;
 
       // 1. Draw the main track background (alternating colors)
       final rect = Rect.fromLTWH(0, currentY, viewportWidth, rowHeight);
@@ -5243,10 +7272,24 @@ class _TimelinePainter extends CustomPainter {
             row % 2 == 0 ? const Color(0xFF1A1F2E) : const Color(0xFF151A26);
       canvas.drawRect(rect, paint);
 
+      if (automationLaneHeight > 0.0) {
+        final automationRect = Rect.fromLTWH(
+          0,
+          currentY + rowHeight,
+          viewportWidth,
+          automationLaneHeight,
+        );
+        final automationPaint = Paint()
+          ..color =
+              row.isEven ? const Color(0xFF141A27) : const Color(0xFF111723);
+        canvas.drawRect(automationRect, automationPaint);
+      }
+
       // 2. Draw the expanded section background (transparent, but maybe a slight tint for debugging/visual separation)
       if (isExpanded) {
+        final expandedTop = currentY + rowHeight + automationLaneHeight;
         final expandedRect = Rect.fromLTWH(
-            0, currentY + rowHeight, viewportWidth, expandedHeight.toDouble());
+            0, expandedTop, viewportWidth, expandedHeight.toDouble());
         final expandedPaint = Paint()
           ..color = const Color(0xFF1A1F2E)
               .withOpacity(0.9); // Semi-transparent overlay
@@ -5272,13 +7315,7 @@ class _TimelinePainter extends CustomPainter {
         highlightedSegmentEndMs != null &&
         highlightedSegmentRow! >= 0 &&
         highlightedSegmentRow! < rowExpanded.length) {
-      double highlightY = 0;
-      for (int r = 0; r < highlightedSegmentRow!; r++) {
-        highlightY += _AudioCanvasTimelineState.kRowHeight;
-        if (rowExpanded[r]) {
-          highlightY += expandedHeights[r];
-        }
-      }
+      final highlightY = _rowTopForIndex(highlightedSegmentRow!);
 
       final startX =
           (highlightedSegmentStartMs! - scrollOffsetMs) * pixelsPerMs;
@@ -5311,13 +7348,7 @@ class _TimelinePainter extends CustomPainter {
         sampleDropPreviewEndMs != null &&
         sampleDropPreviewRow! >= 0 &&
         sampleDropPreviewRow! < rowExpanded.length) {
-      double previewY = 0;
-      for (int r = 0; r < sampleDropPreviewRow!; r++) {
-        previewY += _AudioCanvasTimelineState.kRowHeight;
-        if (rowExpanded[r]) {
-          previewY += expandedHeights[r];
-        }
-      }
+      final previewY = _rowTopForIndex(sampleDropPreviewRow!);
 
       final startX = (sampleDropPreviewStartMs! - scrollOffsetMs) * pixelsPerMs;
       final endX = (sampleDropPreviewEndMs! - scrollOffsetMs) * pixelsPerMs;
@@ -5351,13 +7382,7 @@ class _TimelinePainter extends CustomPainter {
       final int recRow = recordingRowIndex!;
 
       // Compute the row's vertical position on screen
-      double recY = 0;
-      for (int r = 0; r < recRow; r++) {
-        recY += _AudioCanvasTimelineState.kRowHeight;
-        if (rowExpanded[r]) {
-          recY += expandedHeights[r];
-        }
-      }
+      final recY = _rowTopForIndex(recRow);
 
       // final double recRowHeight = _AudioCanvasTimelineState.kRowHeight;
       // final Rect recRect = Rect.fromLTWH(
@@ -5397,6 +7422,7 @@ class _TimelinePainter extends CustomPainter {
     if (draggedClipIndex != null) {
       _drawClip(canvas, draggedClipIndex!, true, overlapByClip);
     }
+    _drawTimelineAutomationClips(canvas, size);
     _drawCutPreviewLine(canvas);
 
     // Draw playhead (centered)
@@ -5556,21 +7582,7 @@ class _TimelinePainter extends CustomPainter {
     final row =
         isDragging ? (draggedClipRowIndex ?? clip.rowIndex) : clip.rowIndex;
 
-    double yOffset = 0;
-    // for (int i = 0; i < row; i++) {
-    //   yOffset += _AudioCanvasTimelineState.kRowHeight;
-    //   if (rowExpanded[i]) {
-    //     yOffset += kExpandedRowHeight;
-    //   }
-    // }
-    for (int i = 0; i < row; i++) {
-      yOffset += _AudioCanvasTimelineState.kRowHeight;
-
-      if (rowExpanded[i]) {
-        yOffset +=
-            (expandedTab[i] == 0) ? kExpandedRowHeight : effectsPanelHeights[i];
-      }
-    }
+    final yOffset = _rowTopForIndex(row);
 
     // visual left follows the new startMs
     final x = (startMs - scrollOffsetMs) * pixelsPerMs;
@@ -5678,6 +7690,170 @@ class _TimelinePainter extends CustomPainter {
         stretchEnabled: clip.stretchToProjectTempo,
         preservePitch: clip.tempoStretchPreservePitch,
       );
+    }
+  }
+
+  Color _automationColorForTarget(String targetId) {
+    const palette = <Color>[
+      Color(0xFF4D8DF0),
+      Color(0xFF42B985),
+      Color(0xFFE19A44),
+      Color(0xFF58B9CF),
+      Color(0xFFD36D61),
+      Color(0xFF89B45B),
+    ];
+    var hash = 0;
+    for (final rune in targetId.runes) {
+      hash = ((hash * 31) + rune) & 0x7fffffff;
+    }
+    return palette[hash % palette.length];
+  }
+
+  void _drawAutomationClipPointPreview(
+    Canvas canvas,
+    Rect rect,
+    AutomationClipSnapshot clip,
+  ) {
+    if (rect.width <= 2.0 || rect.height <= 2.0) return;
+
+    final points = clip.points
+        .map(
+          (p) => AutomationPoint(
+            x: p.x.clamp(0.0, clip.lengthMs).toDouble(),
+            volume: p.volume.clamp(0.0, 1.0).toDouble(),
+          ),
+        )
+        .toList(growable: false)
+      ..sort((a, b) => a.x.compareTo(b.x));
+    if (points.isEmpty) return;
+
+    final safeLength = clip.lengthMs.abs() < 1e-6 ? 1.0 : clip.lengthMs;
+    Offset toOffset(AutomationPoint p) {
+      final t = (p.x / safeLength).clamp(0.0, 1.0).toDouble();
+      final x = rect.left + (t * rect.width);
+      final y = rect.bottom - (p.volume * rect.height);
+      return Offset(x, y.clamp(rect.top, rect.bottom));
+    }
+
+    final path = Path();
+    if (points.length == 1) {
+      final y = toOffset(points.first).dy;
+      path.moveTo(rect.left, y);
+      path.lineTo(rect.right, y);
+    } else {
+      final first = toOffset(points.first);
+      path.moveTo(rect.left, first.dy);
+      path.lineTo(first.dx, first.dy);
+      for (int i = 1; i < points.length; i++) {
+        final o = toOffset(points[i]);
+        path.lineTo(o.dx, o.dy);
+      }
+      final last = toOffset(points.last);
+      path.lineTo(rect.right, last.dy);
+    }
+
+    final previewPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.15
+      ..color = clip.muted
+          ? Colors.white.withOpacity(0.22)
+          : Colors.white.withOpacity(0.78);
+    canvas.drawPath(path, previewPaint);
+
+    if (rect.width > 20 && rect.height > 10) {
+      final pointPaint = Paint()
+        ..style = PaintingStyle.fill
+        ..color = clip.muted
+            ? Colors.white.withOpacity(0.34)
+            : Colors.white.withOpacity(0.9);
+      for (final p in points) {
+        final o = toOffset(p);
+        canvas.drawCircle(o, 1.7, pointPaint);
+      }
+    }
+  }
+
+  void _drawTimelineAutomationClips(Canvas canvas, Size size) {
+    if (automationClipVisuals.isEmpty) return;
+    final textPainter = TextPainter(
+      maxLines: 1,
+      ellipsis: '…',
+      textDirection: TextDirection.ltr,
+    );
+
+    for (final visual in automationClipVisuals) {
+      final rect = visual.rect;
+      if (rect.right <= 0 ||
+          rect.left >= viewportWidth ||
+          rect.bottom <= 0 ||
+          rect.top >= size.height) {
+        continue;
+      }
+
+      final clipped =
+          rect.intersect(Rect.fromLTWH(0, 0, viewportWidth, size.height));
+      if (clipped.width <= 0 || clipped.height <= 0) continue;
+      final rrect = RRect.fromRectAndRadius(clipped, const Radius.circular(6));
+      final baseColor = _automationColorForTarget(visual.targetId);
+      final fillColor = visual.clip.muted
+          ? const Color(0x665E5E5E)
+          : (visual.isSelected
+              ? baseColor.withOpacity(0.92)
+              : baseColor.withOpacity(0.72));
+      final borderColor = visual.isSelected
+          ? Colors.white.withOpacity(0.9)
+          : Colors.white.withOpacity(0.34);
+      final fillPaint = Paint()..color = fillColor;
+      final borderPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = visual.isSelected ? 1.2 : 1.0
+        ..color = borderColor;
+      canvas.drawRRect(rrect, fillPaint);
+
+      final previewRect = rect.deflate(2.0);
+      if (previewRect.width > 2.0 && previewRect.height > 2.0) {
+        canvas.save();
+        canvas.clipRRect(rrect);
+        _drawAutomationClipPointPreview(canvas, previewRect, visual.clip);
+        canvas.restore();
+      }
+
+      canvas.drawRRect(rrect, borderPaint);
+
+      if (visual.isSelected && clipped.width > 20 && clipped.height > 8) {
+        final handlePaint = Paint()
+          ..color = Colors.white.withOpacity(0.85)
+          ..strokeWidth = 1.15;
+        final yTop = clipped.top + 2.0;
+        final yBottom = clipped.bottom - 2.0;
+        final leftX = clipped.left + 2.0;
+        final rightX = clipped.right - 2.0;
+        canvas.drawLine(
+            Offset(leftX, yTop), Offset(leftX, yBottom), handlePaint);
+        canvas.drawLine(
+            Offset(rightX, yTop), Offset(rightX, yBottom), handlePaint);
+      }
+
+      if (clipped.width < 28 || clipped.height < 13) continue;
+      final labelSource = visual.clip.label.trim();
+      final label = labelSource.isEmpty || labelSource == visual.targetLabel
+          ? visual.targetLabel
+          : '${visual.targetLabel}: $labelSource';
+      textPainter.text = TextSpan(
+        text: label,
+        style: TextStyle(
+          color: visual.clip.muted
+              ? Colors.white60
+              : Colors.white.withOpacity(0.94),
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+        ),
+      );
+      textPainter.layout(maxWidth: math.max(0.0, clipped.width - 8));
+      if (textPainter.width <= 0.0) continue;
+      final textY = (clipped.top + (clipped.height - textPainter.height) / 2.0)
+          .toDouble();
+      textPainter.paint(canvas, Offset(clipped.left + 4.0, textY));
     }
   }
 
@@ -5997,13 +8173,7 @@ class _TimelinePainter extends CustomPainter {
     final x = (clampedCutMs - scrollOffsetMs) * pixelsPerMs;
     if (x < 0 || x > viewportWidth) return;
 
-    double yOffset = 0;
-    for (int i = 0; i < row; i++) {
-      yOffset += _AudioCanvasTimelineState.kRowHeight;
-      if (rowExpanded[i]) {
-        yOffset += expandedHeights[i];
-      }
-    }
+    final yOffset = _rowTopForIndex(row);
 
     final top = yOffset + 3;
     final bottom = yOffset + _AudioCanvasTimelineState.kRowHeight - 3;
@@ -6088,10 +8258,12 @@ class _TimelinePainter extends CustomPainter {
         _expandedTabHash != old._expandedTabHash ||
         _effectsPanelHeightsHash != old._effectsPanelHeightsHash ||
         _expandedHeightsHash != old._expandedHeightsHash ||
+        _automationLaneHeightsHash != old._automationLaneHeightsHash ||
         verticalScrollOffset != old.verticalScrollOffset ||
         stretchToolActive != old.stretchToolActive ||
         trimClipIndex != old.trimClipIndex ||
         _clipDataHash != old._clipDataHash ||
+        _automationClipHash != old._automationClipHash ||
         quantizeDivisions != old.quantizeDivisions ||
         highlightedSegmentRow != old.highlightedSegmentRow ||
         highlightedSegmentStartMs != old.highlightedSegmentStartMs ||
@@ -6223,10 +8395,18 @@ class _AutomationLane extends StatefulWidget {
   final double scrollOffsetMs;
   final double laneHeight;
   final double timelineDurationMs; // kept for future use, but not needed for x
+  final String targetLabel;
+  final String targetParamId;
+  final double targetMin;
+  final double targetMax;
+  final bool isVolumeLane;
   final ValueChanged<List<AutomationPoint>> onChanged;
   final void Function(Offset pos) onPanStartExternal;
   final void Function(Offset pos) onPanUpdateExternal;
   final VoidCallback onPanEndExternal;
+  final VoidCallback onBackgroundPanStartExternal;
+  final ValueChanged<double> onBackgroundPanUpdateExternal;
+  final VoidCallback onBackgroundPanEndExternal;
 
   const _AutomationLane({
     Key? key,
@@ -6236,18 +8416,60 @@ class _AutomationLane extends StatefulWidget {
     required this.scrollOffsetMs,
     required this.laneHeight,
     required this.timelineDurationMs,
+    required this.targetLabel,
+    required this.targetParamId,
+    required this.targetMin,
+    required this.targetMax,
+    required this.isVolumeLane,
     required this.onChanged,
     required this.onPanStartExternal,
     required this.onPanUpdateExternal,
     required this.onPanEndExternal,
+    required this.onBackgroundPanStartExternal,
+    required this.onBackgroundPanUpdateExternal,
+    required this.onBackgroundPanEndExternal,
   }) : super(key: key);
 
   @override
   State<_AutomationLane> createState() => _AutomationLaneState();
 }
 
+class _AutomationPointPanGestureRecognizer extends PanGestureRecognizer {
+  _AutomationPointPanGestureRecognizer({
+    required this.shouldAcceptGlobalPosition,
+  });
+
+  final bool Function(Offset globalPosition) shouldAcceptGlobalPosition;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    if (!shouldAcceptGlobalPosition(event.position)) {
+      resolvePointer(event.pointer, GestureDisposition.rejected);
+      return;
+    }
+    super.addAllowedPointer(event);
+  }
+}
+
+class _AutomationLaneBackgroundHorizontalDragRecognizer
+    extends HorizontalDragGestureRecognizer {
+  _AutomationLaneBackgroundHorizontalDragRecognizer({
+    required this.shouldAcceptGlobalPosition,
+  });
+
+  final bool Function(Offset globalPosition) shouldAcceptGlobalPosition;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    if (!shouldAcceptGlobalPosition(event.position)) {
+      resolvePointer(event.pointer, GestureDisposition.rejected);
+      return;
+    }
+    super.addAllowedPointer(event);
+  }
+}
+
 class _AutomationLaneState extends State<_AutomationLane> {
-  static const double pointRadius = 8.0;
   static const double hitRadius = 20.0;
   static const double verticalPadding = 12.0;
 
@@ -6265,13 +8487,6 @@ class _AutomationLaneState extends State<_AutomationLane> {
     double v = 1.0 - ((py - verticalPadding) / _usableHeight);
     return v.clamp(0.0, 1.0);
   }
-
-  double _volToDb(double v) {
-    if (v <= 0.0005) return double.negativeInfinity;
-    return 20 * math.log(v) / math.log(10);
-  }
-
-  bool _dragging = false;
 
   // ---------- Hit test ----------
 
@@ -6316,21 +8531,22 @@ class _AutomationLaneState extends State<_AutomationLane> {
     return RawGestureDetector(
       behavior: HitTestBehavior.opaque,
       gestures: {
-        PanGestureRecognizer:
-            GestureRecognizerFactoryWithHandlers<PanGestureRecognizer>(
+        _AutomationPointPanGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<
+                _AutomationPointPanGestureRecognizer>(
           // 1) Constructor
-          () => PanGestureRecognizer()
-            ..dragStartBehavior = DragStartBehavior.down,
+          () => _AutomationPointPanGestureRecognizer(
+            shouldAcceptGlobalPosition: (globalPosition) {
+              final renderObject = context.findRenderObject();
+              if (renderObject is! RenderBox) return false;
+              final localPosition = renderObject.globalToLocal(globalPosition);
+              return _hitPoint(localPosition) != null;
+            },
+          )..dragStartBehavior = DragStartBehavior.down,
           // 2) Initializer
-          (PanGestureRecognizer instance) {
-            // 👉 Start automation IMMEDIATELY on pointer down IF we are on a point.
+          (_AutomationPointPanGestureRecognizer instance) {
             instance.onDown = (details) {
-              final hit = _hitPoint(details.localPosition);
-              if (hit != null) {
-                // This will set _interactionMode = 'automation' and
-                // _isUserInteracting = true in the parent.
-                widget.onPanStartExternal(details.localPosition);
-              }
+              widget.onPanStartExternal(details.localPosition);
             };
 
             // Normal drag updates: always pass current pointer position.
@@ -6346,6 +8562,34 @@ class _AutomationLaneState extends State<_AutomationLane> {
             // covers the case of a double-tap (calls onDown but never onEnd)
             instance.onCancel = () {
               widget.onPanEndExternal();
+            };
+          },
+        ),
+        _AutomationLaneBackgroundHorizontalDragRecognizer:
+            GestureRecognizerFactoryWithHandlers<
+                _AutomationLaneBackgroundHorizontalDragRecognizer>(
+          () => _AutomationLaneBackgroundHorizontalDragRecognizer(
+            shouldAcceptGlobalPosition: (globalPosition) {
+              final renderObject = context.findRenderObject();
+              if (renderObject is! RenderBox) return false;
+              final localPosition = renderObject.globalToLocal(globalPosition);
+              return _hitPoint(localPosition) == null;
+            },
+          )..dragStartBehavior = DragStartBehavior.down,
+          (_AutomationLaneBackgroundHorizontalDragRecognizer instance) {
+            instance.onStart = (_) {
+              widget.onBackgroundPanStartExternal();
+            };
+            instance.onUpdate = (details) {
+              final deltaDx = details.primaryDelta ?? details.delta.dx;
+              if (deltaDx == 0.0) return;
+              widget.onBackgroundPanUpdateExternal(deltaDx);
+            };
+            instance.onEnd = (_) {
+              widget.onBackgroundPanEndExternal();
+            };
+            instance.onCancel = () {
+              widget.onBackgroundPanEndExternal();
             };
           },
         ),
@@ -6368,6 +8612,11 @@ class _AutomationLaneState extends State<_AutomationLane> {
             pixelsPerMs: widget.pixelsPerMs,
             laneHeight: widget.laneHeight,
             verticalPadding: verticalPadding,
+            targetLabel: widget.targetLabel,
+            targetParamId: widget.targetParamId,
+            targetMin: widget.targetMin,
+            targetMax: widget.targetMax,
+            isVolumeLane: widget.isVolumeLane,
           ),
           size: Size(double.infinity, widget.laneHeight),
         ),
@@ -6386,6 +8635,11 @@ class _AutomationPainter extends CustomPainter {
   final double pixelsPerMs;
   final double laneHeight;
   final double verticalPadding;
+  final String targetLabel;
+  final String targetParamId;
+  final double targetMin;
+  final double targetMax;
+  final bool isVolumeLane;
 
   _AutomationPainter({
     required this.points,
@@ -6393,6 +8647,11 @@ class _AutomationPainter extends CustomPainter {
     required this.pixelsPerMs,
     required this.laneHeight,
     required this.verticalPadding,
+    required this.targetLabel,
+    required this.targetParamId,
+    required this.targetMin,
+    required this.targetMax,
+    required this.isVolumeLane,
   });
 
   double get _usableHeight => laneHeight - verticalPadding * 2;
@@ -6400,6 +8659,129 @@ class _AutomationPainter extends CustomPainter {
   double _timeToPx(double timeMs) => (timeMs - scrollOffsetMs) * pixelsPerMs;
 
   double _volumeToPy(double v) => verticalPadding + (1.0 - v) * _usableHeight;
+
+  double _normalizedToTargetValue(double normalized) {
+    final span = targetMax - targetMin;
+    if (!span.isFinite || span.abs() < 1e-9) {
+      return normalized.clamp(0.0, 1.0).toDouble();
+    }
+    return targetMin + span * normalized.clamp(0.0, 1.0).toDouble();
+  }
+
+  String _trimTrailingZeros(String text) {
+    if (!text.contains('.')) return text;
+    return text.replaceFirst(RegExp(r'\.?0+$'), '');
+  }
+
+  String _formatNumber(double value, {int maxDecimals = 2}) {
+    if (!value.isFinite) return value.toString();
+    final absValue = value.abs();
+    final decimals = absValue >= 1000
+        ? 0
+        : (absValue >= 100
+            ? 1
+            : (absValue >= 10 ? math.min(maxDecimals, 1) : maxDecimals));
+    return _trimTrailingZeros(value.toStringAsFixed(decimals));
+  }
+
+  bool _containsAny(String haystack, List<String> needles) {
+    for (final n in needles) {
+      if (haystack.contains(n)) return true;
+    }
+    return false;
+  }
+
+  String get _targetContext {
+    return '${targetLabel.trim().toLowerCase()} ${targetParamId.trim().toLowerCase()}';
+  }
+
+  _AutomationValueKind get _valueKind {
+    if (isVolumeLane) return _AutomationValueKind.volumeDb;
+
+    final context = _targetContext;
+    final min = targetMin;
+    final max = targetMax;
+    final span = max - min;
+    final hasValidRange = span.isFinite && span.abs() >= 1e-9;
+    final looksNormalizedRange = min >= -0.001 && max <= 1.001;
+    final looksPercentRange = min >= -0.1 && max <= 100.1;
+
+    if (_containsAny(context, const [
+          'freq',
+          'frequency',
+          'cutoff',
+          'hz',
+          'highpass',
+          'lowpass',
+          'band'
+        ]) ||
+        (hasValidRange && min >= 0.0 && max >= 1500.0 && max <= 50000.0)) {
+      return _AutomationValueKind.hz;
+    }
+
+    if (_containsAny(context, const [
+      'attack',
+      'release',
+      'decay',
+      'delay',
+      'predelay',
+      'pre-delay',
+      'pre delay',
+      'hold',
+      'time',
+      'ms',
+      'sec',
+      'second'
+    ])) {
+      if (_containsAny(context, const ['ms', 'millisecond']) ||
+          (hasValidRange && max > 20.0)) {
+        return _AutomationValueKind.milliseconds;
+      }
+      return _AutomationValueKind.seconds;
+    }
+
+    if (_containsAny(context, const ['semitone', 'semi-tone'])) {
+      return _AutomationValueKind.semitone;
+    }
+    if (_containsAny(context, const ['cents'])) {
+      return _AutomationValueKind.cents;
+    }
+    if (_containsAny(context, const ['ratio'])) {
+      return _AutomationValueKind.ratio;
+    }
+
+    final hasDbHint =
+        _containsAny(context, const ['db', 'threshold', 'ceiling']);
+    final hasGainHint = _containsAny(
+      context,
+      const ['gain', 'level', 'trim', 'makeup', 'boost', 'attenuation'],
+    );
+    if (hasDbHint || (hasGainHint && (min < 0.0 || max > 2.5))) {
+      return _AutomationValueKind.db;
+    }
+
+    final hasPercentHint = _containsAny(
+      context,
+      const [
+        'mix',
+        'wet',
+        'dry',
+        'amount',
+        'depth',
+        'feedback',
+        'width',
+        'pan',
+        '%'
+      ],
+    );
+    if (looksPercentRange && (hasPercentHint || looksNormalizedRange)) {
+      return _AutomationValueKind.percent;
+    }
+
+    return _AutomationValueKind.generic;
+  }
+
+  double get _midGuideNormalized => isVolumeLane ? 0.75 : 0.5;
 
   double _volToDb(double v) {
     if (v <= 0.0001) return double.negativeInfinity;
@@ -6414,9 +8796,82 @@ class _AutomationPainter extends CustomPainter {
     return 2.401921537 * rawDb + 6.0;
   }
 
+  String _formatValueLabel(double normalized) {
+    final clamped = normalized.clamp(0.0, 1.0).toDouble();
+
+    if (isVolumeLane) {
+      final db = _volToDb(clamped);
+      if (db.isInfinite) return '-∞';
+      final value = _formatNumber(db.abs(), maxDecimals: 1);
+      final sign = db >= 0 ? '+' : '-';
+      return '$sign$value dB';
+    }
+
+    final raw = _normalizedToTargetValue(clamped);
+    switch (_valueKind) {
+      case _AutomationValueKind.volumeDb:
+        final db = _volToDb(clamped);
+        if (db.isInfinite) return '-∞';
+        final value = _formatNumber(db.abs(), maxDecimals: 1);
+        final sign = db >= 0 ? '+' : '-';
+        return '$sign$value dB';
+      case _AutomationValueKind.percent:
+        final min = targetMin;
+        final max = targetMax;
+        final looksNormalizedRange = min >= -0.001 && max <= 1.001;
+        final pct = looksNormalizedRange ? raw * 100.0 : raw;
+        return '${_formatNumber(pct, maxDecimals: 1)}%';
+      case _AutomationValueKind.db:
+        final sign = raw > 0 ? '+' : '';
+        return '$sign${_formatNumber(raw, maxDecimals: 1)} dB';
+      case _AutomationValueKind.hz:
+        if (raw.abs() >= 1000.0) {
+          return '${_formatNumber(raw / 1000.0, maxDecimals: 2)} kHz';
+        }
+        return '${_formatNumber(raw, maxDecimals: raw.abs() >= 100 ? 0 : 1)} Hz';
+      case _AutomationValueKind.seconds:
+        if (raw.abs() < 1.0) {
+          return '${_formatNumber(raw * 1000.0, maxDecimals: 0)} ms';
+        }
+        return '${_formatNumber(raw, maxDecimals: 2)} s';
+      case _AutomationValueKind.milliseconds:
+        if (raw.abs() >= 1000.0) {
+          return '${_formatNumber(raw / 1000.0, maxDecimals: 2)} s';
+        }
+        return '${_formatNumber(raw, maxDecimals: raw.abs() >= 100 ? 0 : 1)} ms';
+      case _AutomationValueKind.ratio:
+        if (raw <= 0.0) return _formatNumber(raw, maxDecimals: 2);
+        return '${_formatNumber(raw, maxDecimals: 2)}:1';
+      case _AutomationValueKind.semitone:
+        final sign = raw > 0 ? '+' : '';
+        return '$sign${_formatNumber(raw, maxDecimals: 1)} st';
+      case _AutomationValueKind.cents:
+        final sign = raw > 0 ? '+' : '';
+        return '$sign${_formatNumber(raw, maxDecimals: 0)} ct';
+      case _AutomationValueKind.generic:
+        return _formatNumber(raw, maxDecimals: 2);
+    }
+  }
+
+  void _paintAxisLabel(
+    Canvas canvas,
+    TextPainter tp,
+    String text,
+    double centerY,
+  ) {
+    tp.text = TextSpan(
+      text: text,
+      style: const TextStyle(color: Colors.white70, fontSize: 10),
+    );
+    tp.layout(maxWidth: 64);
+    final dy =
+        (centerY - tp.height / 2).clamp(0.0, laneHeight - tp.height).toDouble();
+    tp.paint(canvas, Offset(4, dy));
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    const double axisWidth = 50;
+    const double axisWidth = 44;
 
     // 1) Dark background
     final bg = Paint()..color = const Color(0xFF151A26).withOpacity(0.9);
@@ -6429,45 +8884,23 @@ class _AutomationPainter extends CustomPainter {
       ..color = Colors.white.withOpacity(0.08)
       ..strokeWidth = 1;
 
-    final topY = verticalPadding;
-    final zeroY = _volumeToPy(0.75);
-    final bottomY = verticalPadding + _usableHeight;
+    final topY = _volumeToPy(1.0);
+    final middleY = _volumeToPy(_midGuideNormalized);
+    final bottomY = _volumeToPy(0.0);
 
     canvas.drawLine(
         Offset(axisWidth, topY), Offset(size.width, topY), guidePaint);
     canvas.drawLine(
-        Offset(axisWidth, zeroY), Offset(size.width, zeroY), guidePaint);
+        Offset(axisWidth, middleY), Offset(size.width, middleY), guidePaint);
     canvas.drawLine(
         Offset(axisWidth, bottomY), Offset(size.width, bottomY), guidePaint);
 
     // Y-axis labels on the very left
     final tp = TextPainter(textDirection: TextDirection.ltr);
-
-    // +6.0 dB (very top)
-    tp.text = const TextSpan(
-      text: "+6.0 dB",
-      style: TextStyle(color: Colors.white70, fontSize: 10),
-    );
-    tp.layout();
-    tp.paint(canvas, Offset(4, verticalPadding - 6));
-
-    // +0.0 dB (~3/4 up)
-    final zeroDbVolume = 0.75;
-    final zeroDbPy = _volumeToPy(zeroDbVolume);
-    tp.text = const TextSpan(
-      text: "+0.0 dB",
-      style: TextStyle(color: Colors.white70, fontSize: 10),
-    );
-    tp.layout();
-    tp.paint(canvas, Offset(4, zeroDbPy - 6));
-
-    // -∞ at bottom
-    tp.text = const TextSpan(
-      text: "-∞",
-      style: TextStyle(color: Colors.white70, fontSize: 10),
-    );
-    tp.layout();
-    tp.paint(canvas, Offset(4, verticalPadding + _usableHeight - 10));
+    _paintAxisLabel(canvas, tp, _formatValueLabel(1.0), topY);
+    _paintAxisLabel(
+        canvas, tp, _formatValueLabel(_midGuideNormalized), middleY);
+    _paintAxisLabel(canvas, tp, _formatValueLabel(0.0), bottomY);
 
     if (points.isEmpty) return;
 
@@ -6526,8 +8959,12 @@ class _AutomationPainter extends CustomPainter {
     // Clip all automation drawings so nothing enters Y-axis
     // ====================================================
 
-    final clipRect =
-        Rect.fromLTWH(axisWidth, 0, size.width - axisWidth, size.height);
+    final clipRect = Rect.fromLTWH(
+      axisWidth,
+      0,
+      math.max(0.0, size.width - axisWidth),
+      size.height,
+    );
 
     canvas.save();
     canvas.clipRect(clipRect);
@@ -6571,8 +9008,7 @@ class _AutomationPainter extends CustomPainter {
       final modelPoint = points[i];
       final p = pixelPoints[i];
 
-      final db = _volToDb(modelPoint.volume);
-      final label = db.isInfinite ? "-∞" : "${db.toStringAsFixed(1)} dB";
+      final label = _formatValueLabel(modelPoint.volume);
 
       tp.text = TextSpan(
         text: label,
@@ -6603,8 +9039,28 @@ class _AutomationPainter extends CustomPainter {
   bool shouldRepaint(_AutomationPainter old) {
     return old.points != points ||
         old.scrollOffsetMs != scrollOffsetMs ||
-        old.pixelsPerMs != pixelsPerMs;
+        old.pixelsPerMs != pixelsPerMs ||
+        old.laneHeight != laneHeight ||
+        old.verticalPadding != verticalPadding ||
+        old.targetLabel != targetLabel ||
+        old.targetParamId != targetParamId ||
+        old.targetMin != targetMin ||
+        old.targetMax != targetMax ||
+        old.isVolumeLane != isVolumeLane;
   }
+}
+
+enum _AutomationValueKind {
+  volumeDb,
+  percent,
+  db,
+  hz,
+  seconds,
+  milliseconds,
+  ratio,
+  semitone,
+  cents,
+  generic,
 }
 
 // -----------------------------------------------------------------------------
@@ -6718,7 +9174,8 @@ class ZeroSlopPanGestureRecognizer extends PanGestureRecognizer {
 }
 
 class PrettyGainSlider extends StatefulWidget {
-  final double value; // 0 - 3
+  final double value; // 0 - maxValue
+  final double maxValue;
   final ValueChanged<double> onChangeStart, onChanged, onChangeEnd;
   final bool showLabel;
   final Color trackColor;
@@ -6727,6 +9184,7 @@ class PrettyGainSlider extends StatefulWidget {
   const PrettyGainSlider({
     super.key,
     required this.value,
+    this.maxValue = 3.0,
     required this.onChangeStart,
     required this.onChanged,
     required this.onChangeEnd,
@@ -6741,12 +9199,21 @@ class PrettyGainSlider extends StatefulWidget {
 
 class _PrettyGainSliderState extends State<PrettyGainSlider> {
   double _gainToDb(double sliderValue) {
-    if (sliderValue <= 0.0001) return double.negativeInfinity;
+    const dbMin = -60.0;
+    const dbMax = 6.0;
+    const uiUnity = 2.0;
+    final clamped = sliderValue.clamp(0.0, widget.maxValue).toDouble();
+    final unity = math.min(uiUnity, widget.maxValue);
 
-    // Match your DSP: perceptualGain = sliderValue^2 (clamped to 9)
-    double perceptual = math.min(sliderValue * sliderValue, 9.0);
+    if (clamped <= unity) {
+      final t = unity <= 0.0 ? 0.0 : (clamped / unity).clamp(0.0, 1.0);
+      return dbMin + ((0.0 - dbMin) * t);
+    }
 
-    return 20 * math.log(perceptual) / math.log(10); // log10
+    final t = (widget.maxValue <= unity)
+        ? 0.0
+        : ((clamped - unity) / (widget.maxValue - unity)).clamp(0.0, 1.0);
+    return 0.0 + ((dbMax - 0.0) * t);
   }
 
   @override
@@ -6762,8 +9229,10 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
             onDoubleTap: () {
+              const uiUnity = 2.0;
+              final unity = math.min(uiUnity, widget.maxValue);
               setState(() {
-                widget.onChanged(1.0); // RESET to default
+                widget.onChanged(unity); // reset to unity gain (0 dB)
               });
             },
             child: SliderTheme(
@@ -6776,9 +9245,9 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
                 thumbColor: widget.thumbColor,
               ),
               child: Slider(
-                value: widget.value,
+                value: widget.value.clamp(0.0, widget.maxValue),
                 min: 0.0,
-                max: 3.0,
+                max: widget.maxValue,
                 // divisions: 60,
                 // label: () {
                 //   final db = _gainToDb(widget.value);

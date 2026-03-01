@@ -17,6 +17,7 @@ class PianoRollEditor extends StatefulWidget {
   const PianoRollEditor({
     super.key,
     required this.clip,
+    required this.availableInstruments,
     required this.bpm,
     required this.beatsPerBar,
     required this.projectPlayheadMs,
@@ -31,6 +32,7 @@ class PianoRollEditor extends StatefulWidget {
   });
 
   final AudioTrack clip;
+  final List<Map<String, dynamic>> availableInstruments;
   final double bpm;
   final int beatsPerBar;
   final double projectPlayheadMs;
@@ -82,6 +84,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   late Map<String, double> _params;
   late String _instrumentId;
   late String _instrumentName;
+  String _instrumentBrowserCategory = 'All';
 
   String? _selectedNoteId;
   final Set<String> _selectedNoteIds = <String>{};
@@ -190,14 +193,127 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _instrumentId = widget.clip.instrumentId;
     _instrumentName = widget.clip.instrumentName;
     _ensureDefaultParams();
+    final match = widget.availableInstruments.where((spec) {
+      return (spec['id'] as String?) == _instrumentId;
+    });
+    final category =
+        match.isEmpty ? 'All' : _instrumentCategoryForSpec(match.first);
+    final categories = _instrumentBrowserCategories();
+    _instrumentBrowserCategory =
+        categories.contains(category) ? category : 'All';
   }
 
   void _ensureDefaultParams() {
+    if (_isSampledInstrumentId(_instrumentId)) {
+      _params.putIfAbsent('outputGain', () => 0.72);
+      _params.putIfAbsent('attackMs', () => 6.0);
+      _params.putIfAbsent('releaseMs', () => 520.0);
+      _params['drive'] = 0.0;
+      return;
+    }
     _params.putIfAbsent('oscillator', () => 1.0);
     _params.putIfAbsent('cutoffHz', () => 3200.0);
     _params.putIfAbsent('attackMs', () => 18.0);
     _params.putIfAbsent('releaseMs', () => 180.0);
     _params.putIfAbsent('drive', () => 0.08);
+  }
+
+  bool _isSampledInstrumentId(String id) {
+    return id.trim().toLowerCase().startsWith('sfz.');
+  }
+
+  String _instrumentCategoryForSpec(Map<String, dynamic> spec) {
+    final explicit = (spec['pickerCategory'] as String?)?.trim();
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final text =
+        '${(spec['id'] as String? ?? '').toLowerCase()} ${(spec['name'] as String? ?? '').toLowerCase()}';
+    if (text.contains('string') ||
+        text.contains('violin') ||
+        text.contains('cello')) {
+      return 'Strings';
+    }
+    if (text.contains('woodwind') ||
+        text.contains('flute') ||
+        text.contains('clarinet') ||
+        text.contains('oboe')) {
+      return 'Woodwinds';
+    }
+    if (text.contains('brass') ||
+        text.contains('horn') ||
+        text.contains('trumpet')) {
+      return 'Brass';
+    }
+    if (text.contains('key') ||
+        text.contains('piano') ||
+        text.contains('organ')) {
+      return 'Keys';
+    }
+    if (text.contains('perc') ||
+        text.contains('marimba') ||
+        text.contains('glock')) {
+      return 'Percussion';
+    }
+    if (text.contains('drum') ||
+        text.contains('808') ||
+        text.contains('kick')) {
+      return 'Drums';
+    }
+    return 'Other';
+  }
+
+  List<String> _instrumentBrowserCategories() {
+    const ordered = <String>[
+      'Keys',
+      'Strings',
+      'Woodwinds',
+      'Brass',
+      'Percussion',
+      'Drums',
+      'Other',
+    ];
+    final available = widget.availableInstruments
+        .map(_instrumentCategoryForSpec)
+        .toSet()
+        .toList(growable: false);
+    return <String>[
+      'All',
+      ...ordered.where(available.contains),
+    ];
+  }
+
+  List<Map<String, dynamic>> _visibleInstrumentSpecs() {
+    final category = _instrumentBrowserCategory;
+    final list = widget.availableInstruments.where((spec) {
+      if (category == 'All') return true;
+      return _instrumentCategoryForSpec(spec) == category;
+    }).toList(growable: false);
+    list.sort((a, b) {
+      final an = (a['name'] as String?) ?? '';
+      final bn = (b['name'] as String?) ?? '';
+      return an.compareTo(bn);
+    });
+    return list;
+  }
+
+  void _setInstrumentFromSpec(Map<String, dynamic> spec) {
+    final id = (spec['id'] as String?)?.trim();
+    if (id == null || id.isEmpty) return;
+    final name = (spec['name'] as String?)?.trim();
+    setState(() {
+      _instrumentId = id;
+      _instrumentName = (name == null || name.isEmpty) ? id : name;
+      _params = Map<String, double>.from(_params)
+        ..addAll({
+          if (spec['outputGain'] is num)
+            'outputGain': (spec['outputGain'] as num).toDouble(),
+          if (spec['attackMs'] is num)
+            'attackMs': (spec['attackMs'] as num).toDouble(),
+          if (spec['releaseMs'] is num)
+            'releaseMs': (spec['releaseMs'] as num).toDouble(),
+        });
+      _ensureDefaultParams();
+    });
+    _queueCommit(immediate: true);
   }
 
   bool _clipDataDiffersFromWidget(AudioTrack previous, AudioTrack next) {
@@ -894,105 +1010,102 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     }
   }
 
-  void _applyPreset(String preset) {
-    const presetValues = <String, Map<String, double>>{
-      'Soft Pad': {
-        'oscillator': 0.0,
-        'cutoffHz': 2100.0,
-        'attackMs': 80.0,
-        'releaseMs': 620.0,
-        'drive': 0.02,
-      },
-      'Pluck': {
-        'oscillator': 3.0,
-        'cutoffHz': 4700.0,
-        'attackMs': 2.0,
-        'releaseMs': 150.0,
-        'drive': 0.08,
-      },
-      'Bass Mono': {
-        'oscillator': 2.0,
-        'cutoffHz': 1200.0,
-        'attackMs': 8.0,
-        'releaseMs': 220.0,
-        'drive': 0.28,
-      },
-      'Bright Lead': {
-        'oscillator': 1.0,
-        'cutoffHz': 6200.0,
-        'attackMs': 4.0,
-        'releaseMs': 190.0,
-        'drive': 0.22,
-      },
-      'Warm Keys': {
-        'oscillator': 0.0,
-        'cutoffHz': 3200.0,
-        'attackMs': 10.0,
-        'releaseMs': 320.0,
-        'drive': 0.06,
-      },
-      'Analog Brass': {
-        'oscillator': 1.0,
-        'cutoffHz': 2800.0,
-        'attackMs': 18.0,
-        'releaseMs': 280.0,
-        'drive': 0.15,
-      },
-      'Cinematic Pad': {
-        'oscillator': 3.0,
-        'cutoffHz': 1900.0,
-        'attackMs': 95.0,
-        'releaseMs': 760.0,
-        'drive': 0.05,
-      },
-    };
-    final values = presetValues[preset];
-    if (values == null) return;
-    setState(() {
-      for (final entry in values.entries) {
-        _params[entry.key] = entry.value;
-      }
-    });
-    _queueCommit(immediate: true);
-  }
-
   Future<void> _showMidiHelpDialog() async {
+    Widget tipCard({
+      required IconData icon,
+      required Color accent,
+      required String title,
+      required String body,
+    }) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: accent, size: 16),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.8,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    body,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12.1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1B2333),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: const Text(
-          'Piano Roll Tips',
+          'Piano Roll Quick Guide',
           style: TextStyle(color: Colors.white),
         ),
-        content: const Column(
+        content: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '1. Tap empty grid to add a note.',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
+            tipCard(
+              icon: Icons.touch_app_rounded,
+              accent: const Color(0xFF7DB4FF),
+              title: 'Create + shape notes',
+              body:
+                  'Tap empty grid to add. Drag to move. Pull right edge to resize.',
             ),
-            SizedBox(height: 6),
-            Text(
-              '2. Drag a note to move it. Drag the right edge to resize.',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
+            const SizedBox(height: 8),
+            tipCard(
+              icon: Icons.select_all_rounded,
+              accent: const Color(0xFF83D4B9),
+              title: 'Select groups quickly',
+              body: 'Hold empty space and drag a box to multi-select notes.',
             ),
-            SizedBox(height: 6),
-            Text(
-              '3. Hold on empty grid and drag for box-select.',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
+            const SizedBox(height: 8),
+            tipCard(
+              icon: Icons.pinch_rounded,
+              accent: const Color(0xFFF7C56D),
+              title: 'Zoom + edit faster',
+              body:
+                  'Pinch with two fingers or use +/- buttons to zoom in time and pitch.',
             ),
-            SizedBox(height: 6),
-            Text(
-              '4. Pinch with two fingers to zoom in X/Y.',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
-            ),
-            SizedBox(height: 6),
-            Text(
-              '5. Use bottom tray for duplicate, delete, length, velocity.',
-              style: TextStyle(color: Colors.white70, fontSize: 13),
+            const SizedBox(height: 8),
+            tipCard(
+              icon: Icons.tune_rounded,
+              accent: const Color(0xFFE78CF3),
+              title: 'Use the bottom tray',
+              body:
+                  'Duplicate, delete, and adjust length/velocity for selected notes.',
             ),
           ],
         ),
@@ -1366,6 +1479,24 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   String _instrumentVisualCategory() {
     final text =
         '${_instrumentId.toLowerCase()} ${_instrumentName.toLowerCase()}';
+    if (text.contains('violin') ||
+        text.contains('cello') ||
+        text.contains('string')) {
+      return 'Strings';
+    }
+    if (text.contains('flute') ||
+        text.contains('clarinet') ||
+        text.contains('oboe') ||
+        text.contains('bassoon') ||
+        text.contains('woodwind')) {
+      return 'Woodwinds';
+    }
+    if (text.contains('marimba') ||
+        text.contains('glock') ||
+        text.contains('timp') ||
+        text.contains('perc')) {
+      return 'Percussion';
+    }
     if (text.contains('drum') ||
         text.contains('808') ||
         text.contains('kick')) {
@@ -1398,6 +1529,12 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   Color _instrumentVisualAccent(String category) {
     switch (category) {
+      case 'Strings':
+        return const Color(0xFF6AA9FF);
+      case 'Woodwinds':
+        return const Color(0xFF4BC6A8);
+      case 'Percussion':
+        return const Color(0xFFF8B55E);
       case 'Drums':
         return const Color(0xFFFF6E6E);
       case 'Bass':
@@ -1419,6 +1556,12 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   IconData _instrumentVisualIcon(String category) {
     switch (category) {
+      case 'Strings':
+        return Icons.multitrack_audio_rounded;
+      case 'Woodwinds':
+        return Icons.air_rounded;
+      case 'Percussion':
+        return Icons.music_note_outlined;
       case 'Drums':
         return Icons.album_rounded;
       case 'Bass':
@@ -1441,50 +1584,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   Widget _buildInstrumentTab() {
     final category = _instrumentVisualCategory();
     final accent = _instrumentVisualAccent(category);
-    const scenes = <Map<String, dynamic>>[
-      {
-        'label': 'Soft Pad',
-        'subtitle': 'Wide + smooth',
-        'icon': Icons.cloud_queue_rounded,
-        'color': Color(0xFF4EC8AA),
-      },
-      {
-        'label': 'Pluck',
-        'subtitle': 'Short + bright',
-        'icon': Icons.flash_on_rounded,
-        'color': Color(0xFFD77EFF),
-      },
-      {
-        'label': 'Bass Mono',
-        'subtitle': 'Punch + low',
-        'icon': Icons.south_rounded,
-        'color': Color(0xFF6ED572),
-      },
-      {
-        'label': 'Bright Lead',
-        'subtitle': 'Forward + sharp',
-        'icon': Icons.whatshot_rounded,
-        'color': Color(0xFFFFA84A),
-      },
-      {
-        'label': 'Warm Keys',
-        'subtitle': 'Round + mellow',
-        'icon': Icons.piano_rounded,
-        'color': Color(0xFF5DAEFF),
-      },
-      {
-        'label': 'Analog Brass',
-        'subtitle': 'Stacked + bold',
-        'icon': Icons.campaign_rounded,
-        'color': Color(0xFFF2C45B),
-      },
-      {
-        'label': 'Cinematic Pad',
-        'subtitle': 'Slow + wide',
-        'icon': Icons.blur_on_rounded,
-        'color': Color(0xFF64C6B9),
-      },
-    ];
+    final sampled = _isSampledInstrumentId(_instrumentId);
+    final categories = _instrumentBrowserCategories();
+    final instruments = _visibleInstrumentSpecs();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
@@ -1499,12 +1601,19 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  accent.withValues(alpha: 0.30),
-                  const Color(0xFF1A2232),
+                  accent.withValues(alpha: 0.34),
+                  const Color(0xFF182335),
                 ],
               ),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(color: accent.withValues(alpha: 0.58)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.20),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
             child: Row(
               children: [
@@ -1535,7 +1644,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                         ),
                       ),
                       Text(
-                        '$category tone controls',
+                        sampled
+                            ? '$category sampled instrument'
+                            : '$category synth controls',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.74),
                           fontSize: 10.8,
@@ -1549,173 +1660,342 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             ),
           ),
           const SizedBox(height: 12),
-          Text(
-            'Scenes',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.86),
-              fontSize: 11.8,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
           SizedBox(
-            height: 86,
+            height: 34,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: scenes.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, index) {
-                final scene = scenes[index];
-                final sceneColor = scene['color'] as Color;
+              itemCount: categories.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 7),
+              itemBuilder: (_, i) {
+                final c = categories[i];
+                final selected = c == _instrumentBrowserCategory;
+                final chipAccent =
+                    _instrumentVisualAccent(c == 'All' ? category : c);
                 return InkWell(
-                  onTap: () => _applyPreset(scene['label'] as String),
-                  borderRadius: BorderRadius.circular(11),
-                  child: Ink(
-                    width: 132,
-                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                    decoration: BoxDecoration(
-                      color: sceneColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(11),
-                      border:
-                          Border.all(color: sceneColor.withValues(alpha: 0.58)),
+                  onTap: () => setState(() => _instrumentBrowserCategory = c),
+                  borderRadius: BorderRadius.circular(999),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    constraints: const BoxConstraints(
+                      minHeight: 30,
+                      minWidth: 72,
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          scene['icon'] as IconData,
-                          color: sceneColor,
-                          size: 16,
-                        ),
-                        const Spacer(),
-                        Text(
-                          scene['label'] as String,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
+                    alignment: Alignment.center,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? chipAccent.withValues(alpha: 0.17)
+                          : Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: selected
+                            ? chipAccent.withValues(alpha: 0.70)
+                            : Colors.white.withValues(alpha: 0.14),
+                      ),
+                    ),
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _instrumentVisualIcon(c == 'All' ? category : c),
+                            size: 12.2,
+                            color: selected ? chipAccent : Colors.white70,
                           ),
-                        ),
-                        Text(
-                          scene['subtitle'] as String,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.62),
-                            fontSize: 10.2,
-                            fontWeight: FontWeight.w500,
+                          const SizedBox(width: 5),
+                          Text(
+                            c,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: selected ? chipAccent : Colors.white70,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              height: 1.0,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 );
               },
             ),
           ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxHeight: 210),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0xFF152032),
+                  Color(0xFF111A28),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.11)),
+            ),
+            child: instruments.isEmpty
+                ? Center(
+                    child: Text(
+                      'No instruments in this category.',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.64),
+                        fontSize: 12,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: instruments.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 1,
+                      thickness: 1,
+                      color: Colors.white.withValues(alpha: 0.06),
+                    ),
+                    itemBuilder: (_, i) {
+                      final spec = instruments[i];
+                      final id = (spec['id'] as String?) ?? '';
+                      final selected = id == _instrumentId;
+                      final name = (spec['name'] as String?) ?? id;
+                      final source = (spec['sourceProject'] as String?) ?? '';
+                      final rowAccent = _instrumentVisualAccent(
+                        _instrumentCategoryForSpec(spec),
+                      );
+                      return Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => _setInstrumentFromSpec(spec),
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? rowAccent.withValues(alpha: 0.14)
+                                  : Colors.transparent,
+                              border: selected
+                                  ? Border(
+                                      left: BorderSide(
+                                        color:
+                                            rowAccent.withValues(alpha: 0.95),
+                                        width: 2.0,
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _instrumentVisualIcon(
+                                    _instrumentCategoryForSpec(spec),
+                                  ),
+                                  size: 14,
+                                  color: selected ? rowAccent : Colors.white54,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12.2,
+                                          fontWeight: selected
+                                              ? FontWeight.w800
+                                              : FontWeight.w600,
+                                        ),
+                                      ),
+                                      if (source.isNotEmpty)
+                                        Text(
+                                          source,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Colors.white
+                                                .withValues(alpha: 0.56),
+                                            fontSize: 10.4,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                if (selected)
+                                  Icon(
+                                    Icons.check_circle_rounded,
+                                    size: 15,
+                                    color: rowAccent.withValues(alpha: 0.92),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
           const SizedBox(height: 12),
-          _instrumentCard(
-            title: 'Oscillator',
-            subtitle: 'Pick the source waveform',
-            child: Row(
+          if (sampled) ...[
+            Row(
               children: [
                 Expanded(
-                  child: _waveformButton(
-                    index: 0,
-                    icon: Icons.radio_button_checked_rounded,
+                  child: _macroSliderCard(
+                    label: 'Output',
                     accent: accent,
+                    value: (_params['outputGain'] ?? 0.72).clamp(0.2, 2.0),
+                    min: 0.2,
+                    max: 2.0,
+                    valueLabelBuilder: (v) => '${(v * 100).round()}%',
+                    onChanged: (v) {
+                      setState(() => _params['outputGain'] = v);
+                      _queueCommit();
+                    },
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: _waveformButton(
-                    index: 1,
-                    icon: Icons.show_chart_rounded,
+                  child: _macroSliderCard(
+                    label: 'Release',
                     accent: accent,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _waveformButton(
-                    index: 2,
-                    icon: Icons.crop_square_rounded,
-                    accent: accent,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _waveformButton(
-                    index: 3,
-                    icon: Icons.change_history_rounded,
-                    accent: accent,
+                    value: (_params['releaseMs'] ?? 520.0).clamp(20.0, 1400.0),
+                    min: 20.0,
+                    max: 1400.0,
+                    valueLabelBuilder: (v) => '${v.round()} ms',
+                    onChanged: (v) {
+                      setState(() => _params['releaseMs'] = v);
+                      _queueCommit();
+                    },
                   ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _macroSliderCard(
-                  label: 'Drive',
-                  accent: accent,
-                  value: (_params['drive'] ?? 0.08).clamp(0.0, 1.0),
-                  min: 0.0,
-                  max: 1.0,
-                  valueLabelBuilder: (v) => '${(v * 100).round()}%',
-                  onChanged: (v) {
-                    setState(() => _params['drive'] = v);
-                    _queueCommit();
-                  },
-                ),
+            const SizedBox(height: 10),
+            _instrumentCard(
+              title: 'Attack',
+              subtitle: 'Sample fade-in to avoid clicks',
+              child: _labeledSlider(
+                label: 'Attack',
+                value: (_params['attackMs'] ?? 6.0).clamp(0.0, 180.0),
+                min: 0.0,
+                max: 180.0,
+                onChanged: (v) {
+                  setState(() => _params['attackMs'] = v);
+                  _queueCommit();
+                },
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _macroSliderCard(
-                  label: 'Cutoff',
-                  accent: accent,
-                  value: (_params['cutoffHz'] ?? 3200.0).clamp(200.0, 12000.0),
-                  min: 200.0,
-                  max: 12000.0,
-                  valueLabelBuilder: (v) => '${v.round()} Hz',
-                  onChanged: (v) {
-                    setState(() => _params['cutoffHz'] = v);
-                    _queueCommit();
-                  },
-                ),
+            ),
+          ] else ...[
+            _instrumentCard(
+              title: 'Oscillator',
+              subtitle: 'Pick the source waveform',
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _waveformButton(
+                      index: 0,
+                      icon: Icons.radio_button_checked_rounded,
+                      accent: accent,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _waveformButton(
+                      index: 1,
+                      icon: Icons.show_chart_rounded,
+                      accent: accent,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _waveformButton(
+                      index: 2,
+                      icon: Icons.crop_square_rounded,
+                      accent: accent,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _waveformButton(
+                      index: 3,
+                      icon: Icons.change_history_rounded,
+                      accent: accent,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _instrumentCard(
-            title: 'Envelope',
-            subtitle: 'Shape note attack and tail',
-            child: Column(
+            ),
+            const SizedBox(height: 10),
+            Row(
               children: [
-                _labeledSlider(
-                  label: 'Attack',
-                  value: (_params['attackMs'] ?? 18.0).clamp(0.0, 300.0),
-                  min: 0.0,
-                  max: 300.0,
-                  onChanged: (v) {
-                    setState(() => _params['attackMs'] = v);
-                    _queueCommit();
-                  },
+                Expanded(
+                  child: _macroSliderCard(
+                    label: 'Drive',
+                    accent: accent,
+                    value: (_params['drive'] ?? 0.08).clamp(0.0, 1.0),
+                    min: 0.0,
+                    max: 1.0,
+                    valueLabelBuilder: (v) => '${(v * 100).round()}%',
+                    onChanged: (v) {
+                      setState(() => _params['drive'] = v);
+                      _queueCommit();
+                    },
+                  ),
                 ),
-                _labeledSlider(
-                  label: 'Release',
-                  value: (_params['releaseMs'] ?? 180.0).clamp(20.0, 1200.0),
-                  min: 20.0,
-                  max: 1200.0,
-                  onChanged: (v) {
-                    setState(() => _params['releaseMs'] = v);
-                    _queueCommit();
-                  },
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _macroSliderCard(
+                    label: 'Cutoff',
+                    accent: accent,
+                    value:
+                        (_params['cutoffHz'] ?? 3200.0).clamp(200.0, 12000.0),
+                    min: 200.0,
+                    max: 12000.0,
+                    valueLabelBuilder: (v) => '${v.round()} Hz',
+                    onChanged: (v) {
+                      setState(() => _params['cutoffHz'] = v);
+                      _queueCommit();
+                    },
+                  ),
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 10),
+            _instrumentCard(
+              title: 'Envelope',
+              subtitle: 'Shape note attack and tail',
+              child: Column(
+                children: [
+                  _labeledSlider(
+                    label: 'Attack',
+                    value: (_params['attackMs'] ?? 18.0).clamp(0.0, 300.0),
+                    min: 0.0,
+                    max: 300.0,
+                    onChanged: (v) {
+                      setState(() => _params['attackMs'] = v);
+                      _queueCommit();
+                    },
+                  ),
+                  _labeledSlider(
+                    label: 'Release',
+                    value: (_params['releaseMs'] ?? 180.0).clamp(20.0, 1200.0),
+                    min: 20.0,
+                    max: 1200.0,
+                    onChanged: (v) {
+                      setState(() => _params['releaseMs'] = v);
+                      _queueCommit();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

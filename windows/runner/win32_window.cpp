@@ -25,6 +25,8 @@ constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 constexpr const wchar_t kGetPreferredBrightnessRegKey[] =
   L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
 constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme";
+constexpr int kMinWindowWidth = 1180;
+constexpr int kMinWindowHeight = 720;
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
@@ -203,6 +205,16 @@ Win32Window::MessageHandler(HWND hwnd,
         // Size and position the child window.
         MoveWindow(child_content_, rect.left, rect.top, rect.right - rect.left,
                    rect.bottom - rect.top, TRUE);
+      }
+      return 0;
+    }
+    case WM_GETMINMAXINFO: {
+      auto* minmax = reinterpret_cast<MINMAXINFO*>(lparam);
+      if (minmax != nullptr) {
+        const UINT dpi = FlutterDesktopGetDpiForHWND(hwnd);
+        const double scale_factor = dpi / 96.0;
+        minmax->ptMinTrackSize.x = Scale(kMinWindowWidth, scale_factor);
+        minmax->ptMinTrackSize.y = Scale(kMinWindowHeight, scale_factor);
       }
       return 0;
     }

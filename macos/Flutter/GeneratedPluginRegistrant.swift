@@ -15,6 +15,8 @@ import flutter_appauth
 import flutter_onnxruntime
 import flutter_webrtc
 import google_sign_in_ios
+import in_app_purchase_storekit
+import juce_audio_engine
 import just_audio
 import open_file_mac
 import package_info_plus
@@ -36,6 +38,8 @@ func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   FlutterOnnxruntimePlugin.register(with: registry.registrar(forPlugin: "FlutterOnnxruntimePlugin"))
   FlutterWebRTCPlugin.register(with: registry.registrar(forPlugin: "FlutterWebRTCPlugin"))
   FLTGoogleSignInPlugin.register(with: registry.registrar(forPlugin: "FLTGoogleSignInPlugin"))
+  InAppPurchasePlugin.register(with: registry.registrar(forPlugin: "InAppPurchasePlugin"))
+  JuceAudioEnginePluginSwift.register(with: registry.registrar(forPlugin: "JuceAudioEnginePluginSwift"))
   JustAudioPlugin.register(with: registry.registrar(forPlugin: "JustAudioPlugin"))
   OpenFilePlugin.register(with: registry.registrar(forPlugin: "OpenFilePlugin"))
   FPPPackageInfoPlusPlugin.register(with: registry.registrar(forPlugin: "FPPPackageInfoPlusPlugin"))

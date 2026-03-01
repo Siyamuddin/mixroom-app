@@ -13,10 +13,16 @@ class HaloKey {
 }
 
 class MixChangeHighlighter {
-  final ValueNotifier<Set<HaloKey>> active = ValueNotifier<Set<HaloKey>>(<HaloKey>{});
+  final ValueNotifier<Set<HaloKey>> active =
+      ValueNotifier<Set<HaloKey>>(<HaloKey>{});
   final Map<HaloKey, Timer> _timers = {};
 
-  void trigger(List<HaloKey> keys, {Duration duration = const Duration(seconds: 5)}) {
+  void trigger(List<HaloKey> keys,
+      {Duration duration = const Duration(seconds: 5)}) {
+    if (keys.isEmpty) {
+      clear();
+      return;
+    }
     final next = {...active.value};
     for (final k in keys) {
       next.add(k);
@@ -32,11 +38,17 @@ class MixChangeHighlighter {
     active.value = next;
   }
 
-  void dispose() {
+  void clear() {
     for (final t in _timers.values) {
       t.cancel();
     }
     _timers.clear();
+    if (active.value.isEmpty) return;
+    active.value = <HaloKey>{};
+  }
+
+  void dispose() {
+    clear();
     active.dispose();
   }
 }

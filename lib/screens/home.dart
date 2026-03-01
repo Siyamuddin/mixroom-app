@@ -4,9 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_neumorphic_plus/flutter_neumorphic.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
-import 'package:mixroom/screens/video_editor2.dart';
+import 'package:mixroom/screens/video_projects.dart';
 import 'package:provider/provider.dart';
-import 'video_editor.dart';
 import 'package:mixroom/widgets/main_drawer.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -287,7 +286,7 @@ class _ModeCard extends StatelessWidget {
         Navigator.push(
           context,
           PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) => VideoEditorScreen2(mode: mode),
+            pageBuilder: (context, animation, secondaryAnimation) => const VideoProjectsScreen(),
             transitionsBuilder: (context, animation, secondaryAnimation, child) {
               const beginScale = 0.96;
               const endScale = 1.0;

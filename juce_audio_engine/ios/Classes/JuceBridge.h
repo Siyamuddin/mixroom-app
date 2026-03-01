@@ -84,6 +84,9 @@
                      notes:(NSArray<NSDictionary *> *)notes
                     params:(NSDictionary<NSString *, NSNumber *> *)params
              sourceTempoBpm:(double)sourceTempoBpm;
++ (BOOL)setLiveMidiInputTargetClipObjC:(NSInteger)clipIndex;
++ (NSArray<NSDictionary *> *)consumeLiveMidiInputEventsObjC;
++ (NSArray<NSDictionary *> *)getConnectedMidiInputDevicesObjC;
 + (void)unloadClipObjC:(NSInteger)clipIndex;
 + (void)setClipGainObjC:(NSInteger)clipIndex gain:(float)gain;
 + (void)muteClipObjC:(NSInteger)clipIndex shouldMute:(BOOL)shouldMute;
@@ -120,6 +123,7 @@
                         toIndex:(NSInteger)toIdx;
 + (NSArray<NSString *> *)getTrackEffectsForRowObjC:(NSInteger)trackRow;
 + (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow;
++ (NSArray<NSString *> *)getTrackEffectInstanceIdsForRowObjC:(NSInteger)trackRow;
 + (NSArray<NSDictionary *> *)getTrackPluginParametersObjC:(NSInteger)row
                                               effectIndex:(NSInteger)effect;
 + (void)setTrackEffectObjC:(NSInteger)trackRow
@@ -157,6 +161,13 @@
 // Automation (rows)
 + (void)setTrackAutomationPointsObjC:(NSInteger)trackRow
                               points:(NSArray<NSDictionary *> *)points;
++ (void)setTrackEffectAutomationPointsObjC:(NSInteger)trackRow
+                                effectIndex:(NSInteger)effectIndex
+                                    paramId:(NSString *)paramId
+                                   minValue:(double)minValue
+                                   maxValue:(double)maxValue
+                                     points:(NSArray<NSDictionary *> *)points;
++ (void)clearTrackEffectAutomationForRowObjC:(NSInteger)trackRow;
 + (void)setAutomationTransportObjC:(double)timeSeconds;
 
 // =======================

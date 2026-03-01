@@ -207,6 +207,16 @@ public:
         parameters.band4Q = apvts.getRawParameterValue("band4Q")->load();
         parameters.band1Bell = apvts.getRawParameterValue("band1Bell")->load();
         parameters.band4Bell = apvts.getRawParameterValue("band4Bell")->load();
+
+        parameters.hpfFreq = clampFrequency(parameters.hpfFreq);
+        parameters.lpfFreq = clampFrequency(parameters.lpfFreq);
+        parameters.band1Freq = clampFrequency(parameters.band1Freq);
+        parameters.band2Freq = clampFrequency(parameters.band2Freq);
+        parameters.band3Freq = clampFrequency(parameters.band3Freq);
+        parameters.band4Freq = clampFrequency(parameters.band4Freq);
+
+        if (parameters.lpfFreq <= parameters.hpfFreq + 10.0f)
+            parameters.lpfFreq = clampFrequency(parameters.hpfFreq + 10.0f);
     }
 
     void prepare(double newSampleRate, int maxBlockSize)
@@ -231,6 +241,14 @@ public:
     }
 
 private:
+    float clampFrequency(float hz) const
+    {
+        constexpr float minHz = 20.0f;
+        const double nyquist = sampleRate > 0.0 ? sampleRate * 0.5 : 22050.0;
+        const float maxHz = (float)juce::jmax((double)minHz + 10.0, nyquist - 50.0);
+        return juce::jlimit(minHz, maxHz, hz);
+    }
+
     void setupHPF()
     {
         if (parameters.hpfBypass)
@@ -605,7 +623,7 @@ public:
     juce::AudioProcessorValueTreeState parameters;
 
 private:
-    Delay delay;
+    class Delay delay;
     const juce::StringArray delaySubdivisions{"16th", "16th Triplet", "16th Dotted",
                                               "8th", "8th Triplet", "8th Dotted", "Quarter", "Quarter Triplet", "Quarter Dotted",
                                               "Half", "Half Triplet", "Half Dotted", "Whole"};
@@ -1563,9 +1581,20 @@ public:
 
     juce::AudioProcessorValueTreeState parameters;
     std::array<float, numOutputs> gainReduction;
+    std::array<float, 5> getMeterStrip() const noexcept
+    {
+        return {
+            0.0f,
+            0.0f,
+            grDb.load(std::memory_order_relaxed),
+            0.0f,
+            0.0f,
+        };
+    }
 
 private:
     LimiterModule limiter;
+    std::atomic<float> grDb{0.0f};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LimiterAudioProcessor)
 };
@@ -1709,9 +1738,20 @@ public:
 
     juce::AudioProcessorValueTreeState parameters;
     std::array<float, numOutputs> gainReduction;
+    std::array<float, 5> getMeterStrip() const noexcept
+    {
+        return {
+            0.0f,
+            0.0f,
+            grDb.load(std::memory_order_relaxed),
+            0.0f,
+            0.0f,
+        };
+    }
 
 private:
     ClipperModule clipper;
+    std::atomic<float> grDb{0.0f};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipperAudioProcessor)
 };

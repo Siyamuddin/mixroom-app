@@ -7,6 +7,19 @@
 
 namespace
 {
+juce::String juceStringFromNSString(NSString *value)
+{
+    if (value == nil)
+        return {};
+    const char *utf8 = [value UTF8String];
+    return utf8 != nullptr ? juce::String::fromUTF8(utf8) : juce::String();
+}
+
+juce::File juceFileFromNSString(NSString *value)
+{
+    return juce::File(juceStringFromNSString(value));
+}
+
 juce::Array<TimelineMidiNote> parseTimelineMidiNotes(NSArray<NSDictionary *> *notes)
 {
     juce::Array<TimelineMidiNote> parsed;
@@ -105,11 +118,11 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
     // [[JuceAudioEnginePlugin sharedInstance] sendFlutterLog:@"✅ Objective-C: Entering loadTrackObjC"];
 
-    // juce::String jucePath([path UTF8String]);
+    // juce::String jucePath = juceStringFromNSString(path);
     // juce::MessageManager::callAsync([idx, jucePath] {
     //     JuceEngine::get().loadTrack((int)idx, juce::File(jucePath));
     // });
-    juce::String jucePath = juce::String::fromUTF8([path UTF8String]);
+    juce::String jucePath = juceStringFromNSString(path);
 
     JuceEngine::get().loadTrack((int)idx, juce::File(jucePath)); // CALL DIRECTLY!
 }
@@ -179,7 +192,7 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
 + (void)insertEffectObjC:(NSInteger)track path:(NSString *)pluginPath
 {
-    juce::String jucePath([pluginPath UTF8String]);
+    juce::String jucePath = juceStringFromNSString(pluginPath);
 
     // Remove juce::MessageManager::callAsync here!
     // Let JuceEngine::insertPluginEffect handle threading internally.
@@ -218,10 +231,10 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
     }
     else if ([value isKindOfClass:[NSString class]])
     {
-        newVal = juce::String([(NSString *)value UTF8String]);
+        newVal = juceStringFromNSString((NSString *)value);
     }
 
-    juce::String juceParam([param UTF8String]);
+    juce::String juceParam = juceStringFromNSString(param);
     juce::MessageManager::callAsync([track, pindex, juceParam, newVal]
                                     { JuceEngine::get().setEffectParameter((int)track, (int)pindex, juceParam, newVal); });
 }
@@ -417,11 +430,11 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
 + (NSString *)exportMixObjC:(NSString *)outPath settings:(NSDictionary *)settings
 {
-    juce::String jucePath([outPath UTF8String]);
+    juce::String jucePath = juceStringFromNSString(outPath);
     JuceEngine::ExportOptions options;
     NSString *format = settings[@"format"];
     if ([format isKindOfClass:[NSString class]] && format.length > 0)
-        options.format = juce::String([format UTF8String]);
+        options.format = juceStringFromNSString(format);
     NSNumber *sampleRate = settings[@"sampleRate"];
     if ([sampleRate isKindOfClass:[NSNumber class]])
         options.sampleRate = [sampleRate doubleValue];
@@ -445,11 +458,11 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 + (NSString *)exportTrackObjC:(NSInteger)track outPath:(NSString *)outPath settings:(NSDictionary *)settings
 {
     juce::String result;
-    juce::String jucePath([outPath UTF8String]);
+    juce::String jucePath = juceStringFromNSString(outPath);
     JuceEngine::ExportOptions options;
     NSString *format = settings[@"format"];
     if ([format isKindOfClass:[NSString class]] && format.length > 0)
-        options.format = juce::String([format UTF8String]);
+        options.format = juceStringFromNSString(format);
     NSNumber *sampleRate = settings[@"sampleRate"];
     if ([sampleRate isKindOfClass:[NSNumber class]])
         options.sampleRate = [sampleRate doubleValue];
@@ -478,13 +491,13 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 {
     mixroom::instruments::InstrumentRenderRequest request;
     request.outFile = juce::File(
-        outPath != nil ? juce::String::fromUTF8([outPath UTF8String])
+        outPath != nil ? juceStringFromNSString(outPath)
                        : juce::String());
     request.instrumentId =
-        instrumentId != nil ? juce::String::fromUTF8([instrumentId UTF8String])
+        instrumentId != nil ? juceStringFromNSString(instrumentId)
                             : juce::String();
     request.instrumentName =
-        instrumentName != nil ? juce::String::fromUTF8([instrumentName UTF8String])
+        instrumentName != nil ? juceStringFromNSString(instrumentName)
                               : juce::String();
     request.bpm = bpm;
 
@@ -547,8 +560,10 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
             for (const auto &desc : types) {
                 NSString *formatName = [NSString stringWithUTF8String:desc.pluginFormatName.toRawUTF8()] ?: @"";
                 // iOS "On Device" tab should expose AudioUnit plugins only.
+#if TARGET_OS_IOS
                 if (formatName.length > 0 && ![formatName isEqualToString:@"AudioUnit"])
                     continue;
+#endif
 
                 NSString *name = [NSString stringWithUTF8String:desc.name.toRawUTF8()] ?: @"";
                 NSString *ident = [NSString stringWithUTF8String:desc.fileOrIdentifier.toRawUTF8()] ?: @"";
@@ -594,7 +609,7 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
     if (pluginPath == nil || pluginPath.length == 0)
         return NO;
 
-    juce::String jucePath([pluginPath UTF8String]);
+    juce::String jucePath = juceStringFromNSString(pluginPath);
     bool success = false;
 
     if (auto *mm = juce::MessageManager::getInstance())
@@ -650,6 +665,17 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
     return out;
 }
 
++ (NSArray<NSString *> *)getTrackEffectInstanceIdsForRowObjC:(NSInteger)trackRow
+{
+    auto ids = JuceEngine::get().getTrackEffectInstanceIdsForRow((int)trackRow);
+    NSMutableArray *out = [NSMutableArray array];
+    for (auto &s : ids)
+    {
+        [out addObject:[NSString stringWithUTF8String:s.toRawUTF8()]];
+    }
+    return out;
+}
+
 + (void)setTrackEffectObjC:(NSInteger)trackRow
                effectIndex:(NSInteger)effectIndex
                    paramId:(NSString *)param
@@ -668,10 +694,10 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
     }
     else if ([value isKindOfClass:[NSString class]])
     {
-        newVal = juce::String([(NSString *)value UTF8String]);
+        newVal = juceStringFromNSString((NSString *)value);
     }
 
-    juce::String juceParam([param UTF8String]);
+    juce::String juceParam = juceStringFromNSString(param);
     juce::MessageManager::callAsync([trackRow, effectIndex, juceParam, newVal]
                                     { JuceEngine::get().setTrackEffectParameter((int)trackRow, (int)effectIndex, juceParam, newVal); });
 }
@@ -726,7 +752,7 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
     if (pluginPath == nil || pluginPath.length == 0)
         return NO;
 
-    juce::String jucePath([pluginPath UTF8String]);
+    juce::String jucePath = juceStringFromNSString(pluginPath);
     bool success = false;
 
     if (auto *mm = juce::MessageManager::getInstance())
@@ -797,10 +823,10 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
     }
     else if ([value isKindOfClass:[NSString class]])
     {
-        newVal = juce::String([(NSString *)value UTF8String]);
+        newVal = juceStringFromNSString((NSString *)value);
     }
 
-    juce::String juceParam([param UTF8String]);
+    juce::String juceParam = juceStringFromNSString(param);
     juce::MessageManager::callAsync([effectIndex, juceParam, newVal]
                                     { JuceEngine::get().setMasterEffectParameter((int)effectIndex, juceParam, newVal); });
 }
@@ -863,7 +889,7 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
 + (void)loadVideoAudioObjC:(NSString *)path
 {
-    juce::String jucePath([path UTF8String]);
+    juce::String jucePath = juceStringFromNSString(path);
     juce::MessageManager::callAsync([jucePath]
                                     { JuceEngine::get().loadVideoAudio(juce::File(jucePath)); });
 }
@@ -894,7 +920,7 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
 + (void)debugPrintGraphObjC:(NSString *)title
 {
-    juce::String juceTitle([title UTF8String]);
+    juce::String juceTitle = juceStringFromNSString(title);
     juce::MessageManager::callAsync([juceTitle]
                                     { JuceEngine::get().debugPrintGraph(juceTitle); });
 }
@@ -914,7 +940,7 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
            lengthSec:(double)lengthSec
      inFileOffsetSec:(double)inFileOffsetSec
 {
-    juce::String jucePath = juce::String::fromUTF8([path UTF8String]);
+    juce::String jucePath = juceStringFromNSString(path);
     JuceEngine::get().loadClip((int)clipIndex,
                                (int)rowId,
                                juce::File(jucePath),
@@ -943,10 +969,10 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
          inFileOffsetSec:(double)inFileOffsetSec
 {
     const juce::String iid =
-        instrumentId != nil ? juce::String::fromUTF8([instrumentId UTF8String])
+        instrumentId != nil ? juceStringFromNSString(instrumentId)
                             : juce::String();
     const juce::String iname =
-        instrumentName != nil ? juce::String::fromUTF8([instrumentName UTF8String])
+        instrumentName != nil ? juceStringFromNSString(instrumentName)
                               : juce::String();
     const auto parsedNotes = parseTimelineMidiNotes(notes);
     const auto parsedParams = parseMidiParams(params);
@@ -975,10 +1001,10 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
             sourceTempoBpm:(double)sourceTempoBpm
 {
     const juce::String iid =
-        instrumentId != nil ? juce::String::fromUTF8([instrumentId UTF8String])
+        instrumentId != nil ? juceStringFromNSString(instrumentId)
                             : juce::String();
     const juce::String iname =
-        instrumentName != nil ? juce::String::fromUTF8([instrumentName UTF8String])
+        instrumentName != nil ? juceStringFromNSString(instrumentName)
                               : juce::String();
     const auto parsedNotes = parseTimelineMidiNotes(notes);
     const auto parsedParams = parseMidiParams(params);
@@ -993,6 +1019,71 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
                                                     parsedParams,
                                                     sourceTempoBpm); });
     return (BOOL)ok;
+}
+
++ (BOOL)setLiveMidiInputTargetClipObjC:(NSInteger)clipIndex
+{
+    bool ok = false;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { ok = JuceEngine::get().setLiveMidiInputTargetClip((int)clipIndex); });
+    return (BOOL)ok;
+}
+
++ (NSArray<NSDictionary *> *)consumeLiveMidiInputEventsObjC
+{
+    std::vector<JuceEngine::LiveMidiInputEvent> events;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { events = JuceEngine::get().consumeLiveMidiInputEvents(); });
+
+    NSMutableArray<NSDictionary *> *out =
+        [NSMutableArray arrayWithCapacity:events.size()];
+    for (const auto &event : events)
+    {
+        [out addObject:@{
+            @"clip" : @(event.clipId),
+            @"type" : event.noteOn ? @"noteOn" : @"noteOff",
+            @"channel" : @(event.channel),
+            @"pitch" : @(event.pitch),
+            @"velocity" : @((double)event.velocity),
+            @"transportSec" : @(event.transportSec),
+        }];
+    }
+    return out;
+}
+
++ (NSArray<NSDictionary *> *)getConnectedMidiInputDevicesObjC
+{
+    NSArray<NSDictionary *> *resultArray = nil;
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([&]
+                     {
+            NSMutableArray<NSDictionary *> *arr = [NSMutableArray array];
+            const auto devices = juce::MidiInput::getAvailableDevices();
+            for (const auto &device : devices)
+            {
+                NSString *identifier =
+                    [NSString stringWithUTF8String:device.identifier.toRawUTF8()] ?: @"";
+                if (identifier.length == 0)
+                    continue;
+
+                NSString *name =
+                    [NSString stringWithUTF8String:device.name.toRawUTF8()] ?: @"";
+                if (name.length == 0)
+                    name = identifier;
+
+                [arr addObject:@{
+                    @"id" : identifier,
+                    @"name" : name,
+                }];
+            }
+            resultArray = [arr copy]; });
+    }
+
+    if (resultArray == nil)
+        resultArray = @[];
+
+    return resultArray;
 }
 
 + (void)unloadClipObjC:(NSInteger)clipIndex
@@ -1052,21 +1143,21 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
 + (NSNumber *)addRowObjC:(NSString *)name iconId:(NSInteger)iconId
 {
-    juce::String n([name UTF8String]);
+    juce::String n = juceStringFromNSString(name);
     int rowId = JuceEngine::get().addRow(n, (int)iconId);
     return @(rowId);
 }
 
 + (NSNumber *)insertRowAboveObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId
 {
-    juce::String n([name UTF8String]);
+    juce::String n = juceStringFromNSString(name);
     int rowId = JuceEngine::get().insertRowAbove((int)referenceRowId, n, (int)iconId);
     return @(rowId);
 }
 
 + (NSNumber *)insertRowBelowObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId
 {
-    juce::String n([name UTF8String]);
+    juce::String n = juceStringFromNSString(name);
     int rowId = JuceEngine::get().insertRowBelow((int)referenceRowId, n, (int)iconId);
     return @(rowId);
 }
@@ -1083,7 +1174,7 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
 + (BOOL)renameRowObjC:(NSInteger)rowId name:(NSString *)name
 {
-    juce::String n([name UTF8String]);
+    juce::String n = juceStringFromNSString(name);
     return (BOOL)JuceEngine::get().renameRow((int)rowId, n);
 }
 
@@ -1141,6 +1232,56 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
                                     { JuceEngine::get().setTrackAutomationPoints((int)trackRow, cppPoints); });
 }
 
++ (void)setTrackEffectAutomationPointsObjC:(NSInteger)trackRow
+                                effectIndex:(NSInteger)effectIndex
+                                    paramId:(NSString *)paramId
+                                   minValue:(double)minValue
+                                   maxValue:(double)maxValue
+                                     points:(NSArray<NSDictionary *> *)points
+{
+    std::vector<AutomationPoint> cppPoints;
+    cppPoints.reserve(points.count);
+
+    for (NSDictionary *dict in points)
+    {
+        AutomationPoint p;
+
+        id xVal = dict[@"x"];
+        id timeMsVal = dict[@"timeMs"];
+        id timeSecondsVal = dict[@"timeSeconds"];
+        id valueVal = dict[@"value"];
+        id volumeVal = dict[@"volume"];
+
+        if ([xVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [xVal doubleValue];
+        else if ([timeMsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeMsVal doubleValue];
+        else if ([timeSecondsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeSecondsVal doubleValue] * 1000.0;
+        else
+            p.timeMs = 0.0;
+
+        if ([valueVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[valueVal doubleValue];
+        else if ([volumeVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[volumeVal doubleValue];
+        else
+            p.value = 0.0f;
+
+        cppPoints.push_back(p);
+    }
+
+    juce::String juceParam = juceStringFromNSString(paramId ?: @"");
+    juce::MessageManager::callAsync([trackRow, effectIndex, juceParam, minValue, maxValue, cppPoints]() mutable
+                                    { JuceEngine::get().setTrackEffectAutomationPoints((int)trackRow, (int)effectIndex, juceParam, (float)minValue, (float)maxValue, cppPoints); });
+}
+
++ (void)clearTrackEffectAutomationForRowObjC:(NSInteger)trackRow
+{
+    juce::MessageManager::callAsync([trackRow]
+                                    { JuceEngine::get().clearTrackEffectAutomationForRow((int)trackRow); });
+}
+
 + (void)setAutomationTransportObjC:(double)timeSeconds
 {
     juce::MessageManager::callAsync([timeSeconds]
@@ -1173,7 +1314,7 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
 + (NSArray<NSNumber *> *)decodeAudioMono16kObjC:(NSString *)path
 {
-    juce::File file([path UTF8String]);
+    juce::File file = juceFileFromNSString(path);
 
     auto samples = JuceEngine::get().decodeAudioMono16k(file);
 
@@ -1187,7 +1328,7 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
 + (NSDictionary<NSString *, NSNumber *> *)analyzeAudioStereo16kObjC:(NSString *)path
 {
-    juce::File file([path UTF8String]);
+    juce::File file = juceFileFromNSString(path);
     auto stats = JuceEngine::get().analyzeAudioStereo16k(file);
 
     return @{
@@ -1210,7 +1351,7 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
 + (BOOL)selectInputDeviceObjC:(NSString *)name
 {
-    juce::String dev([name UTF8String]);
+    juce::String dev = juceStringFromNSString(name);
     return JuceEngine::get().selectInputDevice(dev);
 }
 
@@ -1229,8 +1370,8 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
               channelStart:(NSInteger)start
               channelCount:(NSInteger)count
 {
-    // juce::File f(juce::String([path UTF8String]));
-    juce::String jucePath = juce::String::fromUTF8([path UTF8String]);
+    // juce::File f = juceFileFromNSString(path);
+    juce::String jucePath = juceStringFromNSString(path);
     juce::File f(jucePath);
 
     return JuceEngine::get()
