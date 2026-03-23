@@ -7,6 +7,25 @@ import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 class ExportSaveDialog {
   const ExportSaveDialog._();
 
+  static String buildSuggestedFileName({
+    required String baseName,
+    required String extension,
+  }) {
+    final normalizedBase = baseName
+        .trim()
+        .replaceAll(RegExp(r'[\u0000-\u001F]'), ' ')
+        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'[. ]+$'), '')
+        .trim();
+    final safeBase = normalizedBase.isEmpty ? 'Mixroom Export' : normalizedBase;
+    final safeExtension = extension.trim().replaceFirst(RegExp(r'^\.+'), '');
+    if (safeExtension.isEmpty) {
+      return safeBase;
+    }
+    return '$safeBase.$safeExtension';
+  }
+
   static Future<String?> saveExportedFile({
     required String sourceFilePath,
     required String suggestedFileName,

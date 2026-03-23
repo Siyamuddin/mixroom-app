@@ -7,10 +7,23 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    FileInputStream(localPropertiesFile).use { localProperties.load(it) }
+}
+
+val flutterVersionCode =
+    (localProperties.getProperty("flutter.versionCode") ?: "1").toInt()
+val flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "1.0.0"
+val kakaoNativeAppKey =
+    localProperties.getProperty("kakao.nativeAppKey")
+        ?: "a70f53b706f3290cd916615b82b3feea"
+
 android {
     namespace = "com.mixroom.mixroomapp"
     compileSdk = 36 // Ensure this matches the latest Flutter-supported version
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -25,8 +38,8 @@ android {
         applicationId = "com.mixroom.mixroomapp"
         minSdk = 29
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.0.0"  // ❌ Fixed: versionName must be a String
+        versionCode = flutterVersionCode
+        versionName = flutterVersionName
         multiDexEnabled = true
         
         // Add FFmpeg config
@@ -39,6 +52,9 @@ android {
 
         // for OAuth (youtube upload)
         manifestPlaceholders["appAuthRedirectScheme"] = "com.mixroom.mixroomapp"
+        manifestPlaceholders["kakaoNativeAppKey"] = kakaoNativeAppKey
+        manifestPlaceholders["kakaoCustomScheme"] =
+            if (kakaoNativeAppKey.isBlank()) "kakao" else "kakao$kakaoNativeAppKey"
     }
 
     packagingOptions {

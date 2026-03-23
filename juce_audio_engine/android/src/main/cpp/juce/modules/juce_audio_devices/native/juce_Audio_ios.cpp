@@ -479,66 +479,17 @@ struct iOSAudioIODevice::Pimpl final : public AsyncUpdater
     API_AVAILABLE (ios (18))
     std::optional<double> getSampleRateFromAudioQueue() const
     {
-        AudioStreamBasicDescription stream{};
-        stream.mFormatID = kAudioFormatLinearPCM;
-        stream.mChannelsPerFrame = 2;
-        stream.mBitsPerChannel = 32;
-        stream.mFramesPerPacket = 1;
-        stream.mBytesPerFrame = stream.mChannelsPerFrame * stream.mBitsPerChannel / 8;
-        stream.mBytesPerPacket = stream.mBytesPerFrame * stream.mFramesPerPacket;
-        stream.mFormatFlags = stream.mBitsPerChannel;
-        stream.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger
-                            | kLinearPCMFormatFlagIsBigEndian
-                            | kLinearPCMFormatFlagIsPacked;
-
-        AudioQueueRef audioQueue;
-
-        const auto err = AudioQueueNewOutput (&stream,
-                                              [] (auto, auto, auto) {},
-                                              nullptr,
-                                              nullptr,
-                                              kCFRunLoopCommonModes,
-                                              0,
-                                              &audioQueue);
-
-        if (err != noErr || audioQueue == nullptr)
-        {
-            jassertfalse;
-            return {};
-        }
-
-        const ScopeGuard disposeAudioQueueOnReturn { [&]
-        {
-            AudioQueueDispose (audioQueue, true);
-        }};
-
-        double result{};
-
-        UInt32 size = sizeof (sampleRate);
-        const auto propErr = AudioQueueGetProperty (audioQueue,
-                                                    kAudioQueueDeviceProperty_SampleRate,
-                                                    &result,
-                                                    &size);
-
-        if (propErr != noErr || size != sizeof (result))
-        {
-            jassertfalse;
-            return {};
-        }
-
-        return result;
+        const auto session = [AVAudioSession sharedInstance];
+        const auto sessionRate = (double) session.sampleRate;
+        return sessionRate > 0.0 ? std::optional<double> { sessionRate }
+                                 : std::optional<double> { 44100.0 };
     }
 
     double getSampleRate() const
     {
         const auto session = [AVAudioSession sharedInstance];
-
-        // On iOS 18 the AVAudioSession sample rate is not always accurate but
-        // probing the sample rate via an AudioQueue seems to work reliably
-        if (@available (ios 18, *))
-            return getSampleRateFromAudioQueue().value_or (session.sampleRate);
-
-        return session.sampleRate;
+        const auto sessionRate = (double) session.sampleRate;
+        return sessionRate > 0.0 ? sessionRate : 44100.0;
     }
 
     double trySampleRate (double rate)
@@ -560,6 +511,15 @@ struct iOSAudioIODevice::Pimpl final : public AsyncUpdater
         if (iOSExplicitSampleRates.size() != 0)
         {
             availableSampleRates = Array<double> (iOSExplicitSampleRates);
+            return;
+        }
+
+        if (@available (ios 18, *))
+        {
+            const auto currentRate = getSampleRate();
+            availableSampleRates.clear();
+            availableSampleRates.add (currentRate);
+            sampleRate = currentRate;
             return;
         }
 

@@ -3,10 +3,11 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
-import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mixroom/ffmpeg/ffmpeg.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 class SampleDragData {
   final String filePath;
@@ -36,6 +37,7 @@ class SampleBrowserPanel extends StatefulWidget {
   final Stream<Duration?> previewDurationStream;
   final bool previewPlaying;
   final Future<void> Function(Duration position) onPreviewSeek;
+  final Future<void> Function()? onOpenSystemSettings;
   final VoidCallback? onDragOutsidePanel;
 
   const SampleBrowserPanel({
@@ -54,6 +56,7 @@ class SampleBrowserPanel extends StatefulWidget {
     required this.previewDurationStream,
     required this.previewPlaying,
     required this.onPreviewSeek,
+    this.onOpenSystemSettings,
     this.onDragActivityChanged,
     this.onDragOutsidePanel,
   });
@@ -65,6 +68,8 @@ class SampleBrowserPanel extends StatefulWidget {
 class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   static const Duration _kFolderHoldDelay = Duration(milliseconds: 180);
   static const double _kFolderHoldMoveTolerance = 14.0;
+  static const int _kPreviewWaveformBars = 128;
+  static const int _kPreviewWaveformPcmRate = 8000;
   static const Set<String> _kAudioExtensions = <String>{
     '.wav',
     '.wave',
@@ -87,7 +92,6 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   final Set<String> _durationLoading = <String>{};
   final Map<String, List<double>> _waveformByFile = <String, List<double>>{};
   final Set<String> _waveformLoading = <String>{};
-  final WaveformExtractionController _waveformExtractor = WaveformExtractionController();
 
   String? _selectedRoot;
   String? _previewFocusPath;
@@ -131,7 +135,6 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   @override
   void dispose() {
     _folderHoldTimer?.cancel();
-    _waveformExtractor.stopWaveformExtraction();
     super.dispose();
   }
 
@@ -196,12 +199,20 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     final raw = error.toString();
     final lower = raw.toLowerCase();
     if (lower.contains('permission denied') || lower.contains('operation not permitted')) {
-      return 'This folder is not readable by the app.';
+      return 'Mixroom needs permission to read this folder.';
     }
     if (lower.contains('folder is unavailable') || lower.contains('no such file')) {
       return 'This folder is no longer available.';
     }
     return 'Unable to open this folder.';
+  }
+
+  bool _isPermissionErrorMessage(String? message) {
+    if (message == null) return false;
+    final lower = message.toLowerCase();
+    return lower.contains('media access') ||
+        lower.contains('permission denied') ||
+        lower.contains('operation not permitted');
   }
 
   Future<void> _ensureDirectoryLoaded(String dirPath, {bool force = false}) async {
@@ -290,22 +301,24 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       setState(() {});
     });
     try {
-      final raw = await _waveformExtractor.extractWaveformData(
-        path: filePath,
-        noOfSamples: 96,
-      );
+      final raw = await _extractWaveformWithFfmpeg(filePath);
       if (!mounted) return;
       if (raw.isEmpty) {
         setState(() {
-          _waveformByFile[filePath] = const <double>[];
           _waveformLoading.remove(filePath);
         });
         return;
       }
       final abs = raw.map((e) => e.abs()).toList();
       final maxVal = abs.reduce(math.max);
+      if (maxVal <= 0) {
+        setState(() {
+          _waveformLoading.remove(filePath);
+        });
+        return;
+      }
       final normalized =
-          maxVal <= 0 ? abs.map((_) => 0.0).toList() : abs.map((v) => (v / maxVal).clamp(0.0, 1.0)).toList();
+          abs.map((v) => (v / maxVal).clamp(0.0, 1.0)).toList();
       setState(() {
         _waveformByFile[filePath] = normalized;
         _waveformLoading.remove(filePath);
@@ -313,10 +326,81 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _waveformByFile[filePath] = const <double>[];
         _waveformLoading.remove(filePath);
       });
     }
+  }
+
+  Future<List<double>> _extractWaveformWithFfmpeg(String filePath) async {
+    final tmpDir = await getTemporaryDirectory();
+    final rawPath = p.join(
+      tmpDir.path,
+      'sample_preview_${filePath.hashCode}_${DateTime.now().microsecondsSinceEpoch}.raw',
+    );
+    try {
+      await FFmpegKit.execute(
+        '-v error -i "$filePath" -ac 1 -ar $_kPreviewWaveformPcmRate -f s16le -y "$rawPath"',
+      );
+
+      final rawFile = File(rawPath);
+      if (!await rawFile.exists()) {
+        return const <double>[];
+      }
+      final bytes = await rawFile.readAsBytes();
+      if (bytes.length < 2) {
+        return const <double>[];
+      }
+
+      final totalSamples = bytes.length ~/ 2;
+      if (totalSamples <= 0) {
+        return const <double>[];
+      }
+
+      final out = List<double>.filled(_kPreviewWaveformBars, 0.0, growable: false);
+      for (int i = 0; i < _kPreviewWaveformBars; i++) {
+        int start = (i * totalSamples / _kPreviewWaveformBars).floor();
+        int end = ((i + 1) * totalSamples / _kPreviewWaveformBars).floor();
+        start = start.clamp(0, totalSamples);
+        end = end.clamp(0, totalSamples);
+        if (end <= start) {
+          continue;
+        }
+
+        double sumSq = 0.0;
+        int count = 0;
+        for (int s = start; s < end; s++) {
+          final bi = s * 2;
+          int v = bytes[bi] | (bytes[bi + 1] << 8);
+          if ((v & 0x8000) != 0) {
+            v -= 0x10000;
+          }
+          final sample = v / 32768.0;
+          sumSq += sample * sample;
+          count++;
+        }
+        if (count > 0) {
+          out[i] = math.sqrt(sumSq / count).clamp(0.0, 1.0);
+        }
+      }
+      return _amplifyAndCapWaveform(out);
+    } finally {
+      try {
+        final rawFile = File(rawPath);
+        if (await rawFile.exists()) {
+          await rawFile.delete();
+        }
+      } catch (_) {}
+    }
+  }
+
+  List<double> _amplifyAndCapWaveform(List<double> data) {
+    if (data.isEmpty) return const <double>[];
+    return data.map((v) {
+      final amplified = v * 4.0;
+      if (amplified > 1.0) return 1.0;
+      if (amplified < 0.0) return 0.0;
+      return amplified;
+    }).toList(growable: false);
   }
 
   void _ensureDuration(String filePath) {
@@ -742,6 +826,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
 
     final rootError = _dirErrors[root];
     final rootExists = Directory(root).existsSync();
+    final showSettingsCta =
+        _isPermissionErrorMessage(rootError) && widget.onOpenSystemSettings != null;
     if (!rootExists || rootError != null) {
       return Center(
         child: Padding(
@@ -768,6 +854,11 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                 runSpacing: 8,
                 alignment: WrapAlignment.center,
                 children: [
+                  if (showSettingsCta)
+                    OutlinedButton(
+                      onPressed: widget.onOpenSystemSettings,
+                      child: const Text('Open settings'),
+                    ),
                   OutlinedButton(
                     onPressed: widget.onAddFolder,
                     child: const Text('Pick folder'),

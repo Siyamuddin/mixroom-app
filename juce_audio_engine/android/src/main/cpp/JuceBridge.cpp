@@ -746,6 +746,13 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipPitchJNI(JNIEnv *, jclass
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipReversedJNI(JNIEnv *, jclass, jint clipIndex, jboolean reversed)
+{
+    juce::MessageManager::callAsync([clipIndex, reversed]
+                                    { JuceEngine::get().setClipReversed((int)clipIndex, reversed != JNI_FALSE); });
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipStretchOptionsJNI(JNIEnv *, jclass, jint clipIndex, jdouble tempoRatio, jboolean preservePitch)
 {
     juce::MessageManager::callAsync([clipIndex, tempoRatio, preservePitch]
@@ -1624,6 +1631,18 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_clearTrackEffectAutomationForRow
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowGainAutomationPointsJNI(
+    JNIEnv *env,
+    jclass,
+    jint row,
+    jobject pointsList)
+{
+    auto points = parseAutomationPoints(env, pointsList, 1.0f);
+    juce::MessageManager::callAsync([row, points = std::move(points)]() mutable
+                                    { JuceEngine::get().setRowGainAutomationPoints((int)row, points); });
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowGainJNI(JNIEnv *, jclass, jint row, jfloat gain)
 {
     juce::MessageManager::callAsync([row, gain]
@@ -1644,6 +1663,18 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_isRowMutedJNI(JNIEnv *, jclass, 
     juce::MessageManager::getInstance()->callSync([&]
                                                   { muted = JuceEngine::get().isRowMuted((int)row); });
     return muted.load() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowPanAutomationPointsJNI(
+    JNIEnv *env,
+    jclass,
+    jint row,
+    jobject pointsList)
+{
+    auto points = parseAutomationPoints(env, pointsList, 1.0f);
+    juce::MessageManager::callAsync([row, points = std::move(points)]() mutable
+                                    { JuceEngine::get().setRowPanAutomationPoints((int)row, points); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1731,6 +1762,42 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectBypassStateJNI(JN
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterEffectAutomationPointsJNI(
+    JNIEnv *env,
+    jclass,
+    jint effectIndex,
+    jstring paramId,
+    jdouble minValue,
+    jdouble maxValue,
+    jobject pointsList)
+{
+    const juce::String param = juceStringFromJString(env, paramId);
+    auto points = parseAutomationPoints(env, pointsList, 1.0f);
+    juce::MessageManager::callAsync([effectIndex, param, minValue, maxValue, points = std::move(points)]() mutable
+                                    { JuceEngine::get().setMasterEffectAutomationPoints((int)effectIndex, param, (float)minValue, (float)maxValue, points); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_clearMasterEffectAutomationJNI(
+    JNIEnv *,
+    jclass)
+{
+    juce::MessageManager::callAsync([]
+                                    { JuceEngine::get().clearMasterEffectAutomation(); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterGainAutomationPointsJNI(
+    JNIEnv *env,
+    jclass,
+    jobject pointsList)
+{
+    auto points = parseAutomationPoints(env, pointsList, 1.0f);
+    juce::MessageManager::callAsync([points = std::move(points)]() mutable
+                                    { JuceEngine::get().setMasterGainAutomationPoints(points); });
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterGainJNI(JNIEnv *, jclass, jfloat gain)
 {
     juce::MessageManager::callAsync([gain]
@@ -1742,6 +1809,17 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_muteMasterJNI(JNIEnv *, jclass, 
 {
     juce::MessageManager::callAsync([mute]
                                     { JuceEngine::get().muteMaster(mute != JNI_FALSE); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterPanAutomationPointsJNI(
+    JNIEnv *env,
+    jclass,
+    jobject pointsList)
+{
+    auto points = parseAutomationPoints(env, pointsList, 1.0f);
+    juce::MessageManager::callAsync([points = std::move(points)]() mutable
+                                    { JuceEngine::get().setMasterPanAutomationPoints(points); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1840,6 +1918,35 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getNumInputChannelsJNI(JNIEnv *,
     juce::MessageManager::getInstance()->callSync([&]
                                                   { channels = JuceEngine::get().getNumInputChannels(); });
     return (jint)channels.load();
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingInputsJNI(JNIEnv *env,
+                                                                          jclass,
+                                                                          jint desiredInputChannels,
+                                                                          jstring reason)
+{
+    const juce::String juceReason = reason == nullptr
+                                        ? juce::String("dart")
+                                        : juceStringFromJString(env, reason);
+    std::atomic<bool> ok{false};
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  {
+        ok = JuceEngine::get().prepareRecordingInputs((int)desiredInputChannels,
+                                                      juceReason); });
+    return ok.load() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_refreshAudioRouteJNI(JNIEnv *env,
+                                                                     jclass,
+                                                                     jstring reason)
+{
+    const juce::String juceReason = reason == nullptr
+                                        ? juce::String("dart")
+                                        : juceStringFromJString(env, reason);
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { JuceEngine::get().refreshAudioRouteAsync(juceReason); });
 }
 
 extern "C" JNIEXPORT jdouble JNICALL

@@ -2,8 +2,29 @@
 #include "JuceHeader.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
+#include <atomic>
+#include <cmath>
 
 #define numOutputs 2
+
+namespace mixroom::fx
+{
+inline std::atomic<double> &globalTempoBpm()
+{
+    static std::atomic<double> bpm{120.0};
+    return bpm;
+}
+
+inline void setGlobalTempoBpm(double bpm)
+{
+    globalTempoBpm().store(juce::jlimit(1.0, 400.0, bpm), std::memory_order_relaxed);
+}
+
+inline double getGlobalTempoBpm()
+{
+    return juce::jlimit(1.0, 400.0, globalTempoBpm().load(std::memory_order_relaxed));
+}
+} // namespace mixroom::fx
 
 // using namespace juce;
 
@@ -178,7 +199,21 @@ public:
 
     ~ReverbAudioProcessor() override {}
     const juce::String getName() const override { return "Reverb"; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override
+    {
+        const auto mix = (double)parameters.getRawParameterValue("mix")->load() * 0.01;
+        if (mix <= 0.0001)
+            return 0.0;
+
+        const double roomSize =
+            (double)parameters.getRawParameterValue("roomSize")->load() * 0.01;
+        const double damping =
+            (double)parameters.getRawParameterValue("damping")->load() * 0.01;
+        const double predelaySec =
+            (double)parameters.getRawParameterValue("predelay")->load() / 1000.0;
+        const double decaySec = 0.35 + (roomSize * 7.5) + ((1.0 - damping) * 2.5);
+        return juce::jlimit(0.0, 12.0, predelaySec + decaySec);
+    }
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
     void setCurrentProgram(int) override {}
@@ -643,7 +678,33 @@ public:
 
     ~DelayAudioProcessor() override {}
     const juce::String getName() const override { return "Delay"; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override
+    {
+        const double mix = (double)parameters.getRawParameterValue("mix")->load() * 0.01;
+        if (mix <= 0.0001)
+            return 0.0;
+
+        const double bpm = resolvePlaybackBpm();
+        const double baseDelayMs = resolveDelayTimeMs(bpm);
+        const double stereoWidthMs =
+            (double)parameters.getRawParameterValue("width")->load();
+        const double feedback =
+            juce::jlimit(0.0, 0.999, (double)parameters.getRawParameterValue("feedback")->load() * 0.01);
+        const double repeatGapSec =
+            juce::jmax(0.0, (baseDelayMs + stereoWidthMs) / 1000.0);
+
+        if (repeatGapSec <= 0.0)
+            return 0.0;
+        if (feedback <= 0.0001)
+            return juce::jlimit(0.0, 20.0, repeatGapSec);
+
+        const double repeatsUntilSilent =
+            std::ceil(std::log(0.0005) / std::log(feedback));
+        return juce::jlimit(
+            0.0,
+            20.0,
+            repeatGapSec * juce::jmax(1.0, repeatsUntilSilent));
+    }
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
     void setCurrentProgram(int) override {}
@@ -655,7 +716,54 @@ public:
     juce::AudioProcessorValueTreeState parameters;
 
 private:
+    double resolvePlaybackBpm() const
+    {
+        if (auto *currentPlayHead = getPlayHead())
+        {
+            juce::AudioPlayHead::CurrentPositionInfo info;
+            if (currentPlayHead->getCurrentPosition(info) &&
+                std::isfinite(info.bpm) &&
+                info.bpm >= 1.0 &&
+                info.bpm <= 400.0)
+            {
+                return info.bpm;
+            }
+        }
+
+        return mixroom::fx::getGlobalTempoBpm();
+    }
+
+    double resolveDelayTimeMs(double bpm) const
+    {
+        const bool bpmSync =
+            parameters.getRawParameterValue("bpmSync")->load() >= 0.5f;
+        if (!bpmSync)
+            return (double)parameters.getRawParameterValue("delayTime")->load();
+
+        const int subdivisionIndex = juce::jlimit(
+            0,
+            (int)delaySubdivisionRatios.size() - 1,
+            (int)parameters.getRawParameterValue("subdivisionIndex")->load());
+        return delaySubdivisionRatios[(size_t)subdivisionIndex] * 60000.0 /
+               juce::jlimit(1.0, 400.0, bpm);
+    }
+
     Delay delay;
+    static constexpr std::array<double, 13> delaySubdivisionRatios{
+        0.25,
+        (0.5 / 3.0),
+        0.375,
+        0.5,
+        (1.0 / 3.0),
+        0.75,
+        1.0,
+        (2.0 / 3.0),
+        1.5,
+        2.0,
+        (4.0 / 3.0),
+        3.0,
+        4.0,
+    };
     const juce::StringArray delaySubdivisions{"16th", "16th Triplet", "16th Dotted",
                                               "8th", "8th Triplet", "8th Dotted", "Quarter", "Quarter Triplet", "Quarter Dotted",
                                               "Half", "Half Triplet", "Half Dotted", "Whole"};
@@ -713,10 +821,11 @@ public:
     void process(const juce::dsp::ProcessContextReplacing<float> &context)
     {
         auto upsampleBlock = oversampler.processSamplesUp(context.getInputBlock());
-        for (int channel = 0; channel < numOutputs; channel++)
-        {
-            dryBuffer.copyFrom(channel, 0, upsampleBlock.getChannelPointer(channel), bufferSize);
-        }
+        dryBuffer.clear();
+        const int channels = juce::jmin(numOutputs, (int)upsampleBlock.getNumChannels());
+        const int samples = juce::jmin(dryBuffer.getNumSamples(), (int)upsampleBlock.getNumSamples());
+        for (int channel = 0; channel < channels; channel++)
+            dryBuffer.copyFrom(channel, 0, upsampleBlock.getChannelPointer(channel), samples);
         applyInputFilters(upsampleBlock);
         distortBuffer(upsampleBlock);
         applyDcFilter(upsampleBlock);
@@ -925,6 +1034,9 @@ public:
 
     void process(juce::AudioBuffer<float> &inputBuffer)
     {
+        currentBlockSize = juce::jmin(inputBuffer.getNumSamples(), lowBuffer.getNumSamples());
+        if (currentBlockSize <= 0)
+            return;
         copyToFixedStereoBuffer(inputBuffer, lowBuffer);
         copyToFixedStereoBuffer(inputBuffer, highBuffer);
         applyFilters();
@@ -963,7 +1075,7 @@ private:
 
     void createEnvelope()
     {
-        for (int sample = 0; sample < bufferSize; sample++)
+        for (int sample = 0; sample < currentBlockSize; sample++)
         {
             if (parameters.stereo)
             {
@@ -990,7 +1102,7 @@ private:
     void calculateGainReduction()
     {
         outputGainReduction = {0.0f, 0.0f};
-        for (int sample = 0; sample < bufferSize; sample++)
+        for (int sample = 0; sample < currentBlockSize; sample++)
         {
             for (int channel = 0; channel < numOutputs; channel++)
             {
@@ -1015,31 +1127,34 @@ private:
         {
             // apply compression to high buffer
             juce::FloatVectorOperations::multiply(highBuffer.getWritePointer(channel),
-                                                  compressionBuffer.getReadPointer(channel), bufferSize);
+                                                  compressionBuffer.getReadPointer(channel), currentBlockSize);
             // if wide set, also apply compression to low buffer
             if (parameters.wide)
             {
                 juce::FloatVectorOperations::multiply(lowBuffer.getWritePointer(channel),
-                                                      compressionBuffer.getReadPointer(channel), bufferSize);
+                                                      compressionBuffer.getReadPointer(channel), currentBlockSize);
             }
         }
     }
 
     void writeOutput(juce::AudioBuffer<float> &buffer)
     {
-        for (int channel = 0; channel < numOutputs; channel++)
+        const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
+        const int samples = juce::jmin(currentBlockSize, buffer.getNumSamples());
+        for (int channel = 0; channel < channels; channel++)
         {
             // if listen set, output high only, else sum low and high
-            buffer.copyFrom(channel, 0, highBuffer.getReadPointer(channel), bufferSize);
+            buffer.copyFrom(channel, 0, highBuffer.getReadPointer(channel), samples);
             if (!parameters.listen)
             {
-                buffer.addFrom(channel, 0, lowBuffer.getReadPointer(channel), bufferSize);
+                buffer.addFrom(channel, 0, lowBuffer.getReadPointer(channel), samples);
             }
         }
     }
 
     double sampleRate{0.0};
     int bufferSize{0};
+    int currentBlockSize{0};
     float slope = 1.0f - (1.0f / 4.0f);
     DeEsserParameters parameters;
     std::array<float, numOutputs> compressionLevel{0.0f, 0.0f};
@@ -1495,6 +1610,10 @@ public:
 
     void process(juce::AudioBuffer<float> &inputBuffer)
     {
+        currentBlockSize =
+            juce::jmin(inputBuffer.getNumSamples(), compressionBuffer.getNumSamples());
+        if (currentBlockSize <= 0)
+            return;
         copyToFixedStereoBuffer(inputBuffer, compressionBuffer);
         createEnvelope();
         calculateGainReduction();
@@ -1519,7 +1638,7 @@ private:
 
     void createEnvelope()
     {
-        for (int sample = 0; sample < bufferSize; ++sample)
+        for (int sample = 0; sample < currentBlockSize; ++sample)
         {
             if (parameters.stereo)
             {
@@ -1547,7 +1666,7 @@ private:
     {
         outputGainReduction = {0.0f, 0.0f};
 
-        for (int sample = 0; sample < bufferSize; ++sample)
+        for (int sample = 0; sample < currentBlockSize; ++sample)
         {
             for (int channel = 0; channel < numOutputs; ++channel)
             {
@@ -1570,17 +1689,19 @@ private:
 
     void applyLimiting(juce::AudioBuffer<float> &buffer)
     {
-        for (int channel = 0; channel < numOutputs; ++channel)
+        const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
+        for (int channel = 0; channel < channels; ++channel)
         {
             juce::FloatVectorOperations::multiply(
                 buffer.getWritePointer(channel),
                 compressionBuffer.getReadPointer(channel),
-                bufferSize);
+                currentBlockSize);
         }
     }
 
     double sampleRate{0.0};
     int bufferSize{0};
+    int currentBlockSize{0};
 
     LimiterParameters parameters;
     std::array<float, numOutputs> compressionLevel{0.0f, 0.0f};

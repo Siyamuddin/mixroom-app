@@ -45,9 +45,7 @@ class AuthUserProfile {
     required this.displayName,
     required this.provider,
     required this.emailVerified,
-    required this.useMixroomFor,
     required this.createdAt,
-    this.birthday,
   });
 
   final String userId;
@@ -55,8 +53,6 @@ class AuthUserProfile {
   final String displayName;
   final AuthProviderType provider;
   final bool emailVerified;
-  final DateTime? birthday;
-  final String useMixroomFor;
   final DateTime createdAt;
 
   String get initials {
@@ -77,28 +73,31 @@ class AuthUserProfile {
       'displayName': displayName,
       'provider': provider.value,
       'emailVerified': emailVerified,
-      'birthday': birthday?.toIso8601String(),
-      'useMixroomFor': useMixroomFor,
       'createdAt': createdAt.toIso8601String(),
     };
   }
 
   factory AuthUserProfile.fromJson(Map<String, dynamic> json) {
-    final provider =
-        AuthProviderTypeX.fromValue((json['provider'] ?? '').toString());
+    final rawProvider =
+        (json['provider'] ?? json['auth_provider'] ?? '').toString().trim();
+    final provider = rawProvider.isEmpty
+        ? AuthProviderType.email
+        : AuthProviderTypeX.fromValue(rawProvider);
+    final rawEmail =
+        (json['email'] ?? json['email_address'] ?? '').toString().trim();
     return AuthUserProfile(
-      userId: (json['userId'] ?? '').toString(),
-      email: (json['email'] ?? '').toString(),
-      displayName: (json['displayName'] ?? '').toString(),
+      userId: (json['userId'] ?? json['user_id'] ?? '').toString(),
+      email: rawEmail.toLowerCase(),
+      displayName:
+          (json['displayName'] ?? json['display_name'] ?? '').toString(),
       provider: provider,
       emailVerified: json['emailVerified'] is bool
           ? json['emailVerified'] as bool
-          : provider != AuthProviderType.email,
-      birthday: json['birthday'] == null
-          ? null
-          : DateTime.tryParse(json['birthday'].toString()),
-      useMixroomFor: (json['useMixroomFor'] ?? '').toString(),
-      createdAt: DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
+          : json['email_verified'] is bool
+              ? json['email_verified'] as bool
+              : provider != AuthProviderType.email,
+      createdAt: DateTime.tryParse(
+              (json['createdAt'] ?? json['created_at'] ?? '').toString()) ??
           DateTime.now(),
     );
   }
@@ -109,9 +108,6 @@ class AuthUserProfile {
     String? displayName,
     AuthProviderType? provider,
     bool? emailVerified,
-    DateTime? birthday,
-    bool clearBirthday = false,
-    String? useMixroomFor,
     DateTime? createdAt,
   }) {
     return AuthUserProfile(
@@ -120,8 +116,6 @@ class AuthUserProfile {
       displayName: displayName ?? this.displayName,
       provider: provider ?? this.provider,
       emailVerified: emailVerified ?? this.emailVerified,
-      birthday: clearBirthday ? null : (birthday ?? this.birthday),
-      useMixroomFor: useMixroomFor ?? this.useMixroomFor,
       createdAt: createdAt ?? this.createdAt,
     );
   }

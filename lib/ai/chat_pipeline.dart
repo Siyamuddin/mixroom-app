@@ -11,6 +11,9 @@ import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
 
 class ChatPipeline {
+  static const int _kMaxConversationMessages = 24;
+  static const int _kMaxConversationCharacters = 12000;
+
   final CloudLlmService llm;
   final ProjectStateBuilder projectBuilder;
   final LocalMixingModel mixModel;
@@ -44,6 +47,9 @@ class ChatPipeline {
     List<int> selectedClipIndices = const [],
     int primarySelectedClipIndex = -1,
     int? selectedRowIndex,
+    String automationClipSnapshot = '',
+    String? projectId,
+    String? aiFeature,
     bool autoApplyProposals = false,
   }) async {
     final userText = text.trim();
@@ -86,6 +92,7 @@ class ChatPipeline {
         selectedClipIndices: selectedClipIndices,
         primarySelectedClipIndex: primarySelectedClipIndex,
         selectedRowIndex: selectedRowIndex,
+        automationClipSnapshot: automationClipSnapshot,
       );
 
       // final hasAudio = audioTracks.isNotEmpty;
@@ -101,11 +108,14 @@ class ChatPipeline {
         userText: userText,
         projectSnapshot: snapshot,
         selectionSnapshot: selectionSnapshot,
+        projectId: projectId,
+        aiFeature: aiFeature,
         pendingMix: _pendingMix,
       );
       final llmMeta = <String, dynamic>{
         'tool': llmRes.toolName,
         if (llmRes.toolArgs != null) 'tool_args': llmRes.toolArgs,
+        if (llmRes.meta != null) ...llmRes.meta!,
       };
 
       aiDebugLog(
@@ -130,26 +140,77 @@ class ChatPipeline {
 
       // 2.1b) General DAW editor / tutorial actions (single-chatbar workflow).
       if (llmRes.toolName == 'daw_assistant_actions') {
-        final args = llmRes.toolArgs ?? {};
-        final msg =
-            (args['assistant_message']?.toString().trim().isNotEmpty == true)
-                ? args['assistant_message'].toString().trim()
-                : (llmRes.text?.trim().isNotEmpty == true
-                    ? llmRes.text!.trim()
-                    : "Done.");
+        final rawArgs = Map<String, dynamic>.from(llmRes.toolArgs ?? const {});
+        final List<Map<String, dynamic>> calls = rawArgs['calls'] is List
+            ? (rawArgs['calls'] as List)
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList(growable: false)
+            : <Map<String, dynamic>>[rawArgs];
 
-        final rawActions = (args['actions'] as List?) ?? const [];
+        String msg = '';
+        final List<Map<String, dynamic>> rawActions = <Map<String, dynamic>>[];
+        for (final call in calls) {
+          if (msg.isEmpty &&
+              call['assistant_message']?.toString().trim().isNotEmpty == true) {
+            msg = call['assistant_message'].toString().trim();
+          }
+          final callActions = call['actions'];
+          if (callActions is List) {
+            rawActions.addAll(
+              callActions
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e)),
+            );
+          }
+        }
+        if (msg.isEmpty) {
+          msg = (llmRes.text?.trim().isNotEmpty == true)
+              ? llmRes.text!.trim()
+              : "Done.";
+        }
+
         final assistantActions = rawActions
-            .whereType<Map>()
-            .map((e) => AssistantAction.fromJson(Map<String, dynamic>.from(e)))
+            .map(AssistantAction.fromJson)
             .where((a) => a.type.isNotEmpty)
             .toList(growable: false);
 
+        var conversationAssistantText = msg;
+        var shouldPersistAssistantText = !_hasDirectProjectEditAction(
+          assistantActions,
+        );
+        for (final action in assistantActions) {
+          final type = action.type.trim().toLowerCase();
+          if (type == 'tutorial') {
+            shouldPersistAssistantText = true;
+          }
+          if (type != 'clarify') continue;
+          final data = Map<String, dynamic>.from(action.data);
+          final question = (data['question'] ?? '').toString().trim();
+          if (question.isEmpty) break;
+          final options = (data['options'] as List? ?? const [])
+              .map((e) => e.toString().trim())
+              .where((s) => s.isNotEmpty)
+              .toList(growable: false);
+          conversationAssistantText = options.isEmpty
+              ? question
+              : '$question\n\nOptions: ${options.join(' / ')}';
+          shouldPersistAssistantText = true;
+          break;
+        }
+
         _push('user', userText);
-        _push('assistant', msg);
+        if (shouldPersistAssistantText &&
+            conversationAssistantText.trim().isNotEmpty) {
+          _push('assistant', conversationAssistantText);
+        }
         return ChatPipelineResult.message(
           msg,
-          meta: <String, dynamic>{...llmMeta, 'daw_actions': args},
+          meta: <String, dynamic>{
+            ...llmMeta,
+            'daw_actions':
+                calls.length == 1 ? calls.first : <String, dynamic>{'calls': calls},
+          },
           assistantActions: assistantActions,
         );
       }
@@ -203,29 +264,50 @@ class ChatPipeline {
       //     ? (rawArgs['calls'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList()
       //     : <Map<String, dynamic>>[rawArgs];
 
-      final args = Map<String, dynamic>.from(llmRes.toolArgs!);
+      final rawArgs = Map<String, dynamic>.from(llmRes.toolArgs!);
+      final List<Map<String, dynamic>> calls = rawArgs['calls'] is List
+          ? (rawArgs['calls'] as List)
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList(growable: false)
+          : <Map<String, dynamic>>[rawArgs];
 
-      final List<Map<String, dynamic>> actions = (args['actions'] is List)
-          ? (args['actions'] as List)
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList()
-          : const [];
+      final List<Map<String, dynamic>> actions = <Map<String, dynamic>>[];
+      String assistantMessage = '';
+      bool asksPermission = false;
+      String rawMode = '';
 
-      final String assistantMessage =
-          (args['assistant_message']?.toString().trim().isNotEmpty == true)
-              ? args['assistant_message'].toString().trim()
-              : '';
+      for (final call in calls) {
+        final callActions = call['actions'];
+        if (callActions is List) {
+          actions.addAll(
+            callActions
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e)),
+          );
+        }
+        if (assistantMessage.isEmpty &&
+            call['assistant_message']?.toString().trim().isNotEmpty == true) {
+          assistantMessage = call['assistant_message'].toString().trim();
+        }
+        asksPermission = asksPermission || call['asks_permission'] == true;
+        if (rawMode.isEmpty && call['mode'] != null) {
+          rawMode = call['mode'].toString().toLowerCase();
+        }
+      }
 
-      final bool asksPermission = args['asks_permission'] == true;
+      if (assistantMessage.isEmpty && llmRes.text?.trim().isNotEmpty == true) {
+        assistantMessage = llmRes.text!.trim();
+      }
+      rawMode = rawMode.isEmpty ? 'propose' : rawMode;
 
-      final String rawMode =
-          (args['mode'] ?? 'propose').toString().toLowerCase();
       final bool strict = rawMode == 'execute';
       final modelMeta = <String, dynamic>{
         ...llmMeta,
         'mode': rawMode,
         'assistant_message': assistantMessage,
         'llm_actions': actions,
+        if (calls.length > 1) 'llm_calls': calls,
         'learned_magnitude_enabled': magnitudePredictor.isEnabled,
         'learned_magnitude_ready': magnitudePredictor.isReady,
       };
@@ -248,7 +330,7 @@ class ChatPipeline {
         GoalVector goal;
         try {
           final goalJson = Map<String, dynamic>.from(action['goal'] as Map);
-          goal = GoalVector.fromJson(goalJson, userText: userText);
+          goal = GoalVector.fromJson(goalJson);
         } catch (_) {
           continue; // skip malformed action
         }
@@ -330,13 +412,12 @@ class ChatPipeline {
         'mergedActions=${mergedActions.length} fallbackUsed=$fallbackUsed fallbackReasons=${fallbackReasons.join(",")}',
       );
       if (fallbackUsed) {
-        if (!magnitudePredictor.isEnabled) {
-          mergedNotes
-              .add('Using heuristic magnitudes (learned model disabled).');
-        } else {
-          mergedNotes.add(
-              'Using heuristic magnitudes fallback for this request (${fallbackReasons.join(', ')}).');
-        }
+        aiDebugLog(
+          'pipeline',
+          !magnitudePredictor.isEnabled
+              ? 'learned magnitudes disabled; using heuristic actions'
+              : 'learned magnitudes fallback engaged (${fallbackReasons.join(",")})',
+        );
       }
 
       // We only push user once (your original behavior)
@@ -395,9 +476,7 @@ class ChatPipeline {
 
       msg = _appendNotes(msg, mergedMix.notes);
 
-      if (!asksPermission) {
-        msg = "$msg\n\nApply these changes? (yes / no)";
-      }
+      msg = _appendApprovalHint(msg);
 
       aiDebugLog(
           'pipeline', 'proposal result actions=${mergedMix.actions.length}');
@@ -418,9 +497,21 @@ class ChatPipeline {
 
   /// Call this AFTER your UI successfully applies a mix,
   /// so the assistant remembers what it changed.
-  void recordAppliedMix(MixingResult mix) {
+  void recordAppliedMix(
+    MixingResult mix, {
+    String? visibleAssistantText,
+  }) {
     if (mix.isNoOp || mix.actions.isEmpty) return;
-    final msg = "Applied: ${mix.summary}";
+    final msg = (visibleAssistantText?.trim().isNotEmpty == true)
+        ? visibleAssistantText!.trim()
+        : mix.summary.trim();
+    if (msg.isEmpty) return;
+    final last = _conversation.isNotEmpty ? _conversation.last : null;
+    if (last != null &&
+        last['role'] == 'assistant' &&
+        last['content']?.trim() == msg) {
+      return;
+    }
     _push('assistant', msg);
   }
 
@@ -469,12 +560,77 @@ class ChatPipeline {
     return _roleOverrides.remove(rowIndex) != null;
   }
 
+  void replaceConversation(List<Map<String, String>> conversation) {
+    _conversation
+      ..clear()
+      ..addAll(_trimConversationEntries(conversation));
+  }
+
+  void clearConversation() {
+    _conversation.clear();
+    _pendingMix = null;
+  }
+
   void _push(String role, String content) {
-    _conversation.add({'role': role, 'content': content});
-    const max = 8;
-    if (_conversation.length > max) {
-      _conversation.removeRange(0, _conversation.length - max);
+    final nextEntries = _trimConversationEntries([
+      ..._conversation,
+      {'role': role, 'content': content},
+    ]);
+    _conversation
+      ..clear()
+      ..addAll(nextEntries);
+  }
+
+  List<Map<String, String>> _trimConversationEntries(
+    List<Map<String, String>> entries,
+  ) {
+    final normalized = entries
+        .map((entry) {
+          final role = (entry['role'] ?? '').trim().toLowerCase();
+          final content = (entry['content'] ?? '').trim();
+          if ((role != 'user' && role != 'assistant') || content.isEmpty) {
+            return null;
+          }
+          return <String, String>{
+            'role': role,
+            'content': content,
+          };
+        })
+        .whereType<Map<String, String>>()
+        .toList(growable: false);
+
+    final afterCountLimit = normalized.length > _kMaxConversationMessages
+        ? normalized.sublist(normalized.length - _kMaxConversationMessages)
+        : normalized;
+
+    final kept = <Map<String, String>>[];
+    int totalCharacters = 0;
+
+    for (final entry in afterCountLimit.reversed) {
+      final content = entry['content'] ?? '';
+      final remaining = _kMaxConversationCharacters - totalCharacters;
+      if (remaining <= 0) break;
+      if (content.length > remaining) {
+        if (kept.isEmpty) {
+          kept.add({
+            'role': entry['role'] ?? 'user',
+            'content': _truncateText(content, remaining),
+          });
+        }
+        break;
+      }
+      kept.add(entry);
+      totalCharacters += content.length;
     }
+
+    return kept.reversed.toList(growable: false);
+  }
+
+  String _truncateText(String text, int maxCharacters) {
+    if (maxCharacters <= 0) return '';
+    if (text.length <= maxCharacters) return text;
+    if (maxCharacters == 1) return text.substring(0, 1);
+    return '${text.substring(0, maxCharacters - 1)}…';
   }
 
   bool _isEmptyToolGoal(Map<String, dynamic> args) {
@@ -509,6 +665,39 @@ class ChatPipeline {
     return b.toString().trim();
   }
 
+  String _appendApprovalHint(String base) {
+    final trimmed = base.trim();
+    if (trimmed.isEmpty) {
+      return 'Reply "yes" to apply or "no" to cancel.';
+    }
+
+    final lower = trimmed.toLowerCase();
+    if (lower.contains('reply "yes"') ||
+        lower.contains("reply 'yes'") ||
+        lower.contains('reply yes') ||
+        lower.contains('yes / no') ||
+        lower.contains('apply these changes?')) {
+      return trimmed;
+    }
+
+    return '$trimmed\n\nReply "yes" to apply or "no" to cancel.';
+  }
+
+  bool _hasDirectProjectEditAction(List<AssistantAction> actions) {
+    for (final action in actions) {
+      switch (action.type.trim().toLowerCase()) {
+        case 'clip_edit':
+        case 'effect_edit':
+        case 'automation_edit':
+        case 'midi_compose':
+        case 'stem_separate':
+        case 'role_override':
+          return true;
+      }
+    }
+    return false;
+  }
+
   String _prettyStyle(String s) {
     switch (s) {
       case 'electronic':
@@ -533,14 +722,17 @@ class ChatPipeline {
     return b.toString().trim();
   }
 
-  String _automationTargetsSnapshotForRow(
-    RowState row, {
+  String _automationTargetsSnapshotForEffects(
+    List<EffectState> effects, {
+    List<String> mixTargets = const <String>[],
     int maxFx = 6,
     int maxParamsPerFx = 8,
   }) {
-    final chunks = <String>['volume'];
-    final effects = row.effects.take(maxFx);
-    for (final fx in effects) {
+    final chunks = <String>[
+      for (final target in mixTargets)
+        if (target.trim().isNotEmpty) target.trim(),
+    ];
+    for (final fx in effects.take(maxFx)) {
       final floatParams = fx.parameters
           .where((p) => p.type.trim().toLowerCase() == 'float')
           .take(maxParamsPerFx)
@@ -558,6 +750,32 @@ class ChatPipeline {
       chunks.add('fx${fx.effectIndex}:${fx.name}{$params}');
     }
     return chunks.join(' | ');
+  }
+
+  String _automationTargetsSnapshotForRow(
+    RowState row, {
+    int maxFx = 6,
+    int maxParamsPerFx = 8,
+  }) {
+    return _automationTargetsSnapshotForEffects(
+      row.effects,
+      mixTargets: const <String>['volume'],
+      maxFx: maxFx,
+      maxParamsPerFx: maxParamsPerFx,
+    );
+  }
+
+  String _automationTargetsSnapshotForMaster(
+    ProjectState project, {
+    int maxFx = 6,
+    int maxParamsPerFx = 8,
+  }) {
+    return _automationTargetsSnapshotForEffects(
+      project.masterEffects,
+      mixTargets: const <String>['gain', 'pan'],
+      maxFx: maxFx,
+      maxParamsPerFx: maxParamsPerFx,
+    );
   }
 
   String _projectSnapshot(ProjectState p) {
@@ -610,6 +828,16 @@ class ChatPipeline {
       );
     }
 
+    final masterFx = p.masterEffects.map((e) => e.name).join(', ');
+    final masterAutomationTargets = _automationTargetsSnapshotForMaster(p);
+    b.writeln(
+      'Master: '
+      'gain=${p.masterGain0to3.toStringAsFixed(2)} '
+      'pan=${p.masterPan0to1.toStringAsFixed(2)} '
+      'fx=[${masterFx.isEmpty ? '—' : masterFx}] '
+      'automation_targets=[$masterAutomationTargets]',
+    );
+
     return b.toString().trim();
   }
 
@@ -619,6 +847,7 @@ class ChatPipeline {
     required List<int> selectedClipIndices,
     required int primarySelectedClipIndex,
     required int? selectedRowIndex,
+    String automationClipSnapshot = '',
   }) {
     final out = StringBuffer();
     final validClipIndices =
@@ -627,12 +856,19 @@ class ChatPipeline {
     out.writeln('selected_row_index=${selectedRowIndex ?? -1}');
     out.writeln('selected_clip_indices=${validClipIndices.join(",")}');
     out.writeln('primary_selected_clip_index=$primarySelectedClipIndex');
+    out.writeln(
+      'master_automation_targets=${_automationTargetsSnapshotForMaster(project)}',
+    );
     if (selectedRowIndex != null &&
         selectedRowIndex >= 0 &&
         selectedRowIndex < project.rows.length) {
       final row = project.rows[selectedRowIndex];
       out.writeln(
           'selected_row_automation_targets=${_automationTargetsSnapshotForRow(row)}');
+    }
+    final trimmedAutomationClipSnapshot = automationClipSnapshot.trim();
+    if (trimmedAutomationClipSnapshot.isNotEmpty) {
+      out.writeln(trimmedAutomationClipSnapshot);
     }
 
     final Set<int> requested = {

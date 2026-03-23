@@ -6,12 +6,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:mixroom/config/dev_flags.dart';
+import 'package:mixroom/core/analytics/analytics_service.dart';
+import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
+import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/iap_service.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
-import 'package:mixroom/helpers/subscription_service.dart';
+import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
 
 // import 'package:audio_service/audio_service.dart';
@@ -63,9 +67,11 @@ class MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
+    final providerLocale = context.watch<LocaleProvider>().locale;
+    final effectiveLocale = providerLocale ?? _appLocale;
     return MaterialApp(
       title: 'Mixroom App',
-      locale: L10n.resolveSupportedLocale(_appLocale),
+      locale: L10n.resolveSupportedLocale(effectiveLocale),
       supportedLocales: L10n.supportedLocales,
       localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
         GlobalMaterialLocalizations.delegate,
@@ -77,6 +83,9 @@ class MyAppState extends State<MyApp> {
       },
       debugShowCheckedModeBanner: false,
       navigatorKey: rootNavKey,
+      navigatorObservers: <NavigatorObserver>[
+        SentryNavigatorObserver(),
+      ],
       theme: ThemeData(
         fontFamily: 'Pretendard',
         brightness: Brightness.dark,
@@ -215,6 +224,8 @@ void main() async {
     listenForNativeLogs();
   }
 
+  await PlatformCapabilities.refresh();
+
   if (PlatformCapabilities.current.lockPortraitOrientation) {
     await SystemChrome.setPreferredOrientations(
         [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
@@ -222,18 +233,21 @@ void main() async {
     await SystemChrome.setPreferredOrientations(<DeviceOrientation>[]);
   }
 
-  await PlatformCapabilities.refresh();
+  await AnalyticsService.instance.initialize();
+  await CrashReportingService.instance.initialize();
 
-  // FlutterError.onError = (details) {
-  //   JuceAudioEngine.shutdown();
-  //   FlutterError.dumpErrorToConsole(details);
-  // };
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    unawaited(CrashReportingService.instance.captureFlutterError(details));
+  };
 
   PlatformDispatcher.instance.onError = (error, stack) {
-    // print("it's here bruh");
-    // comment out cuz if export gets cancelled this gets called
-    // JuceAudioEngine.shutdown();
-    // return true to prevent the error from propagating further
+    unawaited(
+      CrashReportingService.instance.captureException(
+        error,
+        stackTrace: stack,
+      ),
+    );
     return true;
   };
 
@@ -242,19 +256,27 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (context) => LocaleProvider()),
         ChangeNotifierProvider(create: (context) => AuthService()),
-        ChangeNotifierProxyProvider<AuthService, SubscriptionService>(
-          create: (_) => SubscriptionService(),
+        ChangeNotifierProxyProvider<AuthService, AppUserService>(
+          create: (_) => AppUserService(),
           update: (_, auth, service) {
-            final next = service ?? SubscriptionService();
+            final next = service ?? AppUserService();
             next.bindAuth(auth);
             return next;
           },
         ),
-        ChangeNotifierProxyProvider<SubscriptionService, IapService>(
+        ChangeNotifierProxyProvider<AuthService, EntitlementService>(
+          create: (_) => EntitlementService(),
+          update: (_, auth, service) {
+            final next = service ?? EntitlementService();
+            next.bindAuth(auth);
+            return next;
+          },
+        ),
+        ChangeNotifierProxyProvider<EntitlementService, IapService>(
           create: (_) => IapService(),
-          update: (_, subscription, service) {
+          update: (_, entitlementService, service) {
             final next = service ?? IapService();
-            next.bindSubscriptionService(subscription);
+            next.bindEntitlementService(entitlementService);
             return next;
           },
         ),
@@ -270,6 +292,6 @@ void main() async {
 void listenForNativeLogs() {
   const logEvents = EventChannel('juce_audio_engine/logs');
   logEvents.receiveBroadcastStream().listen((event) {
-    print('[JUCE DEBUG] ${event['message']}');
+    debugPrint('[JUCE DEBUG] ${event['message']}');
   });
 }

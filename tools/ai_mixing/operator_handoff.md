@@ -37,6 +37,16 @@ python3 tools/ai_mixing/validate_feature_contract.py
 You should see:
 `[OK] Feature contract verified (...)`
 
+Optional quick summary before training:
+```bash
+python3 tools/ai_mixing/summarize_sessions.py \
+  --sessions-dir /path/to/ai_mixing_sessions
+```
+
+Note:
+- This collection flow is already full-project based.
+- Each dataset row is an AI action extracted from a full-project snapshot, so multiple prompt cycles on one song still count as full-project supervision.
+
 ---
 
 ## 3) Run Full Pipeline (One Command)
@@ -56,6 +66,22 @@ What this does:
 4. Evaluate models
 5. Export ONNX
 6. Copy ONNX into `assets/models/`
+
+---
+
+## 3B) Full-Project Bootstrap Path
+
+If you do not have enough producer session JSON yet, but you do have finished
+human-made Mixroom projects, use:
+
+```bash
+bash tools/ai_mixing/run_project_bootstrap.sh \
+  --projects-root /path/to/mixroom_projects \
+  --copy-assets
+```
+
+Use this only as a bootstrap path for internal beta. Producer-capture session
+data remains the higher-quality supervision source.
 
 ---
 

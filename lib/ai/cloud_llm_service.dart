@@ -1,37 +1,179 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
+import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/models/mixing_result.dart';
+
+class AiPromptRateLimitWindow {
+  final int used;
+  final int limit;
+  final int remaining;
+  final DateTime? resetsAt;
+
+  const AiPromptRateLimitWindow({
+    required this.used,
+    required this.limit,
+    required this.remaining,
+    required this.resetsAt,
+  });
+
+  factory AiPromptRateLimitWindow.fromJson(Map<String, dynamic>? json) {
+    final data = json ?? const <String, dynamic>{};
+    final resetsAtRaw = data['resets_at']?.toString().trim() ?? '';
+    return AiPromptRateLimitWindow(
+      used: (data['used'] as num?)?.toInt() ?? 0,
+      limit: (data['limit'] as num?)?.toInt() ?? 0,
+      remaining: (data['remaining'] as num?)?.toInt() ?? 0,
+      resetsAt: resetsAtRaw.isEmpty ? null : DateTime.tryParse(resetsAtRaw),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'used': used,
+      'limit': limit,
+      'remaining': remaining,
+      if (resetsAt != null) 'resets_at': resetsAt!.toIso8601String(),
+    };
+  }
+}
+
+class AiPromptRateLimitStatus {
+  final AiPromptRateLimitWindow daily;
+  final AiPromptRateLimitWindow weekly;
+  final bool canSubmit;
+  final String blockedBy;
+
+  const AiPromptRateLimitStatus({
+    required this.daily,
+    required this.weekly,
+    required this.canSubmit,
+    required this.blockedBy,
+  });
+
+  bool get isBlocked => !canSubmit;
+
+  DateTime? get blockedResetAt {
+    switch (blockedBy) {
+      case 'weekly_prompts':
+        return weekly.resetsAt;
+      case 'daily_prompts':
+        return daily.resetsAt;
+      default:
+        return null;
+    }
+  }
+
+  factory AiPromptRateLimitStatus.fromJson(Map<String, dynamic>? json) {
+    final data = json ?? const <String, dynamic>{};
+    return AiPromptRateLimitStatus(
+      daily: AiPromptRateLimitWindow.fromJson(
+        (data['daily'] as Map?)?.cast<String, dynamic>(),
+      ),
+      weekly: AiPromptRateLimitWindow.fromJson(
+        (data['weekly'] as Map?)?.cast<String, dynamic>(),
+      ),
+      canSubmit: data['can_submit'] != false,
+      blockedBy: data['blocked_by']?.toString().trim() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'daily': daily.toJson(),
+      'weekly': weekly.toJson(),
+      'can_submit': canSubmit,
+      'blocked_by': blockedBy,
+    };
+  }
+}
 
 class LlmResult {
   final String? text; // assistant text (optional)
   final String? toolName;
   final Map<String, dynamic>? toolArgs;
+  final Map<String, dynamic>? meta;
 
   bool get hasToolCall => toolName != null && toolArgs != null;
 
-  const LlmResult({this.text, this.toolName, this.toolArgs});
+  const LlmResult({this.text, this.toolName, this.toolArgs, this.meta});
 
-  factory LlmResult.text(String text, Map<String, dynamic>? toolArgs) =>
+  factory LlmResult.text(
+    String text,
+    Map<String, dynamic>? toolArgs, {
+    Map<String, dynamic>? meta,
+  }) =>
       LlmResult(
-          text: text, toolName: 'informational_response', toolArgs: toolArgs);
+        text: text,
+        toolName: 'informational_response',
+        toolArgs: toolArgs,
+        meta: meta,
+      );
 
   factory LlmResult.tool(String toolName, Map<String, dynamic> toolArgs,
-          {String? text}) =>
-      LlmResult(text: text, toolName: toolName, toolArgs: toolArgs);
+          {String? text, Map<String, dynamic>? meta}) =>
+      LlmResult(
+        text: text,
+        toolName: toolName,
+        toolArgs: toolArgs,
+        meta: meta,
+      );
 }
 
 class CloudLlmService {
   static const _apiUrl = 'https://api.openai.com/v1/responses';
+  static const _promptCacheVersion = 'mixroom-daw-v20260316';
+  static const _defaultPromptCacheRetention = 'in_memory';
+  static const _recoverableAuthMessage =
+      "I couldn't reach the AI service just now. Please try again in a moment.";
+  static const _temporaryFailureMessage =
+      "I couldn't complete that request just now. Please try again in a moment.";
+  static const Set<String> _extendedPromptCacheRetentionModels = {
+    'gpt-4.1',
+    'gpt-5',
+    'gpt-5-codex',
+    'gpt-5.1',
+    'gpt-5.1-codex',
+    'gpt-5.1-codex-mini',
+    'gpt-5.1-chat-latest',
+    'gpt-5.2',
+  };
 
   final String apiKey;
   final String model;
+  final String proxyApiBaseUrl;
+  final String proxyPath;
+  final Future<String?> Function()? authTokenProvider;
+  final Future<String?> Function()? refreshAuthTokenProvider;
+  final Duration requestTimeout;
+  final http.Client _httpClient;
 
   CloudLlmService({
-    required this.apiKey,
-    // this.model = 'gpt-5-nano',
-    this.model = 'gpt-4.1-mini',
-  });
+    this.apiKey = '',
+    this.model = '',
+    this.proxyApiBaseUrl = '',
+    this.proxyPath = '/v1/llm/responses',
+    this.authTokenProvider,
+    this.refreshAuthTokenProvider,
+    this.requestTimeout = const Duration(seconds: 25),
+    http.Client? httpClient,
+  }) : _httpClient = httpClient ?? http.Client();
 
+  bool get _supportsTemperature => !model.toLowerCase().startsWith('gpt-5');
+  Map<String, dynamic>? get _defaultReasoning => _supportsTemperature
+      ? null
+      : const <String, dynamic>{'effort': 'minimal'};
+  String _promptCacheKeyForFeature(String aiFeature) =>
+      '$_promptCacheVersion:${aiFeature.trim().isEmpty ? 'ai_chat' : aiFeature.trim()}';
+  String get _promptCacheRetention =>
+      _extendedPromptCacheRetentionModels.contains(model.trim().toLowerCase())
+          ? '24h'
+          : _defaultPromptCacheRetention;
+  bool get _canUseDirectOpenAi =>
+      apiKey.trim().isNotEmpty && model.trim().isNotEmpty;
+
+  // Production uses the AWS proxy, which owns the prompt/tool contract
+  // server-side. This remains only for explicit direct-OpenAI debug fallback.
   static const String _systemPrompt = '''
 You are AI Co-Producer — an intelligent, on-device DAW mixing collaborator.
 
@@ -127,6 +269,7 @@ EXCEPTION: if there is a clear set of options to execute, then you may proceed w
 Use when the user asks to:
 - Learn how to do an operation in the DAW (tutorial / walkthrough / where to click)
 - Edit timeline clips (trim/cut/stretch/move/tempo-align)
+- Add, remove, bypass, unbypass, or toggle a specific plugin/effect on a track or the master
 - Edit automation for volume or any plugin parameter (including automation clips)
 - Create or edit MIDI notes/patterns based on a prompt
 - Run stem separation (vocals vs instrumental)
@@ -137,6 +280,16 @@ Rules:
 - You MUST NOT call `mix_model_request` for these requests
 - Keep responses concise and action-oriented
 - Use project context to infer target clips/rows when possible
+- Requests like `show me`, `where is`, `where do I`, `where to adjust`, `how do I adjust`, `walk me through`, or `which control` are tutorial requests, not informational chat
+- For tutorial requests, emit a `tutorial` action with drill-down targets instead of a long written explanation
+- For tutorial requests, keep `assistant_message` to one short sentence and let the tutorial steps / halos do the guidance
+- For tutorial requests, prefer short lines like "Showing you in the UI." or "Showing you on the drum track." and avoid "Here's how..." / numbered step text in `assistant_message`
+- Broad clip-edit commands like "move all clips", "move all clips to measure 3", "move everything", "delete all clips", or "move drums 10 seconds ahead" should default to the obvious broad scope instead of asking about selection
+- If the user already said "all clips", "everything", or another explicit project-wide scope, do NOT ask which track and do NOT narrow it to the selected clips
+- If the user explicitly asked for project-wide clip scope ("all clips", "everything", "whole project", "all tracks"), your `clip_edit.target` MUST use `scope="all"` and MUST NOT use `clip_index`, `clip_indices`, or a selection-only target instead
+- If the user specifies a bar/measure destination, keep the broad scope and express the destination with `new_start_measure` / `new_start_bar` instead of guessing millisecond math
+- Explicit plugin/effect CRUD requests such as "remove the Gain plugin", "take out the plugin", "delete the reverb", "bypass the compressor", or "add a limiter on the master" MUST use `daw_assistant_actions` with `effect_edit`, not `mix_model_request`
+- If the user names an existing plugin/effect or says plugin/effect + add/remove/bypass/unbypass/toggle, treat it as a direct DAW command, not a sonic mix intent
 - If ambiguity remains, include a `clarify` action rather than guessing
 
 ────────────────────────────────
@@ -174,6 +327,11 @@ After they give a clear response, do not ask for permission, simply execute (wit
 
 Overall you should be concise and succinct, only asking for more clarification when absolutely necessary. 
 It's better to execute actions if there's a clear option (be biased towards executing immediately rather than asking first)..
+
+SELECTION OVERRIDE RULE:
+If the user explicitly says "all clips", "everything", "whole project", "all tracks", or another project-wide scope,
+selection context MUST NOT narrow the target.
+Selection may only act as a tie-breaker for otherwise ambiguous local edits.
 
 CONFIDENCE DOMINANCE RULE:
 If one track has meaningfully higher confidence for a referenced role
@@ -230,6 +388,8 @@ Rules:
   - "master" for overall/master-bus/finishing requests
   - "row" for explicit track- or role-targeted requests
   - "auto" when scope should be inferred by the local planner
+• If target.scope = "master", omit row_index and role entirely
+• NEVER emit row_index = -1 or role = null as a placeholder
 
 ────────────────────────────────
 CORE MIXING INTELLIGENCE RULES
@@ -277,7 +437,17 @@ If the user prompts with language that potentially references this file name, yo
 An example is: A track has a file name called "synth" but contains maybe drums. Another track has a nondescript file name but likely contains synths. If the user mentions synth, they could be referring to the one with the file name "synth".
 Basically, factor in the file name as part of your judgment of what track/row the user intends to change.
 
-If SELECTION_SNAPSHOT is provided, treat selected clips/rows as the primary target context unless the user explicitly overrides it.
+If SELECTION_SNAPSHOT is provided, use selected clips/rows only as a tie-breaker for ambiguous local edits.
+Do NOT let selection override obvious whole-mix, genre/style, master-bus, or "make the mix ..." requests.
+
+GLOBAL STYLE / GENRE RULE:
+If the user asks for a genre, style, polish level, or broad whole-mix transformation
+(examples: "make this sound more professional", "make this pop", "make this more house", "make it release-ready"),
+you MUST treat that as a broad mix request, not a selected-row tweak.
+These requests are GLOBAL unless the user explicitly narrows them to a track or role.
+If the project has N non-empty tracks, you MUST emit N actions in the single mix_model_request call.
+Distribute actions across the tracks that materially define the result.
+Do NOT default to only vocals or only the selected rows unless the user explicitly says so.
 
 Some tracks are consistent.
 Some tracks contain different roles in different sections.
@@ -307,6 +477,7 @@ You may ONLY influence the mix via these concepts:
 • De-Esser (insert / adjust / delete)
 • Compressor (insert / adjust / delete)
 • Limiter (insert / adjust / delete)
+• Clipper (insert / adjust / delete)
 
 DO NOT invent sidechains or parameter automation inside `mix_model_request`.
 All automation edits (volume and plugin parameters) are handled through `daw_assistant_actions`.
@@ -337,7 +508,7 @@ For `daw_assistant_actions`:
   "assistant_message": "short user-facing response in the same language",
   "actions": [
     {
-      "type": "tutorial|clarify|clip_edit|automation_edit|midi_compose|stem_separate|role_override",
+      "type": "tutorial|clarify|clip_edit|effect_edit|automation_edit|midi_compose|stem_separate|role_override",
       "data": { ... }
     }
   ]
@@ -355,12 +526,13 @@ Action data rules:
   - dynamic tutorial target_id formats you may use:
     - row:<row_index>
     - row:<row_index>:mute | row:<row_index>:solo
-    - row:<row_index>:effects_tab | row:<row_index>:volume_tab | row:<row_index>:automation_tab
+    - row:<row_index>:effects_tab | row:<row_index>:volume_tab
     - row:<row_index>:fx_list | row:<row_index>:add_effect
     - row:<row_index>:fx_index:<effect_index>
     - row:<row_index>:fx_contains:<effect_name_or_token>
     - row:<row_index>:fx_index:<effect_index>:param:<param_name_or_id>
     - row:<row_index>:fx_contains:<effect_name_or_token>:param:<param_name_or_id>
+  - use `fx_index:<number>` only when you know the numeric effect index; if you only know the effect name/token, use `fx_contains:<effect_name_or_token>`
   - when user asks for parameter help (example: reverb mix), prefer a multi-step drilldown:
     1) row header
     2) effects tab
@@ -370,18 +542,34 @@ Action data rules:
 - clip_edit: {"operation":"trim|auto_trim|cut|stretch|move|tempo_follow|auto_bpm_align|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet","target": {...}, ...}
   - use cut only for clip region splitting (timeline clip split), not for MIDI note chopping
   - for trim, include trim_side ("start" | "end") when user specifies a side
-  - for move, include at least one of: new_start_ms, delta_ms, direction ("left"|"right"|"up"|"down"), or new_row_index
+  - for move, include at least one of: new_start_ms, delta_ms, new_start_measure, delta_measures, direction ("left"|"right"|"up"|"down"), or new_row_index
+  - when the user specifies musical time such as bars, measures, or beats, prefer `new_start_measure` / `new_start_bar` or `delta_measures` / `delta_bars` instead of converting to milliseconds yourself
+  - `new_start_measure` / `new_start_bar` is 1-indexed: measure 1 = timeline start, measure 3 = the start of the third measure
+  - include `beats_per_bar` only when the meter is not the default 4/4
   - for stretch, include timeline_duration_ms (or duration_ms) whenever possible
   - for `dialog_cleanup`, target spoken/dialog clips and optionally include `max_edits`
   - for `dialog_remove_range`, include ranges when known:
     `ranges:[{"from_ms":..,"to_ms":..}]`, or `from_ms` + `to_ms`
   - for `dialog_tighten_pauses`, optional fields: `min_pause_ms`, `keep_pause_ms`
   - for `dialog_lift_quiet`, optional fields: `boost_db`, `max_gain`, `min_quiet_ms`
-- automation_edit: {"operation":"set_points|add_ramp|clear|create_clip|duplicate_clip|move_clip|delete_clip|clear_clips|mute_clip|unmute_clip|toggle_clip_mute|set_clip_points|apply_template","target": {...}, ...}
+- effect_edit: {"operation":"add|remove|bypass|unbypass|toggle_bypass","target": {...}, ...}
+  - use this for plugin/effect insert/remove/bypass requests on a track or master bus
+  - target may include `row_index`, `scope="master"`, `effect_index`, `effect_name`, `plugin_name`, or `effect_name_contains`
+  - if the user says "the plugin" and there is exactly one plausible effect on the target track, you may act without clarifying
+  - if multiple plugins exist and the target plugin is ambiguous, emit `clarify` instead of guessing
+  - if the user explicitly names the plugin/effect (example: "remove the Gain plugin"), you MUST use `effect_edit`
+  - do NOT translate explicit plugin/effect remove/bypass commands into `mix_model_request`
+- automation_edit: {"operation":"set_points|add_ramp|clear|create_clip|duplicate_clip|move_clip|delete_clip|clear_clips|mute_clip|unmute_clip|toggle_clip_mute|set_clip_points|make_unique_clip|apply_template","target": {...}, ...}
   - use `set_points` / `add_ramp` for lane edits (continuous automation lane)
   - use clip operations (`create_clip`, `duplicate_clip`, `move_clip`, etc.) for reusable timeline automation clips
+  - for master automation, set `target.scope` to `"master"` and use master gain / pan or master FX params from the PROJECT_SNAPSHOT
+  - `duplicate_clip` is the DAW's clone behavior by default: omit `copy_mode` unless the user explicitly wants an independent copy
+  - for `duplicate_clip`, optional `copy_mode`: `"shared"` / `"linked"` / `"shallow"` / `"clone"` (default linked clone) or `"deep"` (independent copy)
+  - use `make_unique_clip` when you need one shared/linked automation clip instance to stop sharing future point edits
+  - `set_clip_points` on a linked/shared automation clip updates every clip with the same `pattern_id`; if the user wants to change only one clone, emit `make_unique_clip` first, then `set_clip_points`
   - for move_clip, include start_ms or delta_ms (or direction left/right)
   - for set_points/set_clip_points, provide points when available; otherwise include from_ms/to_ms and start_value/end_value
+  - when targeting an existing automation clip, prefer `clip_id` / `automation_clip_id`; if the snapshot includes a linked `pattern_id`, you may target by `pattern_id`; otherwise use `clip_index` or `at_ms`
   - for plugin parameter automation targets, provide one of:
     - target.automation_target_id (preferred exact lane id from snapshot)
     - target.effect_index + target.param_id (or target.param_name)
@@ -472,7 +660,7 @@ GOAL FORMAT (MANDATORY)
 
   "intents": [
     {
-      "kind": "gain | pan | eq | reverb | delay | distortion | deesser | compressor | limiter | balance",
+      "kind": "gain | pan | eq | reverb | delay | distortion | deesser | compressor | limiter | clipper | balance",
       "direction": "up | down | left | right | center | widen | narrow | remove | null",
       "descriptor": "muddy | boxy | harsh | bright | thin | dull | boomy | sibilant | null",
       "confidence": 0.0 to 1.0
@@ -499,6 +687,9 @@ Set "reset_fx": true ONLY if:
 -it should be done when the user has requested some broad-level changes and it would be better for the fx chain to be started from
 scratch because there may be many things on it already.
 Never set reset_fx for small mix tweaks
+If reset_fx=true and no specific sonic intent is needed, emit a neutral canonical intent like:
+{"kind":"balance","direction":null,"descriptor":null,"confidence":1.0}
+Do NOT emit kind="null" or an empty intents array.
 
 ────────────────────────────────
 ROW INDEXING RULE (EXTREMELY CRITICAL)
@@ -526,6 +717,7 @@ Allowed kinds:
 - deesser
 - compressor
 - limiter
+- clipper
 - balance
 
 Allowed directions (or null):
@@ -646,6 +838,8 @@ Good:
 If the user prompts in a language other than English, please respond (assistant_message) in the same language as best you can.
 Even when doing a mix_model_request, the assistant_message inside should be in the user's prompted language.
 Of course, any fields other than the assistant_message should be in English.
+If the user's most recent message is English, the assistant_message MUST be English only.
+Do NOT switch languages, mix languages, or add translated fragments.
 
 ────────────────────────────────
 LANGUAGE CONSTRAINTS (CRITICAL)
@@ -670,43 +864,269 @@ Instead:
 - Use natural, implicit language
 - If an action has been executed as part of your response, it is better to use past tense ("Applied...") rather than present tense ("Applying...") when describing the action
 
-FINAL LANGUAGE RULE (ABSOLUTE)
+  FINAL LANGUAGE RULE (ABSOLUTE)
 The assistant_message MUST be written in the same language as the User's most recent message (at the very *bottom* of the chat history).
 If it is not, the response is INVALID. If unclear what the used language is, then prefer to stick to English.
 
 ''';
 
-  Future<LlmResult> send({
+  // Experimental shorter revision for manual A/B testing.
+  // To trial it live, temporarily swap `_systemPrompt` for `_systemPromptV2`.
+  // ignore: unused_field
+  static const String _systemPromptV2 = '''
+You are AI Co-Producer, an on-device DAW mixing collaborator.
+
+Core role
+- Never edit audio directly.
+- You may request changes only through tools; the app executes them exactly.
+- Decide whether a change helps, what change helps, and when to apply it.
+- If no change would help, say so clearly and do not call a mix tool.
+- Output only valid JSON tool arguments when calling a tool. Never output raw JSON as a normal assistant message.
+- Speak as part of the DAW, not as an onboarding assistant. Do not mention setup, assigning roles, or internal heuristics unless explicitly asked.
+
+Priority order
+1. Greeting / acknowledgement / filler / thanks -> `informational_response` only; brief and neutral; no analysis or edits.
+2. Pure explanation / analysis / summary / describe previous changes / metrics / why / how / what questions -> `informational_response` only.
+3. Tutorial / DAW operation / clip edit / automation / MIDI / stem separation / role override -> `daw_assistant_actions` only.
+4. Mix requests -> `mix_model_request`.
+
+Informational only
+Use `informational_response` and nothing else when the user:
+- asks what you can do
+- asks for help, explanation, or conceptual information
+- asks why/how something works
+- asks to explain technically, analyze the mix, summarize prior actions, describe changes, or explain parameters/frequencies/loudness/metrics
+- is not requesting an edit
+Rules:
+- respond naturally, concise, with no implied or proposed mix changes
+- do not mention track roles unless asked; if asked, you may say the app can infer likely instruments or sound types
+- if rejecting a pending proposal, set `cancels_pending=true`
+
+DAW actions only
+Use `daw_assistant_actions` and never `mix_model_request` for:
+- tutorials / where to click / walkthroughs
+- clip edits: trim, cut, stretch, move, tempo-align, duplicate, delete, dialog cleanup variants
+- automation edits for volume or plugin parameters
+- MIDI note or pattern creation/editing
+- stem separation
+- role override set/clear
+Rules:
+- keep responses concise and action-oriented
+- infer targets from project context when possible
+- prefer reasonable execution defaults over clarification when the user's intent is broad and the default is safe
+- for broad clip-edit commands like `move all clips`, `move all clips to measure 3`, `move everything`, `delete all clips`, or `move drums 10 seconds ahead`, prefer the obvious all-on-target scope instead of asking about selection
+- if the user already said `all clips`, `everything`, or another explicit project-wide scope, do not ask which track
+- use `target.scope="all"` for project-wide clip commands and `row_index` for track-wide clip commands when the user's wording is broad
+- if the user specifies a bar/measure destination, prefer `new_start_measure` / `new_start_bar` over millisecond math
+- if ambiguity remains, emit a `clarify` action instead of guessing
+
+Pending proposal
+If `PENDING_MIX_PROPOSAL` exists:
+- questions or discussion about it -> `informational_response`
+- clear approval -> `mix_model_request` with `mode="execute"`
+- rejection/cancel -> `informational_response`, `cancels_pending=true`, then forget the proposal
+- if the user tries to proceed after cancellation or when no pending proposal exists, ask for clarification via `informational_response`
+
+Mix routing
+- DIRECT COMMAND: explicit instruction, explicit track/row/role, or numeric/directional intent -> `mode="execute"`
+- INTERPRETIVE MIX REQUEST: vague feeling/problem/goal -> execute if there is one clear compatible plan; propose only when there are multiple conflicting viable options
+- Bias toward executing when one clear action exists
+- Never ask permission for a clear executable action
+- Do not ask yes/no questions
+- If the user asks for an ambiguous effect choice, clarify instead of guessing
+- Treat broad phrases like `open this mix up`, `make this bigger`, `make it wider`, `give this more space`, or `make it more polished` as mix requests, not informational chat
+
+Targeting and ambiguity
+- Use role probabilities and filenames together. `SELECTION_SNAPSHOT` is only a tie-breaker for ambiguous local edits; it must not override obvious whole-mix, genre/style, master-bus, or "make the mix..." requests.
+- Confidence dominance: if one track's role confidence is ahead of the next best match by about 0.15 or more, treat it as the intended target unless the user explicitly asks for multiple tracks.
+- If the user describes a mix quality, global feel, style, genre, polish level, or release-ready result, treat it as a broad mix request.
+- If the user mentions an instrument, role, or sound source, first resolve one most plausible track. Do not infer GLOBAL from a role mention alone.
+- Allow MULTI-TRACK only when several tracks are comparably plausible targets; shared role labels alone are not enough.
+- Apply changes to multiple tracks only when the targets are comparably plausible and the edit is subtle/reversible.
+- If the inferred scope is GLOBAL and the engine does not support global targets, emit one `mix_model_request` with one action per non-empty track.
+- If no plausible target exists, explain that via `informational_response`.
+- Never emit placeholder targets such as `row_index=-1` or `role=null`.
+
+Scope and indexing
+- `target.scope="master"` for overall/master-bus/finishing requests; omit `row_index` and `role` when scope is `master`
+- `target.scope="row"` for explicit track or role targets
+- `target.scope="auto"` only when local planning should infer the exact scope
+- Default to SINGLE-TRACK when one target is clearly dominant
+- Do not infer GLOBAL from singular/plural wording alone
+- User track numbers are 1-indexed
+- All `row_index` and `clip_index` values you output must be 0-indexed
+
+Mixing intelligence
+- Reason like a real mix engineer.
+- Loudness is relative; consider masking and overlap.
+- Vocals usually lead midrange clarity.
+- Kick and bass should be separated before boosting overlapping lows.
+- Mud usually lives in low mids; harshness usually lives in upper mids/highs.
+- Sometimes the best move is no move.
+- You may disagree with the user, fix an adjacent element instead, or propose a no-op if that is the better engineering choice.
+- Broad qualities often need multiple subtle intents:
+  - wet/spacey -> reverb plus a small delay
+  - dry -> reduce ambience
+  - wide -> panning and/or ambience
+- High dynamic variance can justify a compressor.
+- Typical chain order: dynamic effects before delay, delay before reverb. Keep drum delay subtle.
+- If a track has overlapping roles, be conservative, warn briefly if relevant, and avoid heavy processing unless explicitly requested.
+- A role explicitly clarified by the user is authoritative for the session.
+
+Allowed mix concepts only
+You may influence the mix only through:
+- gain
+- pan
+- eq (three fixed bands: low/mid/high, gain only)
+- reverb
+- delay
+- distortion
+- deesser
+- compressor
+- limiter
+- clipper
+- balance
+Never invent sidechains, automation, or raw plugin parameters inside `mix_model_request`; automation belongs in `daw_assistant_actions`.
+Describe intent, not numeric parameter values.
+
+Tool outputs
+`mix_model_request`
+- Emit exactly one tool call.
+- Top-level fields: `mode`, `assistant_message`, `actions`.
+- Use exactly one top-level `assistant_message` describing the overall result; never put `assistant_message` inside individual actions.
+- If you include `asks_permission`, it must be false for execute and true only for a genuine proposal.
+- Write the `assistant_message` in the user's most recent language. If the most recent user message is English, the `assistant_message` must be English only. Do not mix languages.
+- Past tense is preferred for executed changes.
+
+`daw_assistant_actions`
+Top level:
+`{"assistant_message":"...","actions":[{"type":"tutorial|clarify|clip_edit|effect_edit|automation_edit|midi_compose|stem_separate|role_override","data":{...}}]}`
+- keep `assistant_message` to one short sentence
+- if any action is `clarify` or `tutorial`, do not use `assistant_message` to restate the same question or steps
+- if any action is `tutorial`, prefer short copy like `Showing you in the UI.` rather than numbered instructions
+
+Action data
+- `tutorial`: `{"topic":"...","steps":[{"text":"...","target_id":"...", ...}]}`
+  - prefer target_ids: `mute`, `solo`, `play`, `record`, `restart`, `toolbar`, `timeline`, `piano_roll`, `plugins`, `export`, `project_settings`, `chatbar`
+  - useful dynamic target_ids:
+    - `row:<row_index>`
+    - `row:<row_index>:mute|solo|effects_tab|volume_tab|automation_tab`
+    - `row:<row_index>:fx_list|add_effect`
+    - `row:<row_index>:fx_index:<effect_index>`
+    - `row:<row_index>:fx_contains:<effect_name_or_token>`
+    - `row:<row_index>:fx_index:<effect_index>:param:<param_name_or_id>`
+    - `row:<row_index>:fx_contains:<effect_name_or_token>:param:<param_name_or_id>`
+  - for drill-down tutorials, include `row_index`, `effect_index/effect_name`, `param_id/param_name`, `effect_missing`, `show_add_effect`, `drilldown`
+- `clarify`: `{"question":"...","options":["...","..."]}`
+- `clip_edit`: `operation` is one of `trim|auto_trim|cut|stretch|move|tempo_follow|auto_bpm_align|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet`
+  - `cut` is clip-region splitting only
+  - include `trim_side` when relevant
+  - `move` needs `new_start_ms`, `delta_ms`, `new_start_measure`, `delta_measures`, `direction`, and/or `new_row_index`
+  - when the user specifies bars/measures/beats, prefer `new_start_measure` / `new_start_bar` or `delta_measures` / `delta_bars` instead of converting to milliseconds
+  - `new_start_measure` / `new_start_bar` is 1-indexed: measure 1 = timeline start
+  - include `beats_per_bar` only when the meter is not the default 4/4
+  - `stretch` should include `timeline_duration_ms` or `duration_ms`
+  - spoken-dialog helpers may include `max_edits`, `ranges`, `from_ms/to_ms`, `min_pause_ms`, `keep_pause_ms`, `boost_db`, `max_gain`, `min_quiet_ms`
+- `effect_edit`: `operation` is one of `add|remove|bypass|unbypass|toggle_bypass`
+  - use this for track/master plugin insert/remove/bypass requests
+  - target may include `row_index`, `scope`, `effect_index`, `effect_name`, `plugin_name`, or `effect_name_contains`
+  - if the user clearly refers to a single existing plugin on that target, you may act without clarifying
+  - if multiple plugins could match, emit `clarify`
+- `automation_edit`: `operation` is one of `set_points|add_ramp|clear|create_clip|duplicate_clip|move_clip|delete_clip|clear_clips|mute_clip|unmute_clip|toggle_clip_mute|set_clip_points|make_unique_clip|apply_template`
+  - use `set_points` / `add_ramp` for lanes; clip operations for reusable automation clips
+  - master automation uses `target.scope="master"`
+  - `duplicate_clip` is linked-clone behavior by default; use `copy_mode="deep"` only for an independent copy
+  - if the user says "clone", map that to `duplicate_clip`
+  - `set_clip_points` updates all linked clones that share the same `pattern_id`; use `make_unique_clip` first when only one clone should change
+  - `move_clip` needs `start_ms`, `delta_ms`, or direction
+  - when available, target existing automation clips with `clip_id` / `automation_clip_id` / `pattern_id`; otherwise use `clip_index` or `at_ms`
+  - for plugin automation targets use one of:
+    - `automation_target_id`
+    - `effect_index` + `param_id/param_name`
+    - `effect_name` + `param_name`
+  - if giving real plugin parameter values, set `value_mode="real"`
+  - if plugin automation target is ambiguous, emit `clarify` instead of defaulting to volume
+  - `apply_template` may use `sidechain_pump`, `reverb_tail`, `filter_sweep`, `sidechain_from_kick`
+- `midi_compose`: `operation` is one of `compose_bassline|compose_pattern|replace_notes|append_notes|chop_notes`
+  - include `target.clip_index` when targeting existing MIDI
+  - `chop_notes` includes `subdivision`; optional `velocity_decay_per_slice`, `velocity_jitter`, `velocity_floor`
+  - prefer explicit notes: `{"pitch":48,"start_beat":0.0,"length_beats":1.0,"velocity":0.8}`
+  - chord-only prompts may use `progression`, `beats_per_chord`, `notes_per_chord`, `octave`
+- `stem_separate`: `{"operation":"vocal_instrumental","target":{...}}`
+- `role_override`: `{"operation":"set|clear","target":{"row_index":0},"role":"vocals|drums|bass|guitar|synth|other"}`
+
+Action targets may include:
+- `clip_index` or `clip_indices`
+- `row_index`
+- `scope`
+- `prefer_selected`
+- `automation_target_id`, `target_id`, or `lane_id`
+- `effect_index`, `effect_name`, or `plugin_name`
+- `param_id` or `param_name`
+
+Mix goal format
+Each `actions[i].goal`:
+`{"type":"mix_request","intents":[...],"target":{...},"intensity":0.0-1.0,"reset_fx":true|false}`
+
+Canonical intents
+- `kind`: `gain|pan|eq|reverb|delay|distortion|deesser|compressor|limiter|clipper|balance`
+- `direction`: `up|down|left|right|center|widen|narrow|remove|null`
+- `descriptor`: use canonical tokens only
+
+EQ descriptors
+- `mud_cut`: reduce low-mid buildup
+- `box_cut`: remove boxiness
+- `boom_cut`: control excessive lows
+- `harsh_cut`: tame aggressive upper mids/highs
+- `presence_boost`: push forward
+- `air_boost`: add openness/sheen
+- `warmth_boost`: add low-mid body
+- `thin_fix`: add weight
+- `dull_fix`: restore clarity/brightness
+- `low_cut`: remove unnecessary lows
+- `high_cut`: reduce excessive highs
+- `null`: no tonal change
+
+Descriptor rules
+- Choose descriptors from the desired action, not from instrument words or frequency labels in the user's phrasing.
+- If the user wants more of something, avoid cut descriptors unless they still support the goal.
+- If the user wants less of something, avoid boost descriptors unless they still support the goal.
+- If unsure, use `descriptor=null`; never invent new descriptors or output plain English descriptors.
+
+`reset_fx`
+Set `reset_fx=true` only for style presets, one-button mix, explicit reset/remix/start fresh, or broad changes where restarting the chain is clearly preferable. Never use it for small tweaks.
+If `reset_fx=true` and no specific sonic intent is needed, emit a neutral canonical intent like `{"kind":"balance","direction":null,"descriptor":null,"confidence":1.0}`.
+Do not emit `kind="null"` or an empty `intents` array.
+
+Safety and style
+- Call `mix_model_request` only when the user is clearly asking for a mix change or describing a mix problem.
+- Greetings, small talk, acknowledgements, or filler -> `informational_response` only.
+- Never hallucinate audio problems.
+- Never contradict yourself mid-response.
+- Never output raw plugin parameters.
+- Keep user-facing text concise; bullets are fine; usually under six lines unless asked otherwise.
+''';
+
+  bool get _isProxyEnabled => proxyApiBaseUrl.trim().isNotEmpty;
+
+  List<Map<String, dynamic>> _buildInputMessages({
     required List<Map<String, String>> conversation,
     required String userText,
     required String projectSnapshot,
-    String selectionSnapshot = '',
+    required String selectionSnapshot,
     MixingResult? pendingMix,
-  }) async {
-    if (apiKey.trim().isEmpty) {
-      return LlmResult.text(
-        'AI is not configured. Launch with --dart-define=OPENAI_API_KEY=YOUR_KEY.',
-        null,
-      );
-    }
-
-    final body = {
-      'model': model,
-      'temperature': 0.2,
-      'instructions': _systemPrompt,
-      'input': [
-        ...conversation
-            .map((m) => {'role': m['role'], 'content': m['content']}),
-        {'role': 'user', 'content': 'PROJECT_SNAPSHOT:\n$projectSnapshot'},
-        if (selectionSnapshot.trim().isNotEmpty)
-          {
-            'role': 'user',
-            'content': 'SELECTION_SNAPSHOT:\n$selectionSnapshot',
-          },
-        if (pendingMix != null)
-          {
-            'role': 'user',
-            'content': '''
+  }) {
+    return [
+      {'role': 'user', 'content': 'PROJECT_SNAPSHOT:\n$projectSnapshot'},
+      if (selectionSnapshot.trim().isNotEmpty)
+        {
+          'role': 'user',
+          'content': 'SELECTION_SNAPSHOT:\n$selectionSnapshot',
+        },
+      if (pendingMix != null)
+        {
+          'role': 'user',
+          'content': '''
               PENDING_MIX_PROPOSAL:
               ${jsonEncode(pendingMix.toJson())}
 
@@ -714,68 +1134,23 @@ If it is not, the response is INVALID. If unclear what the used language is, the
               You may refer to this if it is relevant to the discussion at this current point.
               If it is not relevant, please ignore this.
               ''',
-          },
-        {'role': 'user', 'content': userText},
-      ],
-      // 'tools': [
-      //   {
-      //     'type': 'function',
-      //     'name': 'informational_response',
-      //     'parameters': {
-      //       'type': 'object',
-      //       'properties': {
-      //         'message': {'type': 'string', 'description': 'Pure informational response. No mix changes.'}
-      //       },
-      //       'required': ['message'],
-      //     },
-      //   },
-      //   {
-      //     'type': 'function',
-      //     'name': 'mix_model_request',
-      //     'parameters': {
-      //       'type': 'object',
-      //       'properties': {
-      //         'mode': {
-      //           'type': 'string',
-      //           'enum': ['execute', 'propose']
-      //         },
-      //         'assistant_message': {'type': 'string'},
-      //         'asks_permission': {'type': 'boolean'},
-      //         'goal': {
-      //           'type': 'object',
-      //           'properties': {
-      //             'type': {'type': 'string'},
-      //             'intents': {
-      //               'type': 'array',
-      //               'items': {
-      //                 'type': 'object',
-      //                 'properties': {
-      //                   'kind': {'type': 'string'},
-      //                   'direction': {'type': 'string'},
-      //                   'descriptor': {'type': 'string'},
-      //                   'confidence': {'type': 'number'},
-      //                 },
-      //                 'required': ['kind', 'confidence'],
-      //               }
-      //             },
-      //             'target': {
-      //               'type': 'object',
-      //               'properties': {
-      //                 'role': {'type': 'string'},
-      //                 'row_index': {'type': 'integer'},
-      //                 'confidence': {'type': 'number'},
-      //               },
-      //               'required': ['confidence'],
-      //             },
-      //             'intensity': {'type': 'number'},
-      //           },
-      //           'required': ['type', 'intents', 'target', 'intensity'],
-      //         },
-      //       },
-      //       'required': ['mode', 'goal'],
-      //     },
-      //   },
-      // ],
+        },
+      ...conversation.map((m) => {'role': m['role'], 'content': m['content']}),
+      {'role': 'user', 'content': userText},
+    ];
+  }
+
+  Map<String, dynamic> _buildOpenAiRequestBody({
+    required List<Map<String, dynamic>> inputMessages,
+    String? aiFeature,
+  }) {
+    final normalizedAiFeature = _normalizeAiFeatureForProxy(aiFeature);
+    final body = <String, dynamic>{
+      'model': model,
+      'instructions': _systemPrompt,
+      'prompt_cache_key': _promptCacheKeyForFeature(normalizedAiFeature),
+      'prompt_cache_retention': _promptCacheRetention,
+      'input': inputMessages,
       'tools': [
         {
           'type': 'function',
@@ -817,6 +1192,7 @@ If it is not, the response is INVALID. If unclear what the used language is, the
                         'tutorial',
                         'clarify',
                         'clip_edit',
+                        'effect_edit',
                         'automation_edit',
                         'midi_compose',
                         'stem_separate',
@@ -834,88 +1210,6 @@ If it is not, the response is INVALID. If unclear what the used language is, the
             'required': ['assistant_message', 'actions'],
           },
         },
-        /*
-        {
-          'type': 'function',
-          'name': 'mix_model_request',
-          'parameters': {
-            'type': 'object',
-            'properties': {
-              'mode': {
-                'type': 'string',
-                'enum': ['execute', 'propose']
-              },
-              'assistant_message': {'type': 'string'},
-              'asks_permission': {
-                'type': 'boolean'
-              }, // CONSIDER REMOVING THIS, SHOULD ONLY ASK PERMISSION FOR MULTIPLE OPTION REQUESTS
-              'goal': {
-                'type': 'object',
-                'properties': {
-                  'type': {'type': 'string'},
-                  'intents': {
-                    'type': 'array',
-                    'items': {
-                      'type': 'object',
-                      'properties': {
-                        'kind': {
-                          'type': 'string',
-                          'enum': [
-                            'gain',
-                            'pan',
-                            'eq',
-                            'reverb',
-                            'delay',
-                            'distortion',
-                            'deesser',
-                            'compressor',
-                            'balance'
-                          ]
-                        },
-                        'direction': {
-                          'type': 'string',
-                          'enum': ['up', 'down', 'left', 'right', 'center', 'widen', 'narrow', 'remove', 'null']
-                        },
-                        'descriptor': {
-                          'type': 'string',
-                          'enum': [
-                            'mud_cut',
-                            'box_cut',
-                            'boom_cut',
-                            'harsh_cut',
-                            'presence_boost',
-                            'air_boost',
-                            'warmth_boost',
-                            'thin_fix',
-                            'dull_fix',
-                            'low_cut',
-                            'high_cut',
-                            'null'
-                          ]
-                        },
-                        'confidence': {'type': 'number'},
-                      },
-                      'required': ['kind', 'confidence'],
-                    }
-                  },
-                  'target': {
-                    'type': 'object',
-                    'properties': {
-                      'role': {'type': 'string'},
-                      'row_index': {'type': 'integer'},
-                      'confidence': {'type': 'number'},
-                    },
-                    'required': ['confidence'],
-                  },
-                  'intensity': {'type': 'number'},
-                },
-                'required': ['type', 'intents', 'target', 'intensity'],
-              },
-            },
-            'required': ['mode', 'goal'],
-          },
-        },
-        */
         {
           'type': 'function',
           'name': 'mix_model_request',
@@ -959,6 +1253,7 @@ If it is not, the response is INVALID. If unclear what the used language is, the
                                   'deesser',
                                   'compressor',
                                   'limiter',
+                                  'clipper',
                                   'balance',
                                 ],
                               },
@@ -1000,16 +1295,35 @@ If it is not, the response is INVALID. If unclear what the used language is, the
                         },
                         'target': {
                           'type': 'object',
-                          'properties': {
-                            'role': {'type': 'string'},
-                            'row_index': {'type': 'integer'},
-                            'scope': {
-                              'type': 'string',
-                              'enum': ['auto', 'row', 'master']
+                          'oneOf': [
+                            {
+                              'properties': {
+                                'scope': {
+                                  'type': 'string',
+                                  'enum': ['master']
+                                },
+                                'confidence': {'type': 'number'},
+                              },
+                              'required': ['scope', 'confidence'],
+                              'additionalProperties': false,
                             },
-                            'confidence': {'type': 'number'},
-                          },
-                          'required': ['confidence'],
+                            {
+                              'properties': {
+                                'role': {'type': 'string'},
+                                'row_index': {
+                                  'type': 'integer',
+                                  'minimum': 0,
+                                },
+                                'scope': {
+                                  'type': 'string',
+                                  'enum': ['auto', 'row']
+                                },
+                                'confidence': {'type': 'number'},
+                              },
+                              'required': ['scope', 'confidence'],
+                              'additionalProperties': false,
+                            },
+                          ],
                         },
                         'intensity': {'type': 'number'},
                         'reset_fx': {'type': 'boolean'},
@@ -1021,43 +1335,671 @@ If it is not, the response is INVALID. If unclear what the used language is, the
                 },
               },
             },
-            'required': ['mode', 'actions'],
+            'required': ['mode', 'assistant_message', 'actions'],
           },
         },
       ],
-
       'tool_choice': 'required',
-
-      // 'tool_choice': {
-      //   'type': 'function',
-      //   'name': 'mix_model_request',
-      // },
     };
+    if (_supportsTemperature) {
+      body['temperature'] = 0.2;
+    }
+    final reasoning = _defaultReasoning;
+    if (reasoning != null) {
+      body['reasoning'] = reasoning;
+    }
+    return body;
+  }
 
-    final response = await http.post(
-      Uri.parse(_apiUrl),
+  Map<String, dynamic> _buildProxyRequestBody({
+    required List<Map<String, String>> conversation,
+    required String userText,
+    required String projectSnapshot,
+    required String selectionSnapshot,
+    String? projectId,
+    String? aiFeature,
+    MixingResult? pendingMix,
+  }) {
+    final normalizedAiFeature = _normalizeAiFeatureForProxy(aiFeature);
+    return {
+      'conversation': conversation
+          .map((m) => {
+                'role': m['role'],
+                'content': m['content'],
+              })
+          .toList(),
+      'user_text': userText,
+      'project_snapshot': projectSnapshot,
+      if (selectionSnapshot.trim().isNotEmpty)
+        'selection_snapshot': selectionSnapshot,
+      if ((projectId ?? '').trim().isNotEmpty) 'project_id': projectId,
+      if (normalizedAiFeature.isNotEmpty) 'ai_feature': normalizedAiFeature,
+      if (pendingMix != null) 'pending_mix': pendingMix.toJson(),
+      ...AnalyticsService.instance.buildRequestContext(),
+    };
+  }
+
+  String _normalizeAiFeatureForProxy(String? aiFeature) {
+    final value = (aiFeature ?? '').trim();
+    if (value.isEmpty) return 'ai_chat';
+
+    switch (value) {
+      case 'assistant_chat':
+      case 'one_button_mix':
+      case 'ai_chat':
+        return 'ai_chat';
+      default:
+        return value;
+    }
+  }
+
+  Uri _resolveProxyUri({String? pathOverride}) {
+    final base = proxyApiBaseUrl.trim();
+    final path = (pathOverride ?? proxyPath).trim().isEmpty
+        ? '/v1/llm/responses'
+        : (pathOverride ?? proxyPath);
+    final normalizedPath = path.startsWith('/') ? path : '/$path';
+    return Uri.parse('$base$normalizedPath');
+  }
+
+  Future<String?> _resolveProxyAuthToken({bool forceRefresh = false}) async {
+    final primaryProvider =
+        forceRefresh ? refreshAuthTokenProvider : authTokenProvider;
+    final primaryToken = await primaryProvider?.call();
+    final safePrimaryToken = primaryToken?.trim() ?? '';
+    if (safePrimaryToken.isNotEmpty) return safePrimaryToken;
+
+    if (!forceRefresh && refreshAuthTokenProvider != null) {
+      final refreshedToken = await refreshAuthTokenProvider!.call();
+      final safeRefreshedToken = refreshedToken?.trim() ?? '';
+      if (safeRefreshedToken.isNotEmpty) return safeRefreshedToken;
+    }
+    return null;
+  }
+
+  Future<http.Response> _postProxyJson({
+    required String token,
+    required List<Map<String, String>> conversation,
+    required String userText,
+    required String projectSnapshot,
+    required String selectionSnapshot,
+    required String? projectId,
+    required String? aiFeature,
+    required MixingResult? pendingMix,
+  }) {
+    return _postJson(
+      uri: _resolveProxyUri(),
       headers: {
-        'Authorization': 'Bearer $apiKey',
-        'Content-Type': 'application/json'
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
       },
-      body: jsonEncode(body),
+      body: _buildProxyRequestBody(
+        conversation: conversation,
+        userText: userText,
+        projectSnapshot: projectSnapshot,
+        selectionSnapshot: selectionSnapshot,
+        projectId: projectId,
+        aiFeature: aiFeature,
+        pendingMix: pendingMix,
+      ),
+    );
+  }
+
+  String _limitsProxyPath() {
+    final path = proxyPath.trim().isEmpty ? '/v1/llm/responses' : proxyPath;
+    if (path.endsWith('/responses')) {
+      return '${path.substring(0, path.length - '/responses'.length)}/limits';
+    }
+    return '${path.replaceFirst(RegExp(r'/$'), '')}/limits';
+  }
+
+  Future<http.Response> _postJson({
+    required Uri uri,
+    required Map<String, String> headers,
+    required Map<String, dynamic> body,
+  }) {
+    return _httpClient
+        .post(
+          uri,
+          headers: headers,
+          body: jsonEncode(body),
+        )
+        .timeout(requestTimeout);
+  }
+
+  Future<http.Response> _getJson({
+    required Uri uri,
+    required Map<String, String> headers,
+  }) {
+    return _httpClient.get(uri, headers: headers).timeout(requestTimeout);
+  }
+
+  Map<String, dynamic>? _decodeJsonObject(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map) {
+        return decoded.cast<String, dynamic>();
+      }
+    } catch (_) {
+      return null;
+    }
+    return null;
+  }
+
+  AiPromptRateLimitStatus? _parsePromptRateLimitStatus(dynamic raw) {
+    if (raw is Map<String, dynamic>) {
+      return AiPromptRateLimitStatus.fromJson(raw);
+    }
+    if (raw is Map) {
+      return AiPromptRateLimitStatus.fromJson(raw.cast<String, dynamic>());
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _buildResponseMeta(
+    Map<String, dynamic>? payload,
+  ) {
+    if (payload == null) return const <String, dynamic>{};
+    final status = _parsePromptRateLimitStatus(payload['prompt_rate_limit']);
+    final meta = <String, dynamic>{};
+    if (status != null) {
+      meta['prompt_rate_limit'] = status.toJson();
+    }
+    final softError = payload['soft_error'];
+    if (softError is Map<String, dynamic>) {
+      meta['soft_error'] = softError;
+    } else if (softError is Map) {
+      meta['soft_error'] = softError.cast<String, dynamic>();
+    }
+    final usage = payload['usage'];
+    if (usage is Map<String, dynamic>) {
+      meta['usage'] = usage;
+      final cachedPromptTokens = _cachedPromptTokensFromUsage(usage);
+      if (cachedPromptTokens > 0) {
+        meta['cached_prompt_tokens'] = cachedPromptTokens;
+      }
+    } else if (usage is Map) {
+      final normalizedUsage = usage.cast<String, dynamic>();
+      meta['usage'] = normalizedUsage;
+      final cachedPromptTokens = _cachedPromptTokensFromUsage(normalizedUsage);
+      if (cachedPromptTokens > 0) {
+        meta['cached_prompt_tokens'] = cachedPromptTokens;
+      }
+    }
+    return meta;
+  }
+
+  int _cachedPromptTokensFromUsage(Map<String, dynamic> usage) {
+    for (final key in const ['input_tokens_details', 'prompt_tokens_details']) {
+      final details = usage[key];
+      if (details is Map<String, dynamic>) {
+        return (details['cached_tokens'] as num?)?.toInt() ?? 0;
+      }
+      if (details is Map) {
+        return (details['cached_tokens'] as num?)?.toInt() ?? 0;
+      }
+    }
+    return 0;
+  }
+
+  String _formatResetCountdown(DateTime? resetsAt) {
+    if (resetsAt == null) return '';
+    final remaining = resetsAt.toLocal().difference(DateTime.now());
+    if (remaining.inSeconds <= 0) return 'a moment';
+    if (remaining.inDays >= 1) {
+      final hours = remaining.inHours.remainder(24);
+      return hours > 0
+          ? '${remaining.inDays}d ${hours}h'
+          : '${remaining.inDays}d';
+    }
+    if (remaining.inHours >= 1) {
+      final minutes = remaining.inMinutes.remainder(60);
+      return minutes > 0
+          ? '${remaining.inHours}h ${minutes}m'
+          : '${remaining.inHours}h';
+    }
+    if (remaining.inMinutes >= 1) {
+      return '${remaining.inMinutes}m';
+    }
+    return '${remaining.inSeconds}s';
+  }
+
+  String _rateLimitMessage(AiPromptRateLimitStatus? status, String fallback) {
+    if (status == null) return fallback;
+    final limitLabel =
+        status.blockedBy == 'weekly_prompts' ? 'weekly' : 'daily';
+    final wait = _formatResetCountdown(status.blockedResetAt);
+    if (wait.isEmpty) {
+      return 'You have reached the $limitLabel prompt limit. Please try again later.';
+    }
+    return 'You have reached the $limitLabel prompt limit. Try again in $wait.';
+  }
+
+  LlmResult _recoverableTextResult(
+    String message, {
+    String? softErrorCode,
+    Map<String, dynamic>? meta,
+  }) {
+    final mergedMeta = <String, dynamic>{
+      if (meta != null) ...meta,
+      if ((softErrorCode ?? '').trim().isNotEmpty)
+        'soft_error': <String, dynamic>{
+          'code': softErrorCode!.trim(),
+          'usage_refunded': true,
+        },
+    };
+    return LlmResult.text(
+      message,
+      {
+        'message': message,
+        'cancels_pending': false,
+      },
+      meta: mergedMeta,
+    );
+  }
+
+  Future<AiPromptRateLimitStatus?> fetchPromptRateLimitStatus() async {
+    if (!_isProxyEnabled) return null;
+    final token = await authTokenProvider?.call();
+    if (token == null || token.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      final response = await _getJson(
+        uri: _resolveProxyUri(pathOverride: _limitsProxyPath()),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+      if (response.statusCode != 200) return null;
+      final payload = _decodeJsonObject(response.body);
+      return _parsePromptRateLimitStatus(payload?['prompt_rate_limit']);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _fallbackAssistantText(String toolName) {
+    switch (toolName) {
+      case 'mix_model_request':
+        return 'Applied the requested mix changes.';
+      case 'daw_assistant_actions':
+        return 'Here are the relevant steps.';
+      default:
+        return "I couldn't complete that request just now. Please try again.";
+    }
+  }
+
+  bool _isNonAsciiLetterLikeRune(int rune) {
+    if (rune <= 127) return false;
+    return
+        // Latin Extended / IPA / Greek / Cyrillic
+        (rune >= 0x00C0 && rune <= 0x024F) ||
+            (rune >= 0x0370 && rune <= 0x03FF) ||
+            (rune >= 0x0400 && rune <= 0x052F) ||
+            // Hebrew / Arabic / Devanagari
+            (rune >= 0x0590 && rune <= 0x05FF) ||
+            (rune >= 0x0600 && rune <= 0x06FF) ||
+            (rune >= 0x0900 && rune <= 0x097F) ||
+            // Hiragana / Katakana / Hangul
+            (rune >= 0x3040 && rune <= 0x30FF) ||
+            (rune >= 0xAC00 && rune <= 0xD7AF) ||
+            // CJK Unified Ideographs
+            (rune >= 0x3400 && rune <= 0x4DBF) ||
+            (rune >= 0x4E00 && rune <= 0x9FFF);
+  }
+
+  bool _containsNonAsciiLetters(String text) =>
+      text.runes.any(_isNonAsciiLetterLikeRune);
+
+  bool _isProbablyEnglish(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+    return !_containsNonAsciiLetters(trimmed);
+  }
+
+  String _shortTutorialAssistantMessage(
+    Object? value, {
+    required String userText,
+  }) {
+    final raw = _sanitizeUserFacingText(
+      value,
+      toolName: 'daw_assistant_actions',
+      userText: userText,
+    );
+    final normalized = raw.replaceAll('\n', ' ').trim();
+    if (normalized.isEmpty ||
+        normalized == _fallbackAssistantText('daw_assistant_actions')) {
+      return _isProbablyEnglish(userText) ? 'Showing you in the UI.' : raw;
+    }
+
+    final looksVerbose = normalized.contains('\n') ||
+        normalized.length > 60 ||
+        RegExp(r'[.!?].+\S').hasMatch(normalized);
+    if (looksVerbose && _isProbablyEnglish(userText)) {
+      return 'Showing you in the UI.';
+    }
+
+    final firstSentence = normalized
+        .split(RegExp(r'(?<=[.!?])\s+'))
+        .map((s) => s.trim())
+        .firstWhere((s) => s.isNotEmpty, orElse: () => normalized);
+
+    final concise = firstSentence.length > 90
+        ? '${firstSentence.substring(0, 89).trimRight()}.'
+        : firstSentence;
+    if (concise.length <= 90 && !concise.contains('\n')) {
+      return concise;
+    }
+    return _isProbablyEnglish(userText) ? 'Showing you in the UI.' : concise;
+  }
+
+  String _sanitizeUserFacingText(
+    Object? value, {
+    required String toolName,
+    required String userText,
+  }) {
+    final raw = (value?.toString() ?? '').trim();
+    final fallback = _fallbackAssistantText(toolName);
+    if (raw.isEmpty) return fallback;
+
+    final lowered = raw.toLowerCase();
+    if (lowered.contains('mix_model_request') ||
+        lowered.contains('daw_assistant_actions') ||
+        lowered.contains('informational_response') ||
+        lowered.contains('"assistant_message"') ||
+        lowered.contains('"row_index"') ||
+        raw.startsWith('{') ||
+        raw.startsWith('[')) {
+      return fallback;
+    }
+
+    if (_isProbablyEnglish(userText) && _containsNonAsciiLetters(raw)) {
+      return fallback;
+    }
+
+    return raw;
+  }
+
+  Map<String, dynamic>? _decodeToolArgs(dynamic raw) {
+    dynamic current = raw;
+    for (var i = 0; i < 4; i++) {
+      if (current is Map) {
+        final map = Map<String, dynamic>.from(current);
+        if (map.length == 1 && map.containsKey('value')) {
+          current = map['value'];
+          continue;
+        }
+        return map;
+      }
+      if (current is String) {
+        final trimmed = current.trim();
+        if (trimmed.isEmpty) return null;
+        try {
+          current = jsonDecode(trimmed);
+        } catch (_) {
+          return null;
+        }
+        continue;
+      }
+      return null;
+    }
+    return current is Map ? Map<String, dynamic>.from(current) : null;
+  }
+
+  Map<String, dynamic>? _normalizeToolArgs(
+    String toolName,
+    dynamic rawArgs, {
+    required String userText,
+  }) {
+    final args = _decodeToolArgs(rawArgs);
+    if (args == null) return null;
+
+    if (toolName == 'informational_response') {
+      args['message'] = _sanitizeUserFacingText(
+        args['message'],
+        toolName: toolName,
+        userText: userText,
+      );
+      args['cancels_pending'] = args['cancels_pending'] == true;
+      return args;
+    }
+
+    if (toolName == 'daw_assistant_actions') {
+      final actions = args['actions'];
+      if (actions is! List || actions.isEmpty) return null;
+      final hasTutorial = actions.any((action) =>
+          action is Map &&
+          (action['type']?.toString().trim().toLowerCase() == 'tutorial'));
+      args['assistant_message'] = hasTutorial
+          ? _shortTutorialAssistantMessage(
+              args['assistant_message'],
+              userText: userText,
+            )
+          : _sanitizeUserFacingText(
+              args['assistant_message'],
+              toolName: toolName,
+              userText: userText,
+            );
+      return args;
+    }
+
+    if (toolName == 'mix_model_request') {
+      final actions = args['actions'];
+      final mode = (args['mode']?.toString() ?? '').trim();
+      if (actions is! List || actions.isEmpty) return null;
+      if (mode != 'execute' && mode != 'propose') return null;
+
+      for (final action in actions) {
+        if (action is! Map) return null;
+        final goal = action['goal'];
+        if (goal is! Map) return null;
+        final target = goal['target'];
+        if (target is! Map) return null;
+
+        final normalizedTarget = Map<String, dynamic>.from(target);
+        final scope = (normalizedTarget['scope']?.toString() ?? '').trim();
+        if (scope == 'master') {
+          normalizedTarget.remove('row_index');
+          normalizedTarget.remove('role');
+        } else {
+          final rowIndex = normalizedTarget['row_index'];
+          if (rowIndex is num) {
+            final normalizedRow = rowIndex.toInt();
+            if (normalizedRow < 0) return null;
+            normalizedTarget['row_index'] = normalizedRow;
+          } else if (rowIndex != null) {
+            return null;
+          }
+        }
+        goal['target'] = normalizedTarget;
+
+        final intents = goal['intents'];
+        if (intents is! List || intents.isEmpty) return null;
+        for (final intent in intents) {
+          if (intent is! Map) return null;
+        }
+      }
+
+      args['assistant_message'] = _sanitizeUserFacingText(
+        args['assistant_message'],
+        toolName: toolName,
+        userText: userText,
+      );
+      return args;
+    }
+
+    return args;
+  }
+
+  Future<LlmResult> send({
+    required List<Map<String, String>> conversation,
+    required String userText,
+    required String projectSnapshot,
+    String selectionSnapshot = '',
+    String? projectId,
+    String? aiFeature,
+    MixingResult? pendingMix,
+  }) async {
+    late http.Response response;
+    try {
+      if (_isProxyEnabled) {
+        final token = await _resolveProxyAuthToken();
+        if (token == null || token.isEmpty) {
+          return _recoverableTextResult(
+            _recoverableAuthMessage,
+            softErrorCode: 'auth_unavailable',
+          );
+        }
+
+        response = await _postProxyJson(
+          token: token,
+          conversation: conversation,
+          userText: userText,
+          projectSnapshot: projectSnapshot,
+          selectionSnapshot: selectionSnapshot,
+          projectId: projectId,
+          aiFeature: aiFeature,
+          pendingMix: pendingMix,
+        );
+      } else if (_canUseDirectOpenAi) {
+        final inputMessages = _buildInputMessages(
+          conversation: conversation,
+          userText: userText,
+          projectSnapshot: projectSnapshot,
+          selectionSnapshot: selectionSnapshot,
+          pendingMix: pendingMix,
+        );
+
+        response = await _postJson(
+          uri: Uri.parse(_apiUrl),
+          headers: {
+            'Authorization': 'Bearer $apiKey',
+            'Content-Type': 'application/json',
+          },
+          body: _buildOpenAiRequestBody(
+            inputMessages: inputMessages,
+            aiFeature: aiFeature,
+          ),
+        );
+      } else {
+        return LlmResult.text(
+          'AI is not configured. Launch with --dart-define=LLM_PROXY_API_BASE_URL=... or --dart-define=OPENAI_API_KEY=... --dart-define=OPENAI_MODEL=...',
+          null,
+        );
+      }
+    } catch (_) {
+      return _recoverableTextResult(
+        _temporaryFailureMessage,
+        softErrorCode: 'request_failed',
+      );
+    }
+
+    var payload = _decodeJsonObject(response.body);
+    var responseMeta = _buildResponseMeta(payload);
+    var promptRateLimit = _parsePromptRateLimitStatus(
+      payload?['prompt_rate_limit'],
     );
 
     if (response.statusCode != 200) {
-      // print(response.statusCode);
-      // print(response.body);
-      // throw Exception('LLM error: ${response.body}');
-      // return LlmResult.text('LLM error: ${response.body}');
-      return LlmResult.text(
-          'There has been an error, please try again in a moment.', null);
+      if (response.statusCode == 429) {
+        final message = _rateLimitMessage(
+          promptRateLimit,
+          payload?['message']?.toString().trim().isNotEmpty == true
+              ? payload!['message'].toString().trim()
+              : 'You have reached the prompt limit. Please try again later.',
+        );
+        return LlmResult.text(
+          message,
+          {
+            'message': message,
+            'cancels_pending': false,
+          },
+          meta: responseMeta,
+        );
+      }
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        if (_isProxyEnabled && refreshAuthTokenProvider != null) {
+          try {
+            final refreshedToken =
+                await _resolveProxyAuthToken(forceRefresh: true);
+            if (refreshedToken != null && refreshedToken.isNotEmpty) {
+              response = await _postProxyJson(
+                token: refreshedToken,
+                conversation: conversation,
+                userText: userText,
+                projectSnapshot: projectSnapshot,
+                selectionSnapshot: selectionSnapshot,
+                projectId: projectId,
+                aiFeature: aiFeature,
+                pendingMix: pendingMix,
+              );
+              payload = _decodeJsonObject(response.body);
+              responseMeta = _buildResponseMeta(payload);
+              promptRateLimit = _parsePromptRateLimitStatus(
+                payload?['prompt_rate_limit'],
+              );
+              if (response.statusCode == 200) {
+                // Continue into the normal response parsing below.
+              } else if (response.statusCode == 429) {
+                final message = _rateLimitMessage(
+                  promptRateLimit,
+                  payload?['message']?.toString().trim().isNotEmpty == true
+                      ? payload!['message'].toString().trim()
+                      : 'You have reached the prompt limit. Please try again later.',
+                );
+                return LlmResult.text(
+                  message,
+                  {
+                    'message': message,
+                    'cancels_pending': false,
+                  },
+                  meta: responseMeta,
+                );
+              } else if (response.statusCode == 401 ||
+                  response.statusCode == 403) {
+                return _recoverableTextResult(
+                  _recoverableAuthMessage,
+                  softErrorCode: 'auth_rejected',
+                  meta: responseMeta,
+                );
+              } else {
+                return _recoverableTextResult(
+                  _temporaryFailureMessage,
+                  softErrorCode: 'request_failed',
+                  meta: responseMeta,
+                );
+              }
+            }
+          } catch (_) {
+            // Fall through to the recoverable auth message below.
+          }
+        }
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          return _recoverableTextResult(
+            _recoverableAuthMessage,
+            softErrorCode: 'auth_rejected',
+            meta: responseMeta,
+          );
+        }
+      }
+      if (response.statusCode != 200) {
+        return _recoverableTextResult(
+          _temporaryFailureMessage,
+          softErrorCode: 'request_failed',
+          meta: responseMeta,
+        );
+      }
     }
 
-    final json = jsonDecode(response.body);
+    final json = payload ?? const <String, dynamic>{};
     final outputs = (json['output'] as List<dynamic>? ?? const []);
 
-    print("LLM output: $outputs");
-
-    // LlmResult? toolResult;
     final List<LlmResult> toolResults = [];
     String? assistantText;
 
@@ -1068,22 +2010,33 @@ If it is not, the response is INVALID. If unclear what the used language is, the
         final name = o['name'] as String?;
         if (name == null) continue;
 
-        final argsRaw = o['arguments'];
-        final Map<String, dynamic> args = argsRaw is String
-            ? jsonDecode(argsRaw)
-            : Map<String, dynamic>.from(argsRaw);
-
-        if (name == 'informational_response') {
-          return LlmResult.text(args['message']?.toString() ?? '', args);
+        final args = _normalizeToolArgs(
+          name,
+          o['arguments'],
+          userText: userText,
+        );
+        if (args == null) {
+          return LlmResult.text(
+            _fallbackAssistantText('informational_response'),
+            null,
+            meta: responseMeta,
+          );
         }
-
-        if (name == 'daw_assistant_actions') {
-          return LlmResult.tool(name, args, text: args['assistant_message']);
-        }
-
-        if (name == 'mix_model_request') {
-          return LlmResult.tool(name, args, text: args['assistant_message']);
-        }
+        toolResults.add(
+          name == 'informational_response'
+              ? LlmResult.text(
+                  args['message']?.toString() ?? '',
+                  args,
+                  meta: responseMeta,
+                )
+              : LlmResult.tool(
+                  name,
+                  args,
+                  text: args['assistant_message'],
+                  meta: responseMeta,
+                ),
+        );
+        continue;
       }
 
       // 2️⃣ Message outputs
@@ -1099,8 +2052,25 @@ If it is not, the response is INVALID. If unclear what the used language is, the
           // ✅ CRITICAL FIX:
           // If the model emitted a structured object, treat it as a tool call
           if (text is Map<String, dynamic>) {
-            toolResults.add(LlmResult.tool(
-                'mix_model_request', Map<String, dynamic>.from(text)));
+            final args = _normalizeToolArgs(
+              'mix_model_request',
+              text,
+              userText: userText,
+            );
+            if (args == null) {
+              return LlmResult.text(
+                _fallbackAssistantText('informational_response'),
+                null,
+                meta: responseMeta,
+              );
+            }
+            toolResults.add(
+              LlmResult.tool(
+                'mix_model_request',
+                args,
+                meta: responseMeta,
+              ),
+            );
             continue;
           }
 
@@ -1108,26 +2078,86 @@ If it is not, the response is INVALID. If unclear what the used language is, the
           if (text is String &&
               text.trim().isNotEmpty &&
               assistantText == null) {
-            assistantText = text.trim();
+            assistantText = _sanitizeUserFacingText(
+              text,
+              toolName: 'informational_response',
+              userText: userText,
+            );
           }
         }
       }
     }
 
     if (toolResults.isNotEmpty) {
+      final informationalResults =
+          toolResults.where((t) => t.toolName == 'informational_response');
+      final nonInformationalResults =
+          toolResults.where((t) => t.toolName != 'informational_response');
+
+      if (nonInformationalResults.isEmpty) {
+        final firstInfo = informationalResults.first;
+        return LlmResult.text(
+          firstInfo.text ?? '',
+          firstInfo.toolArgs,
+          meta: responseMeta,
+        );
+      }
+
+      final firstTool = nonInformationalResults.first;
+      final sameToolType = nonInformationalResults.every(
+        (t) => t.toolName == firstTool.toolName,
+      );
+      if (!sameToolType) {
+        return LlmResult.text(
+          _fallbackAssistantText('informational_response'),
+          {
+            'message': _fallbackAssistantText('informational_response'),
+            'cancels_pending': false,
+          },
+          meta: responseMeta,
+        );
+      }
+
+      final callArgs = nonInformationalResults
+          .map((t) => t.toolArgs)
+          .whereType<Map<String, dynamic>>()
+          .toList(growable: false);
+      final userFacingText = assistantText ??
+          nonInformationalResults
+              .map((t) => t.text?.trim() ?? '')
+              .firstWhere((t) => t.isNotEmpty, orElse: () => '');
+
+      if (callArgs.length == 1) {
+        return LlmResult.tool(
+          firstTool.toolName!,
+          callArgs.first,
+          text: userFacingText.isEmpty ? null : userFacingText,
+          meta: responseMeta,
+        );
+      }
+
       return LlmResult.tool(
-        toolResults.first.toolName!,
-        {'calls': toolResults.map((t) => t.toolArgs).toList()},
-        text: assistantText, // may be null — that's OK
+        firstTool.toolName!,
+        {'calls': callArgs},
+        text: userFacingText.isEmpty ? null : userFacingText,
+        meta: responseMeta,
       );
     }
 
     // Only reach here if NO tool-like structure existed
-    if (assistantText != null) {
-      return LlmResult.text(assistantText, null);
+    if (assistantText != null &&
+        assistantText != _fallbackAssistantText('informational_response')) {
+      return LlmResult.text(assistantText, null, meta: responseMeta);
     }
 
-    return LlmResult.text("I'm not sure how to respond.", null);
+    return LlmResult.text(
+      _fallbackAssistantText('informational_response'),
+      {
+        'message': _fallbackAssistantText('informational_response'),
+        'cancels_pending': false,
+      },
+      meta: responseMeta,
+    );
   }
 }
 

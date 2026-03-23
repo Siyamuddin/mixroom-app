@@ -92,6 +92,7 @@
 + (void)muteClipObjC:(NSInteger)clipIndex shouldMute:(BOOL)shouldMute;
 + (void)setClipPanObjC:(NSInteger)clipIndex pan:(float)pan;
 + (void)setClipPitchObjC:(NSInteger)clipIndex semitones:(float)semitones;
++ (void)setClipReversedObjC:(NSInteger)clipIndex reversed:(BOOL)reversed;
 + (void)setClipStretchOptionsObjC:(NSInteger)clipIndex
                        tempoRatio:(double)tempoRatio
                     preservePitch:(BOOL)preservePitch;
@@ -135,9 +136,13 @@
                      bypass:(BOOL)shouldBypass;
 + (bool)getRowEffectBypassStateObjC:(NSInteger)rowIndex
                         effectIndex:(NSInteger)effectIndex;
++ (void)setRowGainAutomationPointsObjC:(NSInteger)row
+                               points:(NSArray<NSDictionary *> *)points;
 + (void)setRowGainObjC:(NSInteger)row gain:(float)gain;
 + (void)muteRowObjC:(NSInteger)row shouldMute:(BOOL)shouldMute;
 + (bool)isRowMutedObjC:(NSInteger)row;
++ (void)setRowPanAutomationPointsObjC:(NSInteger)row
+                              points:(NSArray<NSDictionary *> *)points;
 + (void)setRowPanObjC:(NSInteger)row pan:(float)pan;
 
 // Master bus FX and controls
@@ -154,8 +159,16 @@
 + (void)bypassMasterEffectObjC:(NSInteger)effectIndex
                         bypass:(BOOL)shouldBypass;
 + (bool)getMasterEffectBypassStateObjC:(NSInteger)effectIndex;
++ (void)setMasterEffectAutomationPointsObjC:(NSInteger)effectIndex
+                                  paramId:(NSString *)paramId
+                                 minValue:(double)minValue
+                                 maxValue:(double)maxValue
+                                   points:(NSArray<NSDictionary *> *)points;
++ (void)clearMasterEffectAutomationObjC;
++ (void)setMasterGainAutomationPointsObjC:(NSArray<NSDictionary *> *)points;
 + (void)setMasterGainObjC:(float)gain;
 + (void)muteMasterObjC:(BOOL)shouldMute;
++ (void)setMasterPanAutomationPointsObjC:(NSArray<NSDictionary *> *)points;
 + (void)setMasterPanObjC:(float)pan;
 
 // Automation (rows)
@@ -194,6 +207,9 @@
 
 + (NSNumber *)getNumInputChannelsObjC;
 + (NSString *)getCurrentDeviceNameObjC;
++ (BOOL)prepareRecordingInputsObjC:(NSInteger)desiredInputChannels
+                            reason:(NSString *)reason;
++ (void)refreshAudioRouteObjC:(NSString *)reason;
 
 + (BOOL)startRecordingObjC:(NSString *)path
               channelStart:(NSInteger)start

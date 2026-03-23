@@ -1,20 +1,22 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart' as ja;
+import 'package:mixroom/helpers/ffmpeg_waveform.dart';
 import 'package:path/path.dart' as p;
 import 'package:video_player/video_player.dart';
 
 class ExportSuccessPreviewPlayer extends StatefulWidget {
   final String filePath;
   final bool isVideo;
+  final String? displayName;
 
   const ExportSuccessPreviewPlayer({
     super.key,
     required this.filePath,
     required this.isVideo,
+    this.displayName,
   });
 
   @override
@@ -22,9 +24,8 @@ class ExportSuccessPreviewPlayer extends StatefulWidget {
       _ExportSuccessPreviewPlayerState();
 }
 
-class _ExportSuccessPreviewPlayerState extends State<ExportSuccessPreviewPlayer> {
-  final WaveformExtractionController _waveformExtractor =
-      WaveformExtractionController();
+class _ExportSuccessPreviewPlayerState
+    extends State<ExportSuccessPreviewPlayer> {
   List<double> _waveform = const [];
   bool _waveformLoading = false;
 
@@ -61,7 +62,6 @@ class _ExportSuccessPreviewPlayerState extends State<ExportSuccessPreviewPlayer>
     _audioPlayer?.dispose();
     _videoController?.removeListener(_onVideoTick);
     _videoController?.dispose();
-    _waveformExtractor.stopWaveformExtraction();
     super.dispose();
   }
 
@@ -138,13 +138,13 @@ class _ExportSuccessPreviewPlayerState extends State<ExportSuccessPreviewPlayer>
     setState(() {});
 
     try {
-      final raw = await _waveformExtractor.extractWaveformData(
-        path: widget.filePath,
-        noOfSamples: 96,
+      final raw = await extractNormalizedWaveformWithFfmpeg(
+        filePath: widget.filePath,
+        targetBars: 96,
       );
       if (!mounted) return;
       setState(() {
-        _waveform = raw.isEmpty ? const [] : _normalizeWaveform(raw);
+        _waveform = raw;
         _waveformLoading = false;
       });
     } catch (_) {
@@ -153,14 +153,6 @@ class _ExportSuccessPreviewPlayerState extends State<ExportSuccessPreviewPlayer>
         _waveformLoading = false;
       });
     }
-  }
-
-  List<double> _normalizeWaveform(List<double> raw) {
-    if (raw.isEmpty) return const [];
-    final abs = raw.map((v) => v.abs()).toList();
-    final maxVal = abs.reduce((a, b) => a > b ? a : b);
-    if (maxVal <= 0) return List<double>.filled(abs.length, 0.0);
-    return abs.map((v) => (v / maxVal).clamp(0.0, 1.0)).toList();
   }
 
   bool get _isReady {
@@ -225,10 +217,14 @@ class _ExportSuccessPreviewPlayerState extends State<ExportSuccessPreviewPlayer>
 
   @override
   Widget build(BuildContext context) {
-    final fileName = p.basename(widget.filePath);
+    final explicitName = widget.displayName?.trim();
+    final fileName = (explicitName != null && explicitName.isNotEmpty)
+        ? explicitName
+        : p.basename(widget.filePath);
     final totalMs = _duration.inMilliseconds;
-    final progress =
-        totalMs <= 0 ? 0.0 : (_position.inMilliseconds / totalMs).clamp(0.0, 1.0);
+    final progress = totalMs <= 0
+        ? 0.0
+        : (_position.inMilliseconds / totalMs).clamp(0.0, 1.0);
 
     return Container(
       margin: const EdgeInsets.only(top: 12, bottom: 12),
@@ -269,7 +265,8 @@ class _ExportSuccessPreviewPlayerState extends State<ExportSuccessPreviewPlayer>
               return GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTapDown: _canSeek
-                    ? (d) => _seekFromDx(d.localPosition.dx, constraints.maxWidth)
+                    ? (d) =>
+                        _seekFromDx(d.localPosition.dx, constraints.maxWidth)
                     : null,
                 child: SizedBox(
                   height: 28,

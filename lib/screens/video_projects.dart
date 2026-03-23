@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:mixroom/helpers/app_popup.dart';
-import 'package:mixroom/helpers/subscription_service.dart';
+import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/video_project_manager.dart';
-import 'package:mixroom/models/subscription_models.dart';
+import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/screens/video_editor_sequencer.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
@@ -32,6 +32,18 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
   List<VideoProjectMeta> _projects = [];
   bool _loading = true;
   bool _filePickerInFlight = false;
+  String? _loadError;
+
+  String _friendlyLoadError(Object error) {
+    final raw = error.toString().toLowerCase();
+    if (raw.contains('path_provider') ||
+        raw.contains('getapplicationdocumentspath') ||
+        raw.contains('shared_preferences') ||
+        raw.contains('channel-error')) {
+      return 'Video projects are temporarily unavailable on this device. Please try again in a moment.';
+    }
+    return 'We couldn\'t load your video projects right now. Please try again.';
+  }
 
   @override
   void initState() {
@@ -40,10 +52,20 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _loading = true);
-    _projects = await VideoProjectManager.listProjects();
-    if (!mounted) return;
-    setState(() => _loading = false);
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+    try {
+      _projects = await VideoProjectManager.listProjects();
+    } catch (e) {
+      _projects = <VideoProjectMeta>[];
+      _loadError = _friendlyLoadError(e);
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
   Future<void> _openProject(
@@ -76,6 +98,7 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
   Future<void> _newProject() async {
     if (!_ensureCanAccessVideoProjects()) return;
     if (!await VideoProjectManager.canCreateNew()) return;
+    if (!mounted) return;
     showVideoLoadingDialog(context, message: 'Creating video project...');
     await Future.delayed(const Duration(milliseconds: 220));
     final dir = await VideoProjectManager.createNewProjectDir();
@@ -107,12 +130,22 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
     try {
       // Avoid presenting a native picker during an active Flutter route transition.
       await SchedulerBinding.instance.endOfFrame;
-      return await FilePicker.platform.pickFiles(type: type);
+      return await FilePicker.platform.pickFiles(
+        type: type,
+        allowedExtensions: type == FileType.custom
+            ? const <String>['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi']
+            : null,
+      );
     } on PlatformException catch (e) {
       if (e.code != 'multiple_request') rethrow;
       await SchedulerBinding.instance.endOfFrame;
       try {
-        return await FilePicker.platform.pickFiles(type: type);
+        return await FilePicker.platform.pickFiles(
+          type: type,
+          allowedExtensions: type == FileType.custom
+              ? const <String>['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi']
+              : null,
+        );
       } on PlatformException catch (retryError) {
         if (retryError.code == 'multiple_request') return null;
         rethrow;
@@ -130,7 +163,7 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
       return;
     }
 
-    final picked = await _pickFilesSafely(type: FileType.video);
+    final picked = await _pickFilesSafely(type: FileType.custom);
     if (picked == null || picked.files.isEmpty) return;
     final path = picked.files.single.path;
     if (path == null || path.isEmpty) return;
@@ -310,10 +343,10 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
   bool _canAccessVideoProjects() {
     try {
       return context
-          .read<SubscriptionService>()
+          .read<EntitlementService>()
           .canUseCapability(SubscriptionCapability.videoProjects);
     } catch (_) {
-      return true;
+      return false;
     }
   }
 
@@ -390,7 +423,7 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    context.watch<SubscriptionService>();
+    context.watch<EntitlementService>();
     final hasVideoAccess = _canAccessVideoProjects();
     final canCreate = _projects.length < VideoProjectManager.maxProjects;
     return Scaffold(
@@ -472,80 +505,126 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                   ),
                   const SizedBox(height: 12),
                   Expanded(
-                    child: _projects.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'No saved video projects yet.',
-                              style: TextStyle(color: Colors.white70),
-                            ),
-                          )
-                        : ListView.separated(
-                            itemCount: _projects.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 10),
-                            itemBuilder: (_, i) {
-                              final p = _projects[i];
-                              return _GlassCard(
-                                child: ListTile(
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                  ),
-                                  leading: const Icon(
+                    child: (_loadError ?? '').trim().isNotEmpty
+                        ? Center(
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
                                     Icons.video_collection_outlined,
-                                    color: Colors.white,
+                                    color: Colors.white54,
+                                    size: 36,
                                   ),
-                                  title: Text(
-                                    p.name,
-                                    style: const TextStyle(
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'Could not load video projects.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
                                       color: Colors.white,
-                                      fontWeight: FontWeight.w600,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
-                                  subtitle: Text(
-                                    'Last opened: ${_formatTimestamp(p.lastOpenedAt)}',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                    overflow: TextOverflow.ellipsis,
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _loadError!,
+                                    textAlign: TextAlign.center,
                                     style: const TextStyle(
-                                        color: Colors.white60, fontSize: 12),
+                                      color: Colors.white70,
+                                      fontSize: 13,
+                                    ),
                                   ),
-                                  onTap: () {
-                                    if (!hasVideoAccess) {
-                                      _showVideoAccessLockedDialog();
-                                      return;
-                                    }
-                                    _openProject(p.dir);
-                                  },
-                                  trailing: PopupMenuButton<String>(
-                                    icon: const Icon(Icons.more_vert,
-                                        color: Colors.white70),
-                                    onSelected: (v) async {
-                                      if (!hasVideoAccess) {
-                                        _showVideoAccessLockedDialog();
-                                        return;
-                                      }
-                                      if (v == 'open')
-                                        await _openProject(p.dir);
-                                      if (v == 'rename')
-                                        await _renameProject(p);
-                                      if (v == 'delete')
-                                        await _deleteProject(p);
-                                    },
-                                    itemBuilder: (_) => const [
-                                      PopupMenuItem(
-                                          value: 'open', child: Text('Open')),
-                                      PopupMenuItem(
-                                          value: 'rename',
-                                          child: Text('Rename')),
-                                      PopupMenuItem(
-                                          value: 'delete',
-                                          child: Text('Delete')),
-                                    ],
+                                  const SizedBox(height: 14),
+                                  ElevatedButton(
+                                    onPressed: _refresh,
+                                    child: const Text('Retry'),
                                   ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : _projects.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No saved video projects yet.',
+                                  style: TextStyle(color: Colors.white70),
                                 ),
-                              );
-                            },
-                          ),
+                              )
+                            : ListView.separated(
+                                itemCount: _projects.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 10),
+                                itemBuilder: (_, i) {
+                                  final p = _projects[i];
+                                  return _GlassCard(
+                                    child: ListTile(
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(18),
+                                      ),
+                                      leading: const Icon(
+                                        Icons.video_collection_outlined,
+                                        color: Colors.white,
+                                      ),
+                                      title: Text(
+                                        p.name,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        'Last opened: ${_formatTimestamp(p.lastOpenedAt)}',
+                                        maxLines: 1,
+                                        softWrap: false,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                            color: Colors.white60,
+                                            fontSize: 12),
+                                      ),
+                                      onTap: () {
+                                        if (!hasVideoAccess) {
+                                          _showVideoAccessLockedDialog();
+                                          return;
+                                        }
+                                        _openProject(p.dir);
+                                      },
+                                      trailing: PopupMenuButton<String>(
+                                        icon: const Icon(Icons.more_vert,
+                                            color: Colors.white70),
+                                        onSelected: (v) async {
+                                          if (!hasVideoAccess) {
+                                            _showVideoAccessLockedDialog();
+                                            return;
+                                          }
+                                          if (v == 'open') {
+                                            await _openProject(p.dir);
+                                          }
+                                          if (v == 'rename') {
+                                            await _renameProject(p);
+                                          }
+                                          if (v == 'delete') {
+                                            await _deleteProject(p);
+                                          }
+                                        },
+                                        itemBuilder: (_) => const [
+                                          PopupMenuItem(
+                                              value: 'open',
+                                              child: Text('Open')),
+                                          PopupMenuItem(
+                                              value: 'rename',
+                                              child: Text('Rename')),
+                                          PopupMenuItem(
+                                              value: 'delete',
+                                              child: Text('Delete')),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                   ),
                 ],
               ),

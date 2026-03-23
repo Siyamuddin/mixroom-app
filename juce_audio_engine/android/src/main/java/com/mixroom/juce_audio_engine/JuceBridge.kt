@@ -40,6 +40,7 @@ object JuceBridge {
     @JvmStatic external fun muteClipJNI(clipIndex: Int, mute: Boolean)
     @JvmStatic external fun setClipPanJNI(clipIndex: Int, pan: Float)
     @JvmStatic external fun setClipPitchJNI(clipIndex: Int, semitones: Float)
+    @JvmStatic external fun setClipReversedJNI(clipIndex: Int, reversed: Boolean)
     @JvmStatic external fun setClipStretchOptionsJNI(
         clipIndex: Int,
         tempoRatio: Double,
@@ -135,9 +136,11 @@ object JuceBridge {
     )
 
     @JvmStatic external fun clearTrackEffectAutomationForRowJNI(row: Int)
+    @JvmStatic external fun setRowGainAutomationPointsJNI(row: Int, points: List<Map<String, Any>>)
     @JvmStatic external fun setRowGainJNI(row: Int, gain: Float)
     @JvmStatic external fun muteRowJNI(row: Int, mute: Boolean)
     @JvmStatic external fun isRowMutedJNI(row: Int): Boolean
+    @JvmStatic external fun setRowPanAutomationPointsJNI(row: Int, points: List<Map<String, Any>>)
     @JvmStatic external fun setRowPanJNI(row: Int, pan: Float)
 
     // Master FX and controls
@@ -150,8 +153,19 @@ object JuceBridge {
     @JvmStatic external fun setMasterEffectJNI(effectIndex: Int, paramId: String, value: Any)
     @JvmStatic external fun bypassMasterEffectJNI(effectIndex: Int, bypass: Boolean)
     @JvmStatic external fun getMasterEffectBypassStateJNI(effectIndex: Int): Boolean
+    @JvmStatic external fun setMasterEffectAutomationPointsJNI(
+        effectIndex: Int,
+        paramId: String,
+        minValue: Double,
+        maxValue: Double,
+        points: List<Map<String, Any>>,
+    )
+
+    @JvmStatic external fun clearMasterEffectAutomationJNI()
+    @JvmStatic external fun setMasterGainAutomationPointsJNI(points: List<Map<String, Any>>)
     @JvmStatic external fun setMasterGainJNI(gain: Float)
     @JvmStatic external fun muteMasterJNI(mute: Boolean)
+    @JvmStatic external fun setMasterPanAutomationPointsJNI(points: List<Map<String, Any>>)
     @JvmStatic external fun setMasterPanJNI(pan: Float)
 
     // Debug
@@ -172,6 +186,8 @@ object JuceBridge {
     @JvmStatic external fun getInputDevicesJNI(): ArrayList<String>
     @JvmStatic external fun selectInputDeviceJNI(name: String): Boolean
     @JvmStatic external fun getNumInputChannelsJNI(): Int
+    @JvmStatic external fun prepareRecordingInputsJNI(desiredInputChannels: Int, reason: String): Boolean
+    @JvmStatic external fun refreshAudioRouteJNI(reason: String)
     @JvmStatic external fun getRecordingPeakJNI(): Double
     @JvmStatic external fun getCurrentDeviceNameJNI(): String
     @JvmStatic external fun startRecordingJNI(path: String, channelStart: Int, channelCount: Int): Boolean

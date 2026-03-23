@@ -186,6 +186,41 @@ void main() {
         'chop_notes',
       );
     });
+
+    test('resolves musical clip move positions from measures and beats', () {
+      final startMs = AssistantActionUtils.resolveMoveMusicalStartMs(
+        data: const {'new_start_measure': 3},
+        target: const {},
+        bpm: 120,
+      );
+      final deltaMs = AssistantActionUtils.resolveMoveMusicalDeltaMs(
+        data: const {'delta_measures': 4},
+        target: const {},
+        bpm: 120,
+      );
+      final beatMs = AssistantActionUtils.resolveMoveMusicalStartMs(
+        data: const {'new_start_beat': 5},
+        target: const {},
+        bpm: 120,
+      );
+
+      expect(startMs, 4000.0);
+      expect(deltaMs, 8000.0);
+      expect(beatMs, 2000.0);
+    });
+
+    test('supports non-4-4 musical clip move timing when specified', () {
+      final startMs = AssistantActionUtils.resolveMoveMusicalStartMs(
+        data: const {
+          'new_start_measure': 3,
+          'beats_per_bar': 3,
+        },
+        target: const {},
+        bpm: 120,
+      );
+
+      expect(startMs, 3000.0);
+    });
   });
 
   group('AssistantActionUtils clip analysis', () {

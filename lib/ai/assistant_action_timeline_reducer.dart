@@ -8,6 +8,7 @@ class TimelineAutomationClip {
   final String id;
   final int rowIndex;
   final String targetId;
+  final String patternId;
   final double startMs;
   final double lengthMs;
   final bool muted;
@@ -17,6 +18,7 @@ class TimelineAutomationClip {
     required this.id,
     required this.rowIndex,
     required this.targetId,
+    this.patternId = '',
     required this.startMs,
     required this.lengthMs,
     required this.muted,
@@ -27,6 +29,7 @@ class TimelineAutomationClip {
     String? id,
     int? rowIndex,
     String? targetId,
+    String? patternId,
     double? startMs,
     double? lengthMs,
     bool? muted,
@@ -36,6 +39,7 @@ class TimelineAutomationClip {
       id: id ?? this.id,
       rowIndex: rowIndex ?? this.rowIndex,
       targetId: targetId ?? this.targetId,
+      patternId: patternId ?? this.patternId,
       startMs: startMs ?? this.startMs,
       lengthMs: lengthMs ?? this.lengthMs,
       muted: muted ?? this.muted,
@@ -574,20 +578,30 @@ class AssistantActionTimelineReducer {
     if (operation == 'move') {
       final indices = resolveTargetClipIndices();
       if (indices.isEmpty) return state.copyWith(clips: clips);
-      final explicitStart = AssistantActionUtils.toActionDouble(
-        data['new_start_ms'] ??
-            target['new_start_ms'] ??
-            data['start_ms'] ??
-            target['start_ms'],
-      );
-      final deltaMs = AssistantActionUtils.toActionDouble(
-        data['delta_ms'] ??
-            target['delta_ms'] ??
-            data['offset_ms'] ??
-            target['offset_ms'] ??
-            data['shift_ms'] ??
-            target['shift_ms'],
-      );
+      final explicitStart = AssistantActionUtils.resolveMoveMusicalStartMs(
+            data: data,
+            target: target,
+            bpm: state.projectTempoBpm,
+          ) ??
+          AssistantActionUtils.toActionDouble(
+            data['new_start_ms'] ??
+                target['new_start_ms'] ??
+                data['start_ms'] ??
+                target['start_ms'],
+          );
+      final deltaMs = AssistantActionUtils.resolveMoveMusicalDeltaMs(
+            data: data,
+            target: target,
+            bpm: state.projectTempoBpm,
+          ) ??
+          AssistantActionUtils.toActionDouble(
+            data['delta_ms'] ??
+                target['delta_ms'] ??
+                data['offset_ms'] ??
+                target['offset_ms'] ??
+                data['shift_ms'] ??
+                target['shift_ms'],
+          );
       final direction = (data['direction'] ?? target['direction'] ?? '')
           .toString()
           .trim()
@@ -937,7 +951,14 @@ class AssistantActionTimelineReducer {
     Map<String, dynamic> data,
   ) {
     final target = AssistantActionUtils.toActionMap(data['target']);
-    final operation = (data['operation'] ?? '').toString().trim().toLowerCase();
+    String operation =
+        (data['operation'] ?? '').toString().trim().toLowerCase();
+    switch (operation) {
+      case 'clone':
+      case 'clone_clip':
+        operation = 'duplicate_clip';
+        break;
+    }
     if (operation.isEmpty) return state;
 
     final row = (AssistantActionUtils.toActionInt(data['row_index']) ??
@@ -998,6 +1019,27 @@ class AssistantActionTimelineReducer {
         List<TimelineAutomationClip>.from(
             clipMap[laneKey] ?? const <TimelineAutomationClip>[]);
 
+    String newPatternId() =>
+        'pat_${row}_${targetId}_${DateTime.now().microsecondsSinceEpoch}_${clipMap.length}';
+
+    void applySharedPointsToLane(
+      List<TimelineAutomationClip> laneClips,
+      int sourceIndex,
+      List<AutomationPoint> points,
+    ) {
+      final source = laneClips[sourceIndex];
+      final patternId = source.patternId.trim();
+      if (patternId.isEmpty) {
+        laneClips[sourceIndex] = source.copyWith(points: points);
+        return;
+      }
+      for (int i = 0; i < laneClips.length; i++) {
+        final clip = laneClips[i];
+        if (clip.patternId.trim() != patternId) continue;
+        laneClips[i] = clip.copyWith(points: points);
+      }
+    }
+
     int? resolveClipIndex(List<TimelineAutomationClip> clips) {
       final explicit = AssistantActionUtils.toActionInt(
         data['clip_index'] ??
@@ -1012,6 +1054,44 @@ class AssistantActionTimelineReducer {
       if (id.isNotEmpty) {
         final idx = clips.indexWhere((c) => c.id == id);
         if (idx >= 0) return idx;
+      }
+      final patternId = (data['pattern_id'] ??
+              target['pattern_id'] ??
+              data['automation_pattern_id'] ??
+              target['automation_pattern_id'] ??
+              '')
+          .toString()
+          .trim();
+      if (patternId.isNotEmpty) {
+        final idx = clips.indexWhere((c) => c.patternId.trim() == patternId);
+        if (idx >= 0) return idx;
+      }
+      final atMs = AssistantActionUtils.toActionDouble(
+        data['at_ms'] ??
+            target['at_ms'] ??
+            data['time_ms'] ??
+            target['time_ms'] ??
+            data['start_ms'] ??
+            target['start_ms'],
+      );
+      if (atMs != null && atMs.isFinite) {
+        for (int i = 0; i < clips.length; i++) {
+          final clip = clips[i];
+          final endMs = clip.startMs + clip.lengthMs;
+          if (atMs >= clip.startMs && atMs <= endMs) {
+            return i;
+          }
+        }
+        int nearest = 0;
+        double nearestDist = (clips.first.startMs - atMs).abs();
+        for (int i = 1; i < clips.length; i++) {
+          final dist = (clips[i].startMs - atMs).abs();
+          if (dist < nearestDist) {
+            nearest = i;
+            nearestDist = dist;
+          }
+        }
+        return nearest;
       }
       return clips.isEmpty ? null : clips.length - 1;
     }
@@ -1145,6 +1225,7 @@ class AssistantActionTimelineReducer {
               id: 'ac_${row}_${targetId}_${laneClips.length}_${created}_kick',
               rowIndex: row,
               targetId: targetId,
+              patternId: '',
               startMs: cursor,
               lengthMs: len,
               muted: false,
@@ -1160,6 +1241,9 @@ class AssistantActionTimelineReducer {
             id: 'ac_${row}_${targetId}_${laneClips.length}',
             rowIndex: row,
             targetId: targetId,
+            patternId: (data['pattern_id'] ?? target['pattern_id'] ?? '')
+                .toString()
+                .trim(),
             startMs: math.max(0.0, start),
             lengthMs: len,
             muted: AssistantActionUtils.toActionBool(
@@ -1183,13 +1267,37 @@ class AssistantActionTimelineReducer {
             automationLanePoints: lanePoints, automationClips: clipMap);
       }
       final src = laneClips[idx];
+      final copyMode = (data['copy_mode'] ??
+              data['clone_mode'] ??
+              target['copy_mode'] ??
+              target['clone_mode'] ??
+              data['duplicate_mode'] ??
+              target['duplicate_mode'] ??
+              '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      final sharedCopy = copyMode.isEmpty ||
+          copyMode == 'shared' ||
+          copyMode == 'linked' ||
+          copyMode == 'shallow' ||
+          copyMode == 'clone';
+      final patternId = sharedCopy
+          ? (src.patternId.trim().isNotEmpty
+              ? src.patternId.trim()
+              : newPatternId())
+          : '';
+      if (sharedCopy && src.patternId.trim().isEmpty) {
+        laneClips[idx] = src.copyWith(patternId: patternId);
+      }
       final start = AssistantActionUtils.toActionDouble(
             data['start_ms'] ?? target['start_ms'] ?? data['paste_start_ms'],
           ) ??
           (src.startMs + src.lengthMs);
       laneClips.add(
-        src.copyWith(
+        laneClips[idx].copyWith(
           id: '${src.id}_dup_${laneClips.length}',
+          patternId: patternId,
           startMs: math.max(0.0, start),
         ),
       );
@@ -1203,7 +1311,9 @@ class AssistantActionTimelineReducer {
         operation == 'mute_clip' ||
         operation == 'unmute_clip' ||
         operation == 'toggle_clip_mute' ||
-        operation == 'set_clip_points') {
+        operation == 'set_clip_points' ||
+        operation == 'make_unique_clip' ||
+        operation == 'make_unique') {
       final laneClips = clipsForLane();
       final idx = resolveClipIndex(laneClips);
       if (idx == null) {
@@ -1235,9 +1345,17 @@ class AssistantActionTimelineReducer {
         laneClips[idx] = current.copyWith(muted: false);
       } else if (operation == 'toggle_clip_mute') {
         laneClips[idx] = current.copyWith(muted: !current.muted);
+      } else if (operation == 'make_unique_clip' ||
+          operation == 'make_unique') {
+        if (current.patternId.trim().isNotEmpty) {
+          laneClips[idx] = current.copyWith(patternId: '');
+        }
       } else if (operation == 'set_clip_points') {
-        laneClips[idx] = current.copyWith(
-            points: parsePoints(data['points'], current.points));
+        applySharedPointsToLane(
+          laneClips,
+          idx,
+          parsePoints(data['points'], current.points),
+        );
       }
       clipMap[laneKey] = laneClips;
       return state.copyWith(

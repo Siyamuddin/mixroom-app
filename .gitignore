@@ -25,6 +25,7 @@ ios/Runner.xcworkspace/
 ios/build/
 ios/Flutter/Flutter.framework
 ios/Flutter/Flutter.podspec
+ios/Flutter/AppSecrets.xcconfig
 
 # IntelliJ related
 *.iml
@@ -43,3 +44,9 @@ ios/Flutter/Flutter.podspec
 
 # python
 .venv/
+
+# Local/generated artifacts
+.aws-sam/
+tools/live_chatbar_probe_v2_full_results.json
+tools/live_chatbar_probe_v2_full_results_r2.json
+tools/ai_mixing/out*/

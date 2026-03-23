@@ -2,7 +2,6 @@
 
 class GoalVector {
   final String type; // "mix_request"
-  final String userText;
   final List<MixIntent> intents;
   final MixTarget target;
   final double intensity; // 0..1
@@ -11,15 +10,13 @@ class GoalVector {
 
   GoalVector({
     required this.type,
-    required this.userText,
     required this.intents,
     required this.target,
     required this.intensity,
     this.resetFx = false,
   });
 
-  factory GoalVector.fromJson(Map<String, dynamic> j,
-      {required String userText}) {
+  factory GoalVector.fromJson(Map<String, dynamic> j) {
     final intentsJson =
         (j['intents'] is List) ? (j['intents'] as List) : const [];
     final targetJson = j['target'] is Map
@@ -28,7 +25,6 @@ class GoalVector {
 
     return GoalVector(
       type: (j['type'] ?? 'mix_request').toString(),
-      userText: userText,
       intents: intentsJson
           .whereType<Map>()
           .map((m) => MixIntent.fromJson(Map<String, dynamic>.from(m)))
@@ -96,12 +92,17 @@ class MixTarget {
         (rawScope == 'row' || rawScope == 'master' || rawScope == 'auto')
             ? rawScope!
             : 'auto';
+    final rawRowIndex = j['row_index'] is int
+        ? j['row_index'] as int
+        : (j['row_index'] is num ? (j['row_index'] as num).toInt() : null);
+    final rowIndex =
+        (scope == 'master' || (rawRowIndex != null && rawRowIndex < 0))
+            ? null
+            : rawRowIndex;
 
     return MixTarget(
       role: j['role']?.toString(),
-      rowIndex: j['row_index'] is int
-          ? j['row_index'] as int
-          : (j['row_index'] is num ? (j['row_index'] as num).toInt() : null),
+      rowIndex: rowIndex,
       scope: scope,
       confidence: ((j['confidence'] ?? 0.5) as num).toDouble().clamp(0.0, 1.0),
     );

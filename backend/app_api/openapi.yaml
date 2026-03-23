@@ -1,0 +1,413 @@
+openapi: 3.0.3
+info:
+  title: Mixroom Subscription API
+  version: 1.0.0
+  description: Canonical entitlement and billing API for Mixroom clients.
+servers:
+  - url: https://api.mixroom.ai
+paths:
+  /v1/users/me:
+    get:
+      summary: Get or create the current app user profile snapshot
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+    patch:
+      summary: Update the current app user profile snapshot
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProfilePatch'
+      responses:
+        '200':
+          description: Updated user profile snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: Validation error
+        '409':
+          description: Username already claimed
+    delete:
+      summary: Delete the current app user profile and related Mixroom-side account records
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Account records deleted
+        '409':
+          description: Active paid subscription must be cancelled first
+  /v1/entitlements/me:
+    get:
+      summary: Get current user's canonical entitlement snapshot
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Entitlement snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entitlement'
+  /v1/feedback:
+    post:
+      summary: Submit product feedback or a bug report
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, source, message]
+              properties:
+                category:
+                  type: string
+                  enum: [feedback, bug_report]
+                source:
+                  type: string
+                  enum: [home, account, daw_chat]
+                message:
+                  type: string
+                  maxLength: 1500
+                allow_email_contact:
+                  type: boolean
+                  description: Whether the user consents to email follow-up about this submission.
+                client:
+                  type: object
+                context:
+                  type: object
+                screenshot:
+                  type: object
+      responses:
+        '200':
+          description: Feedback accepted
+  /v1/internal/admin/overview:
+    get:
+      summary: Internal admin dashboard overview
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Internal operational overview
+  /v1/internal/admin/feedback:
+    get:
+      summary: Internal admin feedback submissions
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: submission_id
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Feedback submissions or a single submission detail
+  /v1/internal/admin/users:
+    get:
+      summary: Internal admin user search
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: query
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Matching internal admin user records
+  /v1/internal/admin/users/delete:
+    post:
+      summary: Tombstone-delete a user account from internal admin
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, reason]
+              properties:
+                user_id:
+                  type: string
+                reason:
+                  type: string
+                force:
+                  type: boolean
+      responses:
+        '200':
+          description: User deleted and tombstoned
+        '409':
+          description: Active paid subscription requires explicit force flag
+  /v1/internal/admin/users/grant-prompts:
+    post:
+      summary: Add extra AI prompt allowance to a user from internal admin
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, prompt_count]
+              properties:
+                user_id:
+                  type: string
+                prompt_count:
+                  type: integer
+      responses:
+        '200':
+          description: Prompt allowance granted
+  /v1/billing/web/checkout-session:
+    post:
+      summary: Create web checkout session (Paddle/Toss)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [region_code]
+              properties:
+                region_code:
+                  type: string
+                success_url:
+                  type: string
+                cancel_url:
+                  type: string
+      responses:
+        '200':
+          description: Checkout session
+  /v1/billing/mobile/apple/verify:
+    post:
+      summary: Verify Apple subscription transaction
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transaction_jws]
+              properties:
+                transaction_jws:
+                  type: string
+                product_id:
+                  type: string
+                app_account_token:
+                  type: string
+  /v1/billing/mobile/google/verify:
+    post:
+      summary: Verify Google subscription purchase token
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purchase_token, product_id]
+              properties:
+                purchase_token:
+                  type: string
+                product_id:
+                  type: string
+                package_name:
+                  type: string
+                obfuscated_account_id:
+                  type: string
+  /v1/billing/restore:
+    post:
+      summary: Trigger restore from provider account
+      security:
+        - bearerAuth: []
+  /v1/billing/portal-url:
+    get:
+      summary: Resolve provider management URL
+      security:
+        - bearerAuth: []
+  /v1/webhooks/apple:
+    post:
+      summary: Apple ASSN V2 webhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signedPayload]
+              properties:
+                signedPayload:
+                  type: string
+  /v1/webhooks/google:
+    post:
+      summary: Google RTDN webhook
+  /v1/webhooks/paddle:
+    post:
+      summary: Paddle webhook
+  /v1/webhooks/toss:
+    post:
+      summary: Toss webhook
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    UserProfile:
+      type: object
+      required:
+        - user_id
+        - email
+        - display_name
+        - email_verified
+        - profile_status
+        - onboarding_state
+        - created_at
+        - updated_at
+      properties:
+        user_id:
+          type: string
+        email:
+          type: string
+        display_name:
+          type: string
+        email_verified:
+          type: boolean
+        cognito_username:
+          type: string
+        auth_provider:
+          type: string
+        username:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
+        bio:
+          type: string
+          nullable: true
+        profile_status:
+          type: string
+        onboarding_state:
+          type: string
+        accepted_terms_version:
+          type: string
+          nullable: true
+        accepted_privacy_version:
+          type: string
+          nullable: true
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+        newsletter_opt_in:
+          type: boolean
+        newsletter_opt_in_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+    UserProfilePatch:
+      type: object
+      properties:
+        display_name:
+          type: string
+        username:
+          type: string
+          nullable: true
+        bio:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
+        accepted_terms_version:
+          type: string
+          nullable: true
+        accepted_privacy_version:
+          type: string
+          nullable: true
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+        newsletter_opt_in:
+          type: boolean
+        newsletter_opt_in_at:
+          type: string
+          format: date-time
+          nullable: true
+    Entitlement:
+      type: object
+      required:
+        - user_id
+        - tier
+        - status
+        - effective_at
+        - capabilities
+        - revision
+      properties:
+        user_id:
+          type: string
+        tier:
+          type: string
+          enum: [free, pro, studio]
+        status:
+          type: string
+          enum: [trialing, active, grace_period, past_due, paused, canceled, expired, refunded, revoked]
+        effective_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        source_provider:
+          type: string
+          enum: [apple, google, paddle, toss, admin_grant, unknown]
+        source_subscription_id:
+          type: string
+        capabilities:
+          type: object
+          additionalProperties:
+            type: boolean
+        management_channel:
+          type: string
+        revision:
+          type: integer

@@ -23,18 +23,61 @@ Your manual correction becomes the supervision signal for magnitude learning.
 3. Enter a mixing prompt in chat (example: “tighten bass and reduce boom”).
 4. Let AI apply changes.
 5. Manually adjust any parameters needed until it sounds right to you.
-6. Export current capture using the **Export** button in that toolbar.
-7. Continue with more prompts in same project, or turn off **Producer Capture**.
+6. Press the new **Capture Final** button in the capture toolbar when that prompt cycle is done.
+7. Export current capture using the **Export** button in that toolbar.
+8. Continue with more prompts in same project, or turn off **Producer Capture**.
 
 Optional fallback (still supported): `/producer on|off|export`
 
 ### What Gets Captured
-- Pre-step snapshot (project state before AI action)
+- One explicit `prompt_cycle` record per prompt
+- `before_prompt_snapshot` (project state before AI action)
 - Prompt text
 - AI resolved actions (exact values applied)
-- Manual producer edits after AI action
-- Post-step snapshot (state after your edits)
+- `ai_after_snapshot` (state immediately after AI actions)
+- `producer_final_snapshot` (state when producer presses **Capture Final**)
+- Optional `manual_edits_debug` telemetry for troubleshooting, not primary labels
 - Optional quality rating
+- Session-level project metadata (`project_id`, `project_name`) on new exports
+
+### Why the Final Capture Matters
+- Raw manual edit logs are noisy because they include exploratory tweaks, bypass toggles, and repeated drags.
+- The final snapshot lets dataset prep compare the AI-applied state against the producer-final state for that prompt cycle.
+- Exporting, disabling Producer Capture, or starting the next AI prompt now auto-finalizes any unfinished prompt cycle so the boundary is not lost.
+
+### Full-Project Collection Note
+- This pipeline is already designed for full songs/projects, not isolated one-by-one stem labels.
+- Each training row is one AI action, but its features come from the full `project_state` snapshot captured at that moment.
+- Practical implication: one full project can yield many supervised rows if you run several realistic prompt cycles on it.
+- Fast internal-beta target:
+  - 10-20 full projects
+  - 5-10 prompt cycles per project
+  - roughly 5-15 resolved actions per prompt cycle
+  - expected yield: about 250-1500 action rows
+- That is enough for a credibility test and internal beta gate, but not a final production-quality model.
+
+### Finished Project Bootstrap Option
+If you already have finished Mixroom projects made by humans, but you do not
+have enough producer-capture session JSON yet, you can bootstrap a dataset
+directly from those saved project files:
+
+```bash
+bash tools/ai_mixing/run_project_bootstrap.sh \
+  --projects-root /path/to/mixroom_projects \
+  --copy-assets
+```
+
+What this does:
+- reads project folders or `.mixroom` bundles
+- mines final row/master gain, pan, and FX state as human end-state labels
+- generates negative examples from actions/effects that are absent
+- writes a trainable dataset CSV and exports ONNX
+
+Important:
+- this is a fast bootstrap from human-finished full projects
+- it is weaker than true producer-capture session data because prompt intent and
+  correction trajectory are reconstructed from end-state only
+- it is still more defensible than pure synthetic placeholder data for internal beta
 
 ### Data Quality Guidelines (Important)
 - Use diverse source quality: clean stems, rough recordings, different genres.
@@ -56,6 +99,22 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r tools/ai_mixing/requirements.txt
 ```
+
+### Bootstrap sample model for app-flow testing
+If you want to test the real ONNX runtime path before producer data is ready,
+you can generate a synthetic bootstrap model:
+
+```bash
+.venv/bin/python tools/ai_mixing/build_bootstrap_sample_model.py --copy-assets
+```
+
+This writes a synthetic dataset, trains both sklearn stages, exports ONNX, and
+copies the resulting files into `assets/models/`.
+
+Important:
+- this is only for end-to-end app testing
+- it is not a production-quality mixing model
+- keep `MIXROOM_USE_LEARNED_MAGNITUDES` off for real users until listening tests pass
 
 ### One-command pipeline
 Run full pipeline in order (`prepare -> validate -> train -> evaluate -> export`):
@@ -93,6 +152,12 @@ bash tools/ai_mixing/run_all.sh --help
 python tools/ai_mixing/prepare_dataset.py \
   --sessions-dir /path/to/ai_mixing_sessions \
   --out-csv tools/ai_mixing/out/dataset.csv
+```
+
+2.2 Preview collection progress before training:
+```bash
+python tools/ai_mixing/summarize_sessions.py \
+  --sessions-dir /path/to/ai_mixing_sessions
 ```
 
 2.5 Validate feature contract (app inference vs training scripts):
@@ -148,7 +213,7 @@ Then ensure these files are listed in `pubspec.yaml` under `flutter.assets`.
 
 In simple terms:
 - AI makes a move.
-- Producer corrects it.
+- Producer corrects it and marks when that prompt cycle is finished.
 - The pipeline learns when to keep/suppress and how much to scale future moves.
 
 ## Feature Flag Rollout
@@ -166,8 +231,8 @@ In simple terms:
   - otherwise grouped by `session_id`
   - fallback to random split only when grouping is impossible.
 - Deterministic local heuristics remain the fallback path.
-- The ONNX models are exported with one float input tensor shaped `[batch, 76]` to match app inference.
-- Scripts enforce the 76-feature contract to prevent accidental train/inference mismatch.
+- The ONNX models are exported with one float input tensor shaped `[batch, 77]` to match app inference.
+- Scripts enforce the 77-feature contract to prevent accidental train/inference mismatch.
 - Feature vector includes static analysis aggregates (centroid/zcr/sibilance/bassiness),
   short-term dynamics (ST-RMS mean/p95/std, transient density),
   loudness/headroom proxies (true-peak, LUFS estimates, LRA, clip ratio),

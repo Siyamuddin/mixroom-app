@@ -6,6 +6,8 @@ using namespace juce;
 
 namespace
 {
+void sanitiseAutomationPoints(std::vector<AutomationPoint> &points, float maxValue);
+
 TimelineClipProcessorBase *asTimelineProcessor(juce::AudioProcessorGraph::Node::Ptr &node)
 {
     if (!node)
@@ -151,10 +153,10 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         if (device == nullptr)
             return false;
 
-        const int activeInputs = device->getActiveInputChannels().countNumberOfSetBits();
         if (desiredInputChannels <= 0)
-            return activeInputs == 0;
+            return true;
 
+        const int activeInputs = device->getActiveInputChannels().countNumberOfSetBits();
         int availableInputs = device->getInputChannelNames().size();
         if (availableInputs <= 0)
             availableInputs = activeInputs;
@@ -176,12 +178,16 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
 
     // Fast path first: avoid forcing a full device reopen unless we truly need it.
     juce::String error = deviceManager.setAudioDeviceSetup(setup, false);
+    if (error.isEmpty())
+        ignoredDeviceChangeCallbacks.fetch_add(1, std::memory_order_relaxed);
     if (!error.isEmpty())
     {
         if (forceReopen)
         {
             // Fallback when non-reopen apply fails on certain routes.
             error = deviceManager.setAudioDeviceSetup(setup, true);
+            if (error.isEmpty())
+                ignoredDeviceChangeCallbacks.fetch_add(1, std::memory_order_relaxed);
         }
     }
     else if (!routeMatchesDesiredInputs())
@@ -190,6 +196,8 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         {
             // Fallback when non-reopen apply reports success but route state is stale.
             error = deviceManager.setAudioDeviceSetup(setup, true);
+            if (error.isEmpty())
+                ignoredDeviceChangeCallbacks.fetch_add(1, std::memory_order_relaxed);
         }
         else
         {
@@ -211,6 +219,7 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
     if (sr > 1000.0)
         hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
 
+    armOutputSafetyForCurrentRoute();
     logCurrentAudioDeviceState(reason);
     return true;
 }
@@ -237,6 +246,94 @@ void JuceEngine::requestAudioDeviceRefreshAsync(const juce::String &reason)
 
         if (recordingActive)
             routeLiveInputToRow(/*row=*/0, recordChannelCount, recordChannelOffset); });
+}
+
+void JuceEngine::prepareRecordingInputsAsync(int desiredInputChannels,
+                                             const juce::String &reason)
+{
+    desiredInputChannels = juce::jmax(0, desiredInputChannels);
+    desiredInputOpenChannels.store(desiredInputChannels, std::memory_order_relaxed);
+    requestAudioDeviceRefreshAsync("prepareRecordingInputs:" + reason);
+}
+
+bool JuceEngine::prepareRecordingInputs(int desiredInputChannels,
+                                        const juce::String &reason)
+{
+    desiredInputChannels = juce::jmax(0, desiredInputChannels);
+
+    if (applyPreferredAudioDeviceSetup(desiredInputChannels,
+                                       false,
+                                       "prepareRecordingInputs:" + reason))
+        return true;
+
+    return applyPreferredAudioDeviceSetup(desiredInputChannels,
+                                          true,
+                                          "prepareRecordingInputs-reopen:" + reason);
+}
+
+void JuceEngine::refreshAudioRouteAsync(const juce::String &reason)
+{
+    requestAudioDeviceRefreshAsync("manual-refresh:" + reason);
+}
+
+void JuceEngine::changeListenerCallback(juce::ChangeBroadcaster *source)
+{
+    if (source != &deviceManager || !engineInitialized)
+        return;
+
+    int ignored = ignoredDeviceChangeCallbacks.load(std::memory_order_relaxed);
+    while (ignored > 0)
+    {
+        if (ignoredDeviceChangeCallbacks.compare_exchange_weak(
+                ignored,
+                ignored - 1,
+                std::memory_order_acq_rel,
+                std::memory_order_relaxed))
+            return;
+    }
+
+    const double sr =
+        getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
+    if (sr > 1000.0)
+        hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
+
+    logCurrentAudioDeviceState("device-change");
+    armOutputSafetyForCurrentRoute();
+
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const int desiredInputs = desiredInputOpenChannels.load(std::memory_order_relaxed);
+    const int activeInputs = device != nullptr
+                                 ? device->getActiveInputChannels().countNumberOfSetBits()
+                                 : 0;
+    const int availableInputs = device != nullptr
+                                    ? device->getInputChannelNames().size()
+                                    : 0;
+
+    bool inputRouteMismatch = (device == nullptr);
+    if (!inputRouteMismatch && desiredInputs > 0)
+    {
+        const int expectedInputs = juce::jlimit(
+            1,
+            32,
+            juce::jmin(desiredInputs, juce::jmax(1, availableInputs > 0 ? availableInputs : activeInputs)));
+        inputRouteMismatch = activeInputs < expectedInputs;
+    }
+
+    const int activeOutputs = device != nullptr
+                                  ? device->getActiveOutputChannels().countNumberOfSetBits()
+                                  : 0;
+    const bool playbackRouteMismatch = (device == nullptr) || activeOutputs <= 0;
+
+    if (playbackRouteMismatch || inputRouteMismatch)
+        requestAudioDeviceRefreshAsync("device-change");
+}
+
+void JuceEngine::armOutputSafetyForCurrentRoute() noexcept
+{
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    armOutputSafetyFadeIn(getKnownDeviceSampleRate(
+        deviceManager,
+        hostSampleRateAtomic.load(std::memory_order_relaxed)));
 }
 
 void JuceEngine::refreshMidiInputCallbacks()
@@ -294,6 +391,8 @@ void JuceEngine::clearMidiInputCallbacks()
 // ============================================================
 void JuceEngine::initialiseEngine()
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     juceLogToFlutter("Hello from JuceEngine::initialiseEngine()");
 
     if (engineInitialized)
@@ -301,6 +400,10 @@ void JuceEngine::initialiseEngine()
         juceLogToFlutter("JuceEngine::initialiseEngine() already called — skipping.");
         return;
     }
+
+    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+    recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
+    ignoredDeviceChangeCallbacks.store(0, std::memory_order_relaxed);
 
     if (!formatsRegistered)
     {
@@ -313,7 +416,6 @@ void JuceEngine::initialiseEngine()
 #endif
         // Android startup should not depend on mic input availability/permission.
         // Arm inputs only when recording is explicitly requested.
-        desiredInputOpenChannels.store(0, std::memory_order_relaxed);
         juce::String initError = deviceManager.initialise(
             0, // numInputChannels
             2, // numOutputChannels
@@ -334,6 +436,9 @@ void JuceEngine::initialiseEngine()
         formatsRegistered = true;
     }
 
+    deviceManager.removeChangeListener(this);
+    deviceManager.addChangeListener(this);
+
     const double hostRate = getKnownDeviceSampleRate(deviceManager, 44100.0);
     const int blockSize = getKnownDeviceBufferSize(deviceManager, 512);
 
@@ -341,13 +446,9 @@ void JuceEngine::initialiseEngine()
     // juceLogToFlutter(("graph.prepareToPlay(" + String(hostRate) + ", " + String(blockSize) + ")").toRawUTF8());
 
     audioPlayer.setProcessor(&graph);
-    // deviceManager.addAudioCallback(&audioPlayer);
     if (!metronomeCallback)
-    {
         metronomeCallback =
             std::make_unique<MetronomeAudioCallback>(audioPlayer, *this);
-        deviceManager.addAudioCallback(metronomeCallback.get());
-    }
 
     // auto inputNode = graph.addNode(std::make_unique<AudioProcessorGraph::AudioGraphIOProcessor>(
     //     AudioProcessorGraph::AudioGraphIOProcessor::audioInputNode));
@@ -377,6 +478,9 @@ void JuceEngine::initialiseEngine()
     graph.prepareToPlay(hostRate, blockSize);
     juceLogToFlutter(("graph.prepareToPlay(" + String(hostRate) + ", " + String(blockSize) + ")").toRawUTF8());
 
+    // Only expose the live callback after the graph and IO nodes are fully ready.
+    deviceManager.addAudioCallback(metronomeCallback.get());
+
     // Register plugin/MIDI input callbacks lazily on demand.
     // Eager scanning here can stall first project open on iOS route discovery.
     engineInitialized = true;
@@ -397,6 +501,8 @@ void JuceEngine::shutdownEngine()
         deviceManager.removeAudioCallback(metronomeCallback.get());
         metronomeCallback.reset();
     }
+    deviceManager.removeChangeListener(this);
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
     clearMidiInputCallbacks();
 
     audioPlayer.setProcessor(nullptr);
@@ -473,6 +579,7 @@ void JuceEngine::shutdownEngine()
     hasVideoAudio = false;
 
     desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+    recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
     audioRouteRefreshPending.store(false, std::memory_order_relaxed);
     liveMidiInputTargetClip.store(-1, std::memory_order_relaxed);
     {
@@ -523,7 +630,10 @@ void JuceEngine::attachRowBusNodes(RowState &r)
     {
         r.automationProc->setBlockTransportPtr(&blockTransportStartSec);
         if (!r.automationPoints.empty())
+        {
+            sanitiseAutomationPoints(r.automationPoints, 1.0f);
             r.automationProc->setAutomationPoints(r.automationPoints);
+        }
     }
 
     for (int ch = 0; ch < 2; ++ch)
@@ -571,6 +681,7 @@ void JuceEngine::ensureRowBusNodesAttached(int rowIndex)
                     graph.removeConnection({{r.meterTapNode->nodeID, ch}, {masterGainNode->nodeID, ch}});
                     graph.addConnection({{r.meterTapNode->nodeID, ch}, {entryNode->nodeID, ch}});
                 }
+                armOutputSafetyForCurrentRoute();
                 return;
             }
         }
@@ -578,6 +689,8 @@ void JuceEngine::ensureRowBusNodesAttached(int rowIndex)
         // Safety fallback for stale/invalid chain state.
         rewireMasterFxChain();
     }
+
+    armOutputSafetyForCurrentRoute();
 }
 
 void JuceEngine::retargetRowMeterTapPointers()
@@ -648,6 +761,7 @@ void JuceEngine::ensureBusGraphInitialised()
         attachRowBusNodes(r);
 
     busGraphInitialised = true;
+    armOutputSafetyForCurrentRoute();
     juceLogToFlutter("Bus graph initialised (dynamic rows + master)");
 }
 
@@ -663,6 +777,8 @@ void JuceEngine::loadTrack(int idx, const File &file)
 bool JuceEngine::loadClip(int clipId, int rowId, const juce::File &file,
                           double startSec, double lengthSec, double inFileOffsetSec)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (clipId < 0 || clipId >= kMaxClips)
         return false;
 
@@ -730,6 +846,7 @@ bool JuceEngine::loadClip(int clipId, int rowId, const juce::File &file,
     c.lengthSec = resolvedLengthSec;
     c.inFileOffsetSec = safeOffsetSec;
     c.pitchSemitones = 0.0f;
+    c.reversed = false;
     c.tempoRatio = 1.0;
     c.preservePitch = false;
 
@@ -744,6 +861,7 @@ bool JuceEngine::loadClip(int clipId, int rowId, const juce::File &file,
 
     rewireTrackChain(clipId, batchUpdate);
     graph.rebuild();
+    armOutputSafetyForCurrentRoute();
     return true;
 }
 
@@ -758,6 +876,8 @@ bool JuceEngine::loadMidiClip(int clipId,
                               double lengthSec,
                               double inFileOffsetSec)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (clipId < 0 || clipId >= kMaxClips)
         return false;
 
@@ -807,6 +927,7 @@ bool JuceEngine::loadMidiClip(int clipId,
     c.lengthSec = resolvedLengthSec;
     c.inFileOffsetSec = safeOffsetSec;
     c.pitchSemitones = 0.0f;
+    c.reversed = false;
     c.tempoRatio = 1.0;
     c.preservePitch = true;
 
@@ -821,6 +942,7 @@ bool JuceEngine::loadMidiClip(int clipId,
 
     rewireTrackChain(clipId, batchUpdate);
     graph.rebuild();
+    armOutputSafetyForCurrentRoute();
     return true;
 }
 
@@ -952,6 +1074,8 @@ void JuceEngine::handleIncomingMidiMessage(juce::MidiInput *source,
 
 bool JuceEngine::unloadClip(int clipId)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
         return false;
 
@@ -985,6 +1109,7 @@ bool JuceEngine::unloadClip(int clipId)
         liveMidiInputPendingForFlutter.clear();
     }
     graph.rebuild();
+    armOutputSafetyForCurrentRoute();
     return true;
 }
 
@@ -1080,6 +1205,7 @@ void JuceEngine::rewireTrackChain(int clipId, juce::AudioProcessorGraph::UpdateK
 
     c.wired = true;
     c.lastRowInputNodeUid = (int)rowInputNode->nodeID.uid;
+    armOutputSafetyForCurrentRoute();
 }
 
 // ============================================================
@@ -1104,6 +1230,8 @@ double JuceEngine::getTrackDuration(int trackIndex)
 
 bool JuceEngine::setClipTime(int clipId, double startSec, double lengthSec, double inFileOffsetSec)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
         return false;
 
@@ -1123,6 +1251,8 @@ bool JuceEngine::setClipTime(int clipId, double startSec, double lengthSec, doub
 
 bool JuceEngine::moveClipToRow(int clipId, int newRowId)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
         return false;
 
@@ -1220,6 +1350,28 @@ JuceEngine::ExportOptions sanitiseExportOptions(const JuceEngine::ExportOptions 
     return out;
 }
 
+double getGraphTailLengthSeconds(juce::AudioProcessorGraph &graph)
+{
+    double tailSeconds = 0.0;
+
+    for (auto *node : graph.getNodes())
+    {
+        if (node == nullptr)
+            continue;
+        auto *processor = node->getProcessor();
+        if (processor == nullptr)
+            continue;
+
+        const double reportedTail = processor->getTailLengthSeconds();
+        if (!std::isfinite(reportedTail) || reportedTail <= 0.0)
+            continue;
+
+        tailSeconds = juce::jmax(tailSeconds, reportedTail);
+    }
+
+    return juce::jlimit(0.0, 20.0, tailSeconds);
+}
+
 void applyTpdfDither(juce::AudioBuffer<float> &buffer, int bitDepth)
 {
     if (bitDepth >= 32)
@@ -1293,7 +1445,7 @@ juce::String JuceEngine::exportMix(const juce::File &outFile)
 
 juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOptions &rawOptions)
 {
-    std::unique_lock<std::mutex> renderLock(graphRenderMutex);
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
     const auto options = sanitiseExportOptions(rawOptions);
 
     if (options.format == "mp3")
@@ -1346,7 +1498,8 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
     // set transport to 0 for offline render
     transportSec.store(0.0, std::memory_order_relaxed);
 
-    const int64 totalSamples = (int64)std::ceil(endTime * sr);
+    const double tailSeconds = getGraphTailLengthSeconds(graph);
+    const int64 totalSamples = (int64)std::ceil((endTime + tailSeconds) * sr);
     if (totalSamples <= 0)
     {
         graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
@@ -1367,6 +1520,8 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
         while (processed < totalSamples)
         {
             const int toDo = (int)std::min<int64>(static_cast<int64>(bs), totalSamples - processed);
+            if (buf.getNumSamples() != toDo)
+                buf.setSize(nc, toDo, false, false, true);
             buf.clear();
             midi.clear();
 
@@ -1403,15 +1558,163 @@ juce::String JuceEngine::exportTrack(int trackIndex, const juce::File &outFile)
 
 juce::String JuceEngine::exportTrack(int trackIndex,
                                      const juce::File &outFile,
-                                     const ExportOptions &options)
+                                     const ExportOptions &rawOptions)
 {
-    juce::ignoreUnused(options);
-    // Keep your original implementation here – unchanged
-    // (omitted in this paste for brevity – you can keep your version as-is)
-    // You said you'll fix/tune export logic later, so I didn't touch it.
-    juceLogToFlutter("exportTrack called (using your existing implementation)");
-    // Just return empty here to avoid compile error in this snippet
-    return {};
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    const auto options = sanitiseExportOptions(rawOptions);
+
+    if (options.format == "mp3")
+    {
+        juceLogToFlutter("❌ JUCE native MP3 export is not available on this iOS build.");
+        return {};
+    }
+
+    if (trackIndex < 0 || trackIndex >= (int)clips.size())
+        return {};
+
+    auto &targetClip = clips[(size_t)trackIndex];
+    if (!targetClip.alive || targetClip.playerNode == nullptr)
+        return {};
+
+    auto *targetProcessor = asTimelineProcessor(targetClip.playerNode);
+    if (targetProcessor == nullptr)
+        return {};
+
+    juce::WavAudioFormat fmt;
+    auto fs = std::unique_ptr<juce::FileOutputStream>(outFile.createOutputStream());
+    if (!fs)
+        return {};
+
+    const double sr = options.sampleRate;
+    const double liveSampleRate =
+        getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
+    const int liveBlockSize = getKnownDeviceBufferSize(deviceManager, 512);
+    const int bs = juce::jlimit(64, 4096, liveBlockSize > 0 ? liveBlockSize : 512);
+    const int nc = 2;
+    const int bitDepth = options.wavBitDepth;
+
+    auto w = std::unique_ptr<juce::AudioFormatWriter>(
+        fmt.createWriterFor(fs.get(), sr, (unsigned int)nc, bitDepth, {}, 0));
+    if (!w)
+        return {};
+
+    fs.release();
+
+    struct ClipExportSnapshot
+    {
+        bool muted = false;
+        double startSec = 0.0;
+        double lengthSec = 0.0;
+        double inFileOffsetSec = 0.0;
+    };
+
+    std::vector<ClipExportSnapshot> snapshots(clips.size());
+    auto restoreClips = [&]()
+    {
+        for (size_t i = 0; i < clips.size(); ++i)
+        {
+            auto &clip = clips[i];
+            if (!clip.alive)
+                continue;
+
+            clip.muted = snapshots[i].muted;
+            clip.startSec = snapshots[i].startSec;
+            clip.lengthSec = snapshots[i].lengthSec;
+            clip.inFileOffsetSec = snapshots[i].inFileOffsetSec;
+
+            if (auto *processor = asTimelineProcessor(clip.playerNode))
+            {
+                processor->setTimeline(
+                    clip.startSec,
+                    clip.lengthSec,
+                    clip.inFileOffsetSec);
+                processor->setMuted(clip.muted);
+            }
+        }
+    };
+
+    for (size_t i = 0; i < clips.size(); ++i)
+    {
+        auto &clip = clips[i];
+        snapshots[i] = ClipExportSnapshot{
+            clip.muted,
+            clip.startSec,
+            clip.lengthSec,
+            clip.inFileOffsetSec,
+        };
+
+        if (!clip.alive)
+            continue;
+
+        if (auto *processor = asTimelineProcessor(clip.playerNode))
+            processor->setMuted((int)i == trackIndex ? clip.muted : true);
+    }
+
+    targetClip.startSec = 0.0;
+    targetProcessor->setTimeline(0.0, targetClip.lengthSec, targetClip.inFileOffsetSec);
+
+    juce::AudioBuffer<float> buf(nc, bs);
+    juce::MidiBuffer midi;
+
+    const double previousHostRate = hostSampleRateAtomic.load(std::memory_order_relaxed);
+    const double previousTransport = transportSec.load(std::memory_order_relaxed);
+    const bool wasPlaying = isPlayingAtomic.exchange(true, std::memory_order_relaxed);
+
+    hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
+    graph.prepareToPlay(sr, bs);
+    transportSec.store(0.0, std::memory_order_relaxed);
+
+    const double tailSeconds = getGraphTailLengthSeconds(graph);
+    const int64 totalSamples =
+        (int64)std::ceil((targetClip.lengthSec + tailSeconds) * sr);
+    if (totalSamples <= 0)
+    {
+        restoreClips();
+        graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
+                            liveBlockSize > 0 ? liveBlockSize : 512);
+        hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
+        transportSec.store(previousTransport, std::memory_order_relaxed);
+        isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
+        return outFile.getFullPathName();
+    }
+
+    graph.prepareToPlay(sr, bs);
+    transportSec.store(0.0, std::memory_order_relaxed);
+    resetTrackEffectAutomationLatches();
+
+    int64 processed = 0;
+    while (processed < totalSamples)
+    {
+        const int toDo =
+            (int)std::min<int64>(static_cast<int64>(bs), totalSamples - processed);
+        if (buf.getNumSamples() != toDo)
+            buf.setSize(nc, toDo, false, false, true);
+        buf.clear();
+        midi.clear();
+
+        blockTransportStartSec.store(
+            transportSec.load(std::memory_order_relaxed),
+            std::memory_order_relaxed);
+        applyTrackEffectAutomationAtCurrentBlockStart();
+        graph.processBlock(buf, midi);
+
+        if (options.wavDithering)
+            applyTpdfDither(buf, bitDepth);
+        w->writeFromAudioSampleBuffer(buf, 0, toDo);
+
+        transportSec.store(
+            transportSec.load(std::memory_order_relaxed) + (double)toDo / sr,
+            std::memory_order_relaxed);
+        processed += toDo;
+    }
+
+    restoreClips();
+    graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
+                        liveBlockSize > 0 ? liveBlockSize : 512);
+    hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
+    transportSec.store(previousTransport, std::memory_order_relaxed);
+    isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
+    return outFile.getFullPathName();
 }
 
 // ============================================================
@@ -1477,6 +1780,7 @@ void JuceEngine::bypassTrack(int trackIndex, bool shouldBypass)
     if (!c.alive || c.playerNode == nullptr)
         return;
 
+    c.muted = shouldBypass;
     if (auto *p = asTimelineProcessor(c.playerNode))
         p->setMuted(shouldBypass);
 }
@@ -1556,6 +1860,8 @@ juce::Array<juce::PluginDescription> JuceEngine::getKnownPlugins()
 // ============================================================
 void JuceEngine::loadVideoAudio(const juce::File &file)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     juceLogToFlutter("loadVideoAudio()");
     unloadVideoAudio();
 
@@ -1607,6 +1913,7 @@ void JuceEngine::loadVideoAudio(const juce::File &file)
 
         videoAudioNode->setBypassed(true);
         hasVideoAudio = true;
+        armOutputSafetyForCurrentRoute();
         juceLogToFlutter("loadVideoAudio done");
     }
     catch (const std::exception &e)
@@ -1622,6 +1929,8 @@ void JuceEngine::loadVideoAudio(const juce::File &file)
 
 void JuceEngine::unloadVideoAudio()
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (!hasVideoAudio)
         return;
 
@@ -1654,6 +1963,7 @@ void JuceEngine::unloadVideoAudio()
     videoAudioNode = nullptr;
     videoGainProc = nullptr;
     hasVideoAudio = false;
+    armOutputSafetyForCurrentRoute();
 }
 
 void JuceEngine::setVideoAudioGain(float gain)
@@ -1830,6 +2140,8 @@ void JuceEngine::rewireTrackBusFxChain(int row)
 
     for (int ch = 0; ch < 2; ++ch)
         graph.addConnection({{prev->nodeID, ch}, {automationNode->nodeID, ch}});
+
+    armOutputSafetyForCurrentRoute();
 }
 
 // ============================================================
@@ -1906,6 +2218,8 @@ bool resolveKnownPluginDescription(const juce::KnownPluginList &list,
 
 bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     // juceLogToFlutter("Hello from JuceEngine::insertTrackEffect");
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
@@ -2024,6 +2338,8 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
 
 void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     // juceLogToFlutter("Hello from JuceEngine::removeTrackEffect");
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
@@ -2062,6 +2378,8 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
 
 void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     // juceLogToFlutter("Hello from JuceEngine::reorderTrackEffects");
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
@@ -2125,7 +2443,6 @@ juce::StringArray JuceEngine::getTrackEffectsForRow(int trackRow)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return names;
 
-    compactRowFxChain(trackRow);
     auto &chain = rows[(size_t)trackRow].fxChain;
 
     for (auto &nodeID : chain)
@@ -2147,7 +2464,6 @@ juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return ids;
 
-    compactRowFxChain(trackRow);
     auto &r = rows[(size_t)trackRow];
     if (r.fxIds.size() == r.fxChain.size())
         return r.fxIds;
@@ -2170,7 +2486,6 @@ juce::StringArray JuceEngine::getTrackEffectInstanceIdsForRow(int trackRow)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return ids;
 
-    compactRowFxChain(trackRow);
     auto &chain = rows[(size_t)trackRow].fxChain;
 
     for (auto &nodeID : chain)
@@ -2189,7 +2504,6 @@ void JuceEngine::setTrackEffectParameter(int trackRow,
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
-    compactRowFxChain(trackRow);
     auto &chain = rows[(size_t)trackRow].fxChain;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return;
@@ -2267,6 +2581,8 @@ void JuceEngine::setTrackEffectParameter(int trackRow,
 
 void JuceEngine::bypassRowEffect(int trackRow, int effectIndex, bool shouldBypass)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
@@ -2285,7 +2601,6 @@ bool JuceEngine::getRowEffectBypassState(int trackRow, int effectIndex)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return false;
 
-    compactRowFxChain(trackRow);
     auto &chain = rows[(size_t)trackRow].fxChain;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return false;
@@ -2300,12 +2615,16 @@ bool JuceEngine::getRowEffectBypassState(int trackRow, int effectIndex)
 void JuceEngine::setTrackAutomationPoints(int trackRow,
                                           const std::vector<AutomationPoint> &points)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
-    rows[(size_t)trackRow].automationPoints = points;
+    auto safePoints = points;
+    sanitiseAutomationPoints(safePoints, 1.0f);
+    rows[(size_t)trackRow].automationPoints = safePoints;
     if (rows[(size_t)trackRow].automationProc != nullptr)
-        rows[(size_t)trackRow].automationProc->setAutomationPoints(points);
+        rows[(size_t)trackRow].automationProc->setAutomationPoints(safePoints);
 }
 
 void JuceEngine::setTrackEffectAutomationPoints(
@@ -2316,7 +2635,7 @@ void JuceEngine::setTrackEffectAutomationPoints(
     float maxValue,
     const std::vector<AutomationPoint> &points)
 {
-    std::unique_lock<std::mutex> renderLock(graphRenderMutex);
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
@@ -2372,11 +2691,123 @@ void JuceEngine::setTrackEffectAutomationPoints(
 
 void JuceEngine::clearTrackEffectAutomationForRow(int trackRow)
 {
-    std::unique_lock<std::mutex> renderLock(graphRenderMutex);
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
     rows[(size_t)trackRow].effectAutomationLanes.clear();
+}
+
+void JuceEngine::setRowGainAutomationPoints(
+    int row,
+    const std::vector<AutomationPoint> &points)
+{
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
+    if (row < 0 || row >= (int)rows.size())
+        return;
+
+    auto safePoints = points;
+    sanitiseAutomationPoints(safePoints, 1.0f);
+    rows[(size_t)row].gainAutomationPoints = std::move(safePoints);
+}
+
+void JuceEngine::setRowPanAutomationPoints(
+    int row,
+    const std::vector<AutomationPoint> &points)
+{
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
+    if (row < 0 || row >= (int)rows.size())
+        return;
+
+    auto safePoints = points;
+    sanitiseAutomationPoints(safePoints, 1.0f);
+    rows[(size_t)row].panAutomationPoints = std::move(safePoints);
+}
+
+void JuceEngine::setMasterEffectAutomationPoints(
+    int effectIndex,
+    const juce::String &paramId,
+    float minValue,
+    float maxValue,
+    const std::vector<AutomationPoint> &points)
+{
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
+    if (effectIndex < 0)
+        return;
+
+    auto trimmedParamId = paramId.trim();
+    if (trimmedParamId.isEmpty())
+        return;
+
+    auto laneIt = std::find_if(
+        masterEffectAutomationLanes.begin(),
+        masterEffectAutomationLanes.end(),
+        [&](const RowState::TrackEffectAutomationLane &lane)
+        {
+            return lane.effectIndex == effectIndex && lane.paramId == trimmedParamId;
+        });
+
+    auto safePoints = points;
+    sanitiseAutomationPoints(safePoints, 1.0f);
+
+    if (safePoints.empty())
+    {
+        if (laneIt != masterEffectAutomationLanes.end())
+            masterEffectAutomationLanes.erase(laneIt);
+        return;
+    }
+
+    const float safeMin = std::isfinite(minValue) ? minValue : 0.0f;
+    const float safeMax = std::isfinite(maxValue) ? maxValue : 1.0f;
+    const float rangeMin = juce::jmin(safeMin, safeMax);
+    const float rangeMax = juce::jmax(safeMin, safeMax);
+
+    if (laneIt == masterEffectAutomationLanes.end())
+    {
+        RowState::TrackEffectAutomationLane lane;
+        lane.effectIndex = effectIndex;
+        lane.paramId = trimmedParamId;
+        lane.minValue = rangeMin;
+        lane.maxValue = rangeMax;
+        lane.points = std::move(safePoints);
+        lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+        masterEffectAutomationLanes.push_back(std::move(lane));
+        return;
+    }
+
+    laneIt->minValue = rangeMin;
+    laneIt->maxValue = rangeMax;
+    laneIt->points = std::move(safePoints);
+    laneIt->lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+}
+
+void JuceEngine::clearMasterEffectAutomation()
+{
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    masterEffectAutomationLanes.clear();
+}
+
+void JuceEngine::setMasterGainAutomationPoints(
+    const std::vector<AutomationPoint> &points)
+{
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
+    auto safePoints = points;
+    sanitiseAutomationPoints(safePoints, 1.0f);
+    masterGainAutomationPoints = std::move(safePoints);
+}
+
+void JuceEngine::setMasterPanAutomationPoints(
+    const std::vector<AutomationPoint> &points)
+{
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
+    auto safePoints = points;
+    sanitiseAutomationPoints(safePoints, 1.0f);
+    masterPanAutomationPoints = std::move(safePoints);
 }
 
 void JuceEngine::applyTrackEffectAutomationAtCurrentBlockStart()
@@ -2388,21 +2819,35 @@ void JuceEngine::applyTrackEffectAutomationAtCurrentBlockStart()
 void JuceEngine::setAutomationTransport(double timeSeconds)
 {
     setTransportSeconds(timeSeconds);
-    std::unique_lock<std::mutex> renderLock(graphRenderMutex);
-    resetTrackEffectAutomationLatches();
-    applyTrackEffectAutomationAtTimeSeconds(timeSeconds);
 }
 
 void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
 {
-    if (rows.empty())
-        return;
-
     const double timeMs = juce::jmax(0.0, timeSeconds) * 1000.0;
 
     for (int rowIndex = 0; rowIndex < (int)rows.size(); ++rowIndex)
     {
         auto &rowState = rows[(size_t)rowIndex];
+
+        if (!rowState.gainAutomationPoints.empty())
+        {
+            const float normalized = juce::jlimit(
+                0.0f,
+                1.0f,
+                (float)evaluateAutomationValueAtMs(rowState.gainAutomationPoints, timeMs, 0.0));
+            const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
+            setRowGain(rowIndex, gain);
+        }
+
+        if (!rowState.panAutomationPoints.empty())
+        {
+            const float pan = juce::jlimit(
+                0.0f,
+                1.0f,
+                (float)evaluateAutomationValueAtMs(rowState.panAutomationPoints, timeMs, 0.5));
+            setRowPan(rowIndex, pan);
+        }
+
         if (rowState.effectAutomationLanes.empty())
             continue;
 
@@ -2428,6 +2873,50 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 lane.paramId,
                 juce::var((double)value));
         }
+    }
+
+    if (!masterGainAutomationPoints.empty())
+    {
+        const float normalized = juce::jlimit(
+            0.0f,
+            1.0f,
+            (float)evaluateAutomationValueAtMs(masterGainAutomationPoints, timeMs, 0.0));
+        const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
+        setMasterGain(gain);
+    }
+
+    if (!masterPanAutomationPoints.empty())
+    {
+        const float pan = juce::jlimit(
+            0.0f,
+            1.0f,
+            (float)evaluateAutomationValueAtMs(masterPanAutomationPoints, timeMs, 0.5));
+        setMasterPan(pan);
+    }
+
+    if (masterEffectAutomationLanes.empty())
+        return;
+
+    compactMasterFxChain();
+    for (auto &lane : masterEffectAutomationLanes)
+    {
+        if (lane.effectIndex < 0 || masterEffectChain == nullptr ||
+            lane.effectIndex >= masterEffectChain->size())
+            continue;
+        if (lane.paramId.trim().isEmpty())
+            continue;
+        if (lane.points.empty())
+            continue;
+
+        const float normalized = juce::jlimit(
+            0.0f,
+            1.0f,
+            (float)evaluateAutomationValueAtMs(lane.points, timeMs, 0.0));
+        const float value = lane.minValue + (lane.maxValue - lane.minValue) * normalized;
+        setMasterEffectParameter(
+            lane.effectIndex,
+            lane.paramId,
+            juce::var((double)value));
     }
 }
 
@@ -2497,6 +2986,8 @@ void JuceEngine::setRowPan(int row, float pan)
 // ============================================================
 bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     // juceLogToFlutter("Hello from JuceEngine::insertMasterEffect");
 
     if (!masterEffectChain)
@@ -2609,6 +3100,8 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
 
 void JuceEngine::removeMasterEffect(int effectIndex)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (!masterEffectChain)
         return;
     compactMasterFxChain();
@@ -2623,11 +3116,27 @@ void JuceEngine::removeMasterEffect(int effectIndex)
     if (effectIndex >= 0 && effectIndex < masterEffectIds.size())
         masterEffectIds.removeRange(effectIndex, 1);
 
+    masterEffectAutomationLanes.erase(
+        std::remove_if(
+            masterEffectAutomationLanes.begin(),
+            masterEffectAutomationLanes.end(),
+            [effectIndex](const RowState::TrackEffectAutomationLane &lane)
+            { return lane.effectIndex == effectIndex; }),
+        masterEffectAutomationLanes.end());
+    for (auto &lane : masterEffectAutomationLanes)
+    {
+        if (lane.effectIndex > effectIndex)
+            lane.effectIndex -= 1;
+        lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+    }
+
     rewireMasterFxChain();
 }
 
 void JuceEngine::reorderMasterEffects(int fromIndex, int toIndex)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (!masterEffectChain)
         return;
     compactMasterFxChain();
@@ -2654,6 +3163,27 @@ void JuceEngine::reorderMasterEffects(int fromIndex, int toIndex)
         masterEffectIds.insert(toIndex, fxId);
     }
 
+    const int finalToIndex = toIndex;
+    for (auto &lane : masterEffectAutomationLanes)
+    {
+        const int idx = lane.effectIndex;
+        if (idx == fromIndex)
+        {
+            lane.effectIndex = finalToIndex;
+        }
+        else if (fromIndex < finalToIndex)
+        {
+            if (idx > fromIndex && idx <= finalToIndex)
+                lane.effectIndex = idx - 1;
+        }
+        else if (fromIndex > finalToIndex)
+        {
+            if (idx >= finalToIndex && idx < fromIndex)
+                lane.effectIndex = idx + 1;
+        }
+        lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+    }
+
     rewireMasterFxChain();
 }
 
@@ -2663,7 +3193,6 @@ juce::StringArray JuceEngine::getMasterEffects()
 
     if (!masterEffectChain)
         return out;
-    compactMasterFxChain();
 
     for (auto &id : *masterEffectChain)
     {
@@ -2679,7 +3208,6 @@ juce::StringArray JuceEngine::getMasterEffects()
 
 juce::StringArray JuceEngine::getMasterEffectIds()
 {
-    compactMasterFxChain();
     if (masterEffectIds.size() == 0 && masterEffectChain != nullptr && masterEffectChain->size() > 0)
     {
         juce::StringArray ids;
@@ -2701,7 +3229,6 @@ void JuceEngine::setMasterEffectParameter(int effectIndex,
 {
     if (!masterEffectChain)
         return;
-    compactMasterFxChain();
 
     if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
         return;
@@ -2777,6 +3304,8 @@ void JuceEngine::setMasterEffectParameter(int effectIndex,
 
 void JuceEngine::bypassMasterEffect(int effectIndex, bool bypass)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (!masterEffectChain)
         return;
     compactMasterFxChain();
@@ -2794,7 +3323,6 @@ bool JuceEngine::getMasterEffectBypassState(int effectIndex)
 {
     if (!masterEffectChain)
         return false;
-    compactMasterFxChain();
 
     if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
         return false;
@@ -2919,6 +3447,8 @@ void JuceEngine::rewireMasterFxChain()
             graph.addConnection({{masterPanNode->nodeID, ch}, {outputNode->nodeID, ch}});
         }
     }
+
+    armOutputSafetyForCurrentRoute();
 }
 
 int JuceEngine::getTrackIndexForClip(int clipIdx) const
@@ -2988,6 +3518,21 @@ void JuceEngine::setClipPitch(int clipIndex, float semitones)
         p->setPitchSemitones(c.pitchSemitones);
 }
 
+void JuceEngine::setClipReversed(int clipIndex, bool shouldReverse)
+{
+    if (clips.empty() || clipIndex < 0 || clipIndex >= (int)clips.size())
+        return;
+
+    auto &c = clips[(size_t)clipIndex];
+    if (!c.alive || c.playerNode == nullptr)
+        return;
+
+    c.reversed = shouldReverse;
+
+    if (auto *p = asTimelineProcessor(c.playerNode))
+        p->setReversed(c.reversed);
+}
+
 void JuceEngine::setClipStretchOptions(int clipIndex, double tempoRatio, bool preservePitch)
 {
     if (clips.empty() || clipIndex < 0 || clipIndex >= (int)clips.size())
@@ -3012,7 +3557,6 @@ juce::Array<juce::NamedValueSet> JuceEngine::getTrackPluginParameterInfo(int row
     if (row < 0 || row >= (int)rows.size())
         return results;
 
-    compactRowFxChain(row);
     auto &chain = rows[(size_t)row].fxChain;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return results;
@@ -3105,7 +3649,6 @@ juce::Array<juce::NamedValueSet> JuceEngine::getMasterPluginParameterInfo(int ef
 
     if (masterEffectChain == nullptr)
         return results;
-    compactMasterFxChain();
 
     if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
         return results;
@@ -3205,6 +3748,7 @@ void JuceEngine::setMetronomeVolume(float v)
 
 void JuceEngine::setMetronomeBpm(double bpm)
 {
+    mixroom::fx::setGlobalTempoBpm(bpm);
     if (metronomeCallback)
         metronomeCallback->setBpm(bpm);
 }
@@ -3383,8 +3927,7 @@ bool JuceEngine::selectInputDevice(const juce::String &name)
     }
 
     int desiredInputs = desiredInputOpenChannels.load(std::memory_order_relaxed);
-    if (desiredInputs <= 0)
-        desiredInputs = 1;
+    desiredInputs = juce::jmax(0, desiredInputs);
     if (applyPreferredAudioDeviceSetup(desiredInputs, false, "selectInputDevice"))
         return true;
     return applyPreferredAudioDeviceSetup(desiredInputs, true, "selectInputDevice-reopen");
@@ -3411,12 +3954,15 @@ int JuceEngine::getNumInputChannels() const
 
 void JuceEngine::routeLiveInputToRow(int row, int channelCount, int channelStart)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if (!inputNode)
         return;
 
     if (rows.empty())
         return;
     row = juce::jlimit(0, (int)rows.size() - 1, row);
+    ensureRowBusNodesAttached(row);
     auto rowInput = rows[(size_t)row].inputNode;
     if (!rowInput)
         return;
@@ -3438,6 +3984,8 @@ void JuceEngine::routeLiveInputToRow(int row, int channelCount, int channelStart
         graph.addConnection({{inputNode->nodeID, start + ch},
                              {rowInput->nodeID, ch}});
     }
+
+    armOutputSafetyForCurrentRoute();
 }
 
 bool JuceEngine::startRecordingToWav(const juce::File &file,
@@ -3448,6 +3996,7 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
         return false;
 
     const int previousDesiredInputs = desiredInputOpenChannels.load(std::memory_order_relaxed);
+    recordingRestoreDesiredInputs.store(previousDesiredInputs, std::memory_order_relaxed);
 
     const auto failAndRestorePlaybackMode = [this, previousDesiredInputs]()
     {
@@ -3553,7 +4102,14 @@ void JuceEngine::stopRecording()
     }
 
     routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
-    desiredInputOpenChannels.store(1, std::memory_order_relaxed);
+    const int restoreInputs = juce::jmax(
+        0,
+        recordingRestoreDesiredInputs.exchange(0, std::memory_order_relaxed));
+    desiredInputOpenChannels.store(restoreInputs, std::memory_order_relaxed);
+    if (!applyPreferredAudioDeviceSetup(restoreInputs, false, "stopRecording"))
+        requestAudioDeviceRefreshAsync("stopRecording");
+    else
+        logCurrentAudioDeviceState("recording-stopped");
 }
 
 bool JuceEngine::isRecording() const
@@ -3630,6 +4186,105 @@ void JuceEngine::setMasterMeterEnabled(bool enabled)
     masterMeterEnabled.store(enabled, std::memory_order_relaxed);
 }
 
+void JuceEngine::armOutputSafetyFadeIn(double sampleRate) noexcept
+{
+    outputSafetyLastSample = {0.0f, 0.0f};
+    outputSafetyMuteSamplesRemaining = 0;
+    outputSafetyFadeSamplesTotal = juce::jlimit(
+        64,
+        9600,
+        (int)std::lround(juce::jmax(8000.0, sampleRate) * 0.05));
+    outputSafetyFadeSamplesRemaining = outputSafetyFadeSamplesTotal;
+}
+
+void JuceEngine::applyOutputSafetyGuard(float *const *output,
+                                        int numOutputChannels,
+                                        int numSamples) noexcept
+{
+    if (output == nullptr || numOutputChannels <= 0 || numSamples <= 0)
+        return;
+
+    constexpr float kSafetyCeiling = 0.92f;
+    constexpr float kEmergencyAbs = 4.0f;
+    const double currentRate =
+        juce::jmax(8000.0, hostSampleRateAtomic.load(std::memory_order_relaxed));
+    const int emergencyMuteSamples = juce::jlimit(
+        256,
+        48000,
+        (int)std::lround(currentRate * 0.25));
+
+    for (int sample = 0; sample < numSamples; ++sample)
+    {
+        bool emergencyMute = false;
+        float peak = 0.0f;
+
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+        {
+            auto *channelData = output[ch];
+            if (channelData == nullptr)
+                continue;
+
+            const float value = channelData[sample];
+            if (!std::isfinite(value) || std::abs(value) > kEmergencyAbs)
+            {
+                emergencyMute = true;
+                break;
+            }
+
+            peak = juce::jmax(peak, std::abs(value));
+        }
+
+        if (emergencyMute)
+            outputSafetyMuteSamplesRemaining =
+                juce::jmax(outputSafetyMuteSamplesRemaining, emergencyMuteSamples);
+
+        if (outputSafetyMuteSamplesRemaining > 0)
+        {
+            for (int ch = 0; ch < numOutputChannels; ++ch)
+                if (auto *channelData = output[ch])
+                    channelData[sample] = 0.0f;
+
+            --outputSafetyMuteSamplesRemaining;
+            if (outputSafetyMuteSamplesRemaining == 0)
+                outputSafetyFadeSamplesRemaining = outputSafetyFadeSamplesTotal;
+            outputSafetyLastSample = {0.0f, 0.0f};
+            continue;
+        }
+
+        const float frameGain =
+            peak > kSafetyCeiling ? (kSafetyCeiling / peak) : 1.0f;
+        const float fadeGain =
+            outputSafetyFadeSamplesRemaining > 0 && outputSafetyFadeSamplesTotal > 0
+                ? 1.0f - ((float)outputSafetyFadeSamplesRemaining /
+                          (float)outputSafetyFadeSamplesTotal)
+                : 1.0f;
+
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+        {
+            auto *channelData = output[ch];
+            if (channelData == nullptr)
+                continue;
+
+            float value = channelData[sample] * frameGain * fadeGain;
+            if (!std::isfinite(value))
+            {
+                value = 0.0f;
+                outputSafetyMuteSamplesRemaining =
+                    juce::jmax(outputSafetyMuteSamplesRemaining, emergencyMuteSamples);
+            }
+
+            value = juce::jlimit(-kSafetyCeiling, kSafetyCeiling, value);
+            channelData[sample] = value;
+
+            if (ch < (int)outputSafetyLastSample.size())
+                outputSafetyLastSample[(size_t)ch] = value;
+        }
+
+        if (outputSafetyFadeSamplesRemaining > 0)
+            --outputSafetyFadeSamplesRemaining;
+    }
+}
+
 // returns {peakL, peakR, rmsL, rmsR}
 const std::array<float, 4> JuceEngine::getMasterMeterValues()
 {
@@ -3647,13 +4302,13 @@ void JuceEngine::updateMasterMeterFromOutput(const float *const *out,
 {
     if (!masterMeterEnabled.load(std::memory_order_relaxed))
         return;
-    if (numOutCh < 2 || out == nullptr || out[0] == nullptr || out[1] == nullptr)
+    if (numOutCh <= 0 || out == nullptr || out[0] == nullptr)
         return;
     if (numSamples <= 0)
         return;
 
     const float *outL = out[0];
-    const float *outR = out[1];
+    const float *outR = (numOutCh > 1 && out[1] != nullptr) ? out[1] : outL;
 
     float peakL = 0.0f, peakR = 0.0f;
     double sumSqL = 0.0, sumSqR = 0.0;
@@ -3779,7 +4434,6 @@ const std::array<float, 5> JuceEngine::getRowCompressorMeter(int row, int effect
     if (row < 0 || row >= (int)rows.size())
         return {0, 0, 0, 0, 0};
 
-    compactRowFxChain(row);
     auto &chain = rows[(size_t)row].fxChain;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return {0, 0, 0, 0, 0};
@@ -3804,7 +4458,6 @@ const std::array<float, 5> JuceEngine::getMasterCompressorMeter(int effectIndex)
 {
     if (!masterEffectChain)
         return {0, 0, 0, 0, 0};
-    compactMasterFxChain();
 
     if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
         return {0, 0, 0, 0, 0};
@@ -3839,7 +4492,6 @@ std::vector<float> JuceEngine::getRowEqWaveform(int row, int effectIndex, int sa
     if (row < 0 || row >= (int)rows.size())
         return std::vector<float>((size_t)count, 0.0f);
 
-    compactRowFxChain(row);
     auto &chain = rows[(size_t)row].fxChain;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return std::vector<float>((size_t)count, 0.0f);
@@ -3863,7 +4515,6 @@ std::vector<float> JuceEngine::getMasterEqWaveform(int effectIndex, int sampleCo
 
     if (!masterEffectChain)
         return std::vector<float>((size_t)count, 0.0f);
-    compactMasterFxChain();
 
     if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
         return std::vector<float>((size_t)count, 0.0f);
@@ -3883,6 +4534,8 @@ std::vector<float> JuceEngine::getMasterEqWaveform(int effectIndex, int sampleCo
 
 int JuceEngine::addRow(const juce::String &name, int iconId)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if ((int)rows.size() >= kMaxRows)
         return -1;
 
@@ -3894,6 +4547,12 @@ int JuceEngine::addRow(const juce::String &name, int iconId)
 
     rows.push_back(std::move(r));
     rebuildRowIdIndexCache();
+
+    if (engineInitialized)
+    {
+        ensureRowBusNodesAttached((int)rows.size() - 1);
+        retargetRowMeterTapPointers();
+    }
 
     return newRowId;
 }
@@ -3913,6 +4572,8 @@ bool JuceEngine::renameRow(int rowId, const juce::String &newName)
 
 int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int iconId)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if ((int)rows.size() >= kMaxRows)
         return -1;
 
@@ -3930,6 +4591,7 @@ int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int
 
     if (engineInitialized)
     {
+        ensureRowBusNodesAttached(insertIdx);
         retargetRowMeterTapPointers();
     }
 
@@ -3938,6 +4600,8 @@ int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int
 
 int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int iconId)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if ((int)rows.size() >= kMaxRows)
         return -1;
 
@@ -3955,6 +4619,7 @@ int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int
 
     if (engineInitialized)
     {
+        ensureRowBusNodesAttached(insertIdx);
         retargetRowMeterTapPointers();
     }
 
@@ -3963,6 +4628,8 @@ int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int
 
 bool JuceEngine::moveRowOrder(int fromIndex, int toIndex)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     const int n = (int)rows.size();
     if (n <= 1)
         return false;
@@ -4018,6 +4685,8 @@ juce::Array<juce::NamedValueSet> JuceEngine::getRows() const
 // remove row: delete any clips that belong to it
 bool JuceEngine::removeRow(int rowId)
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     if ((int)rows.size() <= 1)
         return false; // always keep at least 1 row
 
@@ -4067,6 +4736,7 @@ bool JuceEngine::removeRow(int rowId)
         retargetRowMeterTapPointers();
     }
 
+    armOutputSafetyForCurrentRoute();
     return true;
 }
 
@@ -4093,6 +4763,8 @@ juce::AudioProcessorGraph::Node::Ptr JuceEngine::getRowInputNodeById(int rowId)
 // Full rebuild of row/master bus nodes while keeping clip nodes
 void JuceEngine::rebuildBusesAndRewireClips()
 {
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
     // 1) Remove connections that touch any row/master nodes
     // 2) Remove row bus nodes and master gain/pan nodes (keep FX nodes/chains)
     // 3) Recreate buses via ensureBusGraphInitialised()
@@ -4158,6 +4830,8 @@ void JuceEngine::rebuildBusesAndRewireClips()
         if (c.alive)
             rewireTrackChain(c.clipId); // we'll rewrite rewireTrackChain to use new clip structure
     }
+
+    armOutputSafetyForCurrentRoute();
 }
 
 const juce::StringArray JuceEngine::mixroomPlugins{

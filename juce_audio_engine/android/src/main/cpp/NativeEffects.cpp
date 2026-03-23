@@ -359,12 +359,18 @@ void DelayAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::M
     for (auto i = getTotalNumInputChannels(); i < getTotalNumOutputChannels(); ++i)
         buffer.clear(i, 0, buffer.getNumSamples());
     // get host bpm
+    double bpm = mixroom::fx::getGlobalTempoBpm();
     playHead = this->getPlayHead();
     if (playHead != nullptr)
     {
-        playHead->getCurrentPosition(cpi);
+        if (playHead->getCurrentPosition(cpi) &&
+            std::isfinite(cpi.bpm) &&
+            cpi.bpm >= 1.0 &&
+            cpi.bpm <= 400.0)
+        {
+            bpm = cpi.bpm;
+        }
     }
-    const double bpm = cpi.bpm;
     // apply delay
     delay.setParameters(parameters, bpm);
     delay.process(buffer);

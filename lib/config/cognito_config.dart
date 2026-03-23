@@ -47,6 +47,21 @@ class CognitoConfig {
     defaultValue: 'Kakao',
   );
 
+  static const bool enableGoogleSignIn = bool.fromEnvironment(
+    'COGNITO_ENABLE_GOOGLE_SIGN_IN',
+    defaultValue: true,
+  );
+
+  static const bool enableAppleSignIn = bool.fromEnvironment(
+    'COGNITO_ENABLE_APPLE_SIGN_IN',
+    defaultValue: true,
+  );
+
+  static const bool enableKakaoSignIn = bool.fromEnvironment(
+    'COGNITO_ENABLE_KAKAO_SIGN_IN',
+    defaultValue: true,
+  );
+
   static const bool enableUseCaseCustomAttribute = bool.fromEnvironment(
     'COGNITO_ENABLE_USE_CASE_ATTRIBUTE',
     defaultValue: false,

@@ -52,7 +52,7 @@
 				<string>Editor</string>
 				<key>CFBundleURLSchemes</key>
 				<array>
-					<string>com.googleusercontent.apps.697048427229-jc3ccjksgqjg566nuubcnd60tsb2hvh1</string>
+					<string>com.googleusercontent.apps.105509343723-eatcl74aibc5pdqrnuvrc52n3f4m3mt3</string>
 				</array>
 			</dict>
 			<dict>
@@ -63,11 +63,21 @@
 					<string>com.mixroom.mixroom</string>
 				</array>
 			</dict>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>kakao$(KAKAO_NATIVE_APP_KEY)</string>
+				</array>
+			</dict>
 		</array>
 		<key>CFBundleVersion</key>
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
 		<key>GIDClientID</key>
-		<string>697048427229-jc3ccjksgqjg566nuubcnd60tsb2hvh1.apps.googleusercontent.com</string>
+		<string>105509343723-eatcl74aibc5pdqrnuvrc52n3f4m3mt3.apps.googleusercontent.com</string>
+		<key>com.posthog.posthog.AUTO_INIT</key>
+		<false/>
 		<key>ITSAppUsesNonExemptEncryption</key>
 		<false/>
 		<key>LSApplicationQueriesSchemes</key>
@@ -76,6 +86,9 @@
 			<string>vnd.youtube</string>
 			<string>snssdk1233</string>
 			<string>soundcloud</string>
+			<string>kakaokompassauth</string>
+			<string>kakaolink</string>
+			<string>kakaoplus</string>
 			<string>https</string>
 		</array>
 		<key>LSRequiresIPhoneOS</key>
@@ -88,6 +101,8 @@
 		<string>We need access to the microphone for audio processing.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
 		<string>We need access to save the exported video.</string>
+		<key>NSPhotoLibraryAddUsageDescription</key>
+		<string>We need permission to save exported media to your photo library.</string>
 		<key>PHImageRequestOptionsDeliveryMode</key>
 		<string>PHImageRequestOptionsDeliveryModeFastFormat</string>
 		<key>PHImageRequestOptionsResizeMode</key>

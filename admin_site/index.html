@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mixroom Admin</title>
+    <link rel="icon" type="image/png" href="./mixroom-app-icon.png" />
+    <link rel="apple-touch-icon" href="./mixroom-app-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./config.js"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header id="signed-in-hero" class="hero hidden">
+        <div class="hero-copy">
+          <div class="brand-row">
+            <img class="brand-logo" src="./mixroom-wordmark.png" alt="Mixroom logo" />
+            <div class="brand-lockup">
+              <p class="brand-name">Mixroom Admin</p>
+              <p class="brand-subtitle" data-i18n="hero.subtitle">Internal tools</p>
+            </div>
+          </div>
+        </div>
+        <aside class="hero-aside">
+          <div class="hero-tool language-toolbar">
+            <span class="toolbar-label" data-i18n="language.label">Language</span>
+            <label class="language-select-wrap" for="language-selector">
+              <select
+                id="language-selector"
+                class="language-select"
+                aria-label="Language"
+                data-i18n-aria-label="language.label"
+              >
+                <option value="en">EN</option>
+                <option value="ko">KR</option>
+              </select>
+            </label>
+          </div>
+          <div class="glass-card">
+            <div id="identity-email" class="identity-email">Not signed in</div>
+            <p id="identity-meta" class="identity-meta">Allowlisted employee access</p>
+          </div>
+          <div class="hero-actions">
+            <button
+              id="refresh-button"
+              class="button button-secondary"
+              type="button"
+              data-i18n="action.refresh"
+            >
+              Refresh
+            </button>
+            <button
+              id="sign-out-button"
+              class="button button-ghost"
+              type="button"
+              data-i18n="action.signOut"
+            >
+              Sign Out
+            </button>
+          </div>
+        </aside>
+      </header>
+
+      <section id="status-panel" class="status-panel" aria-live="polite"></section>
+
+      <section id="signed-out-panel" class="auth-panel">
+        <div class="auth-panel-inner">
+          <div class="auth-top-row">
+            <span class="toolbar-label" data-i18n="language.label">Language</span>
+            <label class="language-select-wrap" for="signed-out-language-selector">
+              <select
+                id="signed-out-language-selector"
+                class="language-select"
+                aria-label="Language"
+                data-i18n-aria-label="language.label"
+              >
+                <option value="en">EN</option>
+                <option value="ko">KR</option>
+              </select>
+            </label>
+          </div>
+          <p class="auth-kicker" data-i18n="auth.kicker">Employee access</p>
+          <h1 class="auth-title" data-i18n="auth.title">Sign in</h1>
+          <p class="auth-copy" data-i18n="auth.copy">Use your work email.</p>
+          <button
+            id="sign-in-button-secondary"
+            class="button button-primary"
+            type="button"
+            data-i18n="action.signIn"
+          >
+            Sign In
+          </button>
+        </div>
+      </section>
+
+      <main id="dashboard" class="dashboard hidden">
+        <section id="summary-section" class="summary-grid"></section>
+
+        <section id="kpi-panel" class="panel hidden">
+          <div class="panel-header">
+              <div>
+                <p class="panel-label" data-i18n="panel.kpi.label">KPI Overview</p>
+                <h2 data-i18n="panel.kpi.title">Product metrics</h2>
+              </div>
+              <div class="hero-actions">
+                <a
+                  id="posthog-panel-link"
+                  class="button button-secondary hidden"
+                  href="#"
+                  target="_blank"
+                  rel="noreferrer"
+                  data-i18n="action.openPosthog"
+                >
+                  Open PostHog
+                </a>
+              </div>
+            </div>
+          <p id="kpi-meta" class="panel-meta" data-i18n="panel.kpi.meta.default">
+            Connect a PostHog share or embed URL to surface MAU, retention, funnels, and session trends here.
+          </p>
+          <div id="kpi-embed-shell" class="kpi-embed-shell hidden">
+            <iframe
+              id="posthog-embed-frame"
+              class="kpi-embed-frame"
+              title="PostHog KPI dashboard"
+              loading="lazy"
+            ></iframe>
+          </div>
+        </section>
+
+        <section class="panel-grid admin-grid">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-label" data-i18n="panel.userAdmin.label">User Admin</p>
+                <h2 data-i18n="panel.userAdmin.title">Find user</h2>
+              </div>
+              <p id="user-search-meta" class="panel-meta" data-i18n="panel.userAdmin.meta.default">
+                Email, username, or user ID.
+              </p>
+            </div>
+            <form id="user-search-form" class="search-form">
+              <label class="search-input-wrap" for="user-search-input">
+                <span class="search-label" data-i18n="search.label">User lookup</span>
+                <input
+                  id="user-search-input"
+                  class="text-input"
+                  type="search"
+                  placeholder="email, username, display name, or user ID"
+                  data-i18n-placeholder="search.placeholder"
+                  autocomplete="off"
+                />
+              </label>
+              <div class="search-actions">
+                <button
+                  id="user-search-button"
+                  class="button button-primary"
+                  type="submit"
+                  data-i18n="action.search"
+                >
+                  Search
+                </button>
+                <button
+                  id="user-search-clear-button"
+                  class="button button-secondary"
+                  type="button"
+                  data-i18n="action.clear"
+                >
+                  Clear
+                </button>
+              </div>
+            </form>
+            <div id="analytics-callout" class="integration-card hidden">
+              <div>
+                <p class="card-label" data-i18n="analytics.label">Product Analytics</p>
+                <p class="integration-copy" data-i18n="analytics.copy">
+                  Retention, MAU, funnels, and session KPIs live in PostHog.
+                </p>
+              </div>
+              <a
+                id="posthog-link"
+                class="button button-secondary"
+                href="#"
+                target="_blank"
+                rel="noreferrer"
+                data-i18n="action.openPosthog"
+              >
+                Open PostHog
+              </a>
+            </div>
+            <div class="subsection compact-subsection">
+              <div class="subsection-header">
+                <div>
+                  <p class="panel-label" data-i18n="panel.accounts.label">Accounts</p>
+                  <h3 data-i18n="panel.accounts.title">Search results</h3>
+                </div>
+                <p class="panel-meta" data-i18n="panel.accounts.meta">
+                  Recent accounts show when blank.
+                </p>
+              </div>
+              <div class="table-wrap compact-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th data-i18n="table.user">User</th>
+                      <th data-i18n="table.auth">Auth</th>
+                      <th data-i18n="table.subscription">Subscription</th>
+                      <th data-i18n="table.state">State</th>
+                      <th data-i18n="table.lastSeen">Last Seen</th>
+                    </tr>
+                  </thead>
+                  <tbody id="admin-users-table-body">
+                    <tr>
+                      <td colspan="5" class="table-empty" data-i18n="empty.signInSearchUsers">
+                        Sign in to search users.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel inspector-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-label" data-i18n="panel.selectedUser.label">Selected User</p>
+                <h2 data-i18n="panel.selectedUser.title">User details</h2>
+              </div>
+              <p class="panel-meta" data-i18n="panel.selectedUser.meta">Review actions here.</p>
+            </div>
+            <div id="user-inspector" class="inspector-empty" data-i18n="empty.selectUser">
+              Select a user to review details and actions.
+            </div>
+          </article>
+        </section>
+
+        <section class="panel-grid">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-label" data-i18n="panel.aiUsage.label">AI Usage</p>
+                <h2 data-i18n="panel.aiUsage.title">AI activity</h2>
+              </div>
+              <p id="generated-at" class="panel-meta">Not loaded</p>
+            </div>
+            <div id="ai-usage-metrics" class="mini-grid"></div>
+            <div class="subsection">
+              <div class="subsection-header">
+                <h3 data-i18n="panel.features.title">Features</h3>
+              </div>
+              <div id="top-features" class="feature-list empty-state" data-i18n="empty.signInFeatureUsage">
+                Sign in to load feature usage.
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-label" data-i18n="panel.tiers.label">Subscription Tier</p>
+                <h2 data-i18n="panel.tiers.title">Tiers</h2>
+              </div>
+            </div>
+            <div id="tier-breakdown" class="tier-list empty-state" data-i18n="empty.signInTierDistribution">
+              Sign in to load tier distribution.
+            </div>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label" data-i18n="panel.accountActivity.label">Account Activity</p>
+              <h2 data-i18n="panel.accountActivity.title">Accounts with app data</h2>
+            </div>
+            <p class="panel-meta" data-i18n="panel.accountActivity.meta">
+              Users with subscription or AI usage records.
+            </p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="table.user">User</th>
+                  <th data-i18n="table.tier">Tier</th>
+                  <th data-i18n="table.status">Status</th>
+                  <th data-i18n="table.aiRequests">AI Requests</th>
+                  <th data-i18n="table.creditsToday">Credits Today</th>
+                  <th data-i18n="table.tokensMonth">Tokens Month</th>
+                  <th data-i18n="table.lastSeen">Last Seen</th>
+                </tr>
+              </thead>
+              <tbody id="users-table-body">
+                <tr>
+                  <td colspan="7" class="table-empty" data-i18n="empty.signInUserData">
+                    Sign in to load user data.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-label" data-i18n="panel.projectActivity.label">Project Activity</p>
+              <h2 data-i18n="panel.projectActivity.title">Projects with AI usage</h2>
+            </div>
+            <p class="panel-meta" data-i18n="panel.projectActivity.meta">
+              Project IDs seen in AI usage events.
+            </p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-i18n="table.project">Project</th>
+                  <th data-i18n="table.requests">Requests</th>
+                  <th data-i18n="table.users">Users</th>
+                  <th data-i18n="table.credits">Credits</th>
+                  <th data-i18n="table.tokens">Tokens</th>
+                  <th data-i18n="table.lastActivity">Last Activity</th>
+                </tr>
+              </thead>
+              <tbody id="projects-table-body">
+                <tr>
+                  <td colspan="6" class="table-empty" data-i18n="empty.signInProjectData">
+                    Sign in to load project data.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel-grid admin-grid">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-label" data-i18n="panel.feedback.label">User Feedback / Bugs</p>
+                <h2 data-i18n="panel.feedback.title">Feedback & bug inbox</h2>
+              </div>
+              <p class="panel-meta" data-i18n="panel.feedback.meta">
+                Latest user feedback and bug reports.
+              </p>
+            </div>
+            <div class="table-wrap compact-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th data-i18n="table.type">Type</th>
+                    <th data-i18n="table.user">User</th>
+                    <th data-i18n="table.message">Message</th>
+                    <th data-i18n="table.attachments">Attachments</th>
+                    <th data-i18n="table.submitted">Submitted</th>
+                  </tr>
+                </thead>
+                <tbody id="feedback-table-body">
+                  <tr>
+                    <td colspan="5" class="table-empty" data-i18n="empty.signInFeedback">
+                      Sign in to load user feedback and bug reports.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel inspector-panel">
+            <div class="panel-header">
+              <div>
+                <p class="panel-label" data-i18n="panel.selectedFeedback.label">Selected Submission</p>
+                <h2 data-i18n="panel.selectedFeedback.title">Submission detail</h2>
+              </div>
+              <p class="panel-meta" data-i18n="panel.selectedFeedback.meta">
+                Review message, DAW context, and screenshots here.
+              </p>
+            </div>
+            <div id="feedback-inspector" class="inspector-empty" data-i18n="empty.selectFeedback">
+              Select a feedback item or bug report to review the full submission.
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

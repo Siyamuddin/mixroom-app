@@ -1071,6 +1071,16 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "setClipReversed") {
+      const int clip = FindInt(args, "clip", 0);
+      const bool reversed = FindBool(args, "reversed", false);
+      CallOnMessageThreadSync([clip, reversed] {
+        JuceEngine::get().setClipReversed(clip, reversed);
+      });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
     if (method_call.method_name() == "setClipStretchOptions") {
       const int clip = FindInt(args, "clip", 0);
       const double tempo_ratio = FindDouble(args, "tempoRatio", 1.0);
@@ -1338,6 +1348,16 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "setRowGainAutomationPoints") {
+      const int row = FindInt(args, "row", 0);
+      auto points = ParseAutomationPoints(FindValue(args, "points"), 1.0f);
+      CallOnMessageThreadSync([row, points = std::move(points)]() mutable {
+        JuceEngine::get().setRowGainAutomationPoints(row, points);
+      });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
     if (method_call.method_name() == "setRowGain") {
       const int row = FindInt(args, "row", 0);
       const float gain = static_cast<float>(FindDouble(args, "gain", 0.0));
@@ -1369,6 +1389,16 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const float pan = static_cast<float>(FindDouble(args, "pan", 0.0));
       CallOnMessageThreadSync(
           [row, pan] { JuceEngine::get().setRowPan(row, pan); });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "setRowPanAutomationPoints") {
+      const int row = FindInt(args, "row", 0);
+      auto points = ParseAutomationPoints(FindValue(args, "points"), 1.0f);
+      CallOnMessageThreadSync([row, points = std::move(points)]() mutable {
+        JuceEngine::get().setRowPanAutomationPoints(row, points);
+      });
       result->Success(flutter::EncodableValue());
       return;
     }
@@ -1447,6 +1477,36 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "setMasterEffectAutomationPoints") {
+      const int effect = FindInt(args, "effect", 0);
+      const std::string param_id = FindString(args, "paramId");
+      const float min_value = static_cast<float>(FindDouble(args, "min", 0.0));
+      const float max_value = static_cast<float>(FindDouble(args, "max", 1.0));
+      auto points = ParseAutomationPoints(FindValue(args, "points"), 1.0f);
+      CallOnMessageThreadSync([=, points = std::move(points)]() mutable {
+        JuceEngine::get().setMasterEffectAutomationPoints(
+            effect, ToJuceString(param_id), min_value, max_value, points);
+      });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "clearMasterEffectAutomation") {
+      CallOnMessageThreadSync(
+          [] { JuceEngine::get().clearMasterEffectAutomation(); });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "setMasterGainAutomationPoints") {
+      auto points = ParseAutomationPoints(FindValue(args, "points"), 1.0f);
+      CallOnMessageThreadSync([points = std::move(points)]() mutable {
+        JuceEngine::get().setMasterGainAutomationPoints(points);
+      });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
     if (method_call.method_name() == "setMasterGain") {
       const float gain = static_cast<float>(FindDouble(args, "gain", 0.0));
       CallOnMessageThreadSync(
@@ -1467,6 +1527,15 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const float pan = static_cast<float>(FindDouble(args, "pan", 0.0));
       CallOnMessageThreadSync(
           [pan] { JuceEngine::get().setMasterPan(pan); });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "setMasterPanAutomationPoints") {
+      auto points = ParseAutomationPoints(FindValue(args, "points"), 1.0f);
+      CallOnMessageThreadSync([points = std::move(points)]() mutable {
+        JuceEngine::get().setMasterPanAutomationPoints(points);
+      });
       result->Success(flutter::EncodableValue());
       return;
     }
@@ -1671,6 +1740,17 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const int channels =
           CallOnMessageThreadSync([] { return JuceEngine::get().getNumInputChannels(); });
       result->Success(flutter::EncodableValue(static_cast<int32_t>(channels)));
+      return;
+    }
+
+    if (method_call.method_name() == "prepareRecordingInputs") {
+      const int desired_channels = FindInt(args, "desiredInputChannels", 1);
+      const std::string reason = FindString(args, "reason");
+      CallOnMessageThreadSync([desired_channels, reason] {
+        JuceEngine::get().prepareRecordingInputsAsync(
+            desired_channels, ToJuceString(reason.empty() ? "dart" : reason));
+      });
+      result->Success();
       return;
     }
 

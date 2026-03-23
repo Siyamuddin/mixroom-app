@@ -72,8 +72,11 @@ class AudioTrack {
   List<AutomationPoint> volumeAutomation; // probably deprecated
   Duration currentPosition; // I think deprecated/unused
   late List<double> normWaveformData;
+  List<double>? _reversedWaveformCache;
+  List<double>? _reversedWaveformSource;
   double gain;
   double pitchSemitones; // clip pitch shift in semitones
+  bool isReversed; // clip plays the source waveform in reverse
   double sourceTempoBpm; // detected/imported source BPM (<=0 means unknown)
   bool stretchToProjectTempo; // clip follows project tempo when enabled
   bool tempoStretchPreservePitch; // false=resample, true=stretch-preserve
@@ -106,6 +109,7 @@ class AudioTrack {
     this.normWaveformData = const [],
     this.gain = kDefaultGainUi,
     this.pitchSemitones = 0.0,
+    this.isReversed = false,
     this.sourceTempoBpm = 0.0,
     this.stretchToProjectTempo = false,
     this.tempoStretchPreservePitch = false,
@@ -145,6 +149,7 @@ class AudioTrack {
     Duration? currentPosition,
     double gain = kDefaultGainUi,
     double pitchSemitones = 0.0,
+    bool isReversed = false,
     double sourceTempoBpm = 0.0,
     bool stretchToProjectTempo = false,
     bool tempoStretchPreservePitch = false,
@@ -178,6 +183,7 @@ class AudioTrack {
       normWaveformData: const [],
       gain: gain,
       pitchSemitones: pitchSemitones,
+      isReversed: isReversed,
       sourceTempoBpm: sourceTempoBpm,
       stretchToProjectTempo: stretchToProjectTempo,
       tempoStretchPreservePitch: tempoStretchPreservePitch,
@@ -198,6 +204,18 @@ class AudioTrack {
   }
 
   bool get isMidi => clipKind == ClipKind.midi;
+
+  List<double> get displayWaveformData {
+    if (!isReversed || normWaveformData.isEmpty) return normWaveformData;
+    if (identical(_reversedWaveformSource, normWaveformData) &&
+        _reversedWaveformCache != null) {
+      return _reversedWaveformCache!;
+    }
+    final reversed = List<double>.unmodifiable(normWaveformData.reversed);
+    _reversedWaveformSource = normWaveformData;
+    _reversedWaveformCache = reversed;
+    return reversed;
+  }
 }
 
 class TimelineRow {
@@ -316,6 +334,7 @@ class AutomationClipSnapshot {
   final String id;
   final String targetId;
   final String label;
+  final String patternId;
   final int row;
   final int lane;
   final double startMs;
@@ -327,6 +346,7 @@ class AutomationClipSnapshot {
     required this.id,
     required this.targetId,
     required this.label,
+    this.patternId = '',
     required this.row,
     this.lane = 0,
     required this.startMs,
@@ -339,6 +359,7 @@ class AutomationClipSnapshot {
     String? id,
     String? targetId,
     String? label,
+    String? patternId,
     int? row,
     int? lane,
     double? startMs,
@@ -350,6 +371,7 @@ class AutomationClipSnapshot {
       id: id ?? this.id,
       targetId: targetId ?? this.targetId,
       label: label ?? this.label,
+      patternId: patternId ?? this.patternId,
       row: row ?? this.row,
       lane: lane ?? this.lane,
       startMs: startMs ?? this.startMs,
@@ -365,6 +387,7 @@ class AutomationClipSnapshot {
       "id": id,
       "targetId": targetId,
       "label": label,
+      "patternId": patternId,
       "row": row,
       "lane": lane,
       "startMs": startMs,
@@ -386,6 +409,7 @@ class AutomationClipSnapshot {
           : (json["id"] as String).trim(),
       targetId: targetId.isEmpty ? 'volume' : targetId,
       label: (json["label"] as String?)?.trim() ?? '',
+      patternId: (json["patternId"] as String?)?.trim() ?? '',
       row: (json["row"] as num?)?.toInt() ?? 0,
       lane: (((json["lane"] as num?)?.toInt() ?? 0).clamp(0, 1 << 20)).toInt(),
       startMs: startMs,
@@ -411,6 +435,7 @@ extension AudioTrackSerialization on AudioTrack {
       "crossfade": crossfade,
       "gain": gain,
       "pitchSemitones": pitchSemitones,
+      "isReversed": isReversed,
       "sourceTempoBpm": sourceTempoBpm,
       "stretchToProjectTempo": stretchToProjectTempo,
       "tempoStretchPreservePitch": tempoStretchPreservePitch,

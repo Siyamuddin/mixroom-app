@@ -13,6 +13,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   private lateinit var methodChannel: MethodChannel
@@ -20,6 +21,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   private lateinit var logsChannel: EventChannel
   private val heavyWorkExecutor: ExecutorService = Executors.newSingleThreadExecutor()
   private val mainHandler = Handler(Looper.getMainLooper())
+  private var instrumentExtractionFuture: Future<*>? = null
 
   private var eventsSink: EventChannel.EventSink? = null
   private var logsSink: EventChannel.EventSink? = null
@@ -76,7 +78,10 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     )
 
     extractPlugins(binding.applicationContext)
-    extractInstrumentAssets(binding.applicationContext)
+    instrumentExtractionFuture =
+      heavyWorkExecutor.submit {
+        extractInstrumentAssets(binding.applicationContext)
+      }
     JuceBridge.setFlutterAssetRootJNI(binding.applicationContext.filesDir.absolutePath)
   }
 
@@ -146,6 +151,16 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "success" to success,
       ),
     )
+  }
+
+  private fun isSampledInstrumentId(instrumentId: String): Boolean {
+    val normalized = instrumentId.trim().lowercase()
+    return normalized.startsWith("sfz.") || normalized.startsWith("sfz_asset:")
+  }
+
+  private fun ensureInstrumentAssetsReadyIfNeeded(instrumentId: String) {
+    if (!isSampledInstrumentId(instrumentId)) return
+    instrumentExtractionFuture?.get()
   }
 
   private fun Map<String, Any?>.intValue(key: String, default: Int = 0): Int {
@@ -411,9 +426,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "renderInstrumentClip" -> {
           runHeavyTask("renderInstrumentClip", result) {
+            val instrumentId = args.stringValue("instrumentId", "mixroom.basic_synth")
+            ensureInstrumentAssetsReadyIfNeeded(instrumentId)
             JuceBridge.renderInstrumentClipJNI(
               args.stringValue("outPath"),
-              args.stringValue("instrumentId", "mixroom.basic_synth"),
+              instrumentId,
               args.stringValue("instrumentName", "Basic Synth"),
               args.doubleValue("bpm", 120.0),
               midiNotesFrom(args["notes"]),
@@ -469,10 +486,12 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "loadMidiClip" -> {
           val clip = args.intValue("clip")
           val rowId = resolveRowId(args, 0)
+          val instrumentId = args.stringValue("instrumentId", "mixroom.basic_synth")
+          ensureInstrumentAssetsReadyIfNeeded(instrumentId)
           val ok = JuceBridge.loadMidiClipJNI(
             clip,
             rowId,
-            args.stringValue("instrumentId", "mixroom.basic_synth"),
+            instrumentId,
             args.stringValue("instrumentName", "Basic Synth"),
             midiNotesFrom(args["notes"]),
             midiParamsFrom(args["params"]),
@@ -484,9 +503,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(ok)
         }
         "updateMidiClipEvents" -> {
+          val instrumentId = args.stringValue("instrumentId", "mixroom.basic_synth")
+          ensureInstrumentAssetsReadyIfNeeded(instrumentId)
           val ok = JuceBridge.updateMidiClipEventsJNI(
             args.intValue("clip"),
-            args.stringValue("instrumentId", "mixroom.basic_synth"),
+            instrumentId,
             args.stringValue("instrumentName", "Basic Synth"),
             midiNotesFrom(args["notes"]),
             midiParamsFrom(args["params"]),
@@ -532,6 +553,13 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "setClipPitch" -> {
           JuceBridge.setClipPitchJNI(args.intValue("clip"), args.floatValue("semitones"))
+          result.success(null)
+        }
+        "setClipReversed" -> {
+          JuceBridge.setClipReversedJNI(
+            args.intValue("clip"),
+            args.boolValue("reversed"),
+          )
           result.success(null)
         }
         "setClipStretchOptions" -> {
@@ -702,6 +730,13 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           JuceBridge.clearTrackEffectAutomationForRowJNI(args.intValue("row"))
           result.success(null)
         }
+        "setRowGainAutomationPoints" -> {
+          JuceBridge.setRowGainAutomationPointsJNI(
+            args.intValue("row"),
+            (args["points"] as? List<Map<String, Any>>) ?: emptyList(),
+          )
+          result.success(null)
+        }
         "setRowGain" -> {
           JuceBridge.setRowGainJNI(args.intValue("row"), args.floatValue("gain"))
           result.success(null)
@@ -715,6 +750,13 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "setRowPan" -> {
           JuceBridge.setRowPanJNI(args.intValue("row"), args.floatValue("pan"))
+          result.success(null)
+        }
+        "setRowPanAutomationPoints" -> {
+          JuceBridge.setRowPanAutomationPointsJNI(
+            args.intValue("row"),
+            (args["points"] as? List<Map<String, Any>>) ?: emptyList(),
+          )
           result.success(null)
         }
         "insertMasterEffect" -> {
@@ -755,6 +797,26 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "getMasterEffectBypassState" -> {
           result.success(JuceBridge.getMasterEffectBypassStateJNI(args.intValue("effect")))
         }
+        "setMasterEffectAutomationPoints" -> {
+          JuceBridge.setMasterEffectAutomationPointsJNI(
+            args.intValue("effect"),
+            args.stringValue("paramId"),
+            args.doubleValue("min"),
+            args.doubleValue("max"),
+            (args["points"] as? List<Map<String, Any>>) ?: emptyList(),
+          )
+          result.success(null)
+        }
+        "clearMasterEffectAutomation" -> {
+          JuceBridge.clearMasterEffectAutomationJNI()
+          result.success(null)
+        }
+        "setMasterGainAutomationPoints" -> {
+          JuceBridge.setMasterGainAutomationPointsJNI(
+            (args["points"] as? List<Map<String, Any>>) ?: emptyList(),
+          )
+          result.success(null)
+        }
         "setMasterGain" -> {
           JuceBridge.setMasterGainJNI(args.floatValue("gain"))
           result.success(null)
@@ -765,6 +827,12 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "setMasterPan" -> {
           JuceBridge.setMasterPanJNI(args.floatValue("pan"))
+          result.success(null)
+        }
+        "setMasterPanAutomationPoints" -> {
+          JuceBridge.setMasterPanAutomationPointsJNI(
+            (args["points"] as? List<Map<String, Any>>) ?: emptyList(),
+          )
           result.success(null)
         }
         "setMasterMeterEnabled" -> {
@@ -876,6 +944,18 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "getNumInputChannels" -> {
           result.success(JuceBridge.getNumInputChannelsJNI())
+        }
+        "prepareRecordingInputs" -> {
+          result.success(
+            JuceBridge.prepareRecordingInputsJNI(
+              args.intValue("desiredInputChannels"),
+              args.stringValue("reason")
+            ),
+          )
+        }
+        "refreshAudioRoute" -> {
+          JuceBridge.refreshAudioRouteJNI(args.stringValue("reason"))
+          result.success(null)
         }
         "getRecordingPeak" -> {
           result.success(JuceBridge.getRecordingPeakJNI())

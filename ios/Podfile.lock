@@ -86,6 +86,8 @@ PODS:
   - flutter_onnxruntime (0.0.1):
     - Flutter
     - onnxruntime-objc (= 1.22.0)
+  - flutter_secure_storage (6.0.0):
+    - Flutter
   - flutter_webrtc (1.2.0):
     - Flutter
     - WebRTC-SDK (= 137.7151.04)
@@ -126,11 +128,18 @@ PODS:
     - Flutter
   - image_picker_ios (0.0.1):
     - Flutter
+  - in_app_purchase_storekit (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - integration_test (0.0.1):
+    - Flutter
   - juce_audio_engine (0.0.1):
     - Flutter
   - just_audio (0.0.1):
     - Flutter
     - FlutterMacOS
+  - kakao_flutter_sdk_common (1.10.0):
+    - Flutter
   - large_file_handler (0.0.1):
     - Flutter
   - libwebp (1.5.0):
@@ -167,17 +176,29 @@ PODS:
   - PINCache/Core (3.0.4):
     - PINOperation (~> 1.2.3)
   - PINOperation (1.2.3)
+  - PostHog (3.45.1)
+  - posthog_flutter (0.0.1):
+    - Flutter
+    - FlutterMacOS
+    - PostHog (< 4.0.0, >= 3.44.0)
   - PromisesObjC (2.4.0)
   - record_ios (1.2.0):
     - Flutter
   - SDWebImage (5.21.5):
     - SDWebImage/Core (= 5.21.5)
   - SDWebImage/Core (5.21.5)
+  - Sentry/HybridSDK (8.56.2)
+  - sentry_flutter (9.14.0):
+    - Flutter
+    - FlutterMacOS
+    - Sentry/HybridSDK (= 8.56.2)
   - share_plus (0.0.1):
     - Flutter
   - shared_preferences_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
+  - sign_in_with_apple (0.0.1):
+    - Flutter
   - SwiftyGif (5.4.5)
   - TensorFlowLiteC (0.0.1-nightly.20250619):
     - TensorFlowLiteC/Core (= 0.0.1-nightly.20250619)
@@ -216,19 +237,26 @@ DEPENDENCIES:
   - flutter_gemma (from `.symlinks/plugins/flutter_gemma/ios`)
   - flutter_native_splash (from `.symlinks/plugins/flutter_native_splash/ios`)
   - flutter_onnxruntime (from `.symlinks/plugins/flutter_onnxruntime/ios`)
+  - flutter_secure_storage (from `.symlinks/plugins/flutter_secure_storage/ios`)
   - flutter_webrtc (from `.symlinks/plugins/flutter_webrtc/ios`)
   - google_sign_in_ios (from `.symlinks/plugins/google_sign_in_ios/darwin`)
   - image_gallery_saver (from `.symlinks/plugins/image_gallery_saver/ios`)
   - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
+  - in_app_purchase_storekit (from `.symlinks/plugins/in_app_purchase_storekit/darwin`)
+  - integration_test (from `.symlinks/plugins/integration_test/ios`)
   - juce_audio_engine (from `.symlinks/plugins/juce_audio_engine/ios`)
   - just_audio (from `.symlinks/plugins/just_audio/darwin`)
+  - kakao_flutter_sdk_common (from `.symlinks/plugins/kakao_flutter_sdk_common/ios`)
   - large_file_handler (from `.symlinks/plugins/large_file_handler/ios`)
   - open_file_ios (from `.symlinks/plugins/open_file_ios/ios`)
   - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
   - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
+  - posthog_flutter (from `.symlinks/plugins/posthog_flutter/ios`)
   - record_ios (from `.symlinks/plugins/record_ios/ios`)
+  - sentry_flutter (from `.symlinks/plugins/sentry_flutter/ios`)
   - share_plus (from `.symlinks/plugins/share_plus/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
+  - sign_in_with_apple (from `.symlinks/plugins/sign_in_with_apple/ios`)
   - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
   - video_player_avfoundation (from `.symlinks/plugins/video_player_avfoundation/darwin`)
   - video_thumbnail (from `.symlinks/plugins/video_thumbnail/ios`)
@@ -254,8 +282,10 @@ SPEC REPOS:
     - onnxruntime-objc
     - PINCache
     - PINOperation
+    - PostHog
     - PromisesObjC
     - SDWebImage
+    - Sentry
     - SwiftyGif
     - TensorFlowLiteC
     - TensorFlowLiteSwift
@@ -292,6 +322,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/flutter_native_splash/ios"
   flutter_onnxruntime:
     :path: ".symlinks/plugins/flutter_onnxruntime/ios"
+  flutter_secure_storage:
+    :path: ".symlinks/plugins/flutter_secure_storage/ios"
   flutter_webrtc:
     :path: ".symlinks/plugins/flutter_webrtc/ios"
   google_sign_in_ios:
@@ -300,10 +332,16 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/image_gallery_saver/ios"
   image_picker_ios:
     :path: ".symlinks/plugins/image_picker_ios/ios"
+  in_app_purchase_storekit:
+    :path: ".symlinks/plugins/in_app_purchase_storekit/darwin"
+  integration_test:
+    :path: ".symlinks/plugins/integration_test/ios"
   juce_audio_engine:
     :path: ".symlinks/plugins/juce_audio_engine/ios"
   just_audio:
     :path: ".symlinks/plugins/just_audio/darwin"
+  kakao_flutter_sdk_common:
+    :path: ".symlinks/plugins/kakao_flutter_sdk_common/ios"
   large_file_handler:
     :path: ".symlinks/plugins/large_file_handler/ios"
   open_file_ios:
@@ -312,12 +350,18 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/package_info_plus/ios"
   permission_handler_apple:
     :path: ".symlinks/plugins/permission_handler_apple/ios"
+  posthog_flutter:
+    :path: ".symlinks/plugins/posthog_flutter/ios"
   record_ios:
     :path: ".symlinks/plugins/record_ios/ios"
+  sentry_flutter:
+    :path: ".symlinks/plugins/sentry_flutter/ios"
   share_plus:
     :path: ".symlinks/plugins/share_plus/ios"
   shared_preferences_foundation:
     :path: ".symlinks/plugins/shared_preferences_foundation/darwin"
+  sign_in_with_apple:
+    :path: ".symlinks/plugins/sign_in_with_apple/ios"
   url_launcher_ios:
     :path: ".symlinks/plugins/url_launcher_ios/ios"
   video_player_avfoundation:
@@ -348,6 +392,7 @@ SPEC CHECKSUMS:
   flutter_gemma: 8f20d538be02f322bbca5877b09aaaa344edae6b
   flutter_native_splash: c32d145d68aeda5502d5f543ee38c192065986cf
   flutter_onnxruntime: 744f037980e9fb685736bfeceaf4c2dd8c381f8a
+  flutter_secure_storage: 1ed9476fba7e7a782b22888f956cce43e2c62f13
   flutter_webrtc: c3e21fc0dcd9d8eb246ae4d5256fcbeb2f5ecd22
   GCDWebServer: 2c156a56c8226e2d5c0c3f208a3621ccffbe3ce4
   google_sign_in_ios: 000870aa06da9b28d1d0bf7ef70ff0213059dd28
@@ -358,8 +403,11 @@ SPEC CHECKSUMS:
   HLSCachingReverseProxyServer: 59935e1e0244ad7f3375d75b5ef46e8eb26ab181
   image_gallery_saver: 14711d79da40581063e8842a11acf1969d781ed7
   image_picker_ios: e0ece4aa2a75771a7de3fa735d26d90817041326
-  juce_audio_engine: 1b96610ac6964016ac465b2778aca2fc312ac9e0
+  in_app_purchase_storekit: 22cca7d08eebca9babdf4d07d0baccb73325d3c8
+  integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
+  juce_audio_engine: e2de7a1dd97265f4de031bf7f96d17cc0727f79d
   just_audio: 4e391f57b79cad2b0674030a00453ca5ce817eed
+  kakao_flutter_sdk_common: 682b3606698f87467788598dc2dc09d4e6867fbd
   large_file_handler: b37481e9b4972562ffcdc8f75700f47cd592bcec
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
   MediaPipeTasksGenAI: 076ba7032a6e9da16db9c7cf0c3b67c751c18bc1
@@ -371,11 +419,16 @@ SPEC CHECKSUMS:
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
   PINCache: d9a87a0ff397acffe9e2f0db972ac14680441158
   PINOperation: fb563bcc9c32c26d6c78aaff967d405aa2ee74a7
+  PostHog: 596b48ea0c12550479680d6757da5dc6f8d55401
+  posthog_flutter: a677be3d8d9f0ec2af5dd61dd8657be4ec6396d8
   PromisesObjC: f5707f49cb48b9636751c5b2e7d227e43fba9f47
   record_ios: 412daca2350b228e698fffcd08f1f94ceb1e3844
   SDWebImage: e9c98383c7572d713c1a0d7dd2783b10599b9838
+  Sentry: b53951377b78e21a734f5dc8318e333dbfc682d7
+  sentry_flutter: 841fa2fe08dc72eb95e2320b76e3f751f3400cf5
   share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
+  sign_in_with_apple: c5dcc141574c8c54d5ac99dd2163c0c72ad22418
   SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
   TensorFlowLiteC: 215ef57653dd0fa09a474e7d94d79ae64a870b28
   TensorFlowLiteSwift: 6de8da348de331778167a0f751ad74c41d8b0554
@@ -385,6 +438,6 @@ SPEC CHECKSUMS:
   wakelock_plus: e29112ab3ef0b318e58cfa5c32326458be66b556
   WebRTC-SDK: 40d4f5ba05cadff14e4db5614aec402a633f007e
 
-PODFILE CHECKSUM: 3f841672a4179ef1fb412cb1ecddb6cd0eda182c
+PODFILE CHECKSUM: b0374f872ab893eeae686357a044739abc5f082a
 
 COCOAPODS: 1.16.2

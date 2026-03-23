@@ -2,15 +2,16 @@ import 'dart:async';
 import 'package:fftea/fftea.dart';
 
 import 'package:flutter/material.dart';
-import 'package:mixroom/helpers/subscription_service.dart';
+import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'dart:math' as math;
 import 'package:provider/provider.dart';
 
+import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/models/models.dart';
-import 'package:mixroom/models/subscription_models.dart';
+import 'package:mixroom/models/entitlement_models.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 
 const int maxNumEffects = 10;
@@ -24,6 +25,12 @@ List<String> _buildStableEffectKeys(List<String> effectIds) {
     keys.add('$id#$n');
   }
   return keys;
+}
+
+String _testKeySlug(String raw) {
+  final normalized = raw.trim().toLowerCase();
+  final slug = normalized.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+  return slug.replaceAll(RegExp(r'^_+|_+$'), '');
 }
 
 bool _isPitchShiftSemitonesParam(
@@ -116,11 +123,25 @@ class RowEffectsPanel extends StatefulWidget {
   final Future<void> Function(
           int row, int effectIndex, String paramId, dynamic value)
       setTrackEffectParam;
+  final Future<void> Function(
+    int row,
+    int effectIndex,
+    String effectName,
+    String paramId,
+    String paramName,
+  )? onRequestAutomateParameter;
   final void Function(RowEffectsSnapshot before, RowEffectsSnapshot after)?
       onPresetCommit;
+  final void Function(int row, int effectIndex, String effectName)?
+      onTutorialEffectAdded;
+  final void Function(int row, int effectIndex, String effectName)?
+      onTutorialEffectOpened;
   final void Function(double height) onHeightChanged;
   final void Function(VoidCallback refresh)? registerRefresh;
   final void Function(VoidCallback refresh)? registerPlaybackRefresh;
+  final void Function(
+    Future<void> Function(int effectIndex, String paramId) reveal,
+  )? registerParameterRevealer;
   final double projectBpm;
 
   final void Function(int row, int effectIndex, String paramId,
@@ -149,11 +170,15 @@ class RowEffectsPanel extends StatefulWidget {
     required this.getTrackPluginParameters,
     required this.scanPlugins,
     required this.setTrackEffectParam,
+    this.onRequestAutomateParameter,
     required this.onHeightChanged,
     required this.onPluginParamCommit,
     required this.onPresetCommit,
+    this.onTutorialEffectAdded,
+    this.onTutorialEffectOpened,
     this.registerRefresh,
     this.registerPlaybackRefresh,
+    this.registerParameterRevealer,
     required this.projectBpm,
     required this.meters,
     required this.getRowCompressorMeter,
@@ -163,6 +188,16 @@ class RowEffectsPanel extends StatefulWidget {
 
   @override
   State<RowEffectsPanel> createState() => _RowEffectsPanelState();
+}
+
+class _PendingParamOverride {
+  final dynamic value;
+  final DateTime updatedAt;
+
+  const _PendingParamOverride({
+    required this.value,
+    required this.updatedAt,
+  });
 }
 
 class _RowEffectsPanelState extends State<RowEffectsPanel> {
@@ -197,10 +232,17 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   DateTime _lastPlaybackRefreshAt = DateTime.fromMillisecondsSinceEpoch(0);
   static const Duration _kPlaybackRefreshMinInterval =
       Duration(milliseconds: 90);
+  static const Duration _kParamRefreshHold = Duration(milliseconds: 900);
+  static const Duration _kPendingParamOverrideTtl = Duration(seconds: 2);
+  DateTime _holdParamRefreshUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _deferredParamRefreshTimer;
+  bool _deferredParamRefreshPlaybackOnly = true;
+  final Map<String, _PendingParamOverride> _pendingParamOverrides =
+      <String, _PendingParamOverride>{};
 
   bool _subscriptionCapabilityOrLegacy(String capability) {
     try {
-      return context.read<SubscriptionService>().canUseCapability(capability);
+      return context.read<EntitlementService>().canUseCapability(capability);
     } catch (_) {
       return widget.mode == 'Pro';
     }
@@ -226,6 +268,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
         .replaceAll(RegExp(r'_+'), '_')
         .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
+  String _normalizedParamToken(String raw) {
+    return raw.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
   }
 
   List<String> _effectHaloKeys({
@@ -257,31 +303,15 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     required String paramName,
   }) {
     final row = widget.rowIndex;
-    final effectSlug = _haloSlug(effectName);
-    final effectLower = effectName.trim().toLowerCase();
     final paramSlug = _haloSlug(paramName);
     final paramLower = paramName.trim().toLowerCase();
     return <String>[
-      'row:$row:fx_index:$effectIndex',
-      if (effectSlug.isNotEmpty) 'row:$row:fx_contains:$effectSlug',
-      if (effectLower.isNotEmpty) 'row:$row:fx_contains:$effectLower',
-      if (paramSlug.isNotEmpty) 'row:$row:param:$paramSlug',
-      if (paramLower.isNotEmpty) 'row:$row:param:$paramLower',
-      if (paramName.trim().isNotEmpty) 'row:$row:param:${paramName.trim()}',
       if (paramName.trim().isNotEmpty)
         'row:$row:fx_index:$effectIndex:param:${paramName.trim()}',
       if (paramSlug.isNotEmpty)
         'row:$row:fx_index:$effectIndex:param:$paramSlug',
       if (paramLower.isNotEmpty)
         'row:$row:fx_index:$effectIndex:param:$paramLower',
-      if (effectSlug.isNotEmpty && paramSlug.isNotEmpty)
-        'row:$row:fx_contains:$effectSlug:param:$paramSlug',
-      if (effectSlug.isNotEmpty && paramName.trim().isNotEmpty)
-        'row:$row:fx_contains:$effectSlug:param:${paramName.trim()}',
-      if (effectLower.isNotEmpty && paramLower.isNotEmpty)
-        'row:$row:fx_contains:$effectLower:param:$paramLower',
-      if (effectLower.isNotEmpty && paramName.trim().isNotEmpty)
-        'row:$row:fx_contains:$effectLower:param:${paramName.trim()}',
     ];
   }
 
@@ -308,6 +338,219 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     );
   }
 
+  void _triggerHalos(
+    List<String> haloKeys, {
+    Duration duration = const Duration(milliseconds: 800),
+  }) {
+    final highlighter = widget.tutorialHighlighter;
+    if (highlighter == null || haloKeys.isEmpty) return;
+    final mapped = haloKeys
+        .map((k) => k.trim())
+        .where((k) => k.isNotEmpty)
+        .map(HaloKey.new)
+        .toList(growable: false);
+    if (mapped.isEmpty) return;
+    highlighter.trigger(mapped, duration: duration);
+  }
+
+  Future<void> _showAutomateParameterSheet({
+    required int effectIndex,
+    required String effectName,
+    required String paramId,
+    required String paramName,
+    required List<String> haloKeys,
+    Offset? anchorGlobalPos,
+  }) async {
+    if (widget.onRequestAutomateParameter == null) return;
+    _triggerHalos(
+      haloKeys,
+      duration: const Duration(milliseconds: 320),
+    );
+    await AppHaptics.impact(AppHapticImpact.medium);
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final fallbackAnchor = (() {
+      final box = context.findRenderObject();
+      if (box is RenderBox) {
+        return box.localToGlobal(
+          Offset(box.size.width / 2, box.size.height / 2),
+        );
+      }
+      return const Offset(120, 120);
+    })();
+    final anchor = anchorGlobalPos ?? fallbackAnchor;
+    String? action;
+    if (overlay != null) {
+      final left = anchor.dx.clamp(0.0, overlay.size.width).toDouble();
+      final top = (anchor.dy - 40.0).clamp(0.0, overlay.size.height).toDouble();
+      final right = (overlay.size.width - anchor.dx)
+          .clamp(0.0, overlay.size.width)
+          .toDouble();
+      final bottom = (overlay.size.height - anchor.dy)
+          .clamp(0.0, overlay.size.height)
+          .toDouble();
+      action = await showMenu<String>(
+        context: context,
+        color: const Color(0xFF1B2233),
+        elevation: 8,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        position: RelativeRect.fromLTRB(left, top, right, bottom),
+        items: const <PopupMenuEntry<String>>[
+          PopupMenuItem<String>(
+            value: 'automate',
+            height: 34,
+            child: Text('Automate'),
+          ),
+        ],
+      );
+    }
+    if (action != 'automate') return;
+    _triggerHalos(haloKeys);
+    await widget.onRequestAutomateParameter!(
+      widget.rowIndex,
+      effectIndex,
+      effectName,
+      paramId,
+      paramName,
+    );
+  }
+
+  Future<void> _revealParameter(int effectIndex, String paramId) async {
+    if (effectIndex < 0) return;
+    if (effectIndex >= _effects.length) {
+      await _loadEffects();
+      if (effectIndex < 0 || effectIndex >= _effects.length) return;
+    }
+    await _openPluginParams(effectIndex);
+    if (!mounted) return;
+    final effectName = _effects[effectIndex];
+    final params = _currentParams;
+    final targetRaw = paramId.trim();
+    final target = targetRaw.toLowerCase();
+    final targetToken = _normalizedParamToken(targetRaw);
+    final match = params.cast<Map<String, dynamic>?>().firstWhere(
+      (param) {
+        if (param == null) return false;
+        final candidateId =
+            (param['id'] ?? param['name'] ?? '').toString().trim();
+        final candidateName = (param['name'] ?? candidateId).toString().trim();
+        if (target.isEmpty) return false;
+        final idLower = candidateId.toLowerCase();
+        final nameLower = candidateName.toLowerCase();
+        if (idLower == target || nameLower == target) return true;
+        if (targetToken.isEmpty) return false;
+        return _normalizedParamToken(candidateId) == targetToken ||
+            _normalizedParamToken(candidateName) == targetToken;
+      },
+      orElse: () => null,
+    );
+    final matchedParamName =
+        (match?['name'] ?? match?['id'] ?? targetRaw).toString().trim();
+    final matchedParamId =
+        (match?['id'] ?? match?['name'] ?? targetRaw).toString().trim();
+    final haloKeys = <String>[];
+    final seen = <String>{};
+    void addHaloKeys(List<String> keys) {
+      for (final key in keys) {
+        final trimmed = key.trim();
+        if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+        haloKeys.add(trimmed);
+      }
+    }
+
+    addHaloKeys(
+      _paramHaloKeys(
+        effectIndex: effectIndex,
+        effectName: effectName,
+        paramName: matchedParamName,
+      ),
+    );
+    if (matchedParamId.isNotEmpty &&
+        matchedParamId.toLowerCase() != matchedParamName.toLowerCase()) {
+      addHaloKeys(
+        _paramHaloKeys(
+          effectIndex: effectIndex,
+          effectName: effectName,
+          paramName: matchedParamId,
+        ),
+      );
+    }
+    if (targetRaw.isNotEmpty &&
+        targetRaw.toLowerCase() != matchedParamName.toLowerCase() &&
+        targetRaw.toLowerCase() != matchedParamId.toLowerCase()) {
+      addHaloKeys(
+        _paramHaloKeys(
+          effectIndex: effectIndex,
+          effectName: effectName,
+          paramName: targetRaw,
+        ),
+      );
+    }
+    final matchedSlug = _haloSlug(matchedParamName);
+    final targetSlug = _haloSlug(targetRaw);
+    if (matchedParamName.isNotEmpty) {
+      addHaloKeys(<String>['row:${widget.rowIndex}:param:$matchedParamName']);
+    }
+    if (matchedSlug.isNotEmpty) {
+      addHaloKeys(<String>['row:${widget.rowIndex}:param:$matchedSlug']);
+    }
+    if (targetRaw.isNotEmpty) {
+      addHaloKeys(<String>['row:${widget.rowIndex}:param:$targetRaw']);
+    }
+    if (targetSlug.isNotEmpty) {
+      addHaloKeys(<String>['row:${widget.rowIndex}:param:$targetSlug']);
+    }
+    if (haloKeys.isEmpty) return;
+    // Trigger after paint so the target param halo node is definitely mounted.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _triggerHalos(haloKeys);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+    _triggerHalos(haloKeys);
+    await Future<void>.delayed(const Duration(milliseconds: 160));
+    if (!mounted) return;
+    _triggerHalos(haloKeys);
+  }
+
+  Widget _wrapAutomatableParam({
+    required int effectIndex,
+    required String effectName,
+    required Map<String, dynamic> param,
+    required Widget child,
+    BorderRadius? borderRadius,
+  }) {
+    final paramName =
+        (param['name'] ?? param['id'] ?? 'Parameter').toString().trim();
+    final paramId = (param['id'] ?? param['name'] ?? '').toString().trim();
+    final haloKeys = _paramHaloKeys(
+      effectIndex: effectIndex,
+      effectName: effectName,
+      paramName: paramName,
+    );
+    return KeyedSubtree(
+      key: ValueKey(
+        'row_param_${widget.rowIndex}_${_testKeySlug(effectName)}_${_testKeySlug(paramName)}',
+      ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onLongPressStart: (details) => _showAutomateParameterSheet(
+          effectIndex: effectIndex,
+          effectName: effectName,
+          paramId: paramId,
+          paramName: paramName,
+          haloKeys: haloKeys,
+          anchorGlobalPos: details.globalPosition,
+        ),
+        child: _wrapWithHalos(
+          haloKeys: haloKeys,
+          borderRadius: borderRadius,
+          child: child,
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -315,21 +558,164 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     // widget.registerRefresh?.call = _refetchAll;
     widget.registerRefresh?.call(_refetchAll);
     widget.registerPlaybackRefresh?.call(_refetchParamsForPlayback);
+    widget.registerParameterRevealer?.call(_revealParameter);
   }
 
   @override
   void didUpdateWidget(covariant RowEffectsPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.rowIndex != widget.rowIndex) {
+      _pendingParamOverrides.clear();
       _refetchAll();
     }
   }
 
   @override
   void dispose() {
+    _deferredParamRefreshTimer?.cancel();
+    _pendingParamOverrides.clear();
     _stopCompressorMetering();
     _stopEqWaveformPolling();
     super.dispose();
+  }
+
+  String _pendingParamOverrideKey(int effectIndex, String paramId) {
+    final trimmedParamId = paramId.trim();
+    final effectKey = (effectIndex >= 0 && effectIndex < _effectKeys.length)
+        ? _effectKeys[effectIndex]
+        : 'idx:$effectIndex';
+    return '$effectKey\u0000$trimmedParamId';
+  }
+
+  void _rememberPendingParamOverride(
+    int effectIndex,
+    String paramId,
+    dynamic value,
+  ) {
+    final trimmedParamId = paramId.trim();
+    if (trimmedParamId.isEmpty) return;
+    _pendingParamOverrides[
+            _pendingParamOverrideKey(effectIndex, trimmedParamId)] =
+        _PendingParamOverride(
+      value: value,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  List<Map<String, dynamic>> _mergePendingParamOverrides(
+    int effectIndex,
+    List<Map<String, dynamic>> params,
+  ) {
+    if (_pendingParamOverrides.isEmpty || params.isEmpty) {
+      return params;
+    }
+
+    final now = DateTime.now();
+    final merged = <Map<String, dynamic>>[];
+    final keysToRemove = <String>{};
+
+    for (final original in params) {
+      final param = Map<String, dynamic>.from(original);
+      final rawName = (param['name'] ?? '').toString().trim();
+      final rawId = (param['id'] ?? '').toString().trim();
+      _PendingParamOverride? override;
+      String? overrideKey;
+
+      for (final candidate in <String>[
+        if (rawId.isNotEmpty) rawId,
+        if (rawName.isNotEmpty) rawName,
+      ]) {
+        final key = _pendingParamOverrideKey(effectIndex, candidate);
+        final pending = _pendingParamOverrides[key];
+        if (pending == null) continue;
+        override = pending;
+        overrideKey = key;
+        break;
+      }
+
+      if (override != null && overrideKey != null) {
+        if (now.difference(override.updatedAt) > _kPendingParamOverrideTtl ||
+            _paramValuesEqual(param['value'], override.value)) {
+          keysToRemove.add(overrideKey);
+        } else {
+          param['value'] = override.value;
+        }
+      }
+
+      merged.add(param);
+    }
+
+    if (keysToRemove.isNotEmpty) {
+      for (final key in keysToRemove) {
+        _pendingParamOverrides.remove(key);
+      }
+    }
+
+    return merged;
+  }
+
+  bool _isParamRefreshHeld() {
+    return DateTime.now().isBefore(_holdParamRefreshUntil);
+  }
+
+  void _extendParamRefreshHold([
+    Duration duration = _kParamRefreshHold,
+  ]) {
+    final until = DateTime.now().add(duration);
+    if (until.isAfter(_holdParamRefreshUntil)) {
+      _holdParamRefreshUntil = until;
+    }
+  }
+
+  void _scheduleDeferredParamRefresh({required bool playbackOnly}) {
+    _deferredParamRefreshPlaybackOnly = _deferredParamRefreshTimer == null
+        ? playbackOnly
+        : (_deferredParamRefreshPlaybackOnly && playbackOnly);
+    _deferredParamRefreshTimer?.cancel();
+    final delay = _holdParamRefreshUntil.difference(DateTime.now());
+    _deferredParamRefreshTimer = Timer(
+      delay.isNegative ? Duration.zero : delay,
+      () {
+        _deferredParamRefreshTimer = null;
+        final playbackRefresh = _deferredParamRefreshPlaybackOnly;
+        _deferredParamRefreshPlaybackOnly = true;
+        if (!mounted) return;
+        if (playbackRefresh) {
+          unawaited(_refetchParamsForPlayback());
+          return;
+        }
+        unawaited(_refetchAll());
+      },
+    );
+  }
+
+  Future<void> _setTrackEffectParam(
+    int row,
+    int effectIndex,
+    String paramId,
+    dynamic value,
+  ) async {
+    _rememberPendingParamOverride(effectIndex, paramId, value);
+    _extendParamRefreshHold();
+    await widget.setTrackEffectParam(row, effectIndex, paramId, value);
+  }
+
+  void _commitTrackEffectParam(
+    int row,
+    int effectIndex,
+    String paramId,
+    dynamic oldValue,
+    dynamic newValue,
+  ) {
+    _extendParamRefreshHold();
+    widget.onPluginParamCommit?.call(
+      row,
+      effectIndex,
+      paramId,
+      oldValue,
+      newValue,
+    );
+    _scheduleDeferredParamRefresh(playbackOnly: false);
   }
 
   Future<void> _loadEffects(
@@ -482,8 +868,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 value: presetLabel,
                 underline: const SizedBox(),
                 items: [
-                  const DropdownMenuItem(
-                      value: 'Custom', child: Text('Custom')),
+                  DropdownMenuItem(
+                    value: 'Custom',
+                    child: Text(L10n.translate(context, 'Custom')),
+                  ),
                   ...kDelayDivisions.map((d) =>
                       DropdownMenuItem(value: d.label, child: Text(d.label))),
                 ],
@@ -500,10 +888,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     param['value'] = newMs;
                   });
 
-                  widget.setTrackEffectParam(widget.rowIndex, effectIndex,
+                  _setTrackEffectParam(widget.rowIndex, effectIndex,
                       param['name'] as String, newMs);
 
-                  widget.onPluginParamCommit?.call(
+                  _commitTrackEffectParam(
                     widget.rowIndex,
                     effectIndex,
                     param['name'] as String,
@@ -531,9 +919,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     final oldValue = (param['value'] as num).toDouble();
                     if ((oldValue - defaultValue).abs() < 1.0e-6) return;
                     setState(() => param['value'] = defaultValue);
-                    widget.setTrackEffectParam(widget.rowIndex, effectIndex,
+                    _setTrackEffectParam(widget.rowIndex, effectIndex,
                         param['name'] as String, defaultValue);
-                    widget.onPluginParamCommit?.call(
+                    _commitTrackEffectParam(
                       widget.rowIndex,
                       effectIndex,
                       param['name'] as String,
@@ -553,13 +941,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     },
                     onChanged: (v) {
                       setState(() => param['value'] = v);
-                      widget.setTrackEffectParam(widget.rowIndex, effectIndex,
+                      _setTrackEffectParam(widget.rowIndex, effectIndex,
                           param['name'] as String, v);
                     },
                     onChangeEnd: (v) {
                       if (_paramDragStartValue == null) return;
 
-                      widget.onPluginParamCommit?.call(
+                      _commitTrackEffectParam(
                         widget.rowIndex,
                         effectIndex,
                         param['name'] as String,
@@ -599,9 +987,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       if ((oldValue - clamped).abs() < 1.0e-6) return;
 
       setState(() => param['value'] = clamped);
-      widget.setTrackEffectParam(
-          widget.rowIndex, effectIndex, paramName, clamped);
-      widget.onPluginParamCommit?.call(
+      _setTrackEffectParam(widget.rowIndex, effectIndex, paramName, clamped);
+      _commitTrackEffectParam(
         widget.rowIndex,
         effectIndex,
         paramName,
@@ -641,13 +1028,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     onChanged: (v) {
                       final snapped = v.roundToDouble().clamp(minV, maxV);
                       setState(() => param['value'] = snapped);
-                      widget.setTrackEffectParam(
+                      _setTrackEffectParam(
                           widget.rowIndex, effectIndex, paramName, snapped);
                     },
                     onChangeEnd: (v) {
                       if (_paramDragStartValue == null) return;
                       final snapped = v.roundToDouble().clamp(minV, maxV);
-                      widget.onPluginParamCommit?.call(
+                      _commitTrackEffectParam(
                         widget.rowIndex,
                         effectIndex,
                         paramName,
@@ -746,9 +1133,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     final oldValue = (param['value'] as num).toDouble();
                     if ((oldValue - target).abs() < 1.0e-6) return;
                     setState(() => param['value'] = target);
-                    widget.setTrackEffectParam(
+                    _setTrackEffectParam(
                         widget.rowIndex, effectIndex, paramName, target);
-                    widget.onPluginParamCommit?.call(
+                    _commitTrackEffectParam(
                       widget.rowIndex,
                       effectIndex,
                       paramName,
@@ -772,12 +1159,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                       },
                       onChanged: (v) {
                         setState(() => param['value'] = v);
-                        widget.setTrackEffectParam(
+                        _setTrackEffectParam(
                             widget.rowIndex, effectIndex, paramName, v);
                       },
                       onChangeEnd: (v) {
                         if (_paramDragStartValue == null) return;
-                        widget.onPluginParamCommit?.call(
+                        _commitTrackEffectParam(
                           widget.rowIndex,
                           effectIndex,
                           paramName,
@@ -994,6 +1381,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     if (!mounted || _selectedEffectIndex == null || _paramsLoading) return;
     if (_paramDragStartValue != null || _EQParamStartValue != null) return;
     if (_playbackRefreshBusy) return;
+    if (_isParamRefreshHeld()) {
+      _scheduleDeferredParamRefresh(playbackOnly: true);
+      return;
+    }
 
     final now = DateTime.now();
     if (now.difference(_lastPlaybackRefreshAt) < _kPlaybackRefreshMinInterval) {
@@ -1014,6 +1405,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       var params =
           await widget.getTrackPluginParameters(widget.rowIndex, liveIdx);
       params = _filterParamsForEffect(effectName, params);
+      params = _mergePendingParamOverrides(liveIdx, params);
 
       if (!mounted || _selectedEffectIndex == null) return;
       final hasChanges =
@@ -1033,6 +1425,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   // used from above when the UI needs to be updated after JUCE state changed from above (undo actions, AI mixer)
   Future<void> _refetchAll() async {
     if (!mounted) return;
+    if (_isParamRefreshHeld()) {
+      _scheduleDeferredParamRefresh(playbackOnly: false);
+      return;
+    }
 
     // Case 1: effect list page
     if (_selectedEffectIndex == null) {
@@ -1057,6 +1453,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         : (idx >= 0 && idx < _effects.length ? _effects[idx] : '');
 
     params = _filterParamsForEffect(effectName, params);
+    params = _mergePendingParamOverrides(liveIdx, params);
 
     if (!mounted) return;
     if (_selectedEffectIndex == null) return;
@@ -1306,42 +1703,40 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     switch (presetName) {
       case 'Concert Hall':
         await widget.insertEffectOnRow(widget.rowIndex, 'Reverb');
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'Room Size', 53);
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'Mix', 20);
+        await _setTrackEffectParam(widget.rowIndex, 0, 'Room Size', 53);
+        await _setTrackEffectParam(widget.rowIndex, 0, 'Mix', 20);
         break;
 
       case 'Echoes':
         await widget.insertEffectOnRow(widget.rowIndex, 'Reverb');
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'Room Size', 40);
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'Mix', 20);
+        await _setTrackEffectParam(widget.rowIndex, 0, 'Room Size', 40);
+        await _setTrackEffectParam(widget.rowIndex, 0, 'Mix', 20);
         await widget.insertEffectOnRow(widget.rowIndex, 'Delay');
-        await widget.setTrackEffectParam(widget.rowIndex, 1, 'Delay Time', 400);
-        await widget.setTrackEffectParam(widget.rowIndex, 1, 'Feedback', 30);
-        await widget.setTrackEffectParam(widget.rowIndex, 1, 'Mix', 30);
+        await _setTrackEffectParam(widget.rowIndex, 1, 'Delay Time', 400);
+        await _setTrackEffectParam(widget.rowIndex, 1, 'Feedback', 30);
+        await _setTrackEffectParam(widget.rowIndex, 1, 'Mix', 30);
         break;
 
       case 'LoFi Effect':
         await widget.insertEffectOnRow(widget.rowIndex, 'EQ Parametric');
-        await widget.setTrackEffectParam(
-            widget.rowIndex, 0, 'LPF Frequency', 2600.0);
+        await _setTrackEffectParam(widget.rowIndex, 0, 'LPF Frequency', 2600.0);
         await widget.insertEffectOnRow(widget.rowIndex, 'Distortion');
-        await widget.setTrackEffectParam(widget.rowIndex, 1, 'Drive', 50);
-        await widget.setTrackEffectParam(widget.rowIndex, 1, 'Mix', 85);
-        await widget.setTrackEffectParam(widget.rowIndex, 1, 'Anger', 1);
-        await widget.setTrackEffectParam(
-            widget.rowIndex, 1, 'LPF Frequency', 2800.0);
-        await widget.setTrackEffectParam(
+        await _setTrackEffectParam(widget.rowIndex, 1, 'Drive', 50);
+        await _setTrackEffectParam(widget.rowIndex, 1, 'Mix', 85);
+        await _setTrackEffectParam(widget.rowIndex, 1, 'Anger', 1);
+        await _setTrackEffectParam(widget.rowIndex, 1, 'LPF Frequency', 2800.0);
+        await _setTrackEffectParam(
             widget.rowIndex, 1, 'Distortion Type', "Mode 3");
         break;
 
       case 'Heavy Crunch':
         await widget.insertEffectOnRow(widget.rowIndex, 'Distortion');
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'Drive', 100);
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'Mix', 100);
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'Anger', 1);
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'Volume', 12);
-        await widget.setTrackEffectParam(widget.rowIndex, 0, 'Pre Shape', 3.0);
-        await widget.setTrackEffectParam(
+        await _setTrackEffectParam(widget.rowIndex, 0, 'Drive', 100);
+        await _setTrackEffectParam(widget.rowIndex, 0, 'Mix', 100);
+        await _setTrackEffectParam(widget.rowIndex, 0, 'Anger', 1);
+        await _setTrackEffectParam(widget.rowIndex, 0, 'Volume', 12);
+        await _setTrackEffectParam(widget.rowIndex, 0, 'Pre Shape', 3.0);
+        await _setTrackEffectParam(
             widget.rowIndex, 0, 'Distortion Type', "Mode 3");
         break;
 
@@ -1599,6 +1994,15 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                 await widget.insertEffectOnRow(
                                     widget.rowIndex, name);
                                 await _loadEffects();
+                                final addedIndex = _effects.length - 1;
+                                if (addedIndex >= 0 &&
+                                    addedIndex < _effects.length) {
+                                  widget.onTutorialEffectAdded?.call(
+                                    widget.rowIndex,
+                                    addedIndex,
+                                    _effects[addedIndex],
+                                  );
+                                }
                               }
                             : null,
                         child: Opacity(
@@ -1670,6 +2074,14 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                           Navigator.pop(context);
                           await widget.insertEffectOnRow(widget.rowIndex, path);
                           await _loadEffects();
+                          final addedIndex = _effects.length - 1;
+                          if (addedIndex >= 0 && addedIndex < _effects.length) {
+                            widget.onTutorialEffectAdded?.call(
+                              widget.rowIndex,
+                              addedIndex,
+                              _effects[addedIndex],
+                            );
+                          }
                         },
                       );
                     },
@@ -1692,6 +2104,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       await _loadEffects();
       if (idx < 0 || idx >= _effects.length) return;
     }
+
+    widget.onTutorialEffectOpened?.call(
+      widget.rowIndex,
+      idx,
+      idx >= 0 && idx < _effects.length ? _effects[idx] : 'Effect',
+    );
 
     setState(() {
       _selectedEffectIndex = idx;
@@ -1722,12 +2140,22 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
 
     // Keep effect parameter subsets consistent with external/poll refresh.
     params = _filterParamsForEffect(_effects[idx], params);
+    params = _mergePendingParamOverrides(idx, params);
+    final effectName = _effects[idx];
+    final estimatedHeight = (effectName == 'EQ Parametric')
+        ? 760.0
+        : (effectName == 'EQ 3-Band')
+            ? 560.0
+            : (220.0 + (math.max(0, params.length) * 74.0))
+                .clamp(widget.minHeight, 1200.0)
+                .toDouble();
 
     if (!mounted) return;
     setState(() {
       _currentParams = params;
       _paramsLoading = false;
     });
+    widget.onHeightChanged(math.max(widget.minHeight, estimatedHeight));
   }
 
   Widget _buildEffectParamsPage(BuildContext context, int idx) {
@@ -1743,8 +2171,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     final effectName = _effects[idx];
     final effectPageHaloKeys = <String>[
       ..._effectHaloKeys(effectIndex: idx, effectName: effectName),
-      'row:${widget.rowIndex}:effects_tab',
       'row:${widget.rowIndex}:fx_list',
+      'row:${widget.rowIndex}:fx_params',
     ];
 
     // Special layout for EQ Parametric
@@ -1811,12 +2239,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           },
           onChanged: (v) {
             setState(() => param['value'] = v);
-            widget.setTrackEffectParam(widget.rowIndex, idx, name, v);
+            _setTrackEffectParam(widget.rowIndex, idx, name, v);
           },
           onChangeEnd: (v) {
             final startValue = _EQParamStartValue;
             if (startValue == null) return;
-            widget.onPluginParamCommit?.call(
+            _commitTrackEffectParam(
               widget.rowIndex,
               idx,
               name,
@@ -1831,9 +2259,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             final oldValue = (param['value'] as num).toDouble();
             if ((oldValue - defaultValue).abs() < 1.0e-6) return;
             setState(() => param['value'] = defaultValue);
-            widget.setTrackEffectParam(
-                widget.rowIndex, idx, name, defaultValue);
-            widget.onPluginParamCommit?.call(
+            _setTrackEffectParam(widget.rowIndex, idx, name, defaultValue);
+            _commitTrackEffectParam(
               widget.rowIndex,
               idx,
               name,
@@ -1918,13 +2345,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             },
             onChanged: (v) {
               setState(() => pHPF['value'] = v);
-              widget.setTrackEffectParam(
+              _setTrackEffectParam(
                   widget.rowIndex, idx, pHPF['name'] as String, v);
             },
             onChangeEnd: (v) {
               final startValue = _EQParamStartValue;
               if (startValue == null) return;
-              widget.onPluginParamCommit?.call(
+              _commitTrackEffectParam(
                 widget.rowIndex,
                 idx,
                 pHPF['name'] as String,
@@ -1939,9 +2366,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               final oldValue = (pHPF['value'] as num).toDouble();
               if ((oldValue - defaultValue).abs() < 1.0e-6) return;
               setState(() => pHPF['value'] = defaultValue);
-              widget.setTrackEffectParam(
+              _setTrackEffectParam(
                   widget.rowIndex, idx, pHPF['name'] as String, defaultValue);
-              widget.onPluginParamCommit?.call(
+              _commitTrackEffectParam(
                 widget.rowIndex,
                 idx,
                 pHPF['name'] as String,
@@ -1958,9 +2385,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 if (!mounted) return;
                 setState(() => pHPFSlope['value'] = picked);
               });
-              widget.setTrackEffectParam(
+              _setTrackEffectParam(
                   widget.rowIndex, idx, pHPFSlope['name'] as String, picked);
-              widget.onPluginParamCommit?.call(
+              _commitTrackEffectParam(
                 widget.rowIndex,
                 idx,
                 pHPFSlope['name'] as String,
@@ -1983,13 +2410,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             },
             onChanged: (v) {
               setState(() => pLPF['value'] = v);
-              widget.setTrackEffectParam(
+              _setTrackEffectParam(
                   widget.rowIndex, idx, pLPF['name'] as String, v);
             },
             onChangeEnd: (v) {
               final startValue = _EQParamStartValue;
               if (startValue == null) return;
-              widget.onPluginParamCommit?.call(
+              _commitTrackEffectParam(
                 widget.rowIndex,
                 idx,
                 pLPF['name'] as String,
@@ -2004,9 +2431,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               final oldValue = (pLPF['value'] as num).toDouble();
               if ((oldValue - defaultValue).abs() < 1.0e-6) return;
               setState(() => pLPF['value'] = defaultValue);
-              widget.setTrackEffectParam(
+              _setTrackEffectParam(
                   widget.rowIndex, idx, pLPF['name'] as String, defaultValue);
-              widget.onPluginParamCommit?.call(
+              _commitTrackEffectParam(
                 widget.rowIndex,
                 idx,
                 pLPF['name'] as String,
@@ -2023,9 +2450,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 if (!mounted) return;
                 setState(() => pLPFSlope['value'] = picked);
               });
-              widget.setTrackEffectParam(
+              _setTrackEffectParam(
                   widget.rowIndex, idx, pLPFSlope['name'] as String, picked);
-              widget.onPluginParamCommit?.call(
+              _commitTrackEffectParam(
                 widget.rowIndex,
                 idx,
                 pLPFSlope['name'] as String,
@@ -2060,6 +2487,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                           _selectedEffectIndex = null;
                           _currentParams = [];
                         });
+                        widget.onHeightChanged(widget.minHeight);
                       },
                     ),
                     const SizedBox(width: 6),
@@ -2103,9 +2531,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                           final oldVal = c['old'];
                           final newVal = c['next'];
                           final name = p['name'] as String;
-                          await widget.setTrackEffectParam(
+                          await _setTrackEffectParam(
                               widget.rowIndex, idx, name, newVal);
-                          widget.onPluginParamCommit?.call(
+                          _commitTrackEffectParam(
                             widget.rowIndex,
                             idx,
                             name,
@@ -2214,6 +2642,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                           _selectedEffectIndex = null;
                           _currentParams = [];
                         });
+                        widget.onHeightChanged(widget.minHeight);
                       },
                     ),
                     const SizedBox(width: 6),
@@ -2265,6 +2694,25 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                     _verticalFader(
                                       context: context,
                                       label: 'Low',
+                                      onLongPressStart: (globalPos) =>
+                                          _showAutomateParameterSheet(
+                                        effectIndex: idx,
+                                        effectName: effectName,
+                                        paramId:
+                                            (pLow['id'] ?? pLow['name'] ?? '')
+                                                .toString()
+                                                .trim(),
+                                        paramName: (pLow['name'] ?? 'Low')
+                                            .toString()
+                                            .trim(),
+                                        haloKeys: _paramHaloKeys(
+                                          effectIndex: idx,
+                                          effectName: effectName,
+                                          paramName: (pLow['name'] ?? 'Low')
+                                              .toString(),
+                                        ),
+                                        anchorGlobalPos: globalPos,
+                                      ),
                                       value: (pLow['value'] as num).toDouble(),
                                       min: (pLow['min'] as num).toDouble(),
                                       max: (pLow['max'] as num).toDouble(),
@@ -2282,12 +2730,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                         }
                                         setState(
                                             () => pLow['value'] = defaultValue);
-                                        widget.setTrackEffectParam(
+                                        _setTrackEffectParam(
                                             widget.rowIndex,
                                             idx,
                                             pLow['name'] as String,
                                             defaultValue);
-                                        widget.onPluginParamCommit?.call(
+                                        _commitTrackEffectParam(
                                           widget.rowIndex,
                                           idx,
                                           pLow['name'] as String,
@@ -2300,7 +2748,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                             (pLow['value'] as num).toDouble();
                                       },
                                       onChangeEnd: (v) {
-                                        widget.onPluginParamCommit?.call(
+                                        _commitTrackEffectParam(
                                           widget.rowIndex,
                                           idx,
                                           pLow['name'] as String,
@@ -2311,17 +2759,33 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                       },
                                       onChanged: (v) {
                                         setState(() => pLow['value'] = v);
-                                        widget.setTrackEffectParam(
-                                            widget.rowIndex,
-                                            idx,
-                                            pLow['name'] as String,
-                                            v);
+                                        _setTrackEffectParam(widget.rowIndex,
+                                            idx, pLow['name'] as String, v);
                                       },
                                     ),
                                   if (pMid != null)
                                     _verticalFader(
                                       context: context,
                                       label: 'Mid',
+                                      onLongPressStart: (globalPos) =>
+                                          _showAutomateParameterSheet(
+                                        effectIndex: idx,
+                                        effectName: effectName,
+                                        paramId:
+                                            (pMid['id'] ?? pMid['name'] ?? '')
+                                                .toString()
+                                                .trim(),
+                                        paramName: (pMid['name'] ?? 'Mid')
+                                            .toString()
+                                            .trim(),
+                                        haloKeys: _paramHaloKeys(
+                                          effectIndex: idx,
+                                          effectName: effectName,
+                                          paramName: (pMid['name'] ?? 'Mid')
+                                              .toString(),
+                                        ),
+                                        anchorGlobalPos: globalPos,
+                                      ),
                                       value: (pMid['value'] as num).toDouble(),
                                       min: (pMid['min'] as num).toDouble(),
                                       max: (pMid['max'] as num).toDouble(),
@@ -2339,12 +2803,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                         }
                                         setState(
                                             () => pMid['value'] = defaultValue);
-                                        widget.setTrackEffectParam(
+                                        _setTrackEffectParam(
                                             widget.rowIndex,
                                             idx,
                                             pMid['name'] as String,
                                             defaultValue);
-                                        widget.onPluginParamCommit?.call(
+                                        _commitTrackEffectParam(
                                           widget.rowIndex,
                                           idx,
                                           pMid['name'] as String,
@@ -2357,7 +2821,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                             (pMid['value'] as num).toDouble();
                                       },
                                       onChangeEnd: (v) {
-                                        widget.onPluginParamCommit?.call(
+                                        _commitTrackEffectParam(
                                           widget.rowIndex,
                                           idx,
                                           pMid['name'] as String,
@@ -2368,17 +2832,33 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                       },
                                       onChanged: (v) {
                                         setState(() => pMid['value'] = v);
-                                        widget.setTrackEffectParam(
-                                            widget.rowIndex,
-                                            idx,
-                                            pMid['name'] as String,
-                                            v);
+                                        _setTrackEffectParam(widget.rowIndex,
+                                            idx, pMid['name'] as String, v);
                                       },
                                     ),
                                   if (pHigh != null)
                                     _verticalFader(
                                       context: context,
                                       label: 'High',
+                                      onLongPressStart: (globalPos) =>
+                                          _showAutomateParameterSheet(
+                                        effectIndex: idx,
+                                        effectName: effectName,
+                                        paramId:
+                                            (pHigh['id'] ?? pHigh['name'] ?? '')
+                                                .toString()
+                                                .trim(),
+                                        paramName: (pHigh['name'] ?? 'High')
+                                            .toString()
+                                            .trim(),
+                                        haloKeys: _paramHaloKeys(
+                                          effectIndex: idx,
+                                          effectName: effectName,
+                                          paramName: (pHigh['name'] ?? 'High')
+                                              .toString(),
+                                        ),
+                                        anchorGlobalPos: globalPos,
+                                      ),
                                       value: (pHigh['value'] as num).toDouble(),
                                       min: (pHigh['min'] as num).toDouble(),
                                       max: (pHigh['max'] as num).toDouble(),
@@ -2397,12 +2877,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                         }
                                         setState(() =>
                                             pHigh['value'] = defaultValue);
-                                        widget.setTrackEffectParam(
+                                        _setTrackEffectParam(
                                             widget.rowIndex,
                                             idx,
                                             pHigh['name'] as String,
                                             defaultValue);
-                                        widget.onPluginParamCommit?.call(
+                                        _commitTrackEffectParam(
                                           widget.rowIndex,
                                           idx,
                                           pHigh['name'] as String,
@@ -2415,7 +2895,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                             (pHigh['value'] as num).toDouble();
                                       },
                                       onChangeEnd: (v) {
-                                        widget.onPluginParamCommit?.call(
+                                        _commitTrackEffectParam(
                                           widget.rowIndex,
                                           idx,
                                           pHigh['name'] as String,
@@ -2426,11 +2906,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                       },
                                       onChanged: (v) {
                                         setState(() => pHigh['value'] = v);
-                                        widget.setTrackEffectParam(
-                                            widget.rowIndex,
-                                            idx,
-                                            pHigh['name'] as String,
-                                            v);
+                                        _setTrackEffectParam(widget.rowIndex,
+                                            idx, pHigh['name'] as String, v);
                                       },
                                     ),
                                 ],
@@ -2472,6 +2949,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                         _selectedEffectIndex = null;
                         _currentParams = [];
                       });
+                      widget.onHeightChanged(widget.minHeight);
                     },
                   ),
                   const SizedBox(width: 6),
@@ -2511,12 +2989,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               for (var param in _currentParams) ...[
                 if (_effects[idx] == 'Delay' &&
                     param['name'] == 'Delay Time') ...[
-                  _wrapWithHalos(
-                    haloKeys: _paramHaloKeys(
-                      effectIndex: idx,
-                      effectName: effectName,
-                      paramName: (param['name'] ?? '').toString(),
-                    ),
+                  _wrapAutomatableParam(
+                    effectIndex: idx,
+                    effectName: effectName,
+                    param: param,
                     borderRadius: BorderRadius.circular(10),
                     child: _buildDelayTimeParam(
                         context: context,
@@ -2525,12 +3001,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                         bpm: widget.projectBpm),
                   ),
                 ] else if (_isGainVolumeParam(effectName, param)) ...[
-                  _wrapWithHalos(
-                    haloKeys: _paramHaloKeys(
-                      effectIndex: idx,
-                      effectName: effectName,
-                      paramName: (param['name'] ?? '').toString(),
-                    ),
+                  _wrapAutomatableParam(
+                    effectIndex: idx,
+                    effectName: effectName,
+                    param: param,
                     borderRadius: BorderRadius.circular(10),
                     child: _buildGainVolumeParam(
                       context: context,
@@ -2539,12 +3013,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     ),
                   ),
                 ] else if (_isPitchShiftSemitonesParam(effectName, param)) ...[
-                  _wrapWithHalos(
-                    haloKeys: _paramHaloKeys(
-                      effectIndex: idx,
-                      effectName: effectName,
-                      paramName: (param['name'] ?? '').toString(),
-                    ),
+                  _wrapAutomatableParam(
+                    effectIndex: idx,
+                    effectName: effectName,
+                    param: param,
                     borderRadius: BorderRadius.circular(10),
                     child: _buildPitchShiftSemitonesParam(
                       context: context,
@@ -2553,12 +3025,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     ),
                   ),
                 ] else if (param['type'] == 'float') ...[
-                  _wrapWithHalos(
-                    haloKeys: _paramHaloKeys(
-                      effectIndex: idx,
-                      effectName: effectName,
-                      paramName: (param['name'] ?? '').toString(),
-                    ),
+                  _wrapAutomatableParam(
+                    effectIndex: idx,
+                    effectName: effectName,
+                    param: param,
                     borderRadius: BorderRadius.circular(10),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
@@ -2636,12 +3106,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                         }
                                         setState(() =>
                                             param['value'] = clampedDefault);
-                                        widget.setTrackEffectParam(
-                                            widget.rowIndex,
-                                            idx,
-                                            paramName,
-                                            clampedDefault);
-                                        widget.onPluginParamCommit?.call(
+                                        _setTrackEffectParam(widget.rowIndex,
+                                            idx, paramName, clampedDefault);
+                                        _commitTrackEffectParam(
                                           widget.rowIndex,
                                           idx,
                                           paramName,
@@ -2668,11 +3135,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                           final v = fromNorm(newNorm);
 
                                           setState(() => param['value'] = v);
-                                          widget.setTrackEffectParam(
-                                              widget.rowIndex,
-                                              idx,
-                                              paramName,
-                                              v);
+                                          _setTrackEffectParam(widget.rowIndex,
+                                              idx, paramName, v);
                                         },
                                         onChangeEnd: (p) {
                                           if (_paramDragStartValue == null)
@@ -2686,7 +3150,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                                   .toDouble();
                                           final v = fromNorm(newNorm);
 
-                                          widget.onPluginParamCommit?.call(
+                                          _commitTrackEffectParam(
                                             widget.rowIndex,
                                             idx,
                                             paramName,
@@ -2715,12 +3179,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     ),
                   ),
                 ] else if (param['type'] == 'bool') ...[
-                  _wrapWithHalos(
-                    haloKeys: _paramHaloKeys(
-                      effectIndex: idx,
-                      effectName: effectName,
-                      paramName: (param['name'] ?? '').toString(),
-                    ),
+                  _wrapAutomatableParam(
+                    effectIndex: idx,
+                    effectName: effectName,
+                    param: param,
                     borderRadius: BorderRadius.circular(10),
                     child: SwitchListTile(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 4),
@@ -2728,9 +3190,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                       value: param['value'] as bool,
                       onChanged: (v) {
                         setState(() => param['value'] = v);
-                        widget.setTrackEffectParam(
+                        _setTrackEffectParam(
                             widget.rowIndex, idx, param['name'] as String, v);
-                        widget.onPluginParamCommit?.call(widget.rowIndex, idx,
+                        _commitTrackEffectParam(widget.rowIndex, idx,
                             param['name'] as String, !v, v);
                       },
                     ),
@@ -2752,12 +3214,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     return Padding(
                       padding: const EdgeInsets.symmetric(
                           vertical: 4.0, horizontal: 4),
-                      child: _wrapWithHalos(
-                        haloKeys: _paramHaloKeys(
-                          effectIndex: idx,
-                          effectName: effectName,
-                          paramName: (param['name'] ?? '').toString(),
-                        ),
+                      child: _wrapAutomatableParam(
+                        effectIndex: idx,
+                        effectName: effectName,
+                        param: param,
                         borderRadius: BorderRadius.circular(10),
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -2781,10 +3241,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                             if (picked != null) {
                               final oldVal = param['value'];
                               setState(() => param['value'] = picked);
-                              widget.setTrackEffectParam(widget.rowIndex, idx,
+                              _setTrackEffectParam(widget.rowIndex, idx,
                                   param['name'] as String, picked);
-                              widget.onPluginParamCommit?.call(widget.rowIndex,
-                                  idx, param['name'] as String, oldVal, picked);
+                              _commitTrackEffectParam(widget.rowIndex, idx,
+                                  param['name'] as String, oldVal, picked);
                             }
                           },
                         ),
@@ -2792,12 +3252,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     );
                   })(),
                 ] else ...[
-                  _wrapWithHalos(
-                    haloKeys: _paramHaloKeys(
-                      effectIndex: idx,
-                      effectName: effectName,
-                      paramName: (param['name'] ?? '').toString(),
-                    ),
+                  _wrapAutomatableParam(
+                    effectIndex: idx,
+                    effectName: effectName,
+                    param: param,
                     borderRadius: BorderRadius.circular(10),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
@@ -2834,6 +3292,12 @@ class MasterEffectsPanel extends StatefulWidget {
       getMasterPluginParameters;
   final Future<void> Function(int effectIndex, String paramId, dynamic value)
       setMasterEffectParam;
+  final Future<void> Function(
+    int effectIndex,
+    String effectName,
+    String paramId,
+    String paramName,
+  )? onRequestAutomateParameter;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
   final void Function(
           int effectIndex, String paramId, dynamic oldValue, dynamic newValue)?
@@ -2849,6 +3313,10 @@ class MasterEffectsPanel extends StatefulWidget {
   final Future<List<double>> Function(int effectIndex) getMasterCompressorMeter;
   final Future<List<double>> Function(int effectIndex, int sampleCount)
       getMasterEqWaveform;
+  final MixChangeHighlighter? highlighter;
+  final void Function(
+    Future<void> Function(int effectIndex, String paramId) reveal,
+  )? registerParameterRevealer;
 
   const MasterEffectsPanel({
     Key? key,
@@ -2863,6 +3331,7 @@ class MasterEffectsPanel extends StatefulWidget {
     required this.insertMasterEffect,
     required this.getMasterPluginParameters,
     required this.setMasterEffectParam,
+    this.onRequestAutomateParameter,
     required this.scanPlugins,
     this.onHeightChanged,
     this.onMasterPluginParamCommit,
@@ -2871,6 +3340,8 @@ class MasterEffectsPanel extends StatefulWidget {
     required this.meters,
     required this.getMasterCompressorMeter,
     required this.getMasterEqWaveform,
+    this.highlighter,
+    this.registerParameterRevealer,
   }) : super(key: key);
 
   @override
@@ -2907,7 +3378,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 
   bool _subscriptionCapabilityOrLegacy(String capability) {
     try {
-      return context.read<SubscriptionService>().canUseCapability(capability);
+      return context.read<EntitlementService>().canUseCapability(capability);
     } catch (_) {
       return widget.mode == 'Pro';
     }
@@ -2925,6 +3396,274 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       widget.isProEntitled != null ||
       widget.mode == 'Basic' ||
       widget.mode == 'Pro';
+
+  String _haloSlug(String raw) {
+    return raw
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
+  String _normalizedParamToken(String raw) {
+    return raw.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  List<String> _effectHaloKeys({
+    required int effectIndex,
+    required String effectName,
+  }) {
+    final lower = effectName.trim().toLowerCase();
+    final slug = _haloSlug(effectName);
+    final tokens = slug
+        .split('_')
+        .map((t) => t.trim())
+        .where((t) => t.isNotEmpty)
+        .toList(growable: false);
+    final out = <String>[
+      'master:fx_index:$effectIndex',
+      if (lower.isNotEmpty) 'master:fx_contains:$lower',
+      if (slug.isNotEmpty) 'master:fx_contains:$slug',
+    ];
+    for (final token in tokens) {
+      out.add('master:fx_contains:$token');
+    }
+    return out;
+  }
+
+  List<String> _paramHaloKeys({
+    required int effectIndex,
+    required String effectName,
+    required String paramName,
+  }) {
+    final paramSlug = _haloSlug(paramName);
+    final paramLower = paramName.trim().toLowerCase();
+    return <String>[
+      if (paramName.trim().isNotEmpty)
+        'master:fx_index:$effectIndex:param:${paramName.trim()}',
+      if (paramSlug.isNotEmpty) 'master:fx_index:$effectIndex:param:$paramSlug',
+      if (paramLower.isNotEmpty)
+        'master:fx_index:$effectIndex:param:$paramLower',
+    ];
+  }
+
+  Widget _wrapWithHalos({
+    required Widget child,
+    required List<String> haloKeys,
+    BorderRadius? borderRadius,
+  }) {
+    final highlighter = widget.highlighter;
+    if (highlighter == null || haloKeys.isEmpty) return child;
+    final mapped = haloKeys
+        .map((k) => k.trim())
+        .where((k) => k.isNotEmpty)
+        .map(HaloKey.new)
+        .toList(growable: false);
+    if (mapped.isEmpty) return child;
+    return MultiHalo(
+      highlighter: highlighter,
+      haloKeys: mapped,
+      borderRadius: borderRadius,
+      child: child,
+    );
+  }
+
+  void _triggerHalos(
+    List<String> haloKeys, {
+    Duration duration = const Duration(milliseconds: 800),
+  }) {
+    final highlighter = widget.highlighter;
+    if (highlighter == null || haloKeys.isEmpty) return;
+    final mapped = haloKeys
+        .map((k) => k.trim())
+        .where((k) => k.isNotEmpty)
+        .map(HaloKey.new)
+        .toList(growable: false);
+    if (mapped.isEmpty) return;
+    highlighter.trigger(mapped, duration: duration);
+  }
+
+  Future<void> _showAutomateParameterSheet({
+    required int effectIndex,
+    required String effectName,
+    required String paramId,
+    required String paramName,
+    required List<String> haloKeys,
+    Offset? anchorGlobalPos,
+  }) async {
+    if (widget.onRequestAutomateParameter == null) return;
+    _triggerHalos(
+      haloKeys,
+      duration: const Duration(milliseconds: 320),
+    );
+    await AppHaptics.impact(AppHapticImpact.medium);
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final fallbackAnchor = (() {
+      final box = context.findRenderObject();
+      if (box is RenderBox) {
+        return box.localToGlobal(
+          Offset(box.size.width / 2, box.size.height / 2),
+        );
+      }
+      return const Offset(120, 120);
+    })();
+    final anchor = anchorGlobalPos ?? fallbackAnchor;
+    String? action;
+    if (overlay != null) {
+      final left = anchor.dx.clamp(0.0, overlay.size.width).toDouble();
+      final top = (anchor.dy - 40.0).clamp(0.0, overlay.size.height).toDouble();
+      final right = (overlay.size.width - anchor.dx)
+          .clamp(0.0, overlay.size.width)
+          .toDouble();
+      final bottom = (overlay.size.height - anchor.dy)
+          .clamp(0.0, overlay.size.height)
+          .toDouble();
+      action = await showMenu<String>(
+        context: context,
+        color: const Color(0xFF1B2233),
+        elevation: 8,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        position: RelativeRect.fromLTRB(left, top, right, bottom),
+        items: const <PopupMenuEntry<String>>[
+          PopupMenuItem<String>(
+            value: 'automate',
+            height: 34,
+            child: Text('Automate'),
+          ),
+        ],
+      );
+    }
+    if (action != 'automate') return;
+    _triggerHalos(haloKeys);
+    await widget.onRequestAutomateParameter!(
+      effectIndex,
+      effectName,
+      paramId,
+      paramName,
+    );
+  }
+
+  Future<void> _revealParameter(int effectIndex, String paramId) async {
+    if (effectIndex < 0) return;
+    if (effectIndex >= _effects.length) {
+      await _loadEffects();
+      if (effectIndex < 0 || effectIndex >= _effects.length) return;
+    }
+    await _openPluginParams(effectIndex);
+    if (!mounted) return;
+    final effectName = _effects[effectIndex];
+    final targetRaw = paramId.trim();
+    final target = targetRaw.toLowerCase();
+    final targetToken = _normalizedParamToken(targetRaw);
+    final match = _currentParams.cast<Map<String, dynamic>?>().firstWhere(
+      (param) {
+        if (param == null) return false;
+        final candidateId =
+            (param['id'] ?? param['name'] ?? '').toString().trim();
+        final candidateName = (param['name'] ?? candidateId).toString().trim();
+        if (target.isEmpty) return false;
+        final idLower = candidateId.toLowerCase();
+        final nameLower = candidateName.toLowerCase();
+        if (idLower == target || nameLower == target) return true;
+        if (targetToken.isEmpty) return false;
+        return _normalizedParamToken(candidateId) == targetToken ||
+            _normalizedParamToken(candidateName) == targetToken;
+      },
+      orElse: () => null,
+    );
+    final matchedParamName =
+        (match?['name'] ?? match?['id'] ?? targetRaw).toString().trim();
+    final matchedParamId =
+        (match?['id'] ?? match?['name'] ?? targetRaw).toString().trim();
+    final haloKeys = <String>[];
+    final seen = <String>{};
+    void addHaloKeys(List<String> keys) {
+      for (final key in keys) {
+        final trimmed = key.trim();
+        if (trimmed.isEmpty || !seen.add(trimmed)) continue;
+        haloKeys.add(trimmed);
+      }
+    }
+
+    addHaloKeys(
+      _paramHaloKeys(
+        effectIndex: effectIndex,
+        effectName: effectName,
+        paramName: matchedParamName,
+      ),
+    );
+    if (matchedParamId.isNotEmpty &&
+        matchedParamId.toLowerCase() != matchedParamName.toLowerCase()) {
+      addHaloKeys(
+        _paramHaloKeys(
+          effectIndex: effectIndex,
+          effectName: effectName,
+          paramName: matchedParamId,
+        ),
+      );
+    }
+    if (targetRaw.isNotEmpty &&
+        targetRaw.toLowerCase() != matchedParamName.toLowerCase() &&
+        targetRaw.toLowerCase() != matchedParamId.toLowerCase()) {
+      addHaloKeys(
+        _paramHaloKeys(
+          effectIndex: effectIndex,
+          effectName: effectName,
+          paramName: targetRaw,
+        ),
+      );
+    }
+    if (haloKeys.isEmpty) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    _triggerHalos(haloKeys);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+    _triggerHalos(haloKeys);
+    await Future<void>.delayed(const Duration(milliseconds: 160));
+    if (!mounted) return;
+    _triggerHalos(haloKeys);
+  }
+
+  Widget _wrapAutomatableParam({
+    required int effectIndex,
+    required String effectName,
+    required Map<String, dynamic> param,
+    required Widget child,
+    BorderRadius? borderRadius,
+  }) {
+    final paramName =
+        (param['name'] ?? param['id'] ?? 'Parameter').toString().trim();
+    final paramId = (param['id'] ?? param['name'] ?? '').toString().trim();
+    final haloKeys = _paramHaloKeys(
+      effectIndex: effectIndex,
+      effectName: effectName,
+      paramName: paramName,
+    );
+    return KeyedSubtree(
+      key: ValueKey(
+        'master_param_${effectIndex}_${_testKeySlug(effectName)}_${_testKeySlug(paramName)}',
+      ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onLongPressStart: (details) => _showAutomateParameterSheet(
+          effectIndex: effectIndex,
+          effectName: effectName,
+          paramId: paramId,
+          paramName: paramName,
+          haloKeys: haloKeys,
+          anchorGlobalPos: details.globalPosition,
+        ),
+        child: _wrapWithHalos(
+          haloKeys: haloKeys,
+          borderRadius: borderRadius,
+          child: child,
+        ),
+      ),
+    );
+  }
 
   Widget _buildGainVolumeParam({
     required BuildContext context,
@@ -3015,6 +3754,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   void initState() {
     super.initState();
     _loadEffects();
+    widget.registerParameterRevealer?.call(_revealParameter);
   }
 
   @override
@@ -3135,8 +3875,10 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                 value: presetLabel,
                 underline: const SizedBox(),
                 items: [
-                  const DropdownMenuItem(
-                      value: 'Custom', child: Text('Custom')),
+                  DropdownMenuItem(
+                    value: 'Custom',
+                    child: Text(L10n.translate(context, 'Custom')),
+                  ),
                   ...kDelayDivisions.map((d) =>
                       DropdownMenuItem(value: d.label, child: Text(d.label))),
                 ],
@@ -4599,6 +5341,24 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                 _verticalFader(
                                   context: context,
                                   label: 'Low',
+                                  onLongPressStart: (globalPos) =>
+                                      _showAutomateParameterSheet(
+                                    effectIndex: idx,
+                                    effectName: effectName,
+                                    paramId: (pLow['id'] ?? pLow['name'] ?? '')
+                                        .toString()
+                                        .trim(),
+                                    paramName: (pLow['name'] ?? 'Low')
+                                        .toString()
+                                        .trim(),
+                                    haloKeys: _paramHaloKeys(
+                                      effectIndex: idx,
+                                      effectName: effectName,
+                                      paramName:
+                                          (pLow['name'] ?? 'Low').toString(),
+                                    ),
+                                    anchorGlobalPos: globalPos,
+                                  ),
                                   value: (pLow['value'] as num).toDouble(),
                                   min: (pLow['min'] as num).toDouble(),
                                   max: (pLow['max'] as num).toDouble(),
@@ -4648,6 +5408,24 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                 _verticalFader(
                                   context: context,
                                   label: 'Mid',
+                                  onLongPressStart: (globalPos) =>
+                                      _showAutomateParameterSheet(
+                                    effectIndex: idx,
+                                    effectName: effectName,
+                                    paramId: (pMid['id'] ?? pMid['name'] ?? '')
+                                        .toString()
+                                        .trim(),
+                                    paramName: (pMid['name'] ?? 'Mid')
+                                        .toString()
+                                        .trim(),
+                                    haloKeys: _paramHaloKeys(
+                                      effectIndex: idx,
+                                      effectName: effectName,
+                                      paramName:
+                                          (pMid['name'] ?? 'Mid').toString(),
+                                    ),
+                                    anchorGlobalPos: globalPos,
+                                  ),
                                   value: (pMid['value'] as num).toDouble(),
                                   min: (pMid['min'] as num).toDouble(),
                                   max: (pMid['max'] as num).toDouble(),
@@ -4697,6 +5475,25 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                 _verticalFader(
                                   context: context,
                                   label: 'High',
+                                  onLongPressStart: (globalPos) =>
+                                      _showAutomateParameterSheet(
+                                    effectIndex: idx,
+                                    effectName: effectName,
+                                    paramId:
+                                        (pHigh['id'] ?? pHigh['name'] ?? '')
+                                            .toString()
+                                            .trim(),
+                                    paramName: (pHigh['name'] ?? 'High')
+                                        .toString()
+                                        .trim(),
+                                    haloKeys: _paramHaloKeys(
+                                      effectIndex: idx,
+                                      effectName: effectName,
+                                      paramName:
+                                          (pHigh['name'] ?? 'High').toString(),
+                                    ),
+                                    anchorGlobalPos: globalPos,
+                                  ),
                                   value: (pHigh['value'] as num).toDouble(),
                                   min: (pHigh['min'] as num).toDouble(),
                                   max: (pHigh['max'] as num).toDouble(),
@@ -4817,164 +5614,192 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           // Params straight in Column
           for (var param in _currentParams) ...[
             if (_effects[idx] == 'Delay' && param['name'] == 'Delay Time') ...[
-              _buildDelayTimeParam(
+              _wrapAutomatableParam(
+                effectIndex: idx,
+                effectName: effectName,
+                param: param,
+                borderRadius: BorderRadius.circular(10),
+                child: _buildDelayTimeParam(
+                    context: context,
+                    param: param,
+                    effectIndex: idx,
+                    bpm: widget.projectBpm),
+              ),
+            ] else if (_isGainVolumeParam(effectName, param)) ...[
+              _wrapAutomatableParam(
+                effectIndex: idx,
+                effectName: effectName,
+                param: param,
+                borderRadius: BorderRadius.circular(10),
+                child: _buildGainVolumeParam(
                   context: context,
                   param: param,
                   effectIndex: idx,
-                  bpm: widget.projectBpm),
-            ] else if (_isGainVolumeParam(effectName, param)) ...[
-              _buildGainVolumeParam(
-                context: context,
-                param: param,
-                effectIndex: idx,
+                ),
               ),
             ] else if (_isPitchShiftSemitonesParam(effectName, param)) ...[
-              _buildPitchShiftSemitonesParam(
-                context: context,
-                param: param,
+              _wrapAutomatableParam(
                 effectIndex: idx,
+                effectName: effectName,
+                param: param,
+                borderRadius: BorderRadius.circular(10),
+                child: _buildPitchShiftSemitonesParam(
+                  context: context,
+                  param: param,
+                  effectIndex: idx,
+                ),
               ),
             ] else if (param['type'] == 'float') ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(param['name'] as String,
-                        style: Theme.of(context).textTheme.bodyLarge),
-                    // const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Text(
-                          (param['min'] as num).toDouble().toStringAsFixed(2),
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        // const SizedBox(width: 8),
-                        Expanded(
-                          child: SliderTheme(
-                            data: SliderTheme.of(context).copyWith(
-                              showValueIndicator: ShowValueIndicator.always,
-                              valueIndicatorTextStyle: const TextStyle(
-                                color: Color.fromARGB(255, 0, 0, 0),
-                                fontSize: 12,
+              _wrapAutomatableParam(
+                effectIndex: idx,
+                effectName: effectName,
+                param: param,
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(param['name'] as String,
+                          style: Theme.of(context).textTheme.bodyLarge),
+                      Row(
+                        children: [
+                          Text(
+                            (param['min'] as num).toDouble().toStringAsFixed(2),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          Expanded(
+                            child: SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                showValueIndicator: ShowValueIndicator.always,
+                                valueIndicatorTextStyle: const TextStyle(
+                                  color: Color.fromARGB(255, 0, 0, 0),
+                                  fontSize: 12,
+                                ),
                               ),
-                            ),
-                            child: (() {
-                              final effectName = _effects[idx];
-                              final paramName = param['name'] as String;
+                              child: (() {
+                                final effectName = _effects[idx];
+                                final paramName = param['name'] as String;
 
-                              final minV = (param['min'] as num).toDouble();
-                              final maxV = (param['max'] as num).toDouble();
-                              final rawV = (param['value'] as num)
-                                  .toDouble()
-                                  .clamp(minV, maxV);
+                                final minV = (param['min'] as num).toDouble();
+                                final maxV = (param['max'] as num).toDouble();
+                                final rawV = (param['value'] as num)
+                                    .toDouble()
+                                    .clamp(minV, maxV);
 
-                              final skew = _getParamSkew(
-                                  effectName, paramName); // null = linear
+                                final skew =
+                                    _getParamSkew(effectName, paramName);
 
-                              // value -> 0..1
-                              double toNorm(double v) =>
-                                  ((v - minV) / (maxV - minV)).clamp(0.0, 1.0);
+                                double toNorm(double v) =>
+                                    ((v - minV) / (maxV - minV))
+                                        .clamp(0.0, 1.0);
 
-                              // 0..1 -> value
-                              double fromNorm(double t) =>
-                                  minV + (maxV - minV) * t.clamp(0.0, 1.0);
+                                double fromNorm(double t) =>
+                                    minV + (maxV - minV) * t.clamp(0.0, 1.0);
 
-                              // if skew exists: position uses norm^skew, and inverse uses ^(1/skew)
-                              final norm = toNorm(rawV);
-                              final sliderPos = (skew == null)
-                                  ? norm
-                                  : math.pow(norm, skew).toDouble();
+                                final norm = toNorm(rawV);
+                                final sliderPos = (skew == null)
+                                    ? norm
+                                    : math.pow(norm, skew).toDouble();
 
-                              return GestureDetector(
-                                behavior: HitTestBehavior.translucent,
-                                onDoubleTap: () {
-                                  final defaultValue =
-                                      _paramDefaultAsDouble(param);
-                                  if (defaultValue == null) return;
-                                  final clampedDefault =
-                                      defaultValue.clamp(minV, maxV).toDouble();
-                                  final oldValue =
-                                      (param['value'] as num).toDouble();
-                                  if ((oldValue - clampedDefault).abs() <
-                                      1.0e-6) {
-                                    return;
-                                  }
-                                  setState(
-                                      () => param['value'] = clampedDefault);
-                                  widget.setMasterEffectParam(
-                                      idx, paramName, clampedDefault);
-                                  widget.onMasterPluginParamCommit?.call(
-                                    idx,
-                                    paramName,
-                                    oldValue,
-                                    clampedDefault,
-                                  );
-                                },
-                                child: Slider(
-                                  value: sliderPos,
-                                  min: 0.0,
-                                  max: 1.0,
-                                  divisions: 200,
-                                  label: rawV.toStringAsFixed(2),
-                                  onChangeStart: (_) {
-                                    _paramDragStartValue = rawV;
-                                  },
-                                  onChanged: (p) {
-                                    final t = p.clamp(0.0, 1.0);
-                                    final newNorm = (skew == null)
-                                        ? t
-                                        : math.pow(t, 1.0 / skew!).toDouble();
-                                    final v = fromNorm(newNorm);
-
-                                    setState(() => param['value'] = v);
+                                return GestureDetector(
+                                  behavior: HitTestBehavior.translucent,
+                                  onDoubleTap: () {
+                                    final defaultValue =
+                                        _paramDefaultAsDouble(param);
+                                    if (defaultValue == null) return;
+                                    final clampedDefault = defaultValue
+                                        .clamp(minV, maxV)
+                                        .toDouble();
+                                    final oldValue =
+                                        (param['value'] as num).toDouble();
+                                    if ((oldValue - clampedDefault).abs() <
+                                        1.0e-6) {
+                                      return;
+                                    }
+                                    setState(
+                                        () => param['value'] = clampedDefault);
                                     widget.setMasterEffectParam(
-                                        idx, paramName, v);
-                                  },
-                                  onChangeEnd: (p) {
-                                    if (_paramDragStartValue == null) return;
-
-                                    final t = p.clamp(0.0, 1.0);
-                                    final newNorm = (skew == null)
-                                        ? t
-                                        : math.pow(t, 1.0 / skew!).toDouble();
-                                    final v = fromNorm(newNorm);
-
+                                        idx, paramName, clampedDefault);
                                     widget.onMasterPluginParamCommit?.call(
                                       idx,
                                       paramName,
-                                      _paramDragStartValue!,
-                                      v,
+                                      oldValue,
+                                      clampedDefault,
                                     );
-
-                                    _paramDragStartValue = null;
                                   },
-                                ),
-                              );
-                            })(),
+                                  child: Slider(
+                                    value: sliderPos,
+                                    min: 0.0,
+                                    max: 1.0,
+                                    divisions: 200,
+                                    label: rawV.toStringAsFixed(2),
+                                    onChangeStart: (_) {
+                                      _paramDragStartValue = rawV;
+                                    },
+                                    onChanged: (p) {
+                                      final t = p.clamp(0.0, 1.0);
+                                      final newNorm = (skew == null)
+                                          ? t
+                                          : math.pow(t, 1.0 / skew!).toDouble();
+                                      final v = fromNorm(newNorm);
+
+                                      setState(() => param['value'] = v);
+                                      widget.setMasterEffectParam(
+                                          idx, paramName, v);
+                                    },
+                                    onChangeEnd: (p) {
+                                      if (_paramDragStartValue == null) return;
+
+                                      final t = p.clamp(0.0, 1.0);
+                                      final newNorm = (skew == null)
+                                          ? t
+                                          : math.pow(t, 1.0 / skew!).toDouble();
+                                      final v = fromNorm(newNorm);
+
+                                      widget.onMasterPluginParamCommit?.call(
+                                        idx,
+                                        paramName,
+                                        _paramDragStartValue!,
+                                        v,
+                                      );
+
+                                      _paramDragStartValue = null;
+                                    },
+                                  ),
+                                );
+                              })(),
+                            ),
                           ),
-                        ),
-                        // const SizedBox(width: 8),
-                        Text(
-                          (param['max'] as num).toDouble().toStringAsFixed(2),
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ],
+                          Text(
+                            (param['max'] as num).toDouble().toStringAsFixed(2),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ] else if (param['type'] == 'bool') ...[
-              SwitchListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                title: Text(param['name'] as String),
-                value: param['value'] as bool,
-                onChanged: (v) {
-                  setState(() => param['value'] = v);
-                  widget.setMasterEffectParam(idx, param['name'] as String, v);
-                  widget.onMasterPluginParamCommit
-                      ?.call(idx, param['name'] as String, !v, v);
-                },
+              _wrapAutomatableParam(
+                effectIndex: idx,
+                effectName: effectName,
+                param: param,
+                borderRadius: BorderRadius.circular(10),
+                child: SwitchListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                  title: Text(param['name'] as String),
+                  value: param['value'] as bool,
+                  onChanged: (v) {
+                    setState(() => param['value'] = v);
+                    widget.setMasterEffectParam(
+                        idx, param['name'] as String, v);
+                    widget.onMasterPluginParamCommit
+                        ?.call(idx, param['name'] as String, !v, v);
+                  },
+                ),
               ),
             ] else if (param['type'] == 'choice') ...[
               (() {
@@ -4991,45 +5816,57 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                 return Padding(
                   padding:
                       const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(param['name'] as String),
-                    trailing: Text(current,
-                        style: Theme.of(context).textTheme.bodyLarge),
-                    onTap: () async {
-                      final picked = await showDialog<String>(
-                        context: context,
-                        useRootNavigator: true,
-                        builder: (ctx) => SimpleDialog(
-                          title: Text(
-                              "${L10n.translate(context, 'Select ')}${param['name']}"),
-                          children: choices.map((c) {
-                            return SimpleDialogOption(
-                                child: Text(c),
-                                onPressed: () => Navigator.pop(ctx, c));
-                          }).toList(),
-                        ),
-                      );
-                      if (picked != null) {
-                        final oldVal = param['value'];
-                        setState(() => param['value'] = picked);
-                        widget.setMasterEffectParam(
-                            idx, param['name'] as String, picked);
-                        widget.onMasterPluginParamCommit?.call(
-                            idx, param['name'] as String, oldVal, picked);
-                      }
-                    },
+                  child: _wrapAutomatableParam(
+                    effectIndex: idx,
+                    effectName: effectName,
+                    param: param,
+                    borderRadius: BorderRadius.circular(10),
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(param['name'] as String),
+                      trailing: Text(current,
+                          style: Theme.of(context).textTheme.bodyLarge),
+                      onTap: () async {
+                        final picked = await showDialog<String>(
+                          context: context,
+                          useRootNavigator: true,
+                          builder: (ctx) => SimpleDialog(
+                            title: Text(
+                                "${L10n.translate(context, 'Select ')}${param['name']}"),
+                            children: choices.map((c) {
+                              return SimpleDialogOption(
+                                  child: Text(c),
+                                  onPressed: () => Navigator.pop(ctx, c));
+                            }).toList(),
+                          ),
+                        );
+                        if (picked != null) {
+                          final oldVal = param['value'];
+                          setState(() => param['value'] = picked);
+                          widget.setMasterEffectParam(
+                              idx, param['name'] as String, picked);
+                          widget.onMasterPluginParamCommit?.call(
+                              idx, param['name'] as String, oldVal, picked);
+                        }
+                      },
+                    ),
                   ),
                 );
               })(),
             ] else ...[
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(param['name'] as String),
-                  trailing: Text("${param['value']}"),
+              _wrapAutomatableParam(
+                effectIndex: idx,
+                effectName: effectName,
+                param: param,
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4),
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(param['name'] as String),
+                    trailing: Text("${param['value']}"),
+                  ),
                 ),
               ),
             ],
@@ -6468,6 +7305,7 @@ Widget _verticalFader({
   onChanged,
   onChangeEnd,
   VoidCallback? onDoubleTapReset,
+  ValueChanged<Offset>? onLongPressStart,
   String? unit, // e.g. "Hz"
   bool logarithmic = false,
   double width = 56, // 👈 new
@@ -6501,6 +7339,7 @@ Widget _verticalFader({
     onDoubleTapReset: (defaultValue != null && onDoubleTapReset != null)
         ? onDoubleTapReset
         : null,
+    onLongPressStart: onLongPressStart,
   );
 }
 
@@ -6517,6 +7356,7 @@ class _EqVerticalFader extends StatefulWidget {
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
   final VoidCallback? onDoubleTapReset;
+  final ValueChanged<Offset>? onLongPressStart;
 
   const _EqVerticalFader({
     required this.width,
@@ -6531,6 +7371,7 @@ class _EqVerticalFader extends StatefulWidget {
     required this.onChanged,
     required this.onChangeEnd,
     required this.onDoubleTapReset,
+    required this.onLongPressStart,
   });
 
   @override
@@ -6549,6 +7390,9 @@ class _EqVerticalFaderState extends State<_EqVerticalFader> {
         setState(() {
           widget.onDoubleTapReset?.call();
         });
+      },
+      onLongPressStart: (details) {
+        widget.onLongPressStart?.call(details.globalPosition);
       },
       child: SizedBox(
         width: widget.width, // 👈 respect caller width

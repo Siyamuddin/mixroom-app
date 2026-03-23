@@ -1,17 +1,28 @@
 import 'dart:math' as math;
+import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:mixroom/config/app_api_config.dart';
+import 'package:mixroom/config/legal_config.dart';
+import 'package:mixroom/config/cognito_config.dart';
+import 'package:mixroom/config/dev_flags.dart';
+import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/password_policy.dart';
 import 'package:mixroom/l10n/l10n.dart';
+import 'package:mixroom/models/auth_user_profile.dart';
+import 'package:mixroom/widgets/email_verification_sheet.dart';
 import 'package:mixroom/widgets/language_selector.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 enum _AuthMode { signIn, register }
 
 enum _SignInStep { email, password }
 
-enum _RegisterStep { account, profile, usage }
+enum _RegisterStep { account, profile }
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -25,7 +36,11 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController =
       TextEditingController();
-  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _firstNameController = TextEditingController();
+  final TextEditingController _lastNameController = TextEditingController();
+  final TextEditingController _signupUsernameController =
+      TextEditingController();
+  final TextEditingController _birthdateController = TextEditingController();
   final FocusNode _signInEmailFocusNode = FocusNode();
   final FocusNode _signInPasswordFocusNode = FocusNode();
 
@@ -33,11 +48,10 @@ class _LoginScreenState extends State<LoginScreen> {
   _SignInStep _signInStep = _SignInStep.email;
   _RegisterStep _registerStep = _RegisterStep.account;
 
-  DateTime? _birthday;
-  String? _useCase;
-
   bool _hidePassword = true;
   bool _hideConfirmPassword = true;
+  bool _newsletterOptIn = false;
+  DateTime? _selectedBirthdateUtc;
 
   String? _signInEmailError;
   String? _signInPasswordError;
@@ -45,25 +59,20 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _registerEmailError;
   String? _registerPasswordError;
   String? _registerConfirmPasswordError;
-  String? _registerNameError;
-  String? _registerBirthdayError;
-  String? _registerUseCaseError;
+  String? _registerUsernameError;
+  String? _registerBirthdateError;
   String? _registerInlineError;
-
-  static const List<String> _useCaseOptions = <String>[
-    'Music enthusiast',
-    'Beginner producer',
-    'For work',
-    'Songwriting',
-    'Mix/master practice',
-  ];
+  String? _registerInlineInfo;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _nameController.dispose();
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _signupUsernameController.dispose();
+    _birthdateController.dispose();
     _signInEmailFocusNode.dispose();
     _signInPasswordFocusNode.dispose();
     super.dispose();
@@ -76,16 +85,80 @@ class _LoginScreenState extends State<LoginScreen> {
     return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(safe);
   }
 
+  bool _isLikelyLoginIdentifier(String value) {
+    final safe = value.trim();
+    if (safe.isEmpty) return false;
+    if (_isLikelyEmail(safe)) return true;
+    return _validateUsername(safe) == null;
+  }
+
+  String? _validateUsername(String value) {
+    final safe = value.trim().toLowerCase();
+    if (safe.isEmpty) {
+      return 'Please choose a username.';
+    }
+    if (safe.length > 30) {
+      return 'Username must be 30 characters or fewer.';
+    }
+    const reserved = <String>{
+      'about',
+      'account',
+      'admin',
+      'api',
+      'app',
+      'auth',
+      'billing',
+      'create',
+      'discover',
+      'download',
+      'edit',
+      'email',
+      'explore',
+      'feed',
+      'help',
+      'home',
+      'legal',
+      'login',
+      'logout',
+      'me',
+      'mixroom',
+      'privacy',
+      'search',
+      'security',
+      'settings',
+      'signup',
+      'studio',
+      'support',
+      'terms',
+      'upload',
+      'user',
+      'users',
+      'verify',
+    };
+    if (reserved.contains(safe)) {
+      return 'That username is reserved.';
+    }
+    if (safe.contains('--') ||
+        safe.contains('__') ||
+        safe.contains('-_') ||
+        safe.contains('_-')) {
+      return 'Username cannot contain repeated separators.';
+    }
+    if (!RegExp(r'^[a-z0-9](?:[a-z0-9_-]{0,28}[a-z0-9])?$').hasMatch(safe)) {
+      return 'Use lowercase letters, numbers, underscores, or hyphens.';
+    }
+    return null;
+  }
+
   String _normalizeError(Object error) {
     return error.toString().replaceFirst('Bad state: ', '');
   }
 
   bool _isSocialSignInCancelled(String message) {
-    final lower = message.toLowerCase();
-    return lower.contains('cancelled') ||
-        lower.contains('canceled') ||
-        lower.contains('aborted') ||
-        lower.contains('popup_closed_by_user');
+    final normalized = message.trim().toLowerCase();
+    return normalized == 'social sign-in was cancelled.' ||
+        normalized == 'sign in was cancelled.' ||
+        normalized == 'sign-in was cancelled.';
   }
 
   void _clearSignInErrors() {
@@ -98,10 +171,10 @@ class _LoginScreenState extends State<LoginScreen> {
     _registerEmailError = null;
     _registerPasswordError = null;
     _registerConfirmPasswordError = null;
-    _registerNameError = null;
-    _registerBirthdayError = null;
-    _registerUseCaseError = null;
+    _registerUsernameError = null;
+    _registerBirthdateError = null;
     _registerInlineError = null;
+    _registerInlineInfo = null;
   }
 
   bool _validateRegisterAccountStep() {
@@ -111,7 +184,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final emailError =
         _isLikelyEmail(email) ? null : 'Please enter a valid email address.';
-    final passwordError = PasswordPolicy.validate(password);
+    final passwordIssues = PasswordPolicy.validateIssues(password);
+    final passwordError =
+        passwordIssues.isEmpty ? null : passwordIssues.join('\n');
     final confirmError = password == confirm ? null : 'Passwords do not match.';
 
     setState(() {
@@ -125,19 +200,84 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   bool _validateRegisterProfileStep() {
-    final nameError = _nameController.text.trim().isNotEmpty
-        ? null
-        : 'Please enter your name.';
-    final birthdayError =
-        _birthday != null ? null : 'Please select your birthday.';
+    final usernameError = _validateUsername(_signupUsernameController.text);
+    final birthdateError = _validateBirthdate(_selectedBirthdateUtc);
 
     setState(() {
-      _registerNameError = nameError;
-      _registerBirthdayError = birthdayError;
+      _registerUsernameError = usernameError;
+      _registerBirthdateError = birthdateError;
       _registerInlineError = null;
     });
 
-    return nameError == null && birthdayError == null;
+    return usernameError == null && birthdateError == null;
+  }
+
+  String _trimmedFirstName() => _firstNameController.text.trim();
+
+  String _trimmedLastName() => _lastNameController.text.trim();
+
+  String _composeSignupDisplayName() {
+    final parts = <String>[
+      _trimmedFirstName(),
+      _trimmedLastName(),
+    ].where((part) => part.isNotEmpty).toList();
+    if (parts.isNotEmpty) {
+      return parts.join(' ');
+    }
+    return _signupUsernameController.text.trim().toLowerCase();
+  }
+
+  String? _validateBirthdate(DateTime? birthdateUtc) {
+    if (birthdateUtc == null) {
+      return 'Please select your birthday.';
+    }
+    final latestAllowed = _latestAllowedBirthdateUtc();
+    if (birthdateUtc.isAfter(latestAllowed)) {
+      return 'You must be at least ${LegalConfig.minimumSignupAgeYears} years old to use Mixroom.';
+    }
+    return null;
+  }
+
+  DateTime _latestAllowedBirthdateUtc() {
+    final now = DateTime.now().toUtc();
+    final normalizedNow = DateTime.utc(now.year, now.month, now.day);
+    return DateTime.utc(
+      normalizedNow.year - LegalConfig.minimumSignupAgeYears,
+      normalizedNow.month,
+      normalizedNow.day,
+    );
+  }
+
+  DateTime _earliestSelectableBirthdateUtc() {
+    final latestAllowed = _latestAllowedBirthdateUtc();
+    return DateTime.utc(latestAllowed.year - 120, 1, 1);
+  }
+
+  String _formatBirthdate(DateTime birthdateUtc) {
+    final year = birthdateUtc.year.toString().padLeft(4, '0');
+    final month = birthdateUtc.month.toString().padLeft(2, '0');
+    final day = birthdateUtc.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
+
+  Future<void> _pickBirthdate() async {
+    final initialDate = _selectedBirthdateUtc ?? _latestAllowedBirthdateUtc();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: _earliestSelectableBirthdateUtc(),
+      lastDate: _latestAllowedBirthdateUtc(),
+      helpText: 'Select birthday',
+    );
+    if (picked == null || !mounted) return;
+    final normalized = DateTime.utc(picked.year, picked.month, picked.day);
+    setState(() {
+      _selectedBirthdateUtc = normalized;
+      _birthdateController.text = _formatBirthdate(normalized);
+      _registerBirthdateError = null;
+      _registerInlineError = null;
+      _registerInlineInfo = null;
+    });
   }
 
   void _switchMode(_AuthMode next) {
@@ -147,15 +287,16 @@ class _LoginScreenState extends State<LoginScreen> {
       _mode = next;
       _signInStep = _SignInStep.email;
       _registerStep = _RegisterStep.account;
+      _newsletterOptIn = false;
       _clearSignInErrors();
       _clearRegisterErrors();
     });
   }
 
   void _continueToPasswordStep() {
-    if (!_isLikelyEmail(_emailController.text.trim())) {
+    if (!_isLikelyLoginIdentifier(_emailController.text.trim())) {
       setState(() {
-        _signInEmailError = 'Please enter a valid email address.';
+        _signInEmailError = 'Please enter a valid email or username.';
       });
       _signInEmailFocusNode.requestFocus();
       return;
@@ -177,11 +318,9 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       if (_registerStep == _RegisterStep.profile) {
         _registerStep = _RegisterStep.account;
-      } else if (_registerStep == _RegisterStep.usage) {
-        _registerStep = _RegisterStep.profile;
       }
-      _registerUseCaseError = null;
       _registerInlineError = null;
+      _registerInlineInfo = null;
     });
   }
 
@@ -191,47 +330,266 @@ class _LoginScreenState extends State<LoginScreen> {
         if (!_validateRegisterAccountStep()) return;
         setState(() {
           _registerStep = _RegisterStep.profile;
-          _registerNameError = null;
-          _registerBirthdayError = null;
+          _registerUsernameError = null;
+          _registerBirthdateError = null;
+          _registerInlineInfo = null;
         });
         return;
       case _RegisterStep.profile:
         if (!_validateRegisterProfileStep()) return;
-        setState(() {
-          _registerStep = _RegisterStep.usage;
-          _registerUseCaseError = null;
-        });
-        return;
-      case _RegisterStep.usage:
         return;
     }
   }
 
-  Future<void> _pickBirthday() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
+  Future<void> _openEmailVerificationFlow(AuthService auth) async {
+    await showEmailVerificationSheet(
+      context,
+      auth: auth,
+      initialEmail: _emailController.text.trim().toLowerCase(),
+      initialPassword: _passwordController.text,
+    );
+  }
+
+  Future<void> _showSocialConflictGuidance(
+    AuthService auth,
+    AuthSocialAccountConflictException conflict,
+  ) async {
+    final safeEmail = conflict.email.trim().toLowerCase();
+    final existingProvider = conflict.existingProvider;
+    final existingProviderLabel =
+        conflict.existingProviderLabel?.trim().isNotEmpty == true
+            ? conflict.existingProviderLabel!.trim()
+            : existingProvider?.label ?? 'Email';
+    final canVerifyPendingEmail = auth.hasPendingEmailVerification &&
+        (auth.currentUser?.email.trim().toLowerCase() ?? '') == safeEmail;
+    final shouldOfferVerification =
+        conflict.verificationRequired && canVerifyPendingEmail;
+    final shouldOfferPasswordReset = conflict.passwordResetAvailable &&
+        existingProvider == AuthProviderType.email;
+    final primaryActionLabel = _socialConflictPrimaryActionLabel(
+      existingProvider,
+    );
+    final description = _socialConflictDescription(
+      email: safeEmail,
+      existingProviderLabel: existingProviderLabel,
+      verificationRequired: conflict.verificationRequired,
+    );
+    final guidance = _socialConflictGuidance(
+      existingProvider: existingProvider,
+      verificationRequired: conflict.verificationRequired,
+      shouldOfferVerification: shouldOfferVerification,
+      shouldOfferPasswordReset: shouldOfferPasswordReset,
+    );
+
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
       context: context,
-      initialDate: _birthday ?? DateTime(now.year - 18, 1, 1),
-      firstDate: DateTime(1920),
-      lastDate: now,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.dark(
-              primary: Color(0xFF4F8BFF),
-              surface: Color(0xFF12233E),
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F2038),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(22)),
+              border: Border.all(color: Colors.white.withOpacity(0.10)),
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  L10n.translate(context, 'Account already exists'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  L10n.translate(
+                    context,
+                    description,
+                  ),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    height: 1.45,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  L10n.translate(
+                    context,
+                    guidance,
+                  ),
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 12,
+                    height: 1.4,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _PrimaryButton(
+                  label: primaryActionLabel,
+                  onTap: () async {
+                    Navigator.of(sheetContext).pop();
+                    await _handleSocialConflictPrimaryAction(
+                      auth,
+                      conflict,
+                      safeEmail: safeEmail,
+                    );
+                  },
+                ),
+                if (shouldOfferVerification) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton(
+                    onPressed: () async {
+                      Navigator.of(sheetContext).pop();
+                      await _openEmailVerificationFlow(auth);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.white.withOpacity(0.14)),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: Text(L10n.translate(context, 'Verify Email')),
+                  ),
+                ],
+                if (shouldOfferPasswordReset) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton(
+                    onPressed: () async {
+                      Navigator.of(sheetContext).pop();
+                      setState(() {
+                        _mode = _AuthMode.signIn;
+                        _signInStep = _SignInStep.password;
+                        _emailController.text = safeEmail;
+                        _passwordController.clear();
+                      });
+                      await _openForgotPasswordFlow(auth);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.white.withOpacity(0.14)),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: Text(L10n.translate(context, 'Forgot Password')),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                  child: Text(L10n.translate(context, 'Close')),
+                ),
+              ],
             ),
           ),
-          child: child ?? const SizedBox.shrink(),
         );
       },
     );
+  }
 
-    if (!mounted || picked == null) return;
-    setState(() {
-      _birthday = picked;
-      _registerBirthdayError = null;
-    });
+  String _socialConflictPrimaryActionLabel(AuthProviderType? provider) {
+    switch (provider) {
+      case AuthProviderType.google:
+        return 'Use Google Sign-In';
+      case AuthProviderType.apple:
+        return 'Use Apple Sign-In';
+      case AuthProviderType.kakao:
+        return 'Use Kakao Sign-In';
+      case AuthProviderType.email:
+      case null:
+        return 'Use Email Sign-In';
+    }
+  }
+
+  String _socialConflictDescription({
+    required String email,
+    required String existingProviderLabel,
+    required bool verificationRequired,
+  }) {
+    if (email.isEmpty) {
+      return verificationRequired
+          ? 'That social account matches an existing unverified Mixroom account.'
+          : 'That social account matches an existing Mixroom account.';
+    }
+    if (verificationRequired) {
+      return 'Mixroom already has an unverified account for $email.';
+    }
+    return 'Mixroom already has an account for $email using $existingProviderLabel sign-in.';
+  }
+
+  String _socialConflictGuidance({
+    required AuthProviderType? existingProvider,
+    required bool verificationRequired,
+    required bool shouldOfferVerification,
+    required bool shouldOfferPasswordReset,
+  }) {
+    if (verificationRequired) {
+      if (shouldOfferVerification) {
+        return 'Finish verifying that email account first, then keep using email sign-in for Mixroom.';
+      }
+      return 'Finish verifying the original email account first. After that, keep using email sign-in for Mixroom.';
+    }
+    switch (existingProvider) {
+      case AuthProviderType.google:
+        return 'Use Google on the sign-in screen for this account. Mixroom does not auto-merge a confirmed account into a different provider.';
+      case AuthProviderType.apple:
+        return 'Use Apple on the sign-in screen for this account. Mixroom does not auto-merge a confirmed account into a different provider.';
+      case AuthProviderType.kakao:
+        return 'Use Kakao on the sign-in screen for this account. Mixroom does not auto-merge a confirmed account into a different provider.';
+      case AuthProviderType.email:
+      case null:
+        if (shouldOfferPasswordReset) {
+          return 'Switch to email sign-in. If you forgot the password, use Forgot password for the same email.';
+        }
+        return 'Switch to email sign-in for this account.';
+    }
+  }
+
+  Future<void> _handleSocialConflictPrimaryAction(
+    AuthService auth,
+    AuthSocialAccountConflictException conflict, {
+    required String safeEmail,
+  }) async {
+    switch (conflict.existingProvider) {
+      case AuthProviderType.google:
+        await _submitSocial(
+          auth,
+          auth.signInWithGoogle,
+          providerLabel: AuthProviderType.google.label,
+        );
+        return;
+      case AuthProviderType.apple:
+        await _submitSocial(
+          auth,
+          auth.signInWithApple,
+          providerLabel: AuthProviderType.apple.label,
+        );
+        return;
+      case AuthProviderType.kakao:
+        await _submitSocial(
+          auth,
+          auth.signInWithKakao,
+          providerLabel: AuthProviderType.kakao.label,
+        );
+        return;
+      case AuthProviderType.email:
+      case null:
+        if (!mounted) return;
+        setState(() {
+          _mode = _AuthMode.signIn;
+          _signInStep = _SignInStep.password;
+          _emailController.text = safeEmail;
+          _passwordController.clear();
+          _signInInlineError = conflict.message;
+        });
+        return;
+    }
   }
 
   Future<void> _submitSignIn(AuthService auth) async {
@@ -256,11 +614,11 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } on AuthEmailConfirmationRequiredException catch (e) {
       if (!mounted) return;
-      await _openEmailVerificationFlow(
-        auth,
-        email: e.email,
-        passwordToSignIn: _passwordController.text,
-      );
+      if (auth.isSignedIn) return;
+      setState(() {
+        _signInInlineError = e.message;
+      });
+      await _openEmailVerificationFlow(auth);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -271,34 +629,59 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _submitRegister(AuthService auth) async {
     FocusScope.of(context).unfocus();
+    final appUserService = context.read<AppUserService>();
+    final safeEmail = _emailController.text.trim().toLowerCase();
 
-    if (_useCase == null || _useCase!.isEmpty) {
+    if (!_validateRegisterProfileStep()) return;
+
+    setState(() {
+      _registerInlineError = null;
+      _registerInlineInfo = null;
+    });
+
+    final usernameAvailabilityError = await _checkUsernameAvailability();
+    if (usernameAvailabilityError != null) {
+      if (!mounted) return;
       setState(() {
-        _registerUseCaseError = 'Please choose what you use Mixroom for.';
+        _registerUsernameError = usernameAvailabilityError;
       });
       return;
     }
 
-    setState(() {
-      _registerUseCaseError = null;
-      _registerInlineError = null;
-    });
-
     try {
       await auth.registerWithEmail(
-        name: _nameController.text,
+        name: _composeSignupDisplayName(),
+        givenName: _trimmedFirstName(),
+        familyName: _trimmedLastName(),
+        birthdate: _birthdateController.text.trim(),
         email: _emailController.text,
         password: _passwordController.text,
-        birthday: _birthday,
-        useMixroomFor: _useCase ?? '',
+      );
+      await appUserService.stageSignupConsents(
+        email: safeEmail,
+        username: _signupUsernameController.text,
+        displayName: _composeSignupDisplayName(),
+        givenName: _trimmedFirstName(),
+        familyName: _trimmedLastName(),
+        birthdate: _birthdateController.text.trim(),
+        newsletterOptIn: _newsletterOptIn,
       );
     } on AuthEmailConfirmationRequiredException catch (e) {
-      if (!mounted) return;
-      await _openEmailVerificationFlow(
-        auth,
-        email: e.email,
-        passwordToSignIn: _passwordController.text,
+      await appUserService.stageSignupConsents(
+        email: safeEmail,
+        username: _signupUsernameController.text,
+        displayName: _composeSignupDisplayName(),
+        givenName: _trimmedFirstName(),
+        familyName: _trimmedLastName(),
+        birthdate: _birthdateController.text.trim(),
+        newsletterOptIn: _newsletterOptIn,
       );
+      if (!mounted) return;
+      if (auth.isSignedIn) return;
+      setState(() {
+        _registerInlineError = e.message;
+      });
+      await _openEmailVerificationFlow(auth);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -307,14 +690,132 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _submitSocial(Future<void> Function() action) async {
+  Future<String?> _checkUsernameAvailability() async {
+    if (!AppApiConfig.hasApiBaseUrl) {
+      return null;
+    }
+
+    final normalizedUsername =
+        _signupUsernameController.text.trim().toLowerCase();
+    if (normalizedUsername.isEmpty) {
+      return 'Please choose a username.';
+    }
+
+    try {
+      final base = AppApiConfig.apiBaseUrl.trim();
+      final normalizedBase =
+          base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+      final response = await http.get(
+        Uri.parse(
+          '$normalizedBase/v1/users/username-availability',
+        ).replace(
+          queryParameters: <String, String>{
+            'username': normalizedUsername,
+          },
+        ),
+        headers: const <String, String>{
+          'Accept': 'application/json',
+        },
+      ).timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 429) {
+          return 'Too many username checks right now. Please wait a moment and try again.';
+        }
+        return null;
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) {
+        return null;
+      }
+      final payload = decoded.map(
+        (key, value) => MapEntry(key.toString(), value),
+      );
+      if (payload['available'] == true) {
+        return null;
+      }
+      final reason = (payload['reason'] ?? '').toString().trim();
+      return reason.isEmpty ? 'That username is already taken.' : reason;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _submitSocial(AuthService auth, Future<void> Function() action,
+      {required String providerLabel}) async {
+    final appUserService = context.read<AppUserService>();
+    final isRegisterSocialFlow = _isRegisterMode;
+    if (isRegisterSocialFlow) {
+      if (_registerStep != _RegisterStep.profile) {
+        FocusScope.of(context).unfocus();
+        setState(() {
+          _registerStep = _RegisterStep.profile;
+          _registerInlineError = null;
+          _registerInlineInfo =
+              'Choose a username and birthday, then continue with $providerLabel.';
+        });
+        return;
+      }
+      if (!_validateRegisterProfileStep()) {
+        return;
+      }
+      final usernameAvailabilityError = await _checkUsernameAvailability();
+      if (usernameAvailabilityError != null) {
+        if (!mounted) return;
+        setState(() {
+          _registerUsernameError = usernameAvailabilityError;
+          _registerInlineInfo = null;
+        });
+        return;
+      }
+    }
+
+    if (!mounted) return;
     FocusScope.of(context).unfocus();
     setState(() {
       _signInInlineError = null;
       _registerInlineError = null;
+      _registerInlineInfo = null;
     });
+
+    var resolvingPostSignIn = false;
     try {
+      if (isRegisterSocialFlow) {
+        appUserService.beginPostSignInResolution();
+        resolvingPostSignIn = true;
+      }
       await action();
+      if (isRegisterSocialFlow &&
+          auth.lastSocialSignInRequiresSignupCompletion &&
+          auth.signedInUser != null) {
+        try {
+          await appUserService.stageSignupConsents(
+            email: auth.signedInUser!.email,
+            username: _signupUsernameController.text,
+            displayName: _composeSignupDisplayName(),
+            givenName: _trimmedFirstName(),
+            familyName: _trimmedLastName(),
+            birthdate: _birthdateController.text.trim(),
+            newsletterOptIn: _newsletterOptIn,
+          );
+        } catch (_) {
+          await auth.signOut();
+          throw StateError(
+            'Mixroom could not finish preparing your signup details. Please try again.',
+          );
+        }
+      }
+    } on AuthSocialAccountConflictException catch (e) {
+      if (!mounted) return;
+      final message = _normalizeError(e);
+      setState(() {
+        if (_isRegisterMode) {
+          _registerInlineError = message;
+          _registerInlineInfo = null;
+        } else {
+          _signInInlineError = message;
+        }
+      });
+      await _showSocialConflictGuidance(auth, e);
     } catch (e) {
       if (!mounted) return;
       final message = _normalizeError(e);
@@ -324,10 +825,15 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() {
         if (_isRegisterMode) {
           _registerInlineError = message;
+          _registerInlineInfo = null;
         } else {
           _signInInlineError = message;
         }
       });
+    } finally {
+      if (resolvingPostSignIn) {
+        appUserService.completePostSignInResolution();
+      }
     }
   }
 
@@ -342,26 +848,6 @@ class _LoginScreenState extends State<LoginScreen> {
         return _ForgotPasswordSheet(
           auth: auth,
           initialEmail: initialEmail,
-          isLikelyEmail: _isLikelyEmail,
-        );
-      },
-    );
-  }
-
-  Future<void> _openEmailVerificationFlow(
-    AuthService auth, {
-    required String email,
-    required String passwordToSignIn,
-  }) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) {
-        return _EmailVerificationSheet(
-          auth: auth,
-          initialEmail: email,
-          passwordToSignIn: passwordToSignIn,
           isLikelyEmail: _isLikelyEmail,
         );
       },
@@ -393,6 +879,13 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final busy = auth.isBusy;
+    final supportsSocialSignIn = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
+    final showGoogle = supportsSocialSignIn && CognitoConfig.enableGoogleSignIn;
+    final showApple = supportsSocialSignIn && CognitoConfig.enableAppleSignIn;
+    final showKakao = supportsSocialSignIn && CognitoConfig.enableKakaoSignIn;
+    final showAnySocial = showGoogle || showApple || showKakao;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -405,98 +898,122 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             SafeArea(
               child: LayoutBuilder(
-                builder: (context, constraints) {
+                builder: (context, _) {
                   final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
                   return AnimatedPadding(
                     duration: const Duration(milliseconds: 220),
                     curve: Curves.easeOutCubic,
                     padding: EdgeInsets.only(bottom: bottomInset),
-                    child: SingleChildScrollView(
+                    child: ListView(
+                      physics: const ClampingScrollPhysics(),
                       keyboardDismissBehavior:
                           ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-                      child: Align(
-                        alignment: Alignment.topCenter,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            minHeight: constraints.maxHeight,
-                            maxWidth: 430,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const SizedBox(height: 2),
-                              const Align(
-                                alignment: Alignment.centerRight,
-                                child: LanguageSelector(),
-                              ),
-                              const SizedBox(height: 12),
-                              const _BrandHeader(),
-                              const SizedBox(height: 22),
-                              _AuthCard(
-                                mode: _mode,
-                                onModeChanged: busy ? null : _switchMode,
-                                child: AnimatedSize(
-                                  duration: const Duration(milliseconds: 220),
-                                  curve: Curves.easeOutCubic,
-                                  alignment: Alignment.topCenter,
-                                  clipBehavior: Clip.hardEdge,
-                                  child: AnimatedSwitcher(
+                      children: [
+                        Align(
+                          alignment: Alignment.topCenter,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 430),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const SizedBox(height: 2),
+                                const Align(
+                                  alignment: Alignment.centerRight,
+                                  child: LanguageSelector(),
+                                ),
+                                const SizedBox(height: 12),
+                                const _BrandHeader(),
+                                const SizedBox(height: 22),
+                                _AuthCard(
+                                  mode: _mode,
+                                  onModeChanged: busy ? null : _switchMode,
+                                  child: AnimatedSize(
                                     duration: const Duration(milliseconds: 220),
-                                    switchInCurve: Curves.easeOutCubic,
-                                    switchOutCurve: Curves.easeInCubic,
-                                    transitionBuilder: _slideFadeTransition,
-                                    layoutBuilder: (currentChild,
-                                            previousChildren) =>
-                                        currentChild ?? const SizedBox.shrink(),
-                                    child: _isRegisterMode
-                                        ? _buildRegisterFlow(
-                                            auth: auth,
-                                            busy: busy,
-                                          )
-                                        : _buildSignInFlow(
-                                            auth: auth,
-                                            busy: busy,
-                                          ),
+                                    curve: Curves.easeOutCubic,
+                                    alignment: Alignment.topCenter,
+                                    clipBehavior: Clip.hardEdge,
+                                    child: AnimatedSwitcher(
+                                      duration:
+                                          const Duration(milliseconds: 220),
+                                      switchInCurve: Curves.easeOutCubic,
+                                      switchOutCurve: Curves.easeInCubic,
+                                      transitionBuilder: _slideFadeTransition,
+                                      layoutBuilder:
+                                          (currentChild, previousChildren) =>
+                                              currentChild ??
+                                              const SizedBox.shrink(),
+                                      child: _isRegisterMode
+                                          ? _buildRegisterFlow(
+                                              auth: auth,
+                                              busy: busy,
+                                            )
+                                          : _buildSignInFlow(
+                                              auth: auth,
+                                              busy: busy,
+                                            ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(height: 14),
-                              _SocialCard(
-                                onGoogleTap: busy
-                                    ? null
-                                    : () =>
-                                        _submitSocial(auth.signInWithGoogle),
-                                onAppleTap: busy
-                                    ? null
-                                    : () => _submitSocial(auth.signInWithApple),
-                                onKakaoTap: busy
-                                    ? null
-                                    : () => _submitSocial(auth.signInWithKakao),
-                              ),
-                              const SizedBox(height: 4),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton.icon(
-                                  onPressed:
-                                      busy ? null : () => _devBypassLogin(auth),
-                                  icon: const Icon(
-                                    Icons.developer_mode_rounded,
-                                    size: 16,
+                                if (showAnySocial) ...[
+                                  const SizedBox(height: 14),
+                                  _SocialCard(
+                                    showGoogle: showGoogle,
+                                    showApple: showApple,
+                                    showKakao: showKakao,
+                                    onGoogleTap: busy
+                                        ? null
+                                        : () => _submitSocial(
+                                              auth,
+                                              auth.signInWithGoogle,
+                                              providerLabel:
+                                                  AuthProviderType.google.label,
+                                            ),
+                                    onAppleTap: busy
+                                        ? null
+                                        : () => _submitSocial(
+                                              auth,
+                                              auth.signInWithApple,
+                                              providerLabel:
+                                                  AuthProviderType.apple.label,
+                                            ),
+                                    onKakaoTap: busy
+                                        ? null
+                                        : () => _submitSocial(
+                                              auth,
+                                              auth.signInWithKakao,
+                                              providerLabel:
+                                                  AuthProviderType.kakao.label,
+                                            ),
                                   ),
-                                  label: const Text('Dev Login (Temp)'),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor:
-                                        Colors.white.withOpacity(0.72),
+                                ],
+                                if (isDevLoginButtonEnabled) ...[
+                                  const SizedBox(height: 4),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: TextButton.icon(
+                                      onPressed: busy
+                                          ? null
+                                          : () => _devBypassLogin(auth),
+                                      icon: const Icon(
+                                        Icons.developer_mode_rounded,
+                                        size: 16,
+                                      ),
+                                      label: const Text('Dev Login (Temp)'),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor:
+                                            Colors.white.withOpacity(0.72),
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                            ],
+                                ],
+                                const SizedBox(height: 2),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
                   );
                 },
@@ -529,10 +1046,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       _Field(
-                        label: 'Email',
-                        hint: 'you@example.com',
+                        label: 'Email or username',
+                        hint: 'Email or username',
                         controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
+                        keyboardType: TextInputType.text,
                         textInputAction: TextInputAction.done,
                         focusNode: _signInEmailFocusNode,
                         errorText: _signInEmailError,
@@ -548,6 +1065,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         },
                       ),
                       const SizedBox(height: 14),
+                      if (_signInInlineError != null) ...[
+                        _InlineErrorBanner(message: _signInInlineError!),
+                        const SizedBox(height: 10),
+                      ],
                       _PrimaryButton(
                         label: 'Continue',
                         onTap: busy ? null : _continueToPasswordStep,
@@ -621,6 +1142,21 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 6),
                         _InlineErrorBanner(message: _signInInlineError!),
                       ],
+                      if (auth.hasPendingEmailVerification) ...[
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: busy
+                                ? null
+                                : () => _openEmailVerificationFlow(auth),
+                            child: Text(
+                              L10n.translate(
+                                  context, 'Enter verification code'),
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 14),
                       _PrimaryButton(
                         label: busy ? 'Signing In...' : 'Sign In',
@@ -672,15 +1208,31 @@ class _LoginScreenState extends State<LoginScreen> {
           _InlineErrorBanner(message: _registerInlineError!),
           const SizedBox(height: 10),
         ],
+        if (_registerInlineInfo != null) ...[
+          _InlineInfoBanner(message: _registerInlineInfo!),
+          const SizedBox(height: 10),
+        ],
+        if (auth.hasPendingEmailVerification) ...[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: busy ? null : () => _openEmailVerificationFlow(auth),
+              child: Text(L10n.translate(context, 'Enter verification code')),
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
+        const _SignupLegalNotice(),
+        const SizedBox(height: 8),
         _PrimaryButton(
-          label: _registerStep == _RegisterStep.usage
+          label: _registerStep == _RegisterStep.profile
               ? (busy ? 'Creating...' : 'Create Account')
               : 'Continue',
-          busy: busy && _registerStep == _RegisterStep.usage,
+          busy: busy && _registerStep == _RegisterStep.profile,
           onTap: busy
               ? null
               : () {
-                  if (_registerStep == _RegisterStep.usage) {
+                  if (_registerStep == _RegisterStep.profile) {
                     _submitRegister(auth);
                   } else {
                     _goNextRegisterStep();
@@ -708,6 +1260,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 setState(() {
                   _registerEmailError = null;
                   _registerInlineError = null;
+                  _registerInlineInfo = null;
                 });
               },
             ),
@@ -723,6 +1276,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 setState(() {
                   _registerPasswordError = null;
                   _registerInlineError = null;
+                  _registerInlineInfo = null;
                 });
               },
               suffix: IconButton(
@@ -750,6 +1304,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 setState(() {
                   _registerConfirmPasswordError = null;
                   _registerInlineError = null;
+                  _registerInlineInfo = null;
                 });
               },
               suffix: IconButton(
@@ -774,79 +1329,69 @@ class _LoginScreenState extends State<LoginScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _Field(
-              label: 'Name',
-              hint: 'Your name',
-              controller: _nameController,
-              errorText: _registerNameError,
+              label: 'First name (optional)',
+              hint: 'First name',
+              controller: _firstNameController,
               onChanged: (_) {
                 setState(() {
-                  _registerNameError = null;
                   _registerInlineError = null;
+                  _registerInlineInfo = null;
                 });
               },
             ),
-            const SizedBox(height: 10),
-            _BirthdayField(
-              birthday: _birthday,
-              onTap: _pickBirthday,
-              errorText: _registerBirthdayError,
-            ),
-          ],
-        );
-      case _RegisterStep.usage:
-        return Column(
-          key: const ValueKey('register-step-usage'),
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              L10n.translate(context, 'What will you use Mixroom for?'),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              initialValue: _useCase,
-              dropdownColor: const Color(0xFF1A2E49),
-              iconEnabledColor: Colors.white70,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-              ),
-              decoration: InputDecoration(
-                errorText: _registerUseCaseError,
-                hintText: L10n.translate(context, 'Select one'),
-                hintStyle: TextStyle(
-                  color: Colors.white.withOpacity(0.45),
-                ),
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.07),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
-                ),
-                focusedBorder: const OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(12)),
-                  borderSide: BorderSide(color: Color(0xFF5F96FF), width: 1.2),
-                ),
-              ),
-              items: _useCaseOptions
-                  .map(
-                    (option) => DropdownMenuItem<String>(
-                      value: option,
-                      child: Text(L10n.translate(context, option)),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (value) {
+            const SizedBox(height: 8),
+            _Field(
+              label: 'Last name (optional)',
+              hint: 'Last name',
+              controller: _lastNameController,
+              onChanged: (_) {
                 setState(() {
-                  _useCase = value;
-                  _registerUseCaseError = null;
                   _registerInlineError = null;
+                  _registerInlineInfo = null;
+                });
+              },
+            ),
+            const SizedBox(height: 8),
+            _Field(
+              label: 'Username',
+              hint: 'your_username',
+              controller: _signupUsernameController,
+              errorText: _registerUsernameError,
+              helperText:
+                  'Used for your username and sign-in. Lowercase letters, numbers, underscores, and hyphens only.',
+              onChanged: (_) {
+                setState(() {
+                  _registerUsernameError = null;
+                  _registerInlineError = null;
+                  _registerInlineInfo = null;
+                });
+              },
+            ),
+            const SizedBox(height: 8),
+            _Field(
+              label: 'Birthday',
+              hint: 'Select birthday',
+              controller: _birthdateController,
+              readOnly: true,
+              errorText: _registerBirthdateError,
+              helperText:
+                  'Required. You must be at least ${LegalConfig.minimumSignupAgeYears} years old to use Mixroom.',
+              onTap: _pickBirthdate,
+              suffix: IconButton(
+                onPressed: _pickBirthdate,
+                icon: const Icon(
+                  Icons.calendar_month_rounded,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            _NewsletterCheckbox(
+              value: _newsletterOptIn,
+              onChanged: (next) {
+                setState(() {
+                  _newsletterOptIn = next;
+                  _registerInlineInfo = null;
                 });
               },
             ),
@@ -856,181 +1401,122 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-class _EmailVerificationSheet extends StatefulWidget {
-  const _EmailVerificationSheet({
-    required this.auth,
-    required this.initialEmail,
-    required this.passwordToSignIn,
-    required this.isLikelyEmail,
-  });
+class _SignupLegalNotice extends StatelessWidget {
+  const _SignupLegalNotice();
 
-  final AuthService auth;
-  final String initialEmail;
-  final String passwordToSignIn;
-  final bool Function(String) isLikelyEmail;
-
-  @override
-  State<_EmailVerificationSheet> createState() =>
-      _EmailVerificationSheetState();
-}
-
-class _EmailVerificationSheetState extends State<_EmailVerificationSheet> {
-  late final TextEditingController _emailController;
-  final TextEditingController _codeController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _emailController = TextEditingController(text: widget.initialEmail);
-  }
-
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _codeController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _confirm() async {
-    final email = _emailController.text.trim();
-    final code = _codeController.text.trim();
-    if (!widget.isLikelyEmail(email)) {
-      _showSnack('Enter a valid email address.');
-      return;
-    }
-    if (code.isEmpty) {
-      _showSnack('Enter the verification code.');
-      return;
-    }
-
-    try {
-      await widget.auth.confirmEmailSignUp(
-        email: email,
-        code: code,
-        passwordToSignIn: widget.passwordToSignIn,
-      );
-      if (!mounted) return;
-      Navigator.of(context).pop();
+  Future<void> _openUrl(BuildContext context, String url) async {
+    final launched = await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(L10n.translate(
-              context, 'Email verified. You are now signed in.')),
+        const SnackBar(
+          content: Text('Could not open this link right now.'),
         ),
       );
-    } catch (e) {
-      if (!mounted) return;
-      _showSnack(e.toString().replaceFirst('Bad state: ', ''));
     }
-  }
-
-  Future<void> _resendCode() async {
-    final email = _emailController.text.trim();
-    if (!widget.isLikelyEmail(email)) {
-      _showSnack('Enter a valid email address.');
-      return;
-    }
-
-    try {
-      await widget.auth.resendSignUpCode(email: email);
-      if (!mounted) return;
-      _showSnack('Verification code resent.');
-    } catch (e) {
-      if (!mounted) return;
-      _showSnack(e.toString().replaceFirst('Bad state: ', ''));
-    }
-  }
-
-  void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(L10n.translate(context, message))));
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: widget.auth,
-      builder: (context, _) {
-        final busy = widget.auth.isBusy;
-        final insets = MediaQuery.of(context).viewInsets;
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 2,
+      runSpacing: 2,
+      children: [
+        Text(
+          'By creating an account, you agree to the',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.72),
+            fontSize: 12,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        TextButton(
+          onPressed: () => _openUrl(context, LegalConfig.termsUrl),
+          style: TextButton.styleFrom(
+            minimumSize: const Size(0, 26),
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: const Text('Terms of Service'),
+        ),
+        Text(
+          'and',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.72),
+            fontSize: 12,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        TextButton(
+          onPressed: () => _openUrl(context, LegalConfig.privacyUrl),
+          style: TextButton.styleFrom(
+            minimumSize: const Size(0, 26),
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: const Text('Privacy Policy'),
+        ),
+        Text(
+          '.',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.72),
+            fontSize: 12,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
-        return Padding(
-          padding: EdgeInsets.only(bottom: insets.bottom),
-          child: SafeArea(
-            top: false,
-            child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xFF0F2038),
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(22)),
-                border: Border.all(color: Colors.white.withOpacity(0.10)),
-              ),
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 44,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.30),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
+class _NewsletterCheckbox extends StatelessWidget {
+  const _NewsletterCheckbox({
+    required this.value,
+    required this.onChanged,
+  });
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => onChanged(!value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Checkbox(
+              value: value,
+              onChanged: (next) => onChanged(next ?? false),
+              activeColor: const Color(0xFF5F96FF),
+              side: BorderSide(color: Colors.white.withOpacity(0.40)),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 11),
+                child: Text(
+                  'Email me product updates and news.',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.80),
+                    fontSize: 12.5,
+                    height: 1.35,
+                    fontWeight: FontWeight.w500,
                   ),
-                  const SizedBox(height: 14),
-                  Text(
-                    L10n.translate(context, 'Verify your email'),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    L10n.translate(context,
-                        'Enter the verification code sent to your email.'),
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                  const SizedBox(height: 12),
-                  _Field(
-                    label: 'Email',
-                    hint: 'you@example.com',
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                  ),
-                  const SizedBox(height: 10),
-                  _Field(
-                    label: 'Verification Code',
-                    hint: 'Enter code',
-                    controller: _codeController,
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: busy ? null : _resendCode,
-                      child: Text(L10n.translate(context, 'Resend code')),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  _PrimaryButton(
-                    label: busy ? 'Verifying...' : 'Verify Email',
-                    busy: busy,
-                    onTap: busy ? null : _confirm,
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: busy ? null : () => Navigator.of(context).pop(),
-                    child: Text(L10n.translate(context, 'Cancel')),
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
-        );
-      },
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1110,9 +1596,9 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
       _showSnack('Enter the verification code.');
       return;
     }
-    final passwordIssue = PasswordPolicy.validate(newPassword);
-    if (passwordIssue != null) {
-      _showSnack(passwordIssue);
+    final passwordIssues = PasswordPolicy.validateIssues(newPassword);
+    if (passwordIssues.isNotEmpty) {
+      _showSnack(passwordIssues.join('\n'));
       return;
     }
     if (newPassword != confirm) {
@@ -1373,11 +1859,17 @@ class _AuthCard extends StatelessWidget {
 
 class _SocialCard extends StatelessWidget {
   const _SocialCard({
+    required this.showGoogle,
+    required this.showApple,
+    required this.showKakao,
     required this.onGoogleTap,
     required this.onAppleTap,
     required this.onKakaoTap,
   });
 
+  final bool showGoogle;
+  final bool showApple;
+  final bool showKakao;
   final VoidCallback? onGoogleTap;
   final VoidCallback? onAppleTap;
   final VoidCallback? onKakaoTap;
@@ -1404,30 +1896,36 @@ class _SocialCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          _SocialButton(
-            label: 'Continue with Google',
-            iconWidget: const _GoogleGlyph(),
-            backgroundColor: Colors.white,
-            foregroundColor: const Color(0xFF1F1F1F),
-            borderColor: const Color(0xFFE6E6E6),
-            onTap: onGoogleTap,
-          ),
-          const SizedBox(height: 8),
-          _SocialButton(
-            label: 'Continue with Apple',
-            iconWidget: const Icon(Icons.apple, size: 20),
-            backgroundColor: const Color(0xFF121212),
-            foregroundColor: Colors.white,
-            onTap: onAppleTap,
-          ),
-          const SizedBox(height: 8),
-          _SocialButton(
-            label: 'Continue with KakaoTalk',
-            iconWidget: const Icon(Icons.chat_bubble_rounded, size: 18),
-            backgroundColor: const Color(0xFFFEE500),
-            foregroundColor: const Color(0xFF3B1E1E),
-            onTap: onKakaoTap,
-          ),
+          if (showGoogle) ...[
+            _SocialButton(
+              label: 'Continue with Google',
+              iconWidget: const _GoogleGlyph(),
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF1F1F1F),
+              borderColor: const Color(0xFFE6E6E6),
+              onTap: onGoogleTap,
+            ),
+          ],
+          if (showApple) ...[
+            if (showGoogle) const SizedBox(height: 8),
+            _SocialButton(
+              label: 'Continue with Apple',
+              iconWidget: const Icon(Icons.apple, size: 20),
+              backgroundColor: const Color(0xFF121212),
+              foregroundColor: Colors.white,
+              onTap: onAppleTap,
+            ),
+          ],
+          if (showKakao) ...[
+            if (showGoogle || showApple) const SizedBox(height: 8),
+            _SocialButton(
+              label: 'Continue with KakaoTalk',
+              iconWidget: const Icon(Icons.chat_bubble_rounded, size: 18),
+              backgroundColor: const Color(0xFFFEE500),
+              foregroundColor: const Color(0xFF3B1E1E),
+              onTap: onKakaoTap,
+            ),
+          ],
         ],
       ),
     );
@@ -1529,14 +2027,14 @@ class _StepIndicator extends StatelessWidget {
     final idx = step.index;
     final stepLabel = L10n.translate(context, 'Step {current} of {total}')
         .replaceAll('{current}', '${idx + 1}')
-        .replaceAll('{total}', '3');
+        .replaceAll('{total}', '2');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            for (var i = 0; i < 3; i++) ...[
+            for (var i = 0; i < 2; i++) ...[
               Expanded(
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
@@ -1549,7 +2047,7 @@ class _StepIndicator extends StatelessWidget {
                   ),
                 ),
               ),
-              if (i != 2) const SizedBox(width: 8),
+              if (i != 1) const SizedBox(width: 8),
             ]
           ],
         ),
@@ -1622,6 +2120,8 @@ class _Field extends StatelessWidget {
     this.textInputAction,
     this.errorText,
     this.helperText,
+    this.readOnly = false,
+    this.onTap,
   });
 
   final String label;
@@ -1636,6 +2136,8 @@ class _Field extends StatelessWidget {
   final TextInputAction? textInputAction;
   final String? errorText;
   final String? helperText;
+  final bool readOnly;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1647,6 +2149,8 @@ class _Field extends StatelessWidget {
       onChanged: onChanged,
       onSubmitted: onSubmitted,
       textInputAction: textInputAction,
+      readOnly: readOnly,
+      onTap: onTap,
       style: const TextStyle(
         color: Colors.white,
         fontSize: 14,
@@ -1660,8 +2164,8 @@ class _Field extends StatelessWidget {
             errorText == null ? null : L10n.translate(context, errorText!),
         helperText:
             helperText == null ? null : L10n.translate(context, helperText!),
-        helperMaxLines: 4,
-        errorMaxLines: 2,
+        helperMaxLines: 6,
+        errorMaxLines: 8,
         labelStyle: TextStyle(
           color: Colors.white.withOpacity(0.86),
           fontSize: 13,
@@ -1702,77 +2206,6 @@ class _Field extends StatelessWidget {
           borderSide: const BorderSide(color: Color(0xFFFF7E88), width: 1.3),
         ),
       ),
-    );
-  }
-}
-
-class _BirthdayField extends StatelessWidget {
-  const _BirthdayField({
-    required this.birthday,
-    required this.onTap,
-    this.errorText,
-  });
-
-  final DateTime? birthday;
-  final VoidCallback onTap;
-  final String? errorText;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = birthday == null
-        ? L10n.translate(context, 'Select birthday')
-        : _formatDate(birthday!);
-    final hasError = errorText != null;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Ink(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.06),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: hasError
-                    ? const Color(0xFFFF7E88)
-                    : Colors.white.withOpacity(0.11),
-                width: hasError ? 1.1 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    text,
-                    style: TextStyle(
-                      color: birthday == null ? Colors.white54 : Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const Icon(Icons.calendar_month_outlined,
-                    color: Colors.white70),
-              ],
-            ),
-          ),
-        ),
-        if (hasError)
-          Padding(
-            padding: const EdgeInsets.only(left: 12, top: 6),
-            child: Text(
-              L10n.translate(context, errorText!),
-              style: const TextStyle(
-                color: Color(0xFFFF9AA2),
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-      ],
     );
   }
 }
@@ -1868,6 +2301,48 @@ class _InlineErrorBanner extends StatelessWidget {
               L10n.translate(context, message),
               style: const TextStyle(
                 color: Color(0xFFFFD7DA),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InlineInfoBanner extends StatelessWidget {
+  const _InlineInfoBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF5F96FF).withOpacity(0.14),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: const Color(0xFF8FB3FF).withOpacity(0.60)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 1.5),
+            child: Icon(
+              Icons.info_outline_rounded,
+              size: 16,
+              color: Color(0xFFCFE0FF),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              L10n.translate(context, message),
+              style: const TextStyle(
+                color: Color(0xFFE5EEFF),
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
@@ -2129,11 +2604,4 @@ class _TexturedBlueBackdropPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _TexturedBlueBackdropPainter oldDelegate) =>
       false;
-}
-
-String _formatDate(DateTime value) {
-  final y = value.year.toString().padLeft(4, '0');
-  final m = value.month.toString().padLeft(2, '0');
-  final d = value.day.toString().padLeft(2, '0');
-  return '$y-$m-$d';
 }

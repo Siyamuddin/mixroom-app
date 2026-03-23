@@ -2,7 +2,7 @@ name: mixroom
 description: "Mixroom is the world's first AI-assisted music production app."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.6+8
+version: 1.0.8+10
 
 environment:
   sdk: ^3.6.0
@@ -45,32 +45,15 @@ dependencies:
   file_picker: ^10.3.3
   accessing_security_scoped_resource: ^3.4.0
 
-  # ios
-  # ffmpeg_kit_flutter_full_gpl: ^6.0.3 #ffmpeg_kit_flutter_min: ^6.0.3
+  # FFmpeg backend. (iOS = new_full, Android = 16kb) Switch with:
+  #   dart run tool/switch_ffmpeg_backend.dart new_full
+  #   dart run tool/switch_ffmpeg_backend.dart 16kb
   ffmpeg_kit_flutter_new_full: ^1.2.0
-  # android
-  # ffmpeg_kit_flutter_full_gpl:
-  #   git: https://github.com/hellohejinyu/ffmpeg_kit_flutter_full_gpl.git
   # ffmpeg_kit_16kb: ^1.0.4
-  # ffmpeg_kit_flutter:
-  #   git: 
-  #     url: https://github.com/AliAkhgar/ffmpeg-kit-16KB.git
-  #     path: flutter/flutter
-  # ffmpeg_kit_flutter:
-  #   git:
-  #     url: https://github.com/fishman8/ffmpeg-kit-16KB.git
-  #     ref: main   # or the branch/tag
-  #     path: flutter/flutter
 
-
-  # ffmpeg_kit_flutter_full_gpl:
-  #   git:
-  #     url: https://github.com/Sahad2701/ffmpeg_kit_flutter_full_gpl.git
-  #     ref: flutter-upgrade/remove-v1-embedding
   flutter_file_dialog: ^3.0.2
   audio_waveforms: ^2.0.2 #deprecated
   fftea: ^1.5.0+1
-
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -91,8 +74,14 @@ dependencies:
   url_launcher: ^6.3.1
   flutter_gen: ^5.10.0
   shared_preferences: ^2.5.3
+  flutter_secure_storage: ^9.2.4
   provider: ^6.1.4
+  package_info_plus: ^8.3.1
+  posthog_flutter: ^5.17.1
+  sentry_flutter: ^9.14.0
   in_app_purchase: ^3.2.2
+  in_app_purchase_android: ^0.4.0+8
+  in_app_purchase_storekit: ^0.4.8
   image_picker: ^1.1.2
   video_thumbnail: ^0.5.3
   easy_video_editor: ^0.1.2
@@ -106,7 +95,7 @@ dependencies:
   yt: ^2.2.6
 
   juce_audio_engine:
-      path: juce_audio_engine
+    path: juce_audio_engine
   flutter_neumorphic_plus: ^3.4.0
   path: ^1.9.1
   path_provider: ^2.1.5
@@ -127,9 +116,13 @@ dependencies:
   uuid: ^4.5.2
   collection: ^1.19.1
   archive: ^4.0.7
+  sign_in_with_apple: ^7.0.1
+  kakao_flutter_sdk_user: ^1.10.0
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
@@ -146,15 +139,9 @@ flutter_native_splash:
   fullscreen: true
   android: true
   ios: true
-  image: assets/mixroom_logo202_home_4x.png #mixroom_logo_splash_big.png      # White transparent logo
-  image_android: assets/mixroom_logo202_home_4x.png
-  image_ios: assets/mixroom_logo202_home_4x.png
-  android_gravity: center
-  ios_content_mode: center
-  color: "#15498E" # "#0F1A2A" is darker color
+  background_image: assets/mixroom_launch_screen.png
   android_12:
-    image: assets/mixroom_logo202_home_4x.png
-    icon_background_color: "#15498E"
+    image: assets/mixroom_launch_screen.png
   # background_image: assets/home_background.png  # Blurred guitar background
 
 # command to refresh: dart run flutter_launcher_icons
@@ -169,7 +156,6 @@ flutter_icons:
 
 # The following section is specific to Flutter packages.
 flutter:
-
   generate: true
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
@@ -196,15 +182,12 @@ flutter:
     - assets/mixroom_logo_202.png
     - assets/mixroom_logo202_home_4x.png
     - assets/mixroom_logo202_home.png
+    - assets/mixroom_launch_screen.png
     - assets/short_white.png
     - assets/magnet-solid-full.svg
     - assets/instruments/
-    - assets/models/yamnet.onnx
-    - assets/models/spleeter_vocals.fp16.onnx
-    - assets/models/spleeter_accompaniment.fp16.onnx
+    - assets/models/
     # Enable after exporting trained models:
-    # - assets/models/mix_apply_classifier.onnx
-    # - assets/models/mix_magnitude_regressor.onnx
     # - assets/models/gemma-2b-it-gpu-int4.bin
     # - assets/models/phi3-mini.gguf (don't use)
     # - assets/models/hammer-2.1-0.5b-gpu-int8.task
@@ -218,7 +201,6 @@ flutter:
           weight: 600
         - asset: assets/fonts/Pretendard-Bold.otf
           weight: 700
-
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

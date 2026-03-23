@@ -4,16 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/svg.dart';
-import 'package:mixroom/l10n/l10n.dart';
 import 'dart:math' as math;
 import 'package:mixroom/models/models.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
 import 'package:mixroom/widgets/sample_browser_panel.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
+import 'package:mixroom/helpers/automation_clip_clone_helper.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
+import 'package:uuid/uuid.dart';
 
 class _QuantizePreset {
   final int divisionsPerBar;
@@ -45,6 +46,108 @@ class _PendingPaintPaste {
     required this.row,
     required this.startMs,
   });
+}
+
+class _TimelineGestureSelectionSnapshot {
+  final int selectedClipIndex;
+  final List<int> selectedClipIndices;
+  final double? clipPopupMs;
+  final int? trimClipIndex;
+  final double? activeTrimHandleX;
+  final int? stretchClipIndex;
+  final Map<String, String> selectedAutomationClipByLane;
+  final String? automationClipMenuClipId;
+  final bool showPastePopup;
+  final int? pasteRow;
+  final double? pasteMs;
+  final int? highlightedSegmentRow;
+  final double? highlightedSegmentStartMs;
+  final double? highlightedSegmentEndMs;
+  final int? inlineClipControlIndex;
+  final _InlineClipControlKind? inlineClipControlKind;
+  final double? inlineClipGainStart;
+  final double? inlineClipPitchStart;
+
+  const _TimelineGestureSelectionSnapshot({
+    required this.selectedClipIndex,
+    required this.selectedClipIndices,
+    required this.clipPopupMs,
+    required this.trimClipIndex,
+    required this.activeTrimHandleX,
+    required this.stretchClipIndex,
+    required this.selectedAutomationClipByLane,
+    required this.automationClipMenuClipId,
+    required this.showPastePopup,
+    required this.pasteRow,
+    required this.pasteMs,
+    required this.highlightedSegmentRow,
+    required this.highlightedSegmentStartMs,
+    required this.highlightedSegmentEndMs,
+    required this.inlineClipControlIndex,
+    required this.inlineClipControlKind,
+    required this.inlineClipGainStart,
+    required this.inlineClipPitchStart,
+  });
+}
+
+class _AutomationClipClipboardEntry {
+  final String targetId;
+  final String targetLabel;
+  final AutomationClipSnapshot clip;
+
+  const _AutomationClipClipboardEntry({
+    required this.targetId,
+    required this.targetLabel,
+    required this.clip,
+  });
+}
+
+class _AutomationPointsClipboardEntry {
+  final _AutomationValueKind kind;
+  final String signature;
+  final bool clipRelative;
+  final List<AutomationPoint> points;
+
+  const _AutomationPointsClipboardEntry({
+    required this.kind,
+    required this.signature,
+    required this.clipRelative,
+    required this.points,
+  });
+
+  bool isCompatibleWith(
+    _AutomationValueFormatter formatter, {
+    required bool expectClipRelative,
+  }) {
+    if (kind != formatter.valueKind) return false;
+    if (clipRelative != expectClipRelative) return false;
+    if (kind == _AutomationValueKind.generic) {
+      return signature == formatter.signature;
+    }
+    return true;
+  }
+}
+
+class _AutomationAreaClipboardEntry {
+  final _AutomationValueKind kind;
+  final String signature;
+  final double durationMs;
+  final List<AutomationPoint> relativePoints;
+
+  const _AutomationAreaClipboardEntry({
+    required this.kind,
+    required this.signature,
+    required this.durationMs,
+    required this.relativePoints,
+  });
+
+  bool isCompatibleWith(_AutomationValueFormatter formatter) {
+    if (kind != formatter.valueKind) return false;
+    if (kind == _AutomationValueKind.generic) {
+      return signature == formatter.signature;
+    }
+    return true;
+  }
 }
 
 enum _TimelineTool {
@@ -127,6 +230,7 @@ extension _TimelineToolUi on _TimelineTool {
 }
 
 class AudioCanvasTimeline extends StatefulWidget {
+  final AudioCanvasTimelineController? controller;
   final List<TimelineRow> rows;
   final List<AudioTrack> clips;
   final List<double> rowGain;
@@ -154,6 +258,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     List<AutomationClipSnapshot> oldClips,
     List<AutomationClipSnapshot> newClips,
   )? onAutomationClipsCommit;
+  final Future<void> Function(int row, String targetId)?
+      onRevealAutomationTarget;
 
   final double Function(AudioTrack) getStartMs;
   final double Function(AudioTrack)
@@ -233,6 +339,7 @@ class AudioCanvasTimeline extends StatefulWidget {
   final Future<void> Function(int clipIndex, double semitones) setClipPitch;
   final void Function(int clipIndex, double oldPitch, double newPitch)?
       onClipPitchCommit;
+  final Future<void> Function(int clipIndex, bool reversed)? onSetClipReversed;
   final Future<void> Function(int clipIndex) onDisableClipTempoFollow;
   final Future<void> Function(int clipIndex) onAdjustClipToTempo;
   final Future<void> Function(int clipIndex) onStretchClipToTempoPreservePitch;
@@ -266,6 +373,14 @@ class AudioCanvasTimeline extends StatefulWidget {
       registerRowFxPlaybackRefresher;
   final void Function(bool magnetEnabled, int quantizeDivisionsPerBar)?
       onSnapSettingsChanged;
+  final VoidCallback? onTutorialTimelineScrolled;
+  final VoidCallback? onTutorialTimelineZoomed;
+  final void Function(int row, bool expanded)? onTutorialRowExpansionChanged;
+  final void Function(int row, int tab)? onTutorialRowTabSelected;
+  final void Function(int row, int effectIndex, String effectName)?
+      onTutorialRowEffectAdded;
+  final void Function(int row, int effectIndex, String effectName)?
+      onTutorialRowEffectOpened;
 
   final MeterBus meters;
   final Future<List<double>> Function(int row, int effectIndex)
@@ -277,11 +392,13 @@ class AudioCanvasTimeline extends StatefulWidget {
   final VoidCallback? onExternalSampleDragEntered;
   final bool externalSampleDragActive;
   final MixChangeHighlighter? tutorialHighlighter;
+  final double bottomDockInset;
 
   final String mode; // "Basic" or "Pro"
 
   const AudioCanvasTimeline({
     Key? key,
+    this.controller,
     required this.rows,
     required this.rowGain,
     required this.rowPan,
@@ -297,6 +414,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.setAutomationClipsForTarget,
     required this.onAutomationTargetCommit,
     this.onAutomationClipsCommit,
+    this.onRevealAutomationTarget,
     required this.clips,
     required this.getStartMs,
     required this.getDurationMs,
@@ -352,6 +470,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.onClipGainCommit,
     required this.setClipPitch,
     required this.onClipPitchCommit,
+    this.onSetClipReversed,
     required this.onDisableClipTempoFollow,
     required this.onAdjustClipToTempo,
     required this.onStretchClipToTempoPreservePitch,
@@ -378,6 +497,12 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.registerRowFxRefresher,
     this.registerRowFxPlaybackRefresher,
     this.onSnapSettingsChanged,
+    this.onTutorialTimelineScrolled,
+    this.onTutorialTimelineZoomed,
+    this.onTutorialRowExpansionChanged,
+    this.onTutorialRowTabSelected,
+    this.onTutorialRowEffectAdded,
+    this.onTutorialRowEffectOpened,
     required this.meters,
     required this.getRowCompressorMeter,
     required this.getRowEqWaveform,
@@ -385,9 +510,43 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onExternalSampleDragEntered,
     this.externalSampleDragActive = false,
     this.tutorialHighlighter,
+    this.bottomDockInset = 0.0,
   }) : super(key: key);
   @override
   State<AudioCanvasTimeline> createState() => _AudioCanvasTimelineState();
+}
+
+class AudioCanvasTimelineController {
+  void Function(int row, {int tab})? _ensureRowExpanded;
+  VoidCallback? _collapseExpandedRows;
+
+  void _bind({
+    required void Function(int row, {int tab}) ensureRowExpanded,
+    required VoidCallback collapseExpandedRows,
+  }) {
+    _ensureRowExpanded = ensureRowExpanded;
+    _collapseExpandedRows = collapseExpandedRows;
+  }
+
+  void _unbind({
+    required void Function(int row, {int tab}) ensureRowExpanded,
+    required VoidCallback collapseExpandedRows,
+  }) {
+    if (identical(_ensureRowExpanded, ensureRowExpanded)) {
+      _ensureRowExpanded = null;
+    }
+    if (identical(_collapseExpandedRows, collapseExpandedRows)) {
+      _collapseExpandedRows = null;
+    }
+  }
+
+  void ensureRowExpanded(int row, {int tab = 0}) {
+    _ensureRowExpanded?.call(row, tab: tab);
+  }
+
+  void collapseExpandedRows() {
+    _collapseExpandedRows?.call();
+  }
 }
 
 class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
@@ -435,6 +594,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   final List<int> _expandedTab =
       <int>[]; // 0 = Volume, 1 = Effects, 2 = Automation
   final List<double> _rowYPositions = [];
+  double? _tutorialPanStartScrollMs;
+  double? _tutorialPanStartPixelsPerMs;
+  bool _tutorialScrollNotifiedForGesture = false;
+  bool _tutorialZoomNotifiedForGesture = false;
 
   // === FIX ===: Unified drag/trim state
   bool _isUserInteracting =
@@ -460,6 +623,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   double? _trimOriginalStartMs; // Original clip startMs at drag start
   double?
       _trimStartAnchorX; // === FIX ===: Anchor: Local X of where the touch began
+  double? _trimTimelineScaleValue; // Source ms -> visible timeline ms
   double?
       _activeTrimHandleX; // === FIX ===: The X anchor for the visual cue/tap
   double? newTrimStartUpdate, newTrimEndUpdate, newStartMsUpdate;
@@ -478,8 +642,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   int? _automationDragIndex;
   Offset? _automationDragStart;
   double? _automationFingerOffsetY;
-  List<AutomationClipSnapshot>? _automationPointEditBeforeClips;
-  String? _automationPointEditTargetId;
+  double? _automationActiveLaneHeight;
   final Map<String, String> _selectedAutomationClipByLane = <String, String>{};
   List<AutomationClipSnapshot>? _automationClipDragBefore;
   int? _automationClipDragRow;
@@ -491,15 +654,31 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   final Map<int, int> _extraAutomationTimelineLanesByRow = <int, int>{};
   final Map<int, bool> _collapsedAutomationTimelineByRow = <int, bool>{};
   final Map<int, int> _automationLaneFocusByRow = <int, int>{};
+  final Map<int, Future<void> Function(int effectIndex, String paramId)>
+      _rowEffectParameterRevealers =
+      <int, Future<void> Function(int effectIndex, String paramId)>{};
+  _TimelineAutomationClipVisual? _pendingAutomationClipVisual;
+  Offset? _pendingAutomationClipStartLocalOffset;
+  String? _pendingAutomationClipInteractionMode;
+  int? _automationClipMenuRow;
+  String? _automationClipMenuTargetId;
+  String? _automationClipMenuClipId;
+  int? _automationEditorRow;
+  String? _automationEditorTargetId;
+  _AutomationClipClipboardEntry? _automationClipClipboard;
+  static _AutomationPointsClipboardEntry? _automationPointsClipboard;
+  static _AutomationAreaClipboardEntry? _automationAreaClipboard;
 
   bool _pendingDrag = false;
-  Offset? _pendingLocalDown;
-  int _pendingClipIndex = -1;
+  bool _pendingDragStartedFromSelection = false;
+  bool _tentativeClipSelectionActive = false;
+  final Set<int> _activeTimelinePointers = <int>{};
 
   // Paste popup state
   bool _showPastePopup = false;
   int? _pasteRow;
   double? _pasteMs;
+  _TimelineGestureSelectionSnapshot? _singleTouchSelectionSnapshot;
   double? _clipPopupMs;
   int? _inlineClipControlIndex;
   _InlineClipControlKind? _inlineClipControlKind;
@@ -531,6 +710,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   int? _highlightedSegmentRow;
   double? _highlightedSegmentStartMs;
   double? _highlightedSegmentEndMs;
+  bool _automationRangeSelectionMode = false;
+  int? _automationRangeSelectionRow;
+  String? _automationRangeSelectionTargetId;
+  double? _automationRangeSelectionStartMs;
+  double? _automationRangeSelectionEndMs;
   bool _loopEnabled = false;
   int?
       _loopStartMs; // made ints because when dragging loop handles, can get sub-ms numbers, but audio_editor converts to int
@@ -578,11 +762,24 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   double? _externalSampleDropStartMs;
   double? _externalSampleDropEndMs;
   bool _externalSampleDragInsideTimeline = false;
+  List<_TimelineAutomationClipVisual> _timelineAutomationClipVisualCache =
+      const <_TimelineAutomationClipVisual>[];
 
   void _notifySnapSettingsChanged() {
     widget.onSnapSettingsChanged
         ?.call(_magnetEnabled, _quantizeDivisionsPerBar);
   }
+
+  bool get _hasPasteClipboard =>
+      widget.hasCopiedClip || _automationClipClipboard != null;
+
+  bool get _hasActiveAutomationClipDrag =>
+      _automationClipDragRow != null &&
+      _automationClipDragTargetId != null &&
+      _automationClipDragId != null &&
+      _automationClipDragMode != null;
+
+  bool get _timelineHasMultiTouch => _activeTimelinePointers.length > 1;
 
   void _clearPastePopup() {
     if (_showPastePopup ||
@@ -612,14 +809,26 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _cutPreviewClipIndex = null;
       _cutPreviewRawMs = null;
       _cutPreviewMs = null;
-      _activeTrimHandleX = null;
-      _trimClipIndex = null;
-      _stretchClipIndex = null;
-      _stretchStartTimelineDurationMs = null;
-      _stretchOriginalStartMs = null;
-      _stretchStartAnchorX = null;
-      _stretchDurationUpdateMs = null;
+      _resetTrimInteractionState();
     });
+  }
+
+  void _resetTrimInteractionState() {
+    _activeTrimHandleX = null;
+    _trimClipIndex = null;
+    _trimStartValue = null;
+    _trimEndValue = null;
+    _trimOriginalStartMs = null;
+    _trimStartAnchorX = null;
+    _trimTimelineScaleValue = null;
+    newTrimStartUpdate = null;
+    newTrimEndUpdate = null;
+    newStartMsUpdate = null;
+    _stretchClipIndex = null;
+    _stretchStartTimelineDurationMs = null;
+    _stretchOriginalStartMs = null;
+    _stretchStartAnchorX = null;
+    _stretchDurationUpdateMs = null;
   }
 
   double _resolvedCutMsForClip(int clipIndex, double rawMs) {
@@ -703,6 +912,53 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onTimelinePointerDown(PointerDownEvent event) {
+    _activeTimelinePointers.add(event.pointer);
+    if (_activeTimelinePointers.length == 1) {
+      _singleTouchSelectionSnapshot = _captureGestureSelectionSnapshot();
+    }
+    final becameMultiTouch = _timelineHasMultiTouch;
+    if (becameMultiTouch) {
+      setState(() {
+        final snapshot = _singleTouchSelectionSnapshot;
+        if (snapshot != null) {
+          _restoreGestureSelectionSnapshot(snapshot);
+        }
+        _clearPendingClipTapState();
+        _clearPendingAutomationClipSelection();
+        _clearAutomationClipMenu();
+        if (_interactionMode == 'drag' && !_hasActiveAutomationClipDrag) {
+          _interactionMode = '';
+          _isUserInteracting = false;
+        }
+      });
+      _singleTouchSelectionSnapshot = null;
+    }
+    if (event.kind != PointerDeviceKind.mouse ||
+        event.buttons == kPrimaryMouseButton) {
+      if (_activeTool == _TimelineTool.paint && !becameMultiTouch) {
+        final tappedClipIndex = _getGestureClipIndexAt(event.localPosition);
+        if (tappedClipIndex != null) {
+          _handleTapDown(
+            TapDownDetails(
+              globalPosition: event.position,
+              localPosition: event.localPosition,
+            ),
+          );
+          return;
+        }
+      }
+      if (_activeTool != _TimelineTool.cut &&
+          _activeTool != _TimelineTool.paint &&
+          _activeTool != _TimelineTool.delete &&
+          !becameMultiTouch) {
+        _handleTapDown(
+          TapDownDetails(
+            globalPosition: event.position,
+            localPosition: event.localPosition,
+          ),
+        );
+      }
+    }
     if (_activeTool == _TimelineTool.cut) {
       _updateCutPreviewAtLocal(event.localPosition);
       return;
@@ -737,6 +993,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onTimelinePointerUp(PointerUpEvent event) {
+    _activeTimelinePointers.remove(event.pointer);
+    _tentativeClipSelectionActive = false;
+    if (_activeTimelinePointers.isEmpty) {
+      _singleTouchSelectionSnapshot = null;
+    }
     if (_activeTool == _TimelineTool.cut) {
       final previewClipIndex = _cutPreviewClipIndex;
       final previewCutMs = _cutPreviewMs;
@@ -760,13 +1021,35 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _resetPaintStrokeState();
       return;
     }
+    final pendingAutomationClip = _pendingAutomationClipVisual;
+    if (pendingAutomationClip != null) {
+      final pendingMode = _pendingAutomationClipInteractionMode ?? 'open';
+      setState(() {
+        _clearPendingAutomationClipSelection();
+        _dragStartGlobalOffset = null;
+      });
+      if (pendingMode == 'open') {
+        _openAutomationClipEditor(pendingAutomationClip);
+      }
+      return;
+    }
+    if (_interactionMode != 'drag' && _pendingDrag) {
+      setState(_clearPendingClipTapState);
+    }
     if (_activeTool == _TimelineTool.delete) {
       _resetDeleteStrokeState();
     }
   }
 
   void _onTimelinePointerCancel(PointerCancelEvent event) {
-    if (_interactionMode == 'automation_clip') {
+    _activeTimelinePointers.remove(event.pointer);
+    _tentativeClipSelectionActive = false;
+    if (_activeTimelinePointers.isEmpty) {
+      _singleTouchSelectionSnapshot = null;
+    }
+    _clearPendingAutomationClipSelection();
+    _clearPendingClipTapState();
+    if (_hasActiveAutomationClipDrag) {
       final row = _automationClipDragRow;
       final targetId = _automationClipDragTargetId;
       if (row != null && targetId != null) {
@@ -950,6 +1233,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _clearClipSelection() {
     _commitInlineClipControlIfNeeded();
     _clearInlineClipControlState();
+    _clearAutomationClipSelection();
     _selectedClipIndex = -1;
     _selectedClipIndices.clear();
     _clipPopupMs = null;
@@ -968,6 +1252,152 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       ..add(clipIndex);
     _clipPopupMs = popupMs;
     _emitSelectionChanged();
+  }
+
+  void _setPrimaryClipSelection(
+    int clipIndex, {
+    double? popupMs,
+    bool preserveExistingSelection = false,
+  }) {
+    if (!preserveExistingSelection) {
+      _setSingleClipSelection(clipIndex, popupMs: popupMs);
+      return;
+    }
+    if (_inlineClipControlIndex != null &&
+        _inlineClipControlIndex != clipIndex) {
+      _commitInlineClipControlIfNeeded();
+      _clearInlineClipControlState();
+    }
+    _selectedClipIndex = clipIndex;
+    _selectedClipIndices.add(clipIndex);
+    _clipPopupMs = null;
+    _emitSelectionChanged();
+  }
+
+  void _clearPendingClipDrag() {
+    _pendingDrag = false;
+    _pendingDragStartedFromSelection = false;
+  }
+
+  void _clearPendingClipTapState() {
+    _pendingDrag = false;
+    _pendingDragStartedFromSelection = false;
+    _draggedClipIndex = null;
+    _dragStartGlobalOffset = null;
+    _dragStartLocalOffset = null;
+  }
+
+  void _restoreTentativeClipSelectionIfNeeded() {
+    if (!_tentativeClipSelectionActive) return;
+    _tentativeClipSelectionActive = false;
+    final snapshot = _singleTouchSelectionSnapshot;
+    if (snapshot == null) return;
+    _restoreGestureSelectionSnapshot(snapshot);
+  }
+
+  _TimelineGestureSelectionSnapshot _captureGestureSelectionSnapshot() {
+    return _TimelineGestureSelectionSnapshot(
+      selectedClipIndex: _selectedClipIndex,
+      selectedClipIndices: _selectedClipIndices.toList(growable: false),
+      clipPopupMs: _clipPopupMs,
+      trimClipIndex: _trimClipIndex,
+      activeTrimHandleX: _activeTrimHandleX,
+      stretchClipIndex: _stretchClipIndex,
+      selectedAutomationClipByLane:
+          Map<String, String>.from(_selectedAutomationClipByLane),
+      automationClipMenuClipId: _automationClipMenuClipId,
+      showPastePopup: _showPastePopup,
+      pasteRow: _pasteRow,
+      pasteMs: _pasteMs,
+      highlightedSegmentRow: _highlightedSegmentRow,
+      highlightedSegmentStartMs: _highlightedSegmentStartMs,
+      highlightedSegmentEndMs: _highlightedSegmentEndMs,
+      inlineClipControlIndex: _inlineClipControlIndex,
+      inlineClipControlKind: _inlineClipControlKind,
+      inlineClipGainStart: _inlineClipGainStart,
+      inlineClipPitchStart: _inlineClipPitchStart,
+    );
+  }
+
+  void _restoreGestureSelectionSnapshot(
+    _TimelineGestureSelectionSnapshot snapshot,
+  ) {
+    _selectedClipIndex = snapshot.selectedClipIndex;
+    _selectedClipIndices
+      ..clear()
+      ..addAll(snapshot.selectedClipIndices);
+    _clipPopupMs = snapshot.clipPopupMs;
+    _trimClipIndex = snapshot.trimClipIndex;
+    _activeTrimHandleX = snapshot.activeTrimHandleX;
+    _stretchClipIndex = snapshot.stretchClipIndex;
+    _selectedAutomationClipByLane
+      ..clear()
+      ..addAll(snapshot.selectedAutomationClipByLane);
+    _automationClipMenuClipId = snapshot.automationClipMenuClipId;
+    _showPastePopup = snapshot.showPastePopup;
+    _pasteRow = snapshot.pasteRow;
+    _pasteMs = snapshot.pasteMs;
+    _highlightedSegmentRow = snapshot.highlightedSegmentRow;
+    _highlightedSegmentStartMs = snapshot.highlightedSegmentStartMs;
+    _highlightedSegmentEndMs = snapshot.highlightedSegmentEndMs;
+    _inlineClipControlIndex = snapshot.inlineClipControlIndex;
+    _inlineClipControlKind = snapshot.inlineClipControlKind;
+    _inlineClipGainStart = snapshot.inlineClipGainStart;
+    _inlineClipPitchStart = snapshot.inlineClipPitchStart;
+    _emitSelectionChanged();
+  }
+
+  String _formatAutomationEditorTime(double ms) {
+    final clampedMs = math.max(0.0, ms);
+    final totalSeconds = clampedMs / 1000.0;
+    if (totalSeconds >= 60.0) {
+      final minutes = totalSeconds ~/ 60;
+      final seconds = totalSeconds - (minutes * 60);
+      return '$minutes:${seconds.toStringAsFixed(1).padLeft(4, '0')}';
+    }
+    final decimals = totalSeconds >= 10.0 ? 1 : 2;
+    return '${totalSeconds.toStringAsFixed(decimals)}s';
+  }
+
+  String _formatAutomationEditorRange(double startMs, double endMs) {
+    return '${_formatAutomationEditorTime(startMs)} - ${_formatAutomationEditorTime(endMs)}';
+  }
+
+  void _revealAutomationRangeInViewport(
+    double startMs,
+    double endMs,
+  ) {
+    final viewportWidth = _getViewportWidth(context);
+    if (viewportWidth <= 0 || _pixelsPerMs <= 0) return;
+    final visibleStartMs = _scrollOffsetMs;
+    final visibleEndMs = _scrollOffsetMs + (viewportWidth / _pixelsPerMs);
+    final marginMs = 28.0 / _pixelsPerMs;
+    final alreadyVisible = startMs >= (visibleStartMs + marginMs) &&
+        endMs <= (visibleEndMs - marginMs);
+    if (alreadyVisible) return;
+
+    final centerMs = (startMs + endMs) / 2.0;
+    _scrollOffsetMs = centerMs - ((viewportWidth / _pixelsPerMs) / 2.0);
+    _clampScroll();
+  }
+
+  double _pendingClipDragActivationSlop() {
+    final draggedIndex = _draggedClipIndex;
+    final draggingGroup = draggedIndex != null &&
+        _selectedClipIndices.length > 1 &&
+        _selectedClipIndices.contains(draggedIndex);
+    if (_pendingDragStartedFromSelection || draggingGroup) {
+      return 4.0;
+    }
+    return 8.0;
+  }
+
+  bool _pendingClipDragExceededSlop(Offset globalPosition) {
+    final dragStartGlobal = _dragStartGlobalOffset;
+    if (dragStartGlobal == null) return false;
+    final delta = globalPosition - dragStartGlobal;
+    final threshold = _pendingClipDragActivationSlop();
+    return delta.dx.abs() > threshold || delta.dy.abs() > threshold;
   }
 
   void _clearInlineClipControlState() {
@@ -1119,6 +1549,273 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return focused.clamp(0, laneCount - 1).toInt();
   }
 
+  bool _isAutomationEditorOpenForRow(int row) {
+    return _automationEditorRow == row &&
+        (_automationEditorTargetId?.trim().isNotEmpty ?? false);
+  }
+
+  void _clearPendingAutomationClipSelection() {
+    _pendingAutomationClipVisual = null;
+    _pendingAutomationClipStartLocalOffset = null;
+    _pendingAutomationClipInteractionMode = null;
+  }
+
+  void _setAutomationClipMenuFor(_TimelineAutomationClipVisual clipVisual) {
+    _automationClipMenuRow = clipVisual.row;
+    _automationClipMenuTargetId = clipVisual.targetId;
+    _automationClipMenuClipId = clipVisual.clip.id;
+  }
+
+  void _clearAutomationClipMenu() {
+    _automationClipMenuRow = null;
+    _automationClipMenuTargetId = null;
+    _automationClipMenuClipId = null;
+  }
+
+  void _clearAutomationClipSelection() {
+    _selectedAutomationClipByLane.clear();
+    _clearAutomationClipMenu();
+  }
+
+  bool _isAutomationClipMenuVisibleFor(
+      _TimelineAutomationClipVisual clipVisual) {
+    return _automationClipMenuRow == clipVisual.row &&
+        _automationClipMenuTargetId == clipVisual.targetId &&
+        _automationClipMenuClipId == clipVisual.clip.id;
+  }
+
+  _TimelineAutomationClipVisual? _currentAutomationClipMenuVisual(
+    List<_TimelineAutomationClipVisual> visuals,
+  ) {
+    final row = _automationClipMenuRow;
+    final targetId = _automationClipMenuTargetId;
+    final clipId = _automationClipMenuClipId;
+    if (row == null || targetId == null || clipId == null) {
+      return null;
+    }
+    for (final visual in visuals) {
+      if (visual.row == row &&
+          visual.targetId == targetId &&
+          visual.clip.id == clipId) {
+        return visual;
+      }
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _automationTargetMetaById(int row, String targetId) {
+    final targets = widget.getAutomationTargetsForRow(row);
+    for (final target in targets) {
+      final id = (target['id'] ?? '').toString().trim();
+      if (id == targetId.trim()) {
+        return Map<String, dynamic>.from(target);
+      }
+    }
+    if (targetId.trim() == 'volume') {
+      return <String, dynamic>{
+        'id': 'volume',
+        'label': 'Volume',
+        'fullLabel': 'Volume',
+        'isVolume': true,
+        'isOrphan': false,
+        'paramId': 'volume',
+        'min': 0.0,
+        'max': 1.0,
+        'initialNormalized': 0.75,
+      };
+    }
+    return null;
+  }
+
+  bool _isMasterAutomationTargetId(String targetId) {
+    final normalized = targetId.trim().toLowerCase();
+    return normalized.startsWith('master:') ||
+        normalized.startsWith('masterfxid:');
+  }
+
+  List<Map<String, dynamic>> _automationTargetsForAutomationTab(int row) {
+    if (row < 0 || row >= _rowCount) return const <Map<String, dynamic>>[];
+    final targets = widget.getAutomationTargetsForRow(row);
+    final filtered = <Map<String, dynamic>>[];
+    for (final raw in targets) {
+      final target = Map<String, dynamic>.from(raw);
+      final id = (target['id'] ?? '').toString().trim();
+      if (id.isEmpty || _isMasterAutomationTargetId(id)) continue;
+      filtered.add(target);
+    }
+    final hasVolume = filtered.any(
+      (target) => (target['id'] ?? '').toString().trim() == 'volume',
+    );
+    if (!hasVolume) {
+      filtered.insert(0, <String, dynamic>{
+        'id': 'volume',
+        'label': 'Volume',
+        'fullLabel': 'Volume',
+        'isVolume': true,
+        'isOrphan': false,
+        'paramId': 'volume',
+        'min': 0.0,
+        'max': 1.0,
+        'initialNormalized': 0.75,
+      });
+    }
+    return filtered;
+  }
+
+  String _resolveAutomationTabTargetId(int row, String preferredTargetId) {
+    final candidates = _automationTargetsForAutomationTab(row);
+    if (candidates.isEmpty) return 'volume';
+    final preferred = preferredTargetId.trim();
+    final hasPreferred = candidates.any(
+      (target) => (target['id'] ?? '').toString().trim() == preferred,
+    );
+    if (hasPreferred) return preferred;
+    return (candidates.first['id'] ?? 'volume').toString().trim();
+  }
+
+  void _openAutomationTabForTarget({
+    required int row,
+    required String targetId,
+    List<String> haloKeys = const <String>[],
+  }) {
+    if (row < 0 || row >= _rowCount) return;
+    final resolvedTargetId = _resolveAutomationTabTargetId(row, targetId);
+    setState(() {
+      _clearAutomationClipMenu();
+      _selectedRowIndex = row;
+      widget.onSelectRow(row);
+      widget.setSelectedAutomationTargetId(row, resolvedTargetId);
+      for (int i = 0; i < _rowCount; i++) {
+        _rowExpanded[i] = i == row;
+      }
+      _expandedTab[row] = _normalizeExpandedTab(2);
+      _automationEditorRow = row;
+      _automationEditorTargetId = resolvedTargetId;
+    });
+    _triggerTimelineHalos(
+      <String>[
+        'row:$row:automation_tab',
+        ...haloKeys,
+      ],
+    );
+  }
+
+  String _haloSlug(String raw) {
+    return raw
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
+  void _applyExpandedTabStateForRow(int row, int normalizedTab) {
+    if (row < 0 || row >= _rowCount) return;
+    if (normalizedTab == 2) {
+      final selectedTarget = _resolveAutomationTabTargetId(
+        row,
+        widget.getSelectedAutomationTargetId(row),
+      );
+      widget.setSelectedAutomationTargetId(row, selectedTarget);
+      _automationEditorRow = row;
+      _automationEditorTargetId = selectedTarget;
+    } else if (_automationEditorRow == row) {
+      _automationEditorRow = null;
+      _automationEditorTargetId = null;
+    }
+    _expandedTab[row] = normalizedTab;
+    if (normalizedTab != 2 && _automationRangeSelectionRow == row) {
+      _clearAutomationRangeSelectionMode();
+    }
+  }
+
+  void _setExpandedTabForRow({
+    required int row,
+    required int tab,
+    bool selectRow = false,
+    bool expandOnlyThisRow = false,
+    String? selectedAutomationTargetId,
+  }) {
+    if (row < 0 || row >= _rowCount) return;
+    final normalizedTab = _normalizeExpandedTab(tab);
+    setState(() {
+      if (selectRow) {
+        _selectedRowIndex = row;
+        widget.onSelectRow(row);
+      }
+      if (selectedAutomationTargetId != null &&
+          selectedAutomationTargetId.trim().isNotEmpty) {
+        widget.setSelectedAutomationTargetId(row, selectedAutomationTargetId);
+      }
+      if (expandOnlyThisRow) {
+        for (int i = 0; i < _rowCount; i++) {
+          _rowExpanded[i] = i == row;
+        }
+      }
+      _applyExpandedTabStateForRow(row, normalizedTab);
+    });
+    widget.onTutorialRowTabSelected?.call(row, normalizedTab);
+  }
+
+  Future<Future<void> Function(int, String)?> _waitForRowParameterRevealer(
+    int row, {
+    int maxAttempts = 10,
+  }) async {
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      if (!mounted || row < 0 || row >= _rowCount) return null;
+      final rowId = widget.rows[row].rowId;
+      final revealer = _rowEffectParameterRevealers[rowId];
+      if (revealer != null) return revealer;
+      await WidgetsBinding.instance.endOfFrame;
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    return null;
+  }
+
+  void _triggerTimelineHalos(List<String> haloKeys) {
+    final highlighter = widget.tutorialHighlighter;
+    if (highlighter == null || haloKeys.isEmpty) return;
+    final mapped = haloKeys
+        .map((key) => key.trim())
+        .where((key) => key.isNotEmpty)
+        .map(HaloKey.new)
+        .toList(growable: false);
+    if (mapped.isEmpty) return;
+    highlighter.trigger(mapped, duration: const Duration(milliseconds: 800));
+  }
+
+  void _setAutomationEditorFor(
+    int row,
+    String targetId,
+  ) {
+    if (row < 0 || row >= _rowCount) return;
+    final resolvedTargetId = _resolveAutomationTabTargetId(row, targetId);
+    _clearAutomationClipMenu();
+    widget.setSelectedAutomationTargetId(row, resolvedTargetId);
+    _selectedRowIndex = row;
+    widget.onSelectRow(row);
+    for (int i = 0; i < _rowCount; i++) {
+      _rowExpanded[i] = i == row;
+    }
+    _expandedTab[row] = _normalizeExpandedTab(2);
+    _automationEditorRow = row;
+    _automationEditorTargetId = resolvedTargetId;
+  }
+
+  void _closeAutomationEditor() {
+    if (_automationEditorRow == null && _automationEditorTargetId == null) {
+      return;
+    }
+    setState(() {
+      final row = _automationEditorRow;
+      if (row != null && row >= 0 && row < _expandedTab.length) {
+        _expandedTab[row] = _normalizeExpandedTab(0);
+      }
+      _automationEditorRow = null;
+      _automationEditorTargetId = null;
+    });
+  }
+
   void _setFocusedAutomationLaneForRow(int row, int lane) {
     final normalized = _normalizedAutomationLaneForRow(row, lane);
     if ((_automationLaneFocusByRow[row] ?? 0) == normalized) return;
@@ -1181,13 +1878,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   double _automationTimelineLaneHeightForRow(int row) {
-    final laneCount = _automationTimelineVisibleLaneCountForRow(row);
-    if (laneCount <= 0) return 0.0;
-    final laneHeight = _automationTimelineSingleLaneHeightForRow(row);
-    final totalGap = (laneCount - 1) * _kTimelineAutomationLaneGap;
-    return (_kTimelineAutomationLaneInset * 2) +
-        (laneCount * laneHeight) +
-        totalGap;
+    return 0.0;
   }
 
   double _automationTimelineLaneTopForRowLane(int row, int lane) {
@@ -1201,33 +1892,45 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   int _timelineAutomationLaneIndexAtLocalY(int row, double localY) {
-    final laneCount = _automationLaneCountForRow(row);
-    if (laneCount <= 0) return 0;
-    if (_isAutomationTimelineCollapsedForRow(row)) return 0;
-    final firstLaneTop = _automationTimelineLaneTopForRowLane(row, 0);
-    final laneHeight = _automationTimelineSingleLaneHeightForRow(row);
-    final totalHeight = (laneCount * laneHeight) +
-        math.max(0, laneCount - 1) * _kTimelineAutomationLaneGap;
-    final relative =
-        (localY - firstLaneTop).clamp(0.0, math.max(0.0, totalHeight - 0.0001));
-    final lane = (relative / (laneHeight + _kTimelineAutomationLaneGap))
-        .floor()
-        .clamp(0, laneCount - 1)
-        .toInt();
-    return lane;
+    return 0;
   }
 
   double _expandedPanelHeightForRow(int row) {
     if (row < 0 || row >= _rowCount || !_rowExpanded[row]) return 0.0;
+    if (_isAutomationEditorOpenForRow(row)) {
+      return kExpandedRowHeight;
+    }
     return _isFixedHeightExpandedTab(_expandedTab[row])
         ? kExpandedRowHeight
         : _effectsPanelHeights[row];
   }
 
   double _rowBlockHeightForIndex(int row) {
-    return kRowHeight +
-        _automationTimelineLaneHeightForRow(row) +
-        _expandedPanelHeightForRow(row);
+    return kRowHeight + _expandedPanelHeightForRow(row);
+  }
+
+  int _defaultAutomationClipRowForSourceRow(int row) {
+    if (_rowCount <= 0) return 0;
+    return (row + 1).clamp(0, _rowCount - 1).toInt();
+  }
+
+  int _preferredAutomationClipRowForTarget(int row, String targetId) {
+    final normalized = targetId.trim().toLowerCase();
+    final isMaster = normalized.startsWith('master:') ||
+        normalized.startsWith('masterfxid:');
+    if (!isMaster || _rowCount <= 0) {
+      return _defaultAutomationClipRowForSourceRow(row);
+    }
+    final occupiedRows = widget.clips
+        .map((clip) => clip.rowIndex)
+        .where((rowIndex) => rowIndex >= 0 && rowIndex < _rowCount)
+        .toSet();
+    for (int candidate = 0; candidate < _rowCount; candidate++) {
+      if (!occupiedRows.contains(candidate)) {
+        return candidate;
+      }
+    }
+    return 0;
   }
 
   bool _isLocalYInMainTrackLane(int row, double localY) {
@@ -1246,44 +1949,75 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return labels;
   }
 
+  Color _automationColorForTarget(
+    String targetId, {
+    bool isOrphan = false,
+  }) {
+    if (isOrphan) {
+      return const Color(0xFFD25C68);
+    }
+    const palette = <Color>[
+      Color(0xFF4D8DF0),
+      Color(0xFF42B985),
+      Color(0xFFE19A44),
+      Color(0xFF58B9CF),
+      Color(0xFFD36D61),
+      Color(0xFF89B45B),
+    ];
+    var hash = 0;
+    for (final rune in targetId.runes) {
+      hash = ((hash * 31) + rune) & 0x7fffffff;
+    }
+    return palette[hash % palette.length];
+  }
+
   List<_TimelineAutomationClipVisual> _timelineAutomationClipVisuals() {
+    return const <_TimelineAutomationClipVisual>[];
+    /*
     if (_rowCount <= 0) return const <_TimelineAutomationClipVisual>[];
     final visuals = <_TimelineAutomationClipVisual>[];
     const minWidthPx = 14.0;
+    const clipTopInset = 2.0;
+    const clipHeight = kRowHeight - 4.0;
 
     for (int row = 0; row < _rowCount; row++) {
-      final laneCount = _automationLaneCountForRow(row);
-      if (laneCount <= 0) continue;
       final labelsById = _automationTargetLabelsForRow(row);
-      final clipHeight = _automationTimelineSingleLaneHeightForRow(row);
-      final visibleLaneCount = _automationTimelineVisibleLaneCountForRow(row);
-      final collapseToSingleLane = visibleLaneCount == 1 && laneCount > 1;
-
       for (final targetId in _automationTargetIdsForRow(row)) {
         if (targetId.trim().isEmpty) continue;
+        final targetMeta = _automationTargetMetaById(row, targetId);
         final targetLabel = labelsById[targetId] ?? targetId;
+        final targetFullLabel =
+            (targetMeta?['fullLabel'] ?? targetMeta?['label'] ?? targetLabel)
+                .toString()
+                .trim();
+        final isOrphan = targetMeta?['isOrphan'] == true;
         final selectedClipId = _selectedAutomationClipIdFor(row, targetId);
         final laneClips = widget.getAutomationClipsForTarget(row, targetId);
         if (laneClips.isEmpty) continue;
 
         for (final clip in laneClips) {
-          final laneIndex = collapseToSingleLane
-              ? 0
-              : _normalizedAutomationLaneForRow(row, clip.lane);
-          final laneTop = _automationTimelineLaneTopForRowLane(row, laneIndex);
+          final displayRow =
+              clip.row.clamp(0, math.max(0, _rowCount - 1)).toInt();
+          final laneTop = _rowTopForIndex(displayRow) + clipTopInset;
           final left = (clip.startMs - _scrollOffsetMs) * _pixelsPerMs;
           final width = math.max(minWidthPx, clip.lengthMs * _pixelsPerMs);
-          final rect =
-              Rect.fromLTWH(left, laneTop, width, math.max(8.0, clipHeight));
+          final rect = Rect.fromLTWH(left, laneTop, width, clipHeight);
           visuals.add(
             _TimelineAutomationClipVisual(
               row: row,
+              displayRow: displayRow,
               targetId: targetId,
               targetLabel: targetLabel,
+              fullTargetLabel: targetFullLabel.isNotEmpty
+                  ? targetFullLabel
+                  : (clip.label.trim().isNotEmpty
+                      ? clip.label.trim()
+                      : targetLabel),
               clip: clip,
-              laneIndex: laneIndex,
+              laneIndex: 0,
               rect: rect,
               isSelected: clip.id == selectedClipId,
+              isOrphan: isOrphan,
             ),
           );
         }
@@ -1291,10 +2025,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
 
     visuals.sort((a, b) {
-      final rowCmp = a.row.compareTo(b.row);
+      final rowCmp = a.displayRow.compareTo(b.displayRow);
       if (rowCmp != 0) return rowCmp;
-      final laneCmp = a.laneIndex.compareTo(b.laneIndex);
-      if (laneCmp != 0) return laneCmp;
       final startCmp = a.clip.startMs.compareTo(b.clip.startMs);
       if (startCmp != 0) return startCmp;
       if (a.isSelected != b.isSelected) {
@@ -1303,17 +2035,74 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return a.clip.id.compareTo(b.clip.id);
     });
     return visuals;
+    */
   }
 
   _TimelineAutomationClipVisual? _timelineAutomationClipAt(Offset localPos) {
-    final visuals = _timelineAutomationClipVisuals();
-    for (int i = visuals.length - 1; i >= 0; i--) {
-      final visual = visuals[i];
-      if (visual.rect.contains(localPos)) {
-        return visual;
+    final visuals = _timelineAutomationClipVisualCache.isNotEmpty
+        ? _timelineAutomationClipVisualCache
+        : _timelineAutomationClipVisuals();
+    if (visuals.isEmpty) return null;
+    _TimelineAutomationClipVisual? best;
+
+    int compareVisuals(
+      _TimelineAutomationClipVisual a,
+      _TimelineAutomationClipVisual b,
+    ) {
+      final rowCmp = a.displayRow.compareTo(b.displayRow);
+      if (rowCmp != 0) return rowCmp;
+      final startCmp = a.clip.startMs.compareTo(b.clip.startMs);
+      if (startCmp != 0) return startCmp;
+      if (a.isSelected != b.isSelected) {
+        return a.isSelected ? 1 : -1;
+      }
+      return a.clip.id.compareTo(b.clip.id);
+    }
+
+    for (final visual in visuals) {
+      if (!visual.rect.contains(localPos)) continue;
+      if (best == null || compareVisuals(visual, best!) > 0) {
+        best = visual;
       }
     }
-    return null;
+
+    return best;
+  }
+
+  Rect _automationClipMoveHandleRect(_TimelineAutomationClipVisual visual) {
+    final width = math.min(22.0, math.max(14.0, visual.rect.width * 0.22));
+    final height = math.min(20.0, math.max(14.0, visual.rect.height - 8.0));
+    final top = visual.rect.top + ((visual.rect.height - height) / 2.0);
+    return Rect.fromLTWH(
+      visual.rect.left + 4.0,
+      top,
+      width,
+      height,
+    );
+  }
+
+  bool _automationClipLeftTrimHandleHit(
+    _TimelineAutomationClipVisual visual,
+    Offset localPos,
+  ) {
+    final hitWidth = math.min(
+      math.max(12.0, visual.rect.width * 0.18),
+      20.0,
+    );
+    return localPos.dx >= visual.rect.left &&
+        localPos.dx <= visual.rect.left + hitWidth;
+  }
+
+  bool _automationClipRightTrimHandleHit(
+    _TimelineAutomationClipVisual visual,
+    Offset localPos,
+  ) {
+    final hitWidth = math.min(
+      math.max(12.0, visual.rect.width * 0.18),
+      20.0,
+    );
+    return localPos.dx <= visual.rect.right &&
+        localPos.dx >= visual.rect.right - hitWidth;
   }
 
   AutomationClipSnapshot? _activeDraggedAutomationClip() {
@@ -1705,6 +2494,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   @override
   void initState() {
     super.initState();
+    widget.controller?._bind(
+      ensureRowExpanded: ensureRowExpanded,
+      collapseExpandedRows: collapseExpandedRows,
+    );
     _syncRowUiState();
     _verticalScrollController.addListener(() {
       setState(() {
@@ -1723,6 +2516,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   @override
   void didUpdateWidget(covariant AudioCanvasTimeline oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.controller, widget.controller)) {
+      oldWidget.controller?._unbind(
+        ensureRowExpanded: ensureRowExpanded,
+        collapseExpandedRows: collapseExpandedRows,
+      );
+      widget.controller?._bind(
+        ensureRowExpanded: ensureRowExpanded,
+        collapseExpandedRows: collapseExpandedRows,
+      );
+    }
     if (oldWidget.clips.length != widget.clips.length) {
       _syncSelectionAfterClipTopologyChange();
       if (_pendingPaintPastes.isNotEmpty) {
@@ -1757,6 +2560,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     } else if (oldWidget.rows.length != widget.rows.length) {
       _syncRowUiState();
     }
+    if (_automationEditorRow != null &&
+        (_automationEditorRow! < 0 || _automationEditorRow! >= _rowCount)) {
+      _automationEditorRow = null;
+      _automationEditorTargetId = null;
+    }
+    final liveRowIds = widget.rows.map((row) => row.rowId).toSet();
+    _rowEffectParameterRevealers
+        .removeWhere((rowId, _) => !liveRowIds.contains(rowId));
     _selectedAutomationClipByLane.removeWhere((laneKey, clipId) {
       final parts = laneKey.split('|');
       if (parts.length < 2) return true;
@@ -1786,6 +2597,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void dispose() {
     _cancelHeaderHoldTimer();
     _cancelMagnetHoldTimer();
+    widget.controller?._unbind(
+      ensureRowExpanded: ensureRowExpanded,
+      collapseExpandedRows: collapseExpandedRows,
+    );
     _verticalScrollController.dispose();
     super.dispose();
   }
@@ -1871,6 +2686,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     setState(() {
       if (!wasSelected) {
+        if (_automationEditorRow != null && _automationEditorRow != tappedRow) {
+          _automationEditorRow = null;
+          _automationEditorTargetId = null;
+        }
         _selectedRowIndex = tappedRow;
         widget.onSelectRow(tappedRow);
         for (int i = 0; i < _rowExpanded.length; i++) {
@@ -1880,6 +2699,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
 
       final shouldExpand = !_rowExpanded[tappedRow];
+      if (!shouldExpand && _automationEditorRow == tappedRow) {
+        _automationEditorRow = null;
+        _automationEditorTargetId = null;
+      }
       for (int i = 0; i < _rowExpanded.length; i++) {
         _rowExpanded[i] = shouldExpand && i == tappedRow;
       }
@@ -1888,14 +2711,43 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
       if (oldExpanded[i] != _rowExpanded[i]) {
         widget.onToggleExpanded(i);
+        widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
       }
     }
+  }
+
+  void ensureRowExpanded(int row, {int tab = 0}) {
+    if (row < 0 || row >= _rowCount) return;
+    final normalizedTab = _normalizeExpandedTab(tab);
+    setState(() {
+      _selectedRowIndex = row;
+      widget.onSelectRow(row);
+      for (int i = 0; i < _rowCount; i++) {
+        _rowExpanded[i] = i == row;
+      }
+      _expandedTab[row] = normalizedTab;
+      if (normalizedTab != 2) {
+        _automationEditorRow = null;
+        _automationEditorTargetId = null;
+      }
+    });
+  }
+
+  void collapseExpandedRows() {
+    if (_rowExpanded.every((expanded) => !expanded)) return;
+    setState(() {
+      for (int i = 0; i < _rowExpanded.length; i++) {
+        _rowExpanded[i] = false;
+      }
+      _automationEditorRow = null;
+      _automationEditorTargetId = null;
+    });
   }
 
   void _syncRowUiState() {
     while (_rowExpanded.length < _rowCount) {
       _rowExpanded.add(false);
-      _expandedTab.add(0);
+      _expandedTab.add(_normalizeExpandedTab(0));
       _effectsPanelHeights.add(_kEffectsPanelMinHeight);
     }
     if (_rowExpanded.length > _rowCount) {
@@ -1952,7 +2804,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       ..clear()
       ..addAll(
         widget.rows
-            .map((r) => oldTabById[r.rowId] ?? 0)
+            .map((r) => _normalizeExpandedTab(oldTabById[r.rowId] ?? 0))
             .toList(growable: false),
       );
     _effectsPanelHeights
@@ -2034,13 +2886,20 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return MediaQuery.of(context).size.width - kHeaderWidth;
   }
 
-  // Helper to get the playhead position in pixels (center of the viewport)
+  // Anchor the playhead to the device-screen center, translated into
+  // timeline-local coordinates.
   double _getPlayheadPx(BuildContext context) {
-    return _getViewportWidth(context) / 2;
+    return (MediaQuery.of(context).size.width / 2) - kHeaderWidth;
+  }
+
+  int _normalizeExpandedTab(int tab) {
+    if (tab == 1 || tab == 2) return tab;
+    return 0;
   }
 
   bool _isFixedHeightExpandedTab(int tab) {
-    return tab == 0 || tab == 2;
+    final normalized = _normalizeExpandedTab(tab);
+    return normalized == 0 || normalized == 2;
   }
 
   double get _totalTimelineHeight {
@@ -2075,22 +2934,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   bool _isAutomationLaneTabForRow(int row) {
     if (row < 0 || row >= _rowCount) return false;
-    return _expandedTab[row] == 0 || _expandedTab[row] == 2;
+    final tab = _normalizeExpandedTab(_expandedTab[row]);
+    return tab == 0 || tab == 2 || _isAutomationEditorOpenForRow(row);
   }
 
   String _activeAutomationTargetIdForRow(int row) {
-    if (_expandedTab[row] == 2) {
-      return widget.getSelectedAutomationTargetId(row);
+    if (row < 0 || row >= _rowCount) return 'volume';
+    final normalizedTab = _normalizeExpandedTab(_expandedTab[row]);
+    if (normalizedTab == 2 || _isAutomationEditorOpenForRow(row)) {
+      final selected = widget.getSelectedAutomationTargetId(row).trim();
+      return _resolveAutomationTabTargetId(row, selected);
     }
     return 'volume';
   }
 
   List<AutomationPoint> _activeAutomationPointsForRow(int row) {
     final targetId = _activeAutomationTargetIdForRow(row);
-    final selectedClip = _selectedAutomationClipForTarget(row, targetId);
-    if (selectedClip != null) {
-      return _automationClipPointsToAbsolute(selectedClip);
-    }
     if (targetId == 'volume') {
       return widget.rowVolumeAutomation[row];
     }
@@ -2102,14 +2961,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     String targetId,
     List<AutomationPoint> points,
   ) {
-    if (_selectedAutomationClipForTarget(row, targetId) != null) {
-      _setSelectedAutomationClipPointsForTarget(
-        row,
-        targetId,
-        points,
-      );
-      return;
-    }
     if (targetId == 'volume') {
       widget.rowVolumeAutomation[row] = points;
       widget.setTrackAutomationPoints(
@@ -2119,6 +2970,95 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return;
     }
     widget.setAutomationPointsForTarget(row, targetId, points);
+  }
+
+  void _commitAutomationPointsForTarget(
+    int row,
+    String targetId,
+    List<AutomationPoint> before,
+    List<AutomationPoint> after,
+  ) {
+    _setActiveAutomationPointsForRow(row, targetId, after);
+    if (targetId == 'volume') {
+      widget.onAutomationCommit?.call(row, before, after);
+      return;
+    }
+    widget.onAutomationTargetCommit?.call(row, targetId, before, after);
+  }
+
+  double _automationValueAtMs(List<AutomationPoint> points, double ms) {
+    if (points.isEmpty) return 0.5;
+    final sorted = points.map((p) => p.copy()).toList(growable: false)
+      ..sort((a, b) => a.x.compareTo(b.x));
+    if (ms <= sorted.first.x) return sorted.first.volume;
+    for (int i = 0; i < sorted.length - 1; i++) {
+      final a = sorted[i];
+      final b = sorted[i + 1];
+      if (ms < a.x || ms > b.x) continue;
+      final span = b.x - a.x;
+      if (span.abs() < 1e-9) return b.volume;
+      final t = ((ms - a.x) / span).clamp(0.0, 1.0).toDouble();
+      return a.volume + (b.volume - a.volume) * t;
+    }
+    return sorted.last.volume;
+  }
+
+  List<AutomationPoint> _automationPointsForRange(
+    List<AutomationPoint> points, {
+    required double startMs,
+    required double endMs,
+    required bool relativeToStart,
+  }) {
+    final safeStart = math.min(startMs, endMs);
+    final safeEnd = math.max(startMs, endMs);
+    if ((safeEnd - safeStart).abs() < 1e-6) {
+      final value = _automationValueAtMs(points, safeStart);
+      return <AutomationPoint>[
+        AutomationPoint(x: relativeToStart ? 0.0 : safeStart, volume: value),
+      ];
+    }
+    final sorted = points.map((p) => p.copy()).toList(growable: false)
+      ..sort((a, b) => a.x.compareTo(b.x));
+    final out = <AutomationPoint>[];
+    final startValue = _automationValueAtMs(sorted, safeStart);
+    final endValue = _automationValueAtMs(sorted, safeEnd);
+    final offset = relativeToStart ? safeStart : 0.0;
+    out.add(AutomationPoint(x: safeStart - offset, volume: startValue));
+    for (final point in sorted) {
+      if (point.x <= safeStart + 1e-6 || point.x >= safeEnd - 1e-6) continue;
+      out.add(AutomationPoint(x: point.x - offset, volume: point.volume));
+    }
+    out.add(AutomationPoint(x: safeEnd - offset, volume: endValue));
+    out.sort((a, b) => a.x.compareTo(b.x));
+    return out;
+  }
+
+  bool _hasActiveLoopRange() {
+    return _loopEnabled &&
+        _loopStartMs != null &&
+        _loopEndMs != null &&
+        _loopEndMs! > _loopStartMs!;
+  }
+
+  bool _isAutomationRangeSelectionModeFor(int row, String targetId) {
+    if (!_automationRangeSelectionMode) return false;
+    if (_automationRangeSelectionRow != row) return false;
+    return _automationRangeSelectionTargetId == targetId;
+  }
+
+  void _clearAutomationRangeSelectionMode({
+    bool clearHighlightedSegment = false,
+  }) {
+    _automationRangeSelectionMode = false;
+    _automationRangeSelectionRow = null;
+    _automationRangeSelectionTargetId = null;
+    _automationRangeSelectionStartMs = null;
+    _automationRangeSelectionEndMs = null;
+    if (clearHighlightedSegment) {
+      _highlightedSegmentRow = null;
+      _highlightedSegmentStartMs = null;
+      _highlightedSegmentEndMs = null;
+    }
   }
 
   double _normalizeValueToAutomationRange(
@@ -2159,13 +3099,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return fallback;
   }
 
-  List<AutomationPoint> _defaultAutomationLanePoints(double normalizedValue) {
-    final value = normalizedValue.clamp(0.0, 1.0).toDouble();
-    return <AutomationPoint>[
-      AutomationPoint(x: 0.0, volume: value),
-    ];
-  }
-
   bool _automationPointListsEqual(
     List<AutomationPoint> a,
     List<AutomationPoint> b,
@@ -2181,98 +3114,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return true;
   }
 
-  bool _automationLaneLooksDefault(
-    List<AutomationPoint> points,
-    double defaultNormalized,
-  ) {
-    if (points.isEmpty) return true;
-    final value = defaultNormalized.clamp(0.0, 1.0).toDouble();
-    bool near(double a, double b, {double eps = 1e-3}) => (a - b).abs() <= eps;
-    if (points.length == 1) {
-      return near(points.first.x, 0.0, eps: 1.0) &&
-          near(points.first.volume, value);
-    }
-    if (points.length == 2) {
-      final sorted = [...points]..sort((a, b) => a.x.compareTo(b.x));
-      final start = sorted.first;
-      final end = sorted.last;
-      final nearStart = near(start.x, 0.0, eps: 1.0);
-      final nearEnd = near(end.x, _maxDurationMs, eps: 2.0);
-      return nearStart &&
-          nearEnd &&
-          near(start.volume, value) &&
-          near(end.volume, value);
-    }
-    return false;
-  }
-
-  bool _automationTargetHasEdits(
-    int row,
-    String targetId, {
-    required double defaultNormalized,
-  }) {
-    final clips = widget.getAutomationClipsForTarget(row, targetId);
-    if (clips.isNotEmpty) return true;
-    final points = targetId == 'volume'
-        ? widget.rowVolumeAutomation[row]
-        : widget.getAutomationPointsForTarget(row, targetId);
-    return !_automationLaneLooksDefault(points, defaultNormalized);
-  }
-
-  void _resetAutomationLaneForTarget(
-    int row,
-    String targetId, {
-    required double defaultNormalized,
-  }) {
-    final oldPoints = (targetId == 'volume'
-            ? widget.rowVolumeAutomation[row]
-            : widget.getAutomationPointsForTarget(row, targetId))
-        .map((p) => p.copy())
-        .toList(growable: false);
-    final nextPoints = _defaultAutomationLanePoints(defaultNormalized);
-    final pointsChanged = !_automationPointListsEqual(oldPoints, nextPoints);
-
-    final oldClips = _cloneAutomationClips(
-      widget.getAutomationClipsForTarget(row, targetId),
-    );
-    final clipsChanged = oldClips.isNotEmpty;
-
-    if (!pointsChanged && !clipsChanged) return;
-
-    if (pointsChanged) {
-      _setActiveAutomationPointsForRow(row, targetId, nextPoints);
-      if (targetId == 'volume') {
-        widget.onAutomationCommit?.call(row, oldPoints, nextPoints);
-      } else {
-        widget.onAutomationTargetCommit
-            ?.call(row, targetId, oldPoints, nextPoints);
-      }
-    }
-
-    if (clipsChanged) {
-      widget.setAutomationClipsForTarget(
-        row,
-        targetId,
-        const <AutomationClipSnapshot>[],
-      );
-      widget.onAutomationClipsCommit?.call(
-        row,
-        targetId,
-        oldClips,
-        const <AutomationClipSnapshot>[],
-      );
-    }
-
-    _setSelectedAutomationClipFor(row, targetId, null);
-    setState(() {});
-  }
-
   String _automationLaneKey(int row, String targetId) => '$row|$targetId';
 
   List<AutomationClipSnapshot> _cloneAutomationClips(
     List<AutomationClipSnapshot> clips,
   ) {
     return clips.map((clip) => clip.copyWith()).toList(growable: false);
+  }
+
+  String _newAutomationPatternId(int row, String targetId) {
+    return 'apat_${row}_${targetId}_${DateTime.now().microsecondsSinceEpoch}_${const Uuid().v4()}';
   }
 
   bool _automationClipListsEqual(
@@ -2286,6 +3137,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       final y = b[i];
       if (x.id != y.id ||
           x.targetId != y.targetId ||
+          x.label != y.label ||
+          x.patternId != y.patternId ||
           x.row != y.row ||
           x.lane != y.lane ||
           x.muted != y.muted ||
@@ -2422,7 +3275,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_automationPointListsEqual(selected.points, relative)) {
       return false;
     }
-    current[selectedIndex] = selected.copyWith(points: relative);
+    final patternId = selected.patternId.trim();
+    if (patternId.isNotEmpty) {
+      for (int i = 0; i < current.length; i++) {
+        if (current[i].patternId.trim() != patternId) continue;
+        current[i] = current[i].copyWith(points: relative);
+      }
+    } else {
+      current[selectedIndex] = selected.copyWith(points: relative);
+    }
     widget.setAutomationClipsForTarget(row, targetId, current);
     _setSelectedAutomationClipFor(
       row,
@@ -2435,15 +3296,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   void _focusAutomationEditorForRow(int row, String targetId) {
     if (row < 0 || row >= _rowCount) return;
-    _selectedRowIndex = row;
-    widget.onSelectRow(row);
-    for (int i = 0; i < _rowCount; i++) {
-      _rowExpanded[i] = i == row;
-    }
-    _expandedTab[row] = 2;
-    if (targetId.trim().isNotEmpty) {
-      widget.setSelectedAutomationTargetId(row, targetId);
-    }
+    setState(() {
+      _setAutomationEditorFor(row, targetId);
+    });
   }
 
   double _defaultAutomationClipLengthMs() {
@@ -2478,12 +3333,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     setState(() {});
   }
 
-  void _insertAutomationClipForActiveTarget(
-    int row,
-    String targetId,
-    String targetLabel,
-    double initialNormalized,
-  ) {
+  void _insertAutomationClipForTarget({
+    required int row,
+    required String targetId,
+    required String targetLabel,
+    required double initialNormalized,
+    int? lane,
+  }) {
+    widget.setSelectedAutomationTargetId(row, targetId);
     final before = _cloneAutomationClips(
       widget.getAutomationClipsForTarget(row, targetId),
     );
@@ -2492,15 +3349,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         : widget.playheadMs;
     final startMs = startRaw.clamp(0.0, _maxDurationMs).toDouble();
     final lengthMs = _defaultAutomationClipLengthMs();
-    final lane = _focusedAutomationLaneForRow(row);
+    final resolvedLane =
+        lane ?? _suggestAutomationLaneForClip(row, startMs, lengthMs);
+    final visualRow = _preferredAutomationClipRowForTarget(row, targetId);
     final id =
-        'ui_clip_${DateTime.now().microsecondsSinceEpoch}_${row}_${targetId}';
+        'ui_clip_${DateTime.now().microsecondsSinceEpoch}_${row}_$targetId';
     final newClip = AutomationClipSnapshot(
       id: id,
       targetId: targetId,
       label: targetLabel.trim().isEmpty ? targetId : targetLabel,
-      row: row,
-      lane: lane,
+      patternId: '',
+      row: visualRow,
+      lane: resolvedLane,
       startMs: startMs,
       lengthMs: lengthMs,
       muted: false,
@@ -2510,32 +3370,291 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       ),
     );
     final next = [...before, newClip];
-    _setSelectedAutomationClipFor(row, targetId, id, lane: lane);
+    _setSelectedAutomationClipFor(row, targetId, id, lane: resolvedLane);
     _applyAutomationClipsWithCommit(row, targetId, before, next);
   }
 
-  void _duplicateSelectedAutomationClipForTarget(
+  int _suggestAutomationLaneForClip(
     int row,
-    String targetId,
+    double startMs,
+    double lengthMs,
   ) {
+    return 0;
+  }
+
+  Future<void> _revealRowAutomationTarget(int row, String targetId) async {
+    if (row < 0 || row >= _rowCount) return;
+    final targetMeta = _automationTargetMetaById(row, targetId);
+    final isOrphan = targetMeta?['isOrphan'] == true;
+    final effectIndex = (targetMeta?['effectIndex'] as num?)?.toInt() ?? -1;
+    final paramId = (targetMeta?['paramId'] ?? targetId).toString().trim();
+    final parsedTargetId = targetMeta == null
+        ? targetId.trim().toLowerCase()
+        : (targetMeta['id'] ?? targetId).toString().trim().toLowerCase();
+    _setExpandedTabForRow(
+      row: row,
+      tab: effectIndex >= 0 && parsedTargetId != 'volume' ? 1 : 0,
+      selectRow: true,
+      expandOnlyThisRow: true,
+      selectedAutomationTargetId: targetId,
+    );
+
+    if (effectIndex < 0 || parsedTargetId == 'volume') {
+      final haloKeys = <String>[
+        'row:$row:volume_tab',
+        'row:$row:mixer',
+      ];
+      if (parsedTargetId.contains('gain')) {
+        haloKeys.add('row:$row:gain');
+        haloKeys.add('row:$row:param:gain');
+      } else if (parsedTargetId.contains('pan')) {
+        haloKeys.add('row:$row:pan');
+        haloKeys.add('row:$row:param:pan');
+      } else {
+        haloKeys.add('row:$row:volume_lane');
+        haloKeys.add('row:$row:param:volume');
+      }
+      _triggerTimelineHalos(haloKeys);
+      if (isOrphan) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text(
+                'This automation target is orphaned. Undo the plugin removal or re-add the plugin to relink it.',
+              ),
+            ),
+          );
+      }
+      return;
+    }
+
+    if (isOrphan) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'This automation target is orphaned. Undo the plugin removal or re-add the plugin to relink it.',
+            ),
+          ),
+        );
+      return;
+    }
+
+    // Follow the same tab transition lifecycle as manual Effects-tab navigation
+    // before opening the target parameter page.
+    _refreshRowFx(row);
+    await WidgetsBinding.instance.endOfFrame;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    final rawLabel = (targetMeta?['label'] ?? '').toString().trim();
+    final fallbackParamName = rawLabel.contains('•')
+        ? rawLabel.split('•').last.trim()
+        : (targetMeta?['paramId'] ?? paramId).toString().trim();
+    final fallbackSlug = _haloSlug(fallbackParamName);
+    final paramIdSlug = _haloSlug(paramId);
+    final revealer = await _waitForRowParameterRevealer(row);
+    if (revealer != null) {
+      await revealer(effectIndex, paramId);
+      if (!mounted) return;
+      if (fallbackParamName.isNotEmpty &&
+          fallbackParamName.toLowerCase() != paramId.toLowerCase()) {
+        await revealer(effectIndex, fallbackParamName);
+      }
+      if (!mounted) return;
+      final haloKeys = <String>[
+        'row:$row:effects_tab',
+        'row:$row:fx_index:$effectIndex',
+        if (paramId.isNotEmpty) 'row:$row:fx_index:$effectIndex:param:$paramId',
+        if (paramId.isNotEmpty)
+          'row:$row:fx_index:$effectIndex:param:${paramId.toLowerCase()}',
+        if (paramIdSlug.isNotEmpty)
+          'row:$row:fx_index:$effectIndex:param:$paramIdSlug',
+        if (fallbackParamName.isNotEmpty)
+          'row:$row:fx_index:$effectIndex:param:$fallbackParamName',
+        if (fallbackParamName.isNotEmpty)
+          'row:$row:fx_index:$effectIndex:param:${fallbackParamName.toLowerCase()}',
+        if (fallbackSlug.isNotEmpty)
+          'row:$row:fx_index:$effectIndex:param:$fallbackSlug',
+        if (fallbackParamName.isNotEmpty) 'row:$row:param:$fallbackParamName',
+        if (fallbackSlug.isNotEmpty) 'row:$row:param:$fallbackSlug',
+      ];
+      _triggerTimelineHalos(haloKeys);
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      if (!mounted) return;
+      _triggerTimelineHalos(haloKeys);
+    }
+  }
+
+  void _openAutomationClipEditor(_TimelineAutomationClipVisual clipVisual) {
+    setState(() {
+      _setSelectedAutomationClipFor(
+        clipVisual.row,
+        clipVisual.targetId,
+        clipVisual.clip.id,
+        lane: clipVisual.clip.lane,
+      );
+      _setAutomationEditorFor(clipVisual.row, clipVisual.targetId);
+      _revealAutomationRangeInViewport(
+        clipVisual.clip.startMs,
+        clipVisual.clip.startMs + clipVisual.clip.lengthMs,
+      );
+    });
+  }
+
+  Future<void> _revealAutomationTargetForClip(
+    _TimelineAutomationClipVisual clipVisual,
+  ) async {
+    _setSelectedAutomationClipFor(
+      clipVisual.row,
+      clipVisual.targetId,
+      clipVisual.clip.id,
+      lane: clipVisual.clip.lane,
+    );
+    await widget.onRevealAutomationTarget?.call(
+      clipVisual.row,
+      clipVisual.targetId,
+    );
+    if (!mounted) return;
+    await _revealRowAutomationTarget(clipVisual.row, clipVisual.targetId);
+  }
+
+  void _copyAutomationClipToClipboard(
+      _TimelineAutomationClipVisual clipVisual) {
+    _automationClipClipboard = _AutomationClipClipboardEntry(
+      targetId: clipVisual.targetId,
+      targetLabel: clipVisual.targetLabel,
+      clip: clipVisual.clip.copyWith(),
+    );
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            'Clone ready for ${clipVisual.targetLabel}',
+          ),
+          duration: const Duration(milliseconds: 1200),
+        ),
+      );
+  }
+
+  String? _automationPasteTargetIdForRow(int row) {
+    final clipboard = _automationClipClipboard;
+    if (clipboard == null || row < 0 || row >= _rowCount) return null;
+    final targets = widget.getAutomationTargetsForRow(row);
+    for (final target in targets) {
+      final candidate = (target['id'] ?? '').toString().trim();
+      if (candidate == clipboard.targetId) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  bool _canPasteAutomationClipAt(int row) =>
+      _automationPasteTargetIdForRow(row) != null;
+
+  void _pasteAutomationClipAt(int row, double startMs) {
+    final clipboard = _automationClipClipboard;
+    final targetId = _automationPasteTargetIdForRow(row);
+    if (clipboard == null || targetId == null) return;
     final before = _cloneAutomationClips(
       widget.getAutomationClipsForTarget(row, targetId),
     );
-    final selectedIndex =
-        _selectedAutomationClipIndexFor(row, targetId, before);
-    if (selectedIndex == null) return;
-    final clip = before[selectedIndex];
-    final startMs = (clip.startMs + clip.lengthMs).clamp(0.0, _maxDurationMs);
-    final duplicate = clip.copyWith(
-      id: 'ui_clip_${DateTime.now().microsecondsSinceEpoch}_${row}_${targetId}',
-      startMs: startMs.toDouble(),
+    final plan = buildAutomationClipClonePlan(
+      existingClips: before,
+      clipboardClip: clipboard.clip,
+      row: row,
+      targetId: targetId,
+      startMs: startMs,
+      maxDurationMs: _maxDurationMs,
+      createClipId: () =>
+          'ui_clip_${DateTime.now().microsecondsSinceEpoch}_${row}_$targetId',
+      createPatternId: () => _newAutomationPatternId(row, targetId),
     );
-    final next = [...before, duplicate];
+    _automationClipClipboard = _AutomationClipClipboardEntry(
+      targetId: clipboard.targetId,
+      targetLabel: clipboard.targetLabel,
+      clip: plan.updatedClipboardClip,
+    );
+    widget.setSelectedAutomationTargetId(row, targetId);
     _setSelectedAutomationClipFor(
       row,
       targetId,
-      duplicate.id,
-      lane: duplicate.lane,
+      plan.clonedClip.id,
+      lane: plan.clonedClip.lane,
+    );
+    _applyAutomationClipsWithCommit(row, targetId, before, plan.nextClips);
+  }
+
+  void _clearClipboard() {
+    widget.onClearCopiedClip?.call();
+    _automationClipClipboard = null;
+    _automationPointsClipboard = null;
+    _automationAreaClipboard = null;
+  }
+
+  Future<void> _handleAutomationClipMenuAction(
+    String action,
+    _TimelineAutomationClipVisual clipVisual,
+  ) async {
+    if (!mounted) return;
+    setState(_clearAutomationClipMenu);
+    switch (action) {
+      case 'reveal':
+        await _revealAutomationTargetForClip(clipVisual);
+        break;
+      case 'open':
+        _openAutomationClipEditor(clipVisual);
+        break;
+      case 'copy':
+        _copyAutomationClipToClipboard(clipVisual);
+        break;
+      case 'make_unique':
+        _makeSelectedAutomationClipUniqueForTarget(
+          clipVisual.row,
+          clipVisual.targetId,
+          clipId: clipVisual.clip.id,
+        );
+        break;
+      case 'delete':
+        _deleteSelectedAutomationClipForTarget(
+          clipVisual.row,
+          clipVisual.targetId,
+        );
+        break;
+    }
+  }
+
+  void _makeSelectedAutomationClipUniqueForTarget(
+    int row,
+    String targetId, {
+    String? clipId,
+  }) {
+    final before = _cloneAutomationClips(
+      widget.getAutomationClipsForTarget(row, targetId),
+    );
+    final requestedClipId = (clipId ?? '').trim();
+    final int? selectedIndex = requestedClipId.isNotEmpty
+        ? before.indexWhere((clip) => clip.id == requestedClipId)
+        : _selectedAutomationClipIndexFor(row, targetId, before);
+    if (selectedIndex == null ||
+        selectedIndex < 0 ||
+        selectedIndex >= before.length) {
+      return;
+    }
+    final current = before[selectedIndex];
+    if (current.patternId.trim().isEmpty) {
+      return;
+    }
+    final next = List<AutomationClipSnapshot>.from(before);
+    next[selectedIndex] = current.copyWith(patternId: '');
+    _setSelectedAutomationClipFor(
+      row,
+      targetId,
+      next[selectedIndex].id,
+      lane: next[selectedIndex].lane,
     );
     _applyAutomationClipsWithCommit(row, targetId, before, next);
   }
@@ -2557,28 +3676,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       targetId,
       next.isNotEmpty ? next.last.id : null,
       lane: next.isNotEmpty ? next.last.lane : null,
-    );
-    _applyAutomationClipsWithCommit(row, targetId, before, next);
-  }
-
-  void _toggleMuteSelectedAutomationClipForTarget(
-    int row,
-    String targetId,
-  ) {
-    final before = _cloneAutomationClips(
-      widget.getAutomationClipsForTarget(row, targetId),
-    );
-    final selectedIndex =
-        _selectedAutomationClipIndexFor(row, targetId, before);
-    if (selectedIndex == null) return;
-    final next = List<AutomationClipSnapshot>.from(before);
-    final selected = next[selectedIndex];
-    next[selectedIndex] = selected.copyWith(muted: !selected.muted);
-    _setSelectedAutomationClipFor(
-      row,
-      targetId,
-      next[selectedIndex].id,
-      lane: next[selectedIndex].lane,
     );
     _applyAutomationClipsWithCommit(row, targetId, before, next);
   }
@@ -2608,8 +3705,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     String targetId,
     AutomationClipSnapshot clip,
     Offset localPos,
-    double clipWidthPx,
-  ) {
+    double clipWidthPx, [
+    String? modeOverride,
+  ]) {
     _automationClipDragBefore = _cloneAutomationClips(
       widget.getAutomationClipsForTarget(row, targetId),
     );
@@ -2622,7 +3720,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _kAutomationClipResizeHandleWidthPx,
       clipWidthPx * 0.4,
     );
-    if (clipWidthPx <= (handleWidth * 2.0)) {
+    if (modeOverride != null && modeOverride.isNotEmpty) {
+      _automationClipDragMode = modeOverride;
+    } else if (clipWidthPx <= (handleWidth * 2.0)) {
       _automationClipDragMode = 'move';
     } else {
       final onLeftHandle = localPos.dx <= handleWidth;
@@ -2672,13 +3772,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       if (_magnetEnabled) {
         nextStart = _segmentStartMsForTap(nextStart);
       }
-      nextStart = nextStart.clamp(0.0, _maxDurationMs).toDouble();
-      final nextLane = _isAutomationTimelineCollapsedForRow(row)
-          ? math.max(0, origin.lane)
-          : _timelineAutomationLaneIndexAtLocalY(row, localPos.dy);
+      nextStart = math.max(0.0, nextStart).toDouble();
+      final hoveredRow = _rowForLocalY(localPos.dy);
+      final nextRow =
+          (hoveredRow ?? (localPos.dy < 0 ? 0 : math.max(0, _rowCount - 1)))
+              .clamp(0, math.max(0, _rowCount - 1))
+              .toInt();
       current[index] = origin.copyWith(
         startMs: nextStart,
-        lane: nextLane,
+        row: nextRow,
+        lane: origin.lane,
       );
     } else if (mode == 'trim_end') {
       var nextEndMs = origin.startMs + origin.lengthMs + deltaMs;
@@ -2714,7 +3817,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
 
     widget.setAutomationClipsForTarget(row, targetId, current);
-    _setFocusedAutomationLaneForRow(row, current[index].lane);
+    _setFocusedAutomationLaneForRow(row, origin.lane);
     setState(() {});
   }
 
@@ -2749,17 +3852,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   void _automationPanStart(int row, Offset pos, double laneHeight) {
     if (!_isAutomationLaneTabForRow(row)) return;
-    final targetId = _activeAutomationTargetIdForRow(row);
-    final selectedClip = _selectedAutomationClipForTarget(row, targetId);
-    if (selectedClip != null) {
-      _automationPointEditBeforeClips = _cloneAutomationClips(
-        widget.getAutomationClipsForTarget(row, targetId),
-      );
-      _automationPointEditTargetId = targetId;
-    } else {
-      _automationPointEditBeforeClips = null;
-      _automationPointEditTargetId = null;
-    }
     final lane = _activeAutomationPointsForRow(row);
     _automationBefore = lane.map((p) => p.copy()).toList();
 
@@ -2767,9 +3859,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     setState(() {
       _interactionMode = 'automation';
       _isUserInteracting = true;
+      _automationActiveLaneHeight = laneHeight;
     });
-
-    if (!_rowExpanded[row]) return;
 
     for (int i = 0; i < lane.length; i++) {
       final p = lane[i];
@@ -2783,7 +3874,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       if ((pos - Offset(px, py)).distance < 20) {
         // compute the offset between finger and point Y
         final p = lane[i];
-        final laneHeight = kExpandedRowHeight;
         final py = _automationLaneLocalY(p.volume, laneHeight);
         setState(() {
           _interactionMode = 'automation';
@@ -2843,7 +3933,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     // ===== 2. Convert finger Y → volume (lane-local coords) =====
     const verticalPadding = 12.0;
-    final laneHeight = kExpandedRowHeight;
+    final laneHeight = _automationActiveLaneHeight ?? kExpandedRowHeight;
     final usableHeight = laneHeight - verticalPadding * 2;
 
     // compensate for initial finger offset so there is NO jump
@@ -2871,20 +3961,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       final targetId = _activeAutomationTargetIdForRow(row);
       final before = _automationBefore;
       final after = _activeAutomationPointsForRow(row);
-      final beforeClips = _automationPointEditBeforeClips;
-      final beforeClipTargetId = _automationPointEditTargetId;
-
-      if (beforeClips != null &&
-          beforeClipTargetId == targetId &&
-          _selectedAutomationClipForTarget(row, targetId) != null) {
-        final afterClips = _cloneAutomationClips(
-          widget.getAutomationClipsForTarget(row, targetId),
-        );
-        if (!_automationClipListsEqual(beforeClips, afterClips)) {
-          widget.onAutomationClipsCommit
-              ?.call(row, targetId, beforeClips, afterClips);
-        }
-      } else if (before != null) {
+      if (before != null) {
         final copiedAfter = after.map((p) => p.copy()).toList(growable: false);
         if (targetId == 'volume') {
           if (widget.onAutomationCommit != null) {
@@ -2896,21 +3973,32 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
 
       _automationBefore = null;
-      _automationPointEditBeforeClips = null;
-      _automationPointEditTargetId = null;
       setState(() {
         _automationDragRow = null;
         _automationDragIndex = null;
         _interactionMode = '';
         _isUserInteracting = false;
         _automationFingerOffsetY = null;
+        _automationActiveLaneHeight = null;
       });
     }
   }
 
+  void _cancelAutomationPointInteraction() {
+    if (_interactionMode != 'automation') return;
+    setState(() {
+      _automationBefore = null;
+      _automationDragRow = null;
+      _automationDragIndex = null;
+      _interactionMode = '';
+      _isUserInteracting = false;
+      _automationFingerOffsetY = null;
+      _automationActiveLaneHeight = null;
+    });
+  }
+
   void _automationLaneBackgroundPanStart() {
-    if (_interactionMode == 'automation' ||
-        _interactionMode == 'automation_clip') {
+    if (_interactionMode == 'automation' || _hasActiveAutomationClipDrag) {
       return;
     }
     _clearPastePopup();
@@ -2983,6 +4071,198 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return _activeTool == _TimelineTool.stretch && !clip.isMidi;
   }
 
+  Widget _buildInlineClipSection({
+    required String title,
+    String? subtitle,
+    required Widget child,
+    bool compact = false,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.fromLTRB(
+        compact ? 9 : 12,
+        compact ? 8 : 11,
+        compact ? 9 : 12,
+        compact ? 9 : 12,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.055),
+        borderRadius: BorderRadius.circular(compact ? 14 : 16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            title.toUpperCase(),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.58),
+              fontSize: compact ? 9 : 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.9,
+            ),
+          ),
+          if (subtitle != null) ...[
+            SizedBox(height: compact ? 1.5 : 3),
+            Text(
+              subtitle,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.64),
+                fontSize: compact ? 10 : 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+          SizedBox(height: compact ? 6 : 10),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInlineClipHeaderAction({
+    required IconData icon,
+    required VoidCallback onTap,
+    Color color = Colors.white,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(11),
+        child: Ink(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          child: Icon(icon, size: 16, color: color.withValues(alpha: 0.9)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInlineClipStatusChip({
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: color),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInlineClipModeOption({
+    required String label,
+    required bool selected,
+    required Color selectedColor,
+    required VoidCallback onTap,
+    bool compact = false,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.all(2),
+          padding: EdgeInsets.symmetric(vertical: compact ? 7 : 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? selectedColor.withValues(alpha: 0.88)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.68),
+              fontSize: compact ? 10 : 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInlineClipActionPill({
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+    Color color = Colors.white,
+    bool compact = false,
+  }) {
+    final enabled = onTap != null;
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.45,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Ink(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 9 : 12,
+              vertical: compact ? 7 : 10,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: compact ? 12 : 14,
+                  color: color.withValues(alpha: 0.9),
+                ),
+                SizedBox(width: compact ? 5 : 8),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: color.withValues(alpha: 0.92),
+                    fontSize: compact ? 10.5 : 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _openClipSettingsPanel(int clipIndex) {
     if (clipIndex < 0 || clipIndex >= widget.clips.length) return;
     setState(() {
@@ -3026,8 +4306,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     final isMidi = clip.isMidi;
     final availableWidth = math.max(80.0, viewportWidth - 12.0);
-    final cardWidth = math.min(320.0, availableWidth);
-    final panelHeight = isMidi ? 198.0 : 258.0;
+    final cardWidth = math.min(360.0, availableWidth);
+    final compactSheet = cardWidth <= 332.0 || viewportWidth <= 390.0;
+    final estimatedPanelHeight = isMidi
+        ? (compactSheet ? 202.0 : 222.0)
+        : (compactSheet ? 252.0 : 286.0);
+    final maxPanelHeight = math.max(160.0, viewportHeight - 12.0);
+    final panelHeight = math.min(estimatedPanelHeight, maxPanelHeight);
 
     final minLeft = kHeaderWidth + 6.0;
     final maxLeft =
@@ -3066,6 +4351,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final thumbColor = _clipControlThumb();
     final tempoModeLabel = _clipTempoModeLabel(clip);
     final tempoModeColor = _clipTempoModeColor(clip);
+    final clipKindLabel = clip.isMidi ? 'MIDI clip' : 'Audio clip';
     final clipName = clip.label.trim().isNotEmpty
         ? clip.label.trim()
         : (clip.isMidi ? 'MIDI Clip' : 'Audio Clip');
@@ -3075,377 +4361,389 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       top: top,
       width: cardWidth,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+        constraints: BoxConstraints(maxHeight: panelHeight),
+        padding: EdgeInsets.fromLTRB(
+          compactSheet ? 10 : 12,
+          compactSheet ? 10 : 12,
+          compactSheet ? 10 : 12,
+          compactSheet ? 10 : 12,
+        ),
         decoration: BoxDecoration(
-          color: const Color(0xFF1A2233).withOpacity(0.94),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.white.withOpacity(0.20)),
+          color: const Color(0xFF121A28).withValues(alpha: 0.97),
+          borderRadius: BorderRadius.circular(compactSheet ? 18 : 20),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.28),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              color: Colors.black.withValues(alpha: 0.34),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
             ),
           ],
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    clipName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
+        child: SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          clipKindLabel.toUpperCase(),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.52),
+                            fontSize: compactSheet ? 9.5 : 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                        SizedBox(height: compactSheet ? 4 : 5),
+                        Text(
+                          clipName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: compactSheet ? 15 : 16,
+                            fontWeight: FontWeight.w700,
+                            height: 1.1,
+                          ),
+                        ),
+                        SizedBox(height: compactSheet ? 5 : 8),
+                        Wrap(
+                          spacing: compactSheet ? 5 : 8,
+                          runSpacing: compactSheet ? 5 : 8,
+                          children: [
+                            _buildInlineClipStatusChip(
+                              icon: clip.isMidi
+                                  ? Icons.piano_rounded
+                                  : Icons.graphic_eq_rounded,
+                              label: clipKindLabel,
+                              color: Colors.white.withValues(alpha: 0.82),
+                            ),
+                            if (!isMidi)
+                              _buildInlineClipStatusChip(
+                                icon: clip.stretchToProjectTempo
+                                    ? Icons.speed_rounded
+                                    : Icons.schedule_rounded,
+                                label: tempoModeLabel.replaceFirst(
+                                  'Tempo mode: ',
+                                  '',
+                                ),
+                                color: tempoModeColor,
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 18,
-                    height: 18,
-                  ),
-                  splashRadius: 12,
-                  onPressed: () => _openClipRenameDialog(clipIndex),
-                  icon: const Icon(
-                    Icons.edit_outlined,
-                    size: 14,
-                    color: Colors.white70,
-                  ),
-                ),
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 18,
-                    height: 18,
-                  ),
-                  splashRadius: 12,
-                  onPressed: _closeInlineClipControl,
-                  icon: const Icon(
-                    Icons.close,
-                    size: 14,
-                    color: Colors.white70,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            PrettyGainSlider(
-              value: clip.gain.clamp(0.0, 3.0),
-              trackColor: accentColor,
-              thumbColor: thumbColor,
-              onChangeStart: (_) {},
-              onChanged: (v) {
-                final next = v.clamp(0.0, 3.0);
-                clip.gain = next;
-                unawaited(widget.setClipGain(clipIndex, next));
-                if (mounted) setState(() {});
-              },
-              onChangeEnd: (_) {},
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                const Text(
-                  'Pitch:',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
-                ),
-                const SizedBox(width: 5),
-                SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(6),
-                        color: accentColor.withValues(alpha: 0.16),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.22),
-                          width: 0.8,
-                        ),
+                  SizedBox(width: compactSheet ? 8 : 10),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildInlineClipHeaderAction(
+                        icon: Icons.drive_file_rename_outline_rounded,
+                        onTap: () => _openClipRenameDialog(clipIndex),
                       ),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(6),
-                        splashColor: Colors.white.withValues(alpha: 0.12),
-                        highlightColor: Colors.white.withValues(alpha: 0.05),
-                        onTap: () {
-                          final next =
-                              (clip.pitchSemitones - 0.5).clamp(-12.0, 12.0);
-                          clip.pitchSemitones = next;
-                          unawaited(widget.setClipPitch(clipIndex, next));
-                          if (mounted) setState(() {});
-                        },
-                        child: const Icon(
-                          Icons.remove,
-                          size: 14,
-                          color: Colors.white,
-                        ),
+                      const SizedBox(width: 6),
+                      _buildInlineClipHeaderAction(
+                        icon: Icons.close_rounded,
+                        onTap: _closeInlineClipControl,
                       ),
-                    ),
+                    ],
                   ),
-                ),
-                Expanded(
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      trackHeight: 5,
-                      thumbShape:
-                          const RoundSliderThumbShape(enabledThumbRadius: 11),
-                      overlayShape: SliderComponentShape.noOverlay,
-                      activeTrackColor: accentColor,
-                      inactiveTrackColor: accentColor.withOpacity(0.65),
+                ],
+              ),
+              SizedBox(height: compactSheet ? 8 : 14),
+              _buildInlineClipSection(
+                title: 'Tone',
+                subtitle:
+                    compactSheet ? null : 'Quick level and pitch adjustments',
+                compact: compactSheet,
+                child: Column(
+                  children: [
+                    PrettyGainSlider(
+                      value: clip.gain.clamp(0.0, 3.0),
+                      trackColor: accentColor,
                       thumbColor: thumbColor,
-                    ),
-                    child: Slider(
-                      value: clip.pitchSemitones.clamp(-12.0, 12.0),
-                      min: -12.0,
-                      max: 12.0,
-                      divisions: 48,
-                      label:
-                          '${clip.pitchSemitones >= 0 ? '+' : ''}${clip.pitchSemitones.toStringAsFixed(1)}st',
+                      onChangeStart: (_) {},
                       onChanged: (v) {
-                        final next = v.clamp(-12.0, 12.0);
-                        clip.pitchSemitones = next;
-                        unawaited(widget.setClipPitch(clipIndex, next));
+                        final next = v.clamp(0.0, 3.0);
+                        clip.gain = next;
+                        unawaited(widget.setClipGain(clipIndex, next));
                         if (mounted) setState(() {});
                       },
+                      onChangeEnd: (_) {},
                     ),
-                  ),
-                ),
-                SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(6),
-                        color: accentColor.withValues(alpha: 0.16),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.22),
-                          width: 0.8,
-                        ),
-                      ),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(6),
-                        splashColor: Colors.white.withValues(alpha: 0.12),
-                        highlightColor: Colors.white.withValues(alpha: 0.05),
-                        onTap: () {
-                          final next =
-                              (clip.pitchSemitones + 0.5).clamp(-12.0, 12.0);
-                          clip.pitchSemitones = next;
-                          unawaited(widget.setClipPitch(clipIndex, next));
-                          if (mounted) setState(() {});
-                        },
-                        child: const Icon(
-                          Icons.add,
-                          size: 14,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                SizedBox(
-                  width: 44,
-                  child: Text(
-                    '${clip.pitchSemitones >= 0 ? '+' : ''}${clip.pitchSemitones.toStringAsFixed(1)}st',
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.visible,
-                    style: const TextStyle(color: Colors.white, fontSize: 11.5),
-                  ),
-                ),
-              ],
-            ),
-            if (isMidi) ...[
-              const SizedBox(height: 4),
-              Text(
-                'MIDI clips follow project BPM automatically.',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.72),
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ] else ...[
-              const SizedBox(height: 4),
-              Text(
-                tempoModeLabel,
-                style: TextStyle(
-                  color: tempoModeColor,
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Container(
-                height: 30,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.06),
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(color: Colors.white12),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () async {
-                          await widget.onDisableClipTempoFollow(clipIndex);
-                          if (mounted) setState(() {});
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 120),
-                          curve: Curves.easeOut,
-                          margin: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            color: !clip.stretchToProjectTempo
-                                ? Colors.blueAccent.withOpacity(0.75)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(6),
+                    SizedBox(height: compactSheet ? 6 : 10),
+                    Row(
+                      children: [
+                        Text(
+                          'Pitch',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: compactSheet ? 11.5 : 13,
+                            fontWeight: FontWeight.w600,
                           ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            'Off',
-                            style: TextStyle(
-                              color: !clip.stretchToProjectTempo
-                                  ? Colors.white
-                                  : Colors.white70,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${clip.pitchSemitones >= 0 ? '+' : ''}${clip.pitchSemitones.toStringAsFixed(1)}st',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.88),
+                            fontSize: compactSheet ? 10.5 : 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: compactSheet ? 4 : 6),
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: compactSheet ? 22 : 24,
+                          height: compactSheet ? 22 : 24,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: Ink(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(7),
+                                color: accentColor.withValues(alpha: 0.16),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.18),
+                                  width: 0.8,
+                                ),
+                              ),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(7),
+                                splashColor:
+                                    Colors.white.withValues(alpha: 0.12),
+                                highlightColor:
+                                    Colors.white.withValues(alpha: 0.05),
+                                onTap: () {
+                                  final next = (clip.pitchSemitones - 0.5)
+                                      .clamp(-12.0, 12.0);
+                                  clip.pitchSemitones = next;
+                                  unawaited(
+                                      widget.setClipPitch(clipIndex, next));
+                                  if (mounted) setState(() {});
+                                },
+                                child: Icon(
+                                  Icons.remove_rounded,
+                                  size: compactSheet ? 13 : 14,
+                                  color: Colors.white,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                    Expanded(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () async {
-                          await widget.onAdjustClipToTempo(clipIndex);
-                          if (mounted) setState(() {});
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 120),
-                          curve: Curves.easeOut,
-                          margin: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            color: clip.stretchToProjectTempo &&
-                                    !clip.tempoStretchPreservePitch
-                                ? Colors.blueAccent.withOpacity(0.75)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            'Resample',
-                            style: TextStyle(
-                              color: clip.stretchToProjectTempo &&
-                                      !clip.tempoStretchPreservePitch
-                                  ? Colors.white
-                                  : Colors.white70,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
+                        SizedBox(width: compactSheet ? 6 : 8),
+                        Expanded(
+                          child: SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 5,
+                              thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 11,
+                              ),
+                              overlayShape: SliderComponentShape.noOverlay,
+                              activeTrackColor: accentColor,
+                              inactiveTrackColor:
+                                  accentColor.withValues(alpha: 0.58),
+                              thumbColor: thumbColor,
+                            ),
+                            child: Slider(
+                              value: clip.pitchSemitones.clamp(-12.0, 12.0),
+                              min: -12.0,
+                              max: 12.0,
+                              divisions: 48,
+                              label:
+                                  '${clip.pitchSemitones >= 0 ? '+' : ''}${clip.pitchSemitones.toStringAsFixed(1)}st',
+                              onChanged: (v) {
+                                final next = v.clamp(-12.0, 12.0);
+                                clip.pitchSemitones = next;
+                                unawaited(widget.setClipPitch(clipIndex, next));
+                                if (mounted) setState(() {});
+                              },
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                    Expanded(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () async {
-                          await widget
-                              .onStretchClipToTempoPreservePitch(clipIndex);
-                          if (mounted) setState(() {});
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 120),
-                          curve: Curves.easeOut,
-                          margin: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            color: clip.stretchToProjectTempo &&
-                                    clip.tempoStretchPreservePitch
-                                ? Colors.blueAccent.withOpacity(0.75)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            'Stretch',
-                            style: TextStyle(
-                              color: clip.stretchToProjectTempo &&
-                                      clip.tempoStretchPreservePitch
-                                  ? Colors.white
-                                  : Colors.white70,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
+                        SizedBox(width: compactSheet ? 6 : 8),
+                        SizedBox(
+                          width: compactSheet ? 22 : 24,
+                          height: compactSheet ? 22 : 24,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: Ink(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(7),
+                                color: accentColor.withValues(alpha: 0.16),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.18),
+                                  width: 0.8,
+                                ),
+                              ),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(7),
+                                splashColor:
+                                    Colors.white.withValues(alpha: 0.12),
+                                highlightColor:
+                                    Colors.white.withValues(alpha: 0.05),
+                                onTap: () {
+                                  final next = (clip.pitchSemitones + 0.5)
+                                      .clamp(-12.0, 12.0);
+                                  clip.pitchSemitones = next;
+                                  unawaited(
+                                      widget.setClipPitch(clipIndex, next));
+                                  if (mounted) setState(() {});
+                                },
+                                child: Icon(
+                                  Icons.add_rounded,
+                                  size: compactSheet ? 13 : 14,
+                                  color: Colors.white,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 6),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    await widget.onDetectClipTempoAndSetProjectTempo(clipIndex);
-                    if (mounted) setState(() {});
-                  },
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 28),
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    visualDensity: VisualDensity.compact,
-                    side: const BorderSide(color: Colors.white24),
-                  ),
-                  icon: const Icon(Icons.auto_fix_high, size: 14),
-                  label: const Text(
-                    'Detect Tempo',
-                    style: TextStyle(fontSize: 10.5),
+              if (isMidi) ...[
+                SizedBox(height: compactSheet ? 6 : 10),
+                _buildInlineClipSection(
+                  title: 'Tempo',
+                  subtitle: compactSheet
+                      ? 'Follows project BPM.'
+                      : 'MIDI clips follow project BPM automatically.',
+                  compact: compactSheet,
+                  child: Text(
+                    'No extra tempo mode is needed here.',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.75),
+                      fontSize: compactSheet ? 10 : 11.5,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
-              ),
-              if (widget.onStemSeparation != null) ...[
-                const SizedBox(height: 6),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () async {
-                      await widget.onStemSeparation!(clipIndex);
-                      if (mounted) setState(() {});
-                    },
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 28),
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      visualDensity: VisualDensity.compact,
-                      side: const BorderSide(color: Colors.white24),
-                    ),
-                    icon: const Icon(Icons.library_music_outlined, size: 14),
-                    label: const Text(
-                      'Separate Vocals / Instrumental',
-                      style: TextStyle(fontSize: 10.5),
-                    ),
+              ] else ...[
+                SizedBox(height: compactSheet ? 6 : 10),
+                _buildInlineClipSection(
+                  title: 'Tempo',
+                  subtitle: compactSheet
+                      ? null
+                      : 'Choose how this audio clip follows project BPM',
+                  compact: compactSheet,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        height: compactSheet ? 32 : 38,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.045),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.08),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            _buildInlineClipModeOption(
+                              label: 'Off',
+                              selected: !clip.stretchToProjectTempo,
+                              selectedColor: const Color(0xFF5B86F7),
+                              compact: compactSheet,
+                              onTap: () async {
+                                await widget
+                                    .onDisableClipTempoFollow(clipIndex);
+                                if (mounted) setState(() {});
+                              },
+                            ),
+                            _buildInlineClipModeOption(
+                              label: 'Resample',
+                              selected: clip.stretchToProjectTempo &&
+                                  !clip.tempoStretchPreservePitch,
+                              selectedColor: const Color(0xFF5B86F7),
+                              compact: compactSheet,
+                              onTap: () async {
+                                await widget.onAdjustClipToTempo(clipIndex);
+                                if (mounted) setState(() {});
+                              },
+                            ),
+                            _buildInlineClipModeOption(
+                              label: 'Stretch',
+                              selected: clip.stretchToProjectTempo &&
+                                  clip.tempoStretchPreservePitch,
+                              selectedColor: const Color(0xFF2AAE9F),
+                              compact: compactSheet,
+                              onTap: () async {
+                                await widget.onStretchClipToTempoPreservePitch(
+                                  clipIndex,
+                                );
+                                if (mounted) setState(() {});
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: compactSheet ? 6 : 10),
+                      Wrap(
+                        spacing: compactSheet ? 5 : 8,
+                        runSpacing: compactSheet ? 5 : 8,
+                        children: [
+                          _buildInlineClipActionPill(
+                            icon: Icons.swap_horiz_rounded,
+                            label: clip.isReversed ? 'Reversed' : 'Reverse',
+                            color: clip.isReversed
+                                ? const Color(0xFFBFD4FF)
+                                : Colors.white,
+                            compact: compactSheet,
+                            onTap: widget.onSetClipReversed == null
+                                ? null
+                                : () async {
+                                    await widget.onSetClipReversed!(
+                                      clipIndex,
+                                      !clip.isReversed,
+                                    );
+                                    if (mounted) setState(() {});
+                                  },
+                          ),
+                          _buildInlineClipActionPill(
+                            icon: Icons.auto_fix_high_rounded,
+                            label: 'Detect tempo',
+                            compact: compactSheet,
+                            onTap: () async {
+                              await widget.onDetectClipTempoAndSetProjectTempo(
+                                clipIndex,
+                              );
+                              if (mounted) setState(() {});
+                            },
+                          ),
+                          if (widget.onStemSeparation != null)
+                            _buildInlineClipActionPill(
+                              icon: Icons.library_music_outlined,
+                              label: 'Split vocals',
+                              compact: compactSheet,
+                              onTap: () async {
+                                await widget.onStemSeparation!(clipIndex);
+                                if (mounted) setState(() {});
+                              },
+                            ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -3590,15 +4888,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   Widget _buildClipPopupAction({
+    Key? key,
     required IconData icon,
     required Color color,
     required VoidCallback? onTap,
+    String? tooltip,
   }) {
     final enabled = onTap != null;
     final iconColor = enabled ? color : color.withOpacity(0.45);
-    return Material(
+    final action = Material(
       color: Colors.transparent,
       child: InkWell(
+        key: key,
         borderRadius: BorderRadius.circular(8),
         onTap: onTap,
         child: Center(
@@ -3606,6 +4907,207 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         ),
       ),
     );
+    if (tooltip == null || tooltip.trim().isEmpty) {
+      return action;
+    }
+    return Tooltip(
+      message: tooltip,
+      child: action,
+    );
+  }
+
+  Widget _buildAutomationClipMenuOverlay(
+    double viewportWidth,
+    double viewportHeight,
+    List<_TimelineAutomationClipVisual> visuals,
+  ) {
+    final visual = _currentAutomationClipMenuVisual(visuals);
+    if (visual == null) {
+      return const SizedBox.shrink();
+    }
+
+    final clipInTimelineX =
+        visual.rect.right >= 0 && visual.rect.left <= viewportWidth;
+    final clipInTimelineY = visual.rect.bottom >= _verticalScrollOffset &&
+        visual.rect.top <= _verticalScrollOffset + viewportHeight;
+    if (!clipInTimelineX || !clipInTimelineY) {
+      return const SizedBox.shrink();
+    }
+
+    final actionCount = 4 + (visual.clip.patternId.trim().isNotEmpty ? 1 : 0);
+    final popupWidth = math
+        .min(viewportWidth - 8.0, (actionCount * 84.0) + 8.0)
+        .clamp(280.0, 440.0)
+        .toDouble();
+    const double popupHeight = 38.0;
+    final anchorPx = visual.rect.left + (visual.rect.width / 2.0);
+    final minLeft = kHeaderWidth + 4.0;
+    final maxLeft =
+        math.max(minLeft, kHeaderWidth + viewportWidth - popupWidth - 4.0);
+    final left = (kHeaderWidth + anchorPx - (popupWidth / 2.0))
+        .clamp(minLeft, maxLeft)
+        .toDouble();
+    final minTop = _verticalScrollOffset + 2.0;
+    final maxTop = math.max(
+      minTop,
+      _verticalScrollOffset + viewportHeight - popupHeight - 2.0,
+    );
+    final preferredAbove = visual.rect.top - popupHeight - 4.0;
+    final preferredBelow = visual.rect.bottom + 4.0;
+    final top = preferredAbove >= minTop
+        ? preferredAbove
+        : (preferredBelow <= maxTop
+            ? preferredBelow
+            : preferredAbove.clamp(minTop, maxTop).toDouble());
+
+    Widget menuAction({
+      required Key key,
+      required IconData icon,
+      required String label,
+      required Color color,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: InkWell(
+          key: key,
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 14, color: color),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final actionChildren = <Widget>[
+      menuAction(
+        key: const ValueKey('automation_clip_menu_reveal'),
+        icon: Icons.tune_rounded,
+        label: 'Open param',
+        color: Colors.white,
+        onTap: () {
+          unawaited(_handleAutomationClipMenuAction('reveal', visual));
+        },
+      ),
+      Container(width: 1, height: 16, color: Colors.white24),
+      menuAction(
+        key: const ValueKey('automation_clip_menu_open'),
+        icon: Icons.auto_graph_rounded,
+        label: 'Edit points',
+        color: Colors.white,
+        onTap: () {
+          unawaited(_handleAutomationClipMenuAction('open', visual));
+        },
+      ),
+      Container(width: 1, height: 16, color: Colors.white24),
+      menuAction(
+        key: const ValueKey('automation_clip_menu_copy'),
+        icon: Icons.content_copy_rounded,
+        label: 'Clone',
+        color: Colors.white,
+        onTap: () {
+          unawaited(_handleAutomationClipMenuAction('copy', visual));
+        },
+      ),
+    ];
+    if (visual.clip.patternId.trim().isNotEmpty) {
+      actionChildren.addAll(<Widget>[
+        Container(width: 1, height: 16, color: Colors.white24),
+        menuAction(
+          key: const ValueKey('automation_clip_menu_make_unique'),
+          icon: Icons.link_off_rounded,
+          label: 'Make unique',
+          color: const Color(0xFFFFD28F),
+          onTap: () {
+            unawaited(_handleAutomationClipMenuAction('make_unique', visual));
+          },
+        ),
+      ]);
+    }
+    actionChildren.addAll(<Widget>[
+      Container(width: 1, height: 16, color: Colors.white24),
+      menuAction(
+        key: const ValueKey('automation_clip_menu_delete'),
+        icon: Icons.delete_outline,
+        label: 'Delete',
+        color: const Color(0xFFFFA4A4),
+        onTap: () {
+          unawaited(_handleAutomationClipMenuAction('delete', visual));
+        },
+      ),
+    ]);
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: Container(
+        width: popupWidth,
+        height: popupHeight,
+        decoration: BoxDecoration(
+          color: const Color(0xFF000000).withOpacity(0.72),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: visual.isOrphan ? const Color(0x44FF9A9A) : Colors.white24,
+            width: 1,
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: Row(children: actionChildren),
+      ),
+    );
+  }
+
+  Widget _buildAutomationClipTestOverlay(
+    double viewportWidth,
+    double viewportHeight,
+    List<_TimelineAutomationClipVisual> visuals,
+  ) {
+    final children = <Widget>[];
+    for (final visual in visuals) {
+      final rect = visual.rect;
+      if (rect.right <= 0 ||
+          rect.left >= viewportWidth ||
+          rect.bottom <= _verticalScrollOffset ||
+          rect.top >= _verticalScrollOffset + viewportHeight) {
+        continue;
+      }
+      children.add(
+        Positioned(
+          key: ValueKey('automation_clip_hit_${visual.clip.id}'),
+          left: kHeaderWidth + rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: const BoxDecoration(color: Colors.transparent),
+            ),
+          ),
+        ),
+      );
+    }
+    if (children.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Stack(children: children);
   }
 
   Widget _buildSelectedClipPopup(double viewportWidth, double viewportHeight) {
@@ -3613,11 +5115,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final hasSingleSelection = selectedIndices.length == 1;
     final singleSelectionIndex =
         hasSingleSelection ? selectedIndices.first : _selectedClipIndex;
-    final bool visible = _selectedClipIndex >= 0 &&
-        _selectedClipIndex < widget.clips.length &&
-        _clipPopupMs != null;
-
-    final rect = (visible ? _getClipRect(_selectedClipIndex) : null);
+    final int? popupClipIndex = hasSingleSelection &&
+            singleSelectionIndex >= 0 &&
+            singleSelectionIndex < widget.clips.length &&
+            widget.clips[singleSelectionIndex].clipKind != ClipKind.midi
+        ? singleSelectionIndex
+        : null;
+    final bool visible = popupClipIndex != null;
+    final rect = popupClipIndex != null ? _getClipRect(popupClipIndex) : null;
     final double popupWidth =
         math.min(116.0, math.max(84.0, viewportWidth - 8));
     const double popupHeight = 32;
@@ -3629,7 +5134,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       final clipInTimelineY = rect.bottom >= _verticalScrollOffset &&
           rect.top <= _verticalScrollOffset + viewportHeight;
       if (clipInTimelineX && clipInTimelineY) {
-        final tapAnchorPx = (_clipPopupMs! - _scrollOffsetMs) * _pixelsPerMs;
+        final tapAnchorPx = _clipPopupMs == null
+            ? double.nan
+            : (_clipPopupMs! - _scrollOffsetMs) * _pixelsPerMs;
         final minAnchorPx = rect.left + 6.0;
         final maxAnchorPx = rect.right - 6.0;
         final anchorPx = tapAnchorPx.isFinite
@@ -3670,15 +5177,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       child: IgnorePointer(
         ignoring: !visible, // prevent clicks when invisible
         child: AnimatedOpacity(
+          key: const ValueKey('selected_clip_popup'),
           opacity: visible ? 1.0 : 0.0,
-          duration: const Duration(milliseconds: 180),
+          duration: const Duration(milliseconds: 70),
           curve: Curves.easeOut,
           child: Container(
             width: popupWidth,
             padding: const EdgeInsets.symmetric(horizontal: 2),
             height: popupHeight,
             decoration: BoxDecoration(
-              color: const Color(0xFF000000).withOpacity(0.65),
+              color: const Color(0xFF000000).withOpacity(0.78),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.white24, width: 1),
             ),
@@ -3731,7 +5239,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   Widget _buildPastePopup(double viewportWidth) {
     final bool visible =
         _showPastePopup && _pasteRow != null && _pasteMs != null;
-    final bool showClearButton = widget.onClearCopiedClip != null;
+    final bool showClearButton =
+        widget.onClearCopiedClip != null || _automationClipClipboard != null;
 
     const double popupHeight = 32;
     final double popupWidth = showClearButton ? 116 : 70;
@@ -3796,12 +5305,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
-                  tooltip: 'Paste',
+                  tooltip: 'Place clone',
                   icon: const Icon(Icons.content_paste,
                       size: 18, color: Colors.white),
                   onPressed: () {
                     if (_pasteRow != null && _pasteMs != null) {
-                      widget.onPasteClipAt(_pasteRow!, _pasteMs!);
+                      if (_automationClipClipboard != null &&
+                          _canPasteAutomationClipAt(_pasteRow!)) {
+                        _pasteAutomationClipAt(_pasteRow!, _pasteMs!);
+                      } else {
+                        widget.onPasteClipAt(_pasteRow!, _pasteMs!);
+                      }
                     }
                     _clearPastePopup();
                   },
@@ -3815,7 +5329,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     icon: const Icon(Icons.delete_outline,
                         size: 18, color: Color(0xFFFFA4A4)),
                     onPressed: () {
-                      widget.onClearCopiedClip?.call();
+                      _clearClipboard();
                       ScaffoldMessenger.of(context)
                         ..hideCurrentSnackBar()
                         ..showSnackBar(
@@ -3843,6 +5357,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final viewportWidth = _getViewportWidth(context);
     final playheadPx = _getPlayheadPx(context);
     _recalculateRowYPositions();
+    _timelineAutomationClipVisualCache = _timelineAutomationClipVisuals();
 
     // --- Center measure 1 (time = 0) on playhead initially ---
     if (_scrollOffsetMs == 0.0 && widget.playheadMs == 0.0) {
@@ -3881,15 +5396,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     final List<double> expandedHeights = List.generate(_rowCount, (i) {
       if (!_rowExpanded[i]) return 0.0;
-      return _isFixedHeightExpandedTab(_expandedTab[i])
-          ? kExpandedRowHeight
-          : _effectsPanelHeights[i];
+      return _expandedPanelHeightForRow(i);
     });
     final List<double> automationLaneHeights = List.generate(
       _rowCount,
       (i) => _automationTimelineLaneHeightForRow(i),
     );
-    final timelineAutomationClipVisuals = _timelineAutomationClipVisuals();
+    final timelineAutomationClipVisuals = _timelineAutomationClipVisualCache;
 
     return Container(
       constraints: const BoxConstraints(),
@@ -3904,219 +5417,248 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final visibleTimelineHeight = constraints.maxHeight;
-                return SingleChildScrollView(
-                  controller: _verticalScrollController,
-                  physics: _isUserInteracting &&
-                              (_interactionMode == 'drag' ||
-                                  _interactionMode == 'automation' ||
-                                  _interactionMode == 'automation_clip') ||
-                          _activeTool == _TimelineTool.delete
-                      ? const NeverScrollableScrollPhysics() // DISABLE V-SCROLL DURING DRAG
-                      : const ClampingScrollPhysics(),
-                  child: SizedBox(
-                    height: _scrollContentHeight,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // === Timeline background (waveforms, clips, playhead) ===
-                        Positioned.fill(
-                          left:
-                              kHeaderWidth, // 👈 ensures waveform starts after header
-                          child: Builder(
-                            builder: (context) {
-                              Widget timelineContent = Listener(
-                                behavior: HitTestBehavior.opaque,
-                                onPointerDown: _onTimelinePointerDown,
-                                onPointerMove: _onTimelinePointerMove,
-                                onPointerHover: _onTimelinePointerHover,
-                                onPointerUp: _onTimelinePointerUp,
-                                onPointerCancel: _onTimelinePointerCancel,
-                                child: GestureDetector(
-                                  // dragStartBehavior: DragStartBehavior.start,
-                                  // === FIX ===: Added all gesture handlers
-                                  onScaleStart: _onScaleStart,
-                                  onScaleUpdate: _onScaleUpdate,
-                                  onScaleEnd: _onScaleEnd,
-                                  onLongPressStart: _onTimelineLongPressStart,
-                                  onLongPressMoveUpdate:
-                                      _onTimelineLongPressMoveUpdate,
-                                  onLongPressEnd: _onTimelineLongPressEnd,
-                                  onTapDown: (details) =>
-                                      _handleTapDown(details),
-                                  onTapUp: _onTimelineTap,
-                                  child: Align(
-                                    alignment: Alignment.topLeft,
-                                    child: ClipRect(
-                                      child: RepaintBoundary(
-                                        child: CustomPaint(
-                                          painter: _TimelinePainter(
-                                            clips: widget.clips,
-                                            getStartMs: widget.getStartMs,
-                                            getDurationMs: widget.getDurationMs,
-                                            getTimelineDurationMs:
-                                                widget.getTimelineDurationMs,
-                                            getTrimStartMs:
-                                                widget.getTrimStartMs,
-                                            getTrimEndMs: widget.getTrimEndMs,
-                                            getFullDurationMs:
-                                                widget.getFullDurationMs,
-                                            getPeaks: widget.getPeaks,
-                                            pixelsPerMs: _pixelsPerMs,
-                                            scrollOffsetMs: _scrollOffsetMs,
-                                            viewportWidth: viewportWidth,
-                                            playheadPx:
-                                                playheadPx, // === FIX ===
-                                            selectedClipIndex:
-                                                _selectedClipIndex,
-                                            selectedClipIndices:
-                                                _selectedClipIndices.toList(
-                                                    growable: false),
-                                            stretchToolActive: _activeTool ==
-                                                _TimelineTool.stretch,
-                                            trimClipIndex:
-                                                _trimClipIndex, // === FIX ===: Pass the active trim index
-                                            // === FIX ===: Pass drag state to painter
-                                            draggedClipIndex: _draggedClipIndex,
-                                            draggedClipStartMs:
-                                                _dragStartClipMs,
-                                            draggedClipRowIndex: _dragStartRow,
-                                            rowExpanded: _rowExpanded,
-                                            kExpandedRowHeight:
-                                                kExpandedRowHeight,
-                                            verticalScrollOffset:
-                                                _verticalScrollOffset,
-                                            expandedTab: _expandedTab,
-                                            effectsPanelHeights:
-                                                _effectsPanelHeights,
-                                            expandedHeights: expandedHeights,
-                                            automationLaneHeights:
-                                                automationLaneHeights,
-                                            isRecording: widget.isRecording,
-                                            recordingRowIndex:
-                                                widget.recordingRowIndex,
-                                            recordingStartMs:
-                                                widget.recordingStartMs,
-                                            recordingPeaks:
-                                                widget.recordingPeaks,
-                                            bpm: widget.bpm,
-                                            beatsPerBar: widget.beatsPerBar,
-                                            quantizeDivisions:
-                                                _quantizeDivisionsPerBar,
-                                            highlightedSegmentRow:
-                                                _highlightedSegmentRow,
-                                            highlightedSegmentStartMs:
-                                                _highlightedSegmentStartMs,
-                                            highlightedSegmentEndMs:
-                                                _highlightedSegmentEndMs,
-                                            sampleDropPreviewRow:
-                                                _externalSampleDropRow,
-                                            sampleDropPreviewStartMs:
-                                                _externalSampleDropStartMs,
-                                            sampleDropPreviewEndMs:
-                                                _externalSampleDropEndMs,
-                                            cutPreviewClipIndex:
-                                                _cutPreviewClipIndex,
-                                            cutPreviewMs: _cutPreviewMs,
-                                            automationClipVisuals:
-                                                timelineAutomationClipVisuals,
+                return Stack(
+                  children: [
+                    SingleChildScrollView(
+                      controller: _verticalScrollController,
+                      physics: ((_pendingDrag ||
+                                      _pendingAutomationClipVisual != null) &&
+                                  _activeTool != _TimelineTool.delete) ||
+                              _isUserInteracting &&
+                                  (_interactionMode == 'drag' ||
+                                      _interactionMode == 'automation' ||
+                                      _hasActiveAutomationClipDrag) ||
+                              _activeTool == _TimelineTool.delete
+                          ? const NeverScrollableScrollPhysics()
+                          : const ClampingScrollPhysics(),
+                      child: SizedBox(
+                        height: _scrollContentHeight,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            // === Timeline background (waveforms, clips, playhead) ===
+                            Positioned.fill(
+                              left:
+                                  kHeaderWidth, // 👈 ensures waveform starts after header
+                              child: Builder(
+                                builder: (context) {
+                                  Widget timelineContent = Listener(
+                                    behavior: HitTestBehavior.opaque,
+                                    onPointerDown: _onTimelinePointerDown,
+                                    onPointerMove: _onTimelinePointerMove,
+                                    onPointerHover: _onTimelinePointerHover,
+                                    onPointerUp: _onTimelinePointerUp,
+                                    onPointerCancel: _onTimelinePointerCancel,
+                                    child: GestureDetector(
+                                      // dragStartBehavior: DragStartBehavior.start,
+                                      // === FIX ===: Added all gesture handlers
+                                      onScaleStart: _onScaleStart,
+                                      onScaleUpdate: _onScaleUpdate,
+                                      onScaleEnd: _onScaleEnd,
+                                      onLongPressStart:
+                                          _onTimelineLongPressStart,
+                                      onLongPressMoveUpdate:
+                                          _onTimelineLongPressMoveUpdate,
+                                      onLongPressEnd: _onTimelineLongPressEnd,
+                                      onDoubleTapDown: _onTimelineDoubleTapDown,
+                                      onTapUp: _onTimelineTap,
+                                      child: Align(
+                                        alignment: Alignment.topLeft,
+                                        child: ClipRect(
+                                          child: RepaintBoundary(
+                                            child: CustomPaint(
+                                              painter: _TimelinePainter(
+                                                clips: widget.clips,
+                                                getStartMs: widget.getStartMs,
+                                                getDurationMs:
+                                                    widget.getDurationMs,
+                                                getTimelineDurationMs: widget
+                                                    .getTimelineDurationMs,
+                                                getTrimStartMs:
+                                                    widget.getTrimStartMs,
+                                                getTrimEndMs:
+                                                    widget.getTrimEndMs,
+                                                getFullDurationMs:
+                                                    widget.getFullDurationMs,
+                                                getPeaks: widget.getPeaks,
+                                                pixelsPerMs: _pixelsPerMs,
+                                                scrollOffsetMs: _scrollOffsetMs,
+                                                viewportWidth: viewportWidth,
+                                                playheadPx:
+                                                    playheadPx, // === FIX ===
+                                                selectedClipIndex:
+                                                    _selectedClipIndex,
+                                                selectedClipIndices:
+                                                    _selectedClipIndices.toList(
+                                                        growable: false),
+                                                stretchToolActive:
+                                                    _activeTool ==
+                                                        _TimelineTool.stretch,
+                                                trimClipIndex:
+                                                    _trimClipIndex, // === FIX ===: Pass the active trim index
+                                                // === FIX ===: Pass drag state to painter
+                                                draggedClipIndex:
+                                                    _interactionMode == 'drag'
+                                                        ? _draggedClipIndex
+                                                        : null,
+                                                draggedClipStartMs:
+                                                    _interactionMode == 'drag'
+                                                        ? _dragStartClipMs
+                                                        : null,
+                                                draggedClipRowIndex:
+                                                    _interactionMode == 'drag'
+                                                        ? _dragStartRow
+                                                        : null,
+                                                rowExpanded: _rowExpanded,
+                                                kExpandedRowHeight:
+                                                    kExpandedRowHeight,
+                                                verticalScrollOffset:
+                                                    _verticalScrollOffset,
+                                                expandedTab: _expandedTab,
+                                                effectsPanelHeights:
+                                                    _effectsPanelHeights,
+                                                expandedHeights:
+                                                    expandedHeights,
+                                                automationLaneHeights:
+                                                    automationLaneHeights,
+                                                isRecording: widget.isRecording,
+                                                recordingRowIndex:
+                                                    widget.recordingRowIndex,
+                                                recordingStartMs:
+                                                    widget.recordingStartMs,
+                                                recordingPeaks:
+                                                    widget.recordingPeaks,
+                                                bpm: widget.bpm,
+                                                beatsPerBar: widget.beatsPerBar,
+                                                quantizeDivisions:
+                                                    _quantizeDivisionsPerBar,
+                                                highlightedSegmentRow:
+                                                    _highlightedSegmentRow,
+                                                highlightedSegmentStartMs:
+                                                    _highlightedSegmentStartMs,
+                                                highlightedSegmentEndMs:
+                                                    _highlightedSegmentEndMs,
+                                                sampleDropPreviewRow:
+                                                    _externalSampleDropRow,
+                                                sampleDropPreviewStartMs:
+                                                    _externalSampleDropStartMs,
+                                                sampleDropPreviewEndMs:
+                                                    _externalSampleDropEndMs,
+                                                cutPreviewClipIndex:
+                                                    _cutPreviewClipIndex,
+                                                cutPreviewMs: _cutPreviewMs,
+                                                automationClipVisuals:
+                                                    timelineAutomationClipVisuals,
+                                              ),
+                                              size: Size(
+                                                viewportWidth,
+                                                _timelinePaintHeight,
+                                              ), //size: Size(viewportWidth, kNumRows * kRowHeight),
+                                            ),
                                           ),
-                                          size: Size(
-                                            viewportWidth,
-                                            _timelinePaintHeight,
-                                          ), //size: Size(viewportWidth, kNumRows * kRowHeight),
                                         ),
                                       ),
                                     ),
-                                  ),
-                                ),
-                              );
+                                  );
 
-                              if (widget.onExternalSampleDrop == null) {
-                                return timelineContent;
-                              }
+                                  if (widget.onExternalSampleDrop == null) {
+                                    return timelineContent;
+                                  }
 
-                              return DragTarget<SampleDragData>(
-                                key: _externalSampleDropTargetKey,
-                                onWillAcceptWithDetails: (details) {
-                                  return _updateExternalSampleDropPreview(
-                                    details.offset,
-                                    data: details.data,
-                                    notifyEntered: true,
+                                  return DragTarget<SampleDragData>(
+                                    key: _externalSampleDropTargetKey,
+                                    onWillAcceptWithDetails: (details) {
+                                      return _updateExternalSampleDropPreview(
+                                        details.offset,
+                                        data: details.data,
+                                        notifyEntered: true,
+                                      );
+                                    },
+                                    onMove: (details) {
+                                      _updateExternalSampleDropPreview(
+                                        details.offset,
+                                        data: details.data,
+                                      );
+                                    },
+                                    onLeave: (_) {
+                                      _clearExternalSampleDropPreview();
+                                    },
+                                    onAcceptWithDetails: (details) async {
+                                      final placement =
+                                          _sampleDropPlacementForGlobalOffset(
+                                        details.offset,
+                                        data: details.data,
+                                      );
+                                      _clearExternalSampleDropPreview();
+                                      if (placement == null) return;
+                                      await widget.onExternalSampleDrop!(
+                                        details.data,
+                                        placement.row,
+                                        placement.startMs,
+                                      );
+                                    },
+                                    builder: (_, __, ___) => timelineContent,
                                   );
                                 },
-                                onMove: (details) {
-                                  _updateExternalSampleDropPreview(
-                                    details.offset,
-                                    data: details.data,
-                                  );
-                                },
-                                onLeave: (_) {
-                                  _clearExternalSampleDropPreview();
-                                },
-                                onAcceptWithDetails: (details) async {
-                                  final placement =
-                                      _sampleDropPlacementForGlobalOffset(
-                                    details.offset,
-                                    data: details.data,
-                                  );
-                                  _clearExternalSampleDropPreview();
-                                  if (placement == null) return;
-                                  await widget.onExternalSampleDrop!(
-                                    details.data,
-                                    placement.row,
-                                    placement.startMs,
-                                  );
-                                },
-                                builder: (_, __, ___) => timelineContent,
-                              );
-                            },
-                          ),
-                        ),
-                        if (_currentSelectionRect() != null)
-                          _buildSelectionBoxOverlay(),
-                        // Expanded row panels (Volume/Effects)
-                        ..._buildExpandedRows(viewportWidth),
-
-                        // if (_selectedClipIndex != -1) _buildSelectedClipPopup(viewportWidth),
-                        _buildSelectedClipPopup(
-                          viewportWidth,
-                          visibleTimelineHeight,
-                        ),
-                        // if (_showPastePopup && _pasteRow != null && _pasteMs != null) _buildPastePopup(viewportWidth),
-                        _buildPastePopup(viewportWidth),
-                        _buildDeadZoneRowNames(viewportWidth),
-
-                        // === Track headers (always on top) ===
-                        Positioned(
-                          left: 0,
-                          top: 0, // _verticalScrollOffset,
-                          bottom: 0,
-                          // child: Builder(builder: (context) {
-                          //   // (Your dynamic header width logic, left as-is)
-                          //   double dynamicWidth = _AudioCanvasTimelineState.kHeaderWidth;
-                          //   return Container(
-                          //     height: _totalTimelineHeight,
-                          //     width: dynamicWidth,
-                          //     color: const Color(0xFF252B3A),
-                          //     child: _buildTrackHeaders(dynamicWidth),
-                          //   );
-                          // }),
-                          child: SizedBox(
-                            width: _AudioCanvasTimelineState.kHeaderWidth,
-                            child: SizedBox(
-                              height: _scrollContentHeight,
-                              child: _buildTrackHeadersContent(
-                                  _AudioCanvasTimelineState.kHeaderWidth),
+                              ),
                             ),
-                          ),
+                            if (_currentSelectionRect() != null)
+                              _buildSelectionBoxOverlay(),
+                            // Expanded row panels (Volume/Effects)
+                            ..._buildExpandedRows(viewportWidth),
+
+                            // if (_selectedClipIndex != -1) _buildSelectedClipPopup(viewportWidth),
+                            _buildSelectedClipPopup(
+                              viewportWidth,
+                              visibleTimelineHeight,
+                            ),
+                            // if (_showPastePopup && _pasteRow != null && _pasteMs != null) _buildPastePopup(viewportWidth),
+                            _buildPastePopup(viewportWidth),
+                            _buildAutomationClipMenuOverlay(
+                              viewportWidth,
+                              visibleTimelineHeight,
+                              timelineAutomationClipVisuals,
+                            ),
+                            _buildAutomationClipTestOverlay(
+                              viewportWidth,
+                              visibleTimelineHeight,
+                              timelineAutomationClipVisuals,
+                            ),
+                            _buildDeadZoneRowNames(viewportWidth),
+
+                            // === Track headers (always on top) ===
+                            Positioned(
+                              left: 0,
+                              top: 0, // _verticalScrollOffset,
+                              bottom: 0,
+                              // child: Builder(builder: (context) {
+                              //   // (Your dynamic header width logic, left as-is)
+                              //   double dynamicWidth = _AudioCanvasTimelineState.kHeaderWidth;
+                              //   return Container(
+                              //     height: _totalTimelineHeight,
+                              //     width: dynamicWidth,
+                              //     color: const Color(0xFF252B3A),
+                              //     child: _buildTrackHeaders(dynamicWidth),
+                              //   );
+                              // }),
+                              child: SizedBox(
+                                width: _AudioCanvasTimelineState.kHeaderWidth,
+                                child: SizedBox(
+                                  height: _scrollContentHeight,
+                                  child: _buildTrackHeadersContent(
+                                      _AudioCanvasTimelineState.kHeaderWidth),
+                                ),
+                              ),
+                            ),
+                            _buildInlineClipControlOverlay(
+                              viewportWidth,
+                              visibleTimelineHeight,
+                            ),
+                          ],
                         ),
-                        _buildInlineClipControlOverlay(
-                          viewportWidth,
-                          visibleTimelineHeight,
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                  ],
                 );
               },
             ),
@@ -4151,27 +5693,27 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     for (int row = 0; row < _rowCount; row++) {
       if (!_rowExpanded[row]) continue;
+      final expandedTab = _expandedTab[row];
+      final expandedHeight = _expandedPanelHeightForRow(row);
 
-      final double topY = _rowYPositions[row] +
-          kRowHeight +
-          _automationTimelineLaneHeightForRow(row);
+      final double topY = _rowYPositions[row] + kRowHeight;
+      final normalizedExpandedTab = _normalizeExpandedTab(expandedTab);
+      final automationTargetId = _activeAutomationTargetIdForRow(row);
       list.add(
         Positioned(
           key: ValueKey('expanded_row_${widget.rows[row].rowId}'),
           left: kHeaderWidth,
           top: topY,
           width: viewportWidth,
-          // height: (_expandedTab[row] == 0) ? kExpandedRowHeight : _effectsPanelHeights[row],
-          // child:
-          // _expandedTab[row] == 0 ? _buildVolumePanel(row) : _buildEffectsPanel(row),
-          height: _isFixedHeightExpandedTab(_expandedTab[row])
-              ? kExpandedRowHeight
-              : null,
+          height: expandedHeight,
           child: ClipRect(
             // prevents overflow painting
             child: Container(
               // margin: const EdgeInsets.only(top: 6),
               decoration: BoxDecoration(
+                color: normalizedExpandedTab == 1
+                    ? const Color(0xFF151A26)
+                    : Colors.transparent,
                 // borderRadius: BorderRadius.circular(0),
                 border: Border.all(
                     color: const Color.fromARGB(255, 47, 64, 117)
@@ -4180,11 +5722,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               ),
               // padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               // padding: const EdgeInsets.only(bottom: 0),
-              child: _expandedTab[row] == 0
-                  ? _buildVolumePanel(row)
-                  : (_expandedTab[row] == 1
-                      ? _buildEffectsPanel(row)
-                      : _buildAutomationPanel(row)),
+              child: _buildExpandedRowPanelContent(
+                row,
+                viewportWidth,
+                normalizedExpandedTab,
+                automationTargetId,
+              ),
             ),
           ),
         ),
@@ -4192,6 +5735,51 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
 
     return list;
+  }
+
+  Widget _buildExpandedRowPanelContent(
+    int row,
+    double viewportWidth,
+    int normalizedExpandedTab,
+    String automationTargetId,
+  ) {
+    final visibleContent = switch (normalizedExpandedTab) {
+      0 => _buildVolumePanel(row),
+      2 => _buildAutomationPanel(
+          row,
+          targetId: automationTargetId,
+        ),
+      _ => null,
+    };
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        if (visibleContent != null) Positioned.fill(child: visibleContent),
+        Positioned.fill(
+          child: IgnorePointer(
+            ignoring: normalizedExpandedTab != 1,
+            child: Offstage(
+              offstage: normalizedExpandedTab != 1,
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: OverflowBox(
+                  alignment: Alignment.topLeft,
+                  minWidth: viewportWidth,
+                  maxWidth: viewportWidth,
+                  minHeight: 0.0,
+                  maxHeight: double.infinity,
+                  child: SizedBox(
+                    width: viewportWidth,
+                    child: _buildEffectsPanel(row),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildDeadZoneRowNames(double viewportWidth) {
@@ -4250,15 +5838,55 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
+  String? _resolveRowEffectAutomationTargetId(
+    int row,
+    int effectIndex,
+    String paramId,
+  ) {
+    final trimmedParamId = paramId.trim();
+    if (trimmedParamId.isEmpty) return null;
+    final targets = widget.getAutomationTargetsForRow(row);
+    for (final target in targets) {
+      final candidateEffectIndex = (target['effectIndex'] as num?)?.toInt();
+      final candidateParamId =
+          (target['paramId'] ?? target['id'] ?? '').toString().trim();
+      if (candidateEffectIndex == effectIndex &&
+          candidateParamId == trimmedParamId) {
+        return (target['id'] ?? '').toString().trim();
+      }
+    }
+    return null;
+  }
+
+  Future<void> _handleRowEffectAutomationRequest(
+    int row,
+    int effectIndex,
+    String effectName,
+    String paramId,
+    String paramName,
+  ) async {
+    final targetId =
+        _resolveRowEffectAutomationTargetId(row, effectIndex, paramId);
+    if (targetId == null || targetId.isEmpty) return;
+    await AppHaptics.impact(AppHapticImpact.medium);
+    _openAutomationTabForTarget(
+      row: row,
+      targetId: targetId,
+      haloKeys: <String>[
+        'row:$row:automation_tab',
+        'row:$row:automation_lane',
+        'row:$row:fx_index:$effectIndex',
+        'row:$row:param:${paramName.trim()}',
+        'row:$row:fx_index:$effectIndex:param:${paramName.trim()}',
+      ],
+    );
+  }
+
   Widget _buildTabButton(int row, int tab, String label) {
-    final bool selected = _expandedTab[row] == tab;
-    final List<HaloKey> haloKeys = <HaloKey>[
-      HaloKey('row:$row:tabs'),
-      HaloKey('row:$row:tab:$tab'),
-    ];
+    final bool selected = _normalizeExpandedTab(_expandedTab[row]) == tab;
+    final List<HaloKey> haloKeys = <HaloKey>[];
     if (tab == 0) {
       haloKeys.add(HaloKey('row:$row:volume_tab'));
-      haloKeys.add(HaloKey('row:$row:mixer'));
     } else if (tab == 1) {
       haloKeys.add(HaloKey('row:$row:effects_tab'));
     } else if (tab == 2) {
@@ -4267,9 +5895,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     Widget tabButton = GestureDetector(
       onTap: () {
-        setState(() {
-          _expandedTab[row] = tab;
-        });
+        _setExpandedTabForRow(row: row, tab: tab);
       },
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
@@ -4383,6 +6009,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   targetMin: 0.0,
                   targetMax: 1.0,
                   isVolumeLane: true,
+                  highlightStartMs: null,
+                  highlightEndMs: null,
                   onChanged: (pts) {
                     final before = widget.rowVolumeAutomation[row];
                     widget.onAutomationCommit!(
@@ -4402,6 +6030,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       _automationPanStart(row, pos, laneHeight),
                   onPanUpdateExternal: (pos) => _automationPanUpdate(row, pos),
                   onPanEndExternal: () => _automationPanEnd(row),
+                  onPanCancelExternal: _cancelAutomationPointInteraction,
                   onBackgroundPanStartExternal:
                       _automationLaneBackgroundPanStart,
                   onBackgroundPanUpdateExternal:
@@ -4442,7 +6071,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           Container(
             // margin: const EdgeInsets.only(top: 6),
             decoration: BoxDecoration(
-              color: const Color(0xFF151A26).withOpacity(0.9),
+              color: const Color(0xFF151A26),
               borderRadius: BorderRadius.circular(0),
             ),
             // padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -4453,20 +6082,49 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: PrettyStereoSlider(
-                    value:
-                        widget.rowPan[row], // <-- plug in real per-track value
-                    onChangeStart: (v) {
-                      _panDragStart = v;
-                    },
-                    onChanged: (v) {
-                      setState(() => widget.rowPan[row] = v);
-                      widget.setRowPan(row, v);
-                    },
-                    onChangeEnd: (v) {
-                      widget.onRowPanCommit!(
-                          row, _panDragStart!, widget.rowPan[row]);
-                      _panDragStart = null;
+                  child: Builder(
+                    builder: (context) {
+                      Widget child = PrettyStereoSlider(
+                        value: widget.rowPan[row],
+                        onLongPress: () {
+                          unawaited(AppHaptics.impact(AppHapticImpact.medium));
+                          _openAutomationTabForTarget(
+                            row: row,
+                            targetId: 'mix:pan',
+                            haloKeys: <String>[
+                              'row:$row:automation_tab',
+                              'row:$row:volume_tab',
+                              'row:$row:mixer',
+                              'row:$row:pan',
+                              'row:$row:param:pan',
+                            ],
+                          );
+                        },
+                        onChangeStart: (v) {
+                          _panDragStart = v;
+                        },
+                        onChanged: (v) {
+                          setState(() => widget.rowPan[row] = v);
+                          widget.setRowPan(row, v);
+                        },
+                        onChangeEnd: (v) {
+                          widget.onRowPanCommit!(
+                              row, _panDragStart!, widget.rowPan[row]);
+                          _panDragStart = null;
+                        },
+                      );
+                      if (widget.tutorialHighlighter != null) {
+                        child = MultiHalo(
+                          highlighter: widget.tutorialHighlighter!,
+                          haloKeys: <HaloKey>[
+                            HaloKey('row:$row:pan'),
+                            HaloKey('row:$row:param:pan'),
+                          ],
+                          borderRadius: BorderRadius.circular(10),
+                          child: child,
+                        );
+                      }
+                      return child;
                     },
                   ),
                 ),
@@ -4477,19 +6135,49 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: PrettyGainSlider(
-                    value: widget.rowGain[row],
-                    onChangeStart: (v) {
-                      _gainDragStart = v;
-                    },
-                    onChanged: (v) {
-                      setState(() => widget.rowGain[row] = v);
-                      widget.setRowGain(row, v);
-                    },
-                    onChangeEnd: (v) {
-                      widget.onRowGainCommit!(
-                          row, _gainDragStart!, widget.rowGain[row]);
-                      _gainDragStart = null;
+                  child: Builder(
+                    builder: (context) {
+                      Widget child = PrettyGainSlider(
+                        value: widget.rowGain[row],
+                        onLongPress: () {
+                          unawaited(AppHaptics.impact(AppHapticImpact.medium));
+                          _openAutomationTabForTarget(
+                            row: row,
+                            targetId: 'mix:gain',
+                            haloKeys: <String>[
+                              'row:$row:automation_tab',
+                              'row:$row:volume_tab',
+                              'row:$row:mixer',
+                              'row:$row:gain',
+                              'row:$row:param:gain',
+                            ],
+                          );
+                        },
+                        onChangeStart: (v) {
+                          _gainDragStart = v;
+                        },
+                        onChanged: (v) {
+                          setState(() => widget.rowGain[row] = v);
+                          widget.setRowGain(row, v);
+                        },
+                        onChangeEnd: (v) {
+                          widget.onRowGainCommit!(
+                              row, _gainDragStart!, widget.rowGain[row]);
+                          _gainDragStart = null;
+                        },
+                      );
+                      if (widget.tutorialHighlighter != null) {
+                        child = MultiHalo(
+                          highlighter: widget.tutorialHighlighter!,
+                          haloKeys: <HaloKey>[
+                            HaloKey('row:$row:gain'),
+                            HaloKey('row:$row:param:gain'),
+                          ],
+                          borderRadius: BorderRadius.circular(10),
+                          child: child,
+                        );
+                      }
+                      return child;
                     },
                   ),
                 ),
@@ -4506,7 +6194,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         highlighter: widget.tutorialHighlighter!,
         haloKeys: <HaloKey>[
           HaloKey('row:$row:mixer'),
-          HaloKey('row:$row:volume_tab'),
+          HaloKey('row:$row:volume_lane'),
+          HaloKey('row:$row:param:volume'),
         ],
         borderRadius: BorderRadius.circular(10),
         child: panel,
@@ -4515,465 +6204,704 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return panel;
   }
 
-  Widget _buildAutomationPanel(int row) {
-    final targets = widget.getAutomationTargetsForRow(row);
-    final fallbackTargetId = targets.isNotEmpty
-        ? (targets.first['id']?.toString() ?? 'volume')
-        : 'volume';
-    final selectedTargetId = widget.getSelectedAutomationTargetId(row);
-    final hasSelected = targets.any(
-      (t) => (t['id']?.toString() ?? '') == selectedTargetId,
-    );
-    final activeTargetId = hasSelected ? selectedTargetId : fallbackTargetId;
-
-    if (!hasSelected && activeTargetId.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        widget.setSelectedAutomationTargetId(row, activeTargetId);
-      });
-    }
-
+  Widget _buildAutomationPanel(
+    int row, {
+    required String targetId,
+    VoidCallback? onClose,
+  }) {
+    final availableTargets = _automationTargetsForAutomationTab(row);
+    final activeTargetId = _resolveAutomationTabTargetId(row, targetId);
+    final activeTarget =
+        _automationTargetMetaById(row, activeTargetId) ?? <String, dynamic>{};
     final lanePoints = activeTargetId == 'volume'
         ? widget.rowVolumeAutomation[row]
         : widget.getAutomationPointsForTarget(row, activeTargetId);
-    final laneClips = _cloneAutomationClips(
-      widget.getAutomationClipsForTarget(row, activeTargetId),
-    );
-    final selectedClipIndex =
-        _selectedAutomationClipIndexFor(row, activeTargetId, laneClips);
-    final selectedClip =
-        selectedClipIndex == null ? null : laneClips[selectedClipIndex];
-    if (selectedClip != null) {
-      _setFocusedAutomationLaneForRow(row, selectedClip.lane);
-    }
-    final clipPointsAbsolute = selectedClip == null
-        ? const <AutomationPoint>[]
-        : _automationClipPointsToAbsolute(selectedClip);
-    final editorPoints = selectedClip == null ? lanePoints : clipPointsAbsolute;
-    final activeTarget = targets.firstWhere(
-      (t) => (t['id']?.toString() ?? '') == activeTargetId,
-      orElse: () => <String, dynamic>{},
-    );
     final targetLabel =
         (activeTarget['label'] ?? activeTargetId).toString().trim();
+    final targetFullLabel =
+        (activeTarget['fullLabel'] ?? targetLabel).toString().trim();
     final targetParamId =
         (activeTarget['paramId'] ?? activeTargetId).toString().trim();
     final targetMin = (activeTarget['min'] as num?)?.toDouble() ?? 0.0;
     final targetMax = (activeTarget['max'] as num?)?.toDouble() ?? 1.0;
     final isVolumeTarget =
         (activeTarget['isVolume'] == true) || activeTargetId == 'volume';
-    final dropdownTargets = targets.isEmpty
-        ? const <Map<String, dynamic>>[
-            {'id': 'volume', 'label': 'Volume', 'initialNormalized': 0.75}
-          ]
-        : targets;
-    final screenWidth = MediaQuery.of(context).size.width;
-    const dropdownTextStyle = TextStyle(
-      color: Colors.white,
-      fontSize: 12,
-      fontWeight: FontWeight.w500,
+    final isOrphanTarget = activeTarget['isOrphan'] == true;
+    final formatter = _AutomationValueFormatter(
+      targetLabel: targetLabel.isEmpty ? activeTargetId : targetLabel,
+      targetParamId: targetParamId.isEmpty ? activeTargetId : targetParamId,
+      targetMin: targetMin,
+      targetMax: targetMax,
+      isVolumeLane: isVolumeTarget,
     );
-    final textPainter = TextPainter(
-      textDirection: TextDirection.ltr,
-      maxLines: 1,
+    final bool clipboardMatchesSelection =
+        _automationPointsClipboard?.isCompatibleWith(
+              formatter,
+              expectClipRelative: false,
+            ) ??
+            false;
+    final bool areaClipboardMatchesSelection =
+        _automationAreaClipboard?.isCompatibleWith(formatter) ?? false;
+    final accentColor = _automationColorForTarget(
+      activeTargetId,
+      isOrphan: isOrphanTarget,
     );
-    double longestLabelWidth = 0.0;
-    for (final target in dropdownTargets) {
-      final label = (target['label'] ?? target['id'] ?? 'Volume').toString();
-      textPainter.text = TextSpan(text: label, style: dropdownTextStyle);
-      textPainter.layout();
-      if (textPainter.width > longestLabelWidth) {
-        longestLabelWidth = textPainter.width;
+    final targetDisplayTitle = targetFullLabel.isEmpty
+        ? (targetLabel.isEmpty ? activeTargetId : targetLabel)
+        : targetFullLabel;
+    final rangeSelectionActiveForTarget =
+        _isAutomationRangeSelectionModeFor(row, activeTargetId);
+    final bool hasRangeStart = _automationRangeSelectionStartMs != null;
+    final bool hasRangeEnd = _automationRangeSelectionEndMs != null;
+    final bool canConfirmRangeSelection = rangeSelectionActiveForTarget &&
+        hasRangeStart &&
+        hasRangeEnd &&
+        (_automationRangeSelectionEndMs! - _automationRangeSelectionStartMs!)
+                .abs() >
+            1e-6;
+    final editorSubtitle = isOrphanTarget
+        ? 'Target unavailable'
+        : rangeSelectionActiveForTarget
+            ? (!hasRangeStart
+                ? 'Tap start'
+                : (hasRangeEnd ? 'Range locked' : 'Tap end'))
+            : 'Point lane';
+
+    double? laneHighlightStartMs;
+    double? laneHighlightEndMs;
+    final hasSharedHighlight = _highlightedSegmentRow == row &&
+        _highlightedSegmentStartMs != null &&
+        _highlightedSegmentEndMs != null &&
+        _highlightedSegmentEndMs! > _highlightedSegmentStartMs!;
+    if (hasSharedHighlight) {
+      laneHighlightStartMs = _highlightedSegmentStartMs!;
+      laneHighlightEndMs = _highlightedSegmentEndMs!;
+    }
+    if (rangeSelectionActiveForTarget && hasRangeStart) {
+      final start = _automationRangeSelectionStartMs!;
+      if (hasRangeEnd) {
+        final end = _automationRangeSelectionEndMs!;
+        laneHighlightStartMs = math.min(start, end);
+        laneHighlightEndMs = math.max(start, end);
+      } else {
+        final previewWidthMs = _magnetEnabled
+            ? _quantizeIntervalMs()
+            : math.max(1.0, 14.0 / _pixelsPerMs);
+        final previewEnd = (start + previewWidthMs)
+            .clamp(start + 0.001, _maxDurationMs)
+            .toDouble();
+        laneHighlightStartMs = start;
+        laneHighlightEndMs = previewEnd;
       }
     }
-    // Label + edited dot + row padding, capped so menu never spans full width.
-    final dropdownMenuWidth = (longestLabelWidth + 92.0).clamp(
-      220.0,
-      screenWidth * 0.72,
-    );
-    final targetMetaById = <String, Map<String, dynamic>>{
-      for (final target in dropdownTargets)
-        (target['id'] ?? 'volume').toString(): target,
-    };
-    final targetDefaultById = <String, double>{};
-    final targetEditedById = <String, bool>{};
-    for (final entry in targetMetaById.entries) {
-      final targetId = entry.key;
-      final defaultNormalized =
-          _automationTargetInitialNormalized(targetId, entry.value);
-      targetDefaultById[targetId] = defaultNormalized;
-      targetEditedById[targetId] = _automationTargetHasEdits(
-        row,
-        targetId,
-        defaultNormalized: defaultNormalized,
+
+    void showAutomationSnackbar(String message) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(message),
+            duration: const Duration(milliseconds: 1300),
+          ),
+        );
+    }
+
+    void copyAutomationAreaForRange({
+      required double startMs,
+      required double endMs,
+      required String successMessage,
+    }) {
+      final safeStart = math.min(startMs, endMs).clamp(0.0, _maxDurationMs);
+      final safeEnd = math.max(startMs, endMs).clamp(0.0, _maxDurationMs);
+      if (safeEnd - safeStart <= 0.0) {
+        showAutomationSnackbar('Invalid range. Tap a different end point.');
+        return;
+      }
+      final copiedRelative = _automationPointsForRange(
+        lanePoints,
+        startMs: safeStart.toDouble(),
+        endMs: safeEnd.toDouble(),
+        relativeToStart: true,
+      );
+      _automationAreaClipboard = _AutomationAreaClipboardEntry(
+        kind: formatter.valueKind,
+        signature: formatter.signature,
+        durationMs: safeEnd - safeStart,
+        relativePoints: copiedRelative,
+      );
+      setState(() {
+        _highlightedSegmentRow = row;
+        _highlightedSegmentStartMs = safeStart.toDouble();
+        _highlightedSegmentEndMs = safeEnd.toDouble();
+      });
+      showAutomationSnackbar(successMessage);
+    }
+
+    void copyAllAutomationPoints() {
+      final copiedPoints =
+          lanePoints.map((point) => point.copy()).toList(growable: false);
+      _automationPointsClipboard = _AutomationPointsClipboardEntry(
+        kind: formatter.valueKind,
+        signature: formatter.signature,
+        clipRelative: false,
+        points: copiedPoints,
+      );
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Copied all automation points'),
+            duration: Duration(milliseconds: 1200),
+          ),
+        );
+    }
+
+    void pasteAllAutomationPoints() {
+      final clipboard = _automationPointsClipboard;
+      if (clipboard == null ||
+          !clipboardMatchesSelection ||
+          clipboard.points.isEmpty) {
+        return;
+      }
+      final before =
+          lanePoints.map((point) => point.copy()).toList(growable: false);
+      final copiedAfter =
+          clipboard.points.map((point) => point.copy()).toList(growable: false);
+      _commitAutomationPointsForTarget(
+          row, activeTargetId, before, copiedAfter);
+      setState(() {});
+    }
+
+    void copyAutomationArea() {
+      if (_hasActiveLoopRange()) {
+        final loopStart = _loopStartMs!.toDouble();
+        final loopEnd = _loopEndMs!.toDouble();
+        if (rangeSelectionActiveForTarget) {
+          setState(() {
+            _clearAutomationRangeSelectionMode();
+          });
+        }
+        copyAutomationAreaForRange(
+          startMs: loopStart,
+          endMs: loopEnd,
+          successMessage:
+              'Copied loop automation region ${_formatAutomationEditorRange(loopStart, loopEnd)}',
+        );
+        return;
+      }
+      setState(() {
+        _automationRangeSelectionMode = true;
+        _automationRangeSelectionRow = row;
+        _automationRangeSelectionTargetId = activeTargetId;
+        _automationRangeSelectionStartMs = null;
+        _automationRangeSelectionEndMs = null;
+        _highlightedSegmentRow = null;
+        _highlightedSegmentStartMs = null;
+        _highlightedSegmentEndMs = null;
+      });
+      showAutomationSnackbar('Tap start, then tap end to copy range');
+    }
+
+    void cancelAutomationRangeSelection() {
+      if (!rangeSelectionActiveForTarget) return;
+      setState(() {
+        _clearAutomationRangeSelectionMode();
+      });
+      showAutomationSnackbar('Range selection cancelled');
+    }
+
+    void confirmAutomationRangeSelection() {
+      if (!rangeSelectionActiveForTarget) return;
+      final startMs = _automationRangeSelectionStartMs;
+      final endMs = _automationRangeSelectionEndMs;
+      if (startMs == null || endMs == null) {
+        showAutomationSnackbar('Select start and end points first');
+        return;
+      }
+      final safeStart = math.min(startMs, endMs);
+      final safeEnd = math.max(startMs, endMs);
+      if (safeEnd - safeStart <= 0.0) {
+        showAutomationSnackbar('Tap a different end point');
+        return;
+      }
+      copyAutomationAreaForRange(
+        startMs: safeStart,
+        endMs: safeEnd,
+        successMessage:
+            'Copied area ${_formatAutomationEditorRange(safeStart, safeEnd)}',
+      );
+      setState(() {
+        _clearAutomationRangeSelectionMode();
+      });
+    }
+
+    void handleAutomationRangeTap(Offset localPos) {
+      if (!rangeSelectionActiveForTarget) return;
+      final rawMs = (_scrollOffsetMs + localPos.dx / _pixelsPerMs)
+          .clamp(0.0, _maxDurationMs)
+          .toDouble();
+      final tappedMs = _magnetEnabled ? _segmentStartMsForTap(rawMs) : rawMs;
+      final startMs = _automationRangeSelectionStartMs;
+      final endMs = _automationRangeSelectionEndMs;
+
+      if (startMs == null || endMs != null) {
+        setState(() {
+          _automationRangeSelectionStartMs = tappedMs;
+          _automationRangeSelectionEndMs = null;
+        });
+        showAutomationSnackbar(
+          'Start ${_formatAutomationEditorTime(tappedMs)} set. Tap end point.',
+        );
+        return;
+      }
+
+      final safeStart = math.min(startMs, tappedMs);
+      final safeEnd = math.max(startMs, tappedMs);
+      if (safeEnd - safeStart <= 0.0) {
+        showAutomationSnackbar('Tap a different end point');
+        return;
+      }
+
+      setState(() {
+        _automationRangeSelectionEndMs = tappedMs;
+      });
+      showAutomationSnackbar(
+        'Range ${_formatAutomationEditorRange(safeStart, safeEnd)} selected. Tap Confirm.',
       );
     }
-    final activeTargetDefaultNormalized = targetDefaultById[activeTargetId] ??
-        _automationTargetInitialNormalized(activeTargetId, activeTarget);
-    final activeTargetEdited = targetEditedById[activeTargetId] ?? false;
-    final statusTargetName =
-        (targetLabel.isEmpty ? activeTargetId : targetLabel).trim();
-    final statusText =
-        '$statusTargetName (${selectedClip == null ? 'Lane' : 'Clip'})';
-    Widget editedMarker(bool edited) {
-      return Container(
-        width: 8,
-        height: 8,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: edited ? const Color(0xFFFFC857) : Colors.transparent,
-          border: Border.all(
-            color: edited
-                ? const Color(0xFFFFE29D)
-                : Colors.white.withOpacity(0.18),
-            width: edited ? 0.8 : 0.6,
+
+    void pasteAutomationAreaAtPlayhead() {
+      final clipboard = _automationAreaClipboard;
+      if (clipboard == null ||
+          !areaClipboardMatchesSelection ||
+          clipboard.relativePoints.isEmpty ||
+          clipboard.durationMs <= 0.0) {
+        return;
+      }
+      final playheadStart = _magnetEnabled
+          ? _segmentStartMsForTap(widget.playheadMs)
+          : widget.playheadMs;
+      final startMs = playheadStart.clamp(0.0, _maxDurationMs).toDouble();
+      final availableDuration = _maxDurationMs - startMs;
+      if (availableDuration <= 1.0) return;
+      final appliedDuration = math.min(clipboard.durationMs, availableDuration);
+      final endMs = startMs + appliedDuration;
+      final relativeSlice = _automationPointsForRange(
+        clipboard.relativePoints,
+        startMs: 0.0,
+        endMs: appliedDuration,
+        relativeToStart: true,
+      );
+      final pastedPoints = relativeSlice
+          .map((point) =>
+              AutomationPoint(x: startMs + point.x, volume: point.volume))
+          .toList(growable: false);
+      final before =
+          lanePoints.map((point) => point.copy()).toList(growable: false);
+      final merged = <AutomationPoint>[
+        ...before
+            .where(
+                (point) => point.x < startMs - 1e-6 || point.x > endMs + 1e-6)
+            .map((point) => point.copy()),
+        ...pastedPoints.map((point) => point.copy()),
+      ]..sort((a, b) => a.x.compareTo(b.x));
+      final compacted = <AutomationPoint>[];
+      for (final point in merged) {
+        if (compacted.isNotEmpty && (point.x - compacted.last.x).abs() < 1e-6) {
+          compacted[compacted.length - 1] = point.copy();
+        } else {
+          compacted.add(point.copy());
+        }
+      }
+      _commitAutomationPointsForTarget(row, activeTargetId, before, compacted);
+      setState(() {
+        _highlightedSegmentRow = row;
+        _highlightedSegmentStartMs = startMs;
+        _highlightedSegmentEndMs = endMs;
+      });
+    }
+
+    Widget actionButton({
+      required String label,
+      required IconData icon,
+      required VoidCallback? onTap,
+      Color? accent,
+      bool iconOnly = false,
+    }) {
+      final enabled = onTap != null;
+      final foreground = enabled
+          ? (accent ?? Colors.white.withValues(alpha: 0.84))
+          : Colors.white.withValues(alpha: 0.28);
+      return Padding(
+        padding: const EdgeInsets.only(right: 5),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(999),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              curve: Curves.easeOutCubic,
+              padding: EdgeInsets.symmetric(
+                horizontal: iconOnly ? 8 : 9,
+                vertical: 5,
+              ),
+              decoration: BoxDecoration(
+                color: enabled
+                    ? (accent ?? Colors.white).withValues(alpha: 0.11)
+                    : Colors.white.withValues(alpha: 0.03),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 12, color: foreground),
+                  if (!iconOnly) ...[
+                    const SizedBox(width: 5),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 10.1,
+                        fontWeight: FontWeight.w700,
+                        height: 1.0,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       );
     }
 
-    return Container(
-      decoration:
-          BoxDecoration(color: const Color(0xFF151A26).withOpacity(0.9)),
-      child: Column(
-        children: [
-          Container(
-            height: 44,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.2),
-              border: Border(
-                bottom: BorderSide(color: Colors.white.withOpacity(0.06)),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: activeTargetId,
-                      isExpanded: true,
-                      isDense: true,
-                      menuWidth: dropdownMenuWidth,
-                      menuMaxHeight: 420,
-                      itemHeight: null,
-                      dropdownColor: const Color(0xFF21283B),
-                      style: dropdownTextStyle,
-                      selectedItemBuilder: (context) => dropdownTargets.map(
-                        (target) {
-                          final id = (target['id'] ?? 'volume').toString();
-                          final edited = targetEditedById[id] ?? false;
-                          return Align(
-                            alignment: Alignment.centerLeft,
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    (target['label'] ??
-                                            target['id'] ??
-                                            'Volume')
-                                        .toString(),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    softWrap: false,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                editedMarker(edited),
-                              ],
-                            ),
-                          );
-                        },
-                      ).toList(growable: false),
-                      items: dropdownTargets.map(
-                        (target) {
-                          final id = (target['id'] ?? 'volume').toString();
-                          final edited = targetEditedById[id] ?? false;
-                          return DropdownMenuItem<String>(
-                            value: id,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              child: SizedBox(
-                                width: dropdownMenuWidth,
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        (target['label'] ??
-                                                target['id'] ??
-                                                'Volume')
-                                            .toString(),
-                                        softWrap: true,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 3),
-                                      child: editedMarker(edited),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ).toList(growable: false),
-                      onChanged: (nextId) {
-                        if (nextId == null) return;
-                        widget.setSelectedAutomationTargetId(row, nextId);
-                        setState(() {});
-                      },
+    Widget toolbarAction({
+      required String label,
+      required IconData icon,
+      required VoidCallback? onTap,
+    }) {
+      final enabled = onTap != null;
+      final fg = enabled
+          ? Colors.white.withValues(alpha: 0.84)
+          : Colors.white.withValues(alpha: 0.3);
+      return Padding(
+        padding: const EdgeInsets.only(right: 10),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 13, color: fg),
+                  const SizedBox(width: 5),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 10.6,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
                     ),
                   ),
-                ),
-                IconButton(
-                  tooltip: 'Reset automation lane',
-                  iconSize: 18,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 30,
-                    height: 30,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  color: activeTargetEdited
-                      ? const Color(0xFFFFB9A3)
-                      : Colors.white24,
-                  onPressed: activeTargetEdited
-                      ? () => _resetAutomationLaneForTarget(
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 0, 0, 0),
+      child: Container(
+        key: const ValueKey('automation_panel'),
+        color: const Color(0xFF151A26),
+        child: Column(
+          children: [
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final laneHeight = constraints.maxHeight;
+                  return Stack(
+                    children: [
+                      _AutomationLane(
+                        rowIndex: row,
+                        points: lanePoints,
+                        pixelsPerMs: _pixelsPerMs,
+                        scrollOffsetMs: _scrollOffsetMs,
+                        laneHeight: laneHeight,
+                        timelineDurationMs: _maxDurationMs,
+                        targetLabel:
+                            targetLabel.isEmpty ? activeTargetId : targetLabel,
+                        targetParamId: targetParamId.isEmpty
+                            ? activeTargetId
+                            : targetParamId,
+                        targetMin: targetMin,
+                        targetMax: targetMax,
+                        isVolumeLane: isVolumeTarget,
+                        highlightStartMs: laneHighlightStartMs,
+                        highlightEndMs: laneHighlightEndMs,
+                        onChanged: (pts) {
+                          if (rangeSelectionActiveForTarget) return;
+                          final copiedAfter =
+                              pts.map((p) => p.copy()).toList(growable: false);
+                          final before = lanePoints
+                              .map((p) => p.copy())
+                              .toList(growable: false);
+                          _commitAutomationPointsForTarget(
                             row,
                             activeTargetId,
-                            defaultNormalized: activeTargetDefaultNormalized,
-                          )
-                      : null,
-                  icon: const Icon(Icons.restart_alt_rounded),
-                ),
-                IconButton(
-                  tooltip: 'Add automation clip',
-                  iconSize: 18,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 30,
-                    height: 30,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  color: Colors.white70,
-                  onPressed: () => _insertAutomationClipForActiveTarget(
-                    row,
-                    activeTargetId,
-                    targetLabel,
-                    activeTargetDefaultNormalized,
-                  ),
-                  icon: const Icon(Icons.add_box_outlined),
-                ),
-                IconButton(
-                  tooltip: selectedClip == null
-                      ? (laneClips.isEmpty
-                          ? 'No automation clip to edit'
-                          : 'Switch to clip editing')
-                      : 'Switch to lane editing',
-                  iconSize: 18,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 30,
-                    height: 30,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  color: laneClips.isEmpty
-                      ? Colors.white24
-                      : (selectedClip == null
-                          ? Colors.white70
-                          : const Color(0xFF8EC5FF)),
-                  onPressed: laneClips.isEmpty
-                      ? null
-                      : () {
-                          if (selectedClip == null) {
-                            final clipToSelect = laneClips.last;
-                            _setSelectedAutomationClipFor(
-                              row,
-                              activeTargetId,
-                              clipToSelect.id,
-                              lane: clipToSelect.lane,
-                            );
-                          } else {
-                            _setSelectedAutomationClipFor(
-                              row,
-                              activeTargetId,
-                              null,
-                            );
-                          }
+                            before,
+                            copiedAfter,
+                          );
                           setState(() {});
                         },
-                  icon: Icon(
-                    selectedClip == null
-                        ? Icons.polyline_rounded
-                        : Icons.show_chart_rounded,
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Duplicate selected clip',
-                  iconSize: 18,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 30,
-                    height: 30,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  color: laneClips.isEmpty ? Colors.white24 : Colors.white70,
-                  onPressed: laneClips.isEmpty
-                      ? null
-                      : () => _duplicateSelectedAutomationClipForTarget(
-                            row,
-                            activeTargetId,
+                        onPanStartExternal: (pos) =>
+                            _automationPanStart(row, pos, laneHeight),
+                        onPanUpdateExternal: (pos) =>
+                            _automationPanUpdate(row, pos),
+                        onPanEndExternal: () => _automationPanEnd(row),
+                        onPanCancelExternal: _cancelAutomationPointInteraction,
+                        onBackgroundPanStartExternal:
+                            _automationLaneBackgroundPanStart,
+                        onBackgroundPanUpdateExternal:
+                            _automationLaneBackgroundPanUpdate,
+                        onBackgroundPanEndExternal:
+                            _automationLaneBackgroundPanEnd,
+                      ),
+                      if (rangeSelectionActiveForTarget)
+                        Positioned.fill(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTapDown: (details) =>
+                                handleAutomationRangeTap(details.localPosition),
                           ),
-                  icon: const Icon(Icons.copy_outlined),
-                ),
-                IconButton(
-                  tooltip: selectedClip?.muted == true
-                      ? 'Unmute selected clip'
-                      : 'Mute selected clip',
-                  iconSize: 18,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 30,
-                    height: 30,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  color: selectedClip == null
-                      ? Colors.white24
-                      : (selectedClip.muted
-                          ? const Color(0xFFFFC9A4)
-                          : Colors.white70),
-                  onPressed: selectedClip == null
-                      ? null
-                      : () => _toggleMuteSelectedAutomationClipForTarget(
-                            row,
-                            activeTargetId,
-                          ),
-                  icon: Icon(
-                    selectedClip?.muted == true
-                        ? Icons.volume_off_outlined
-                        : Icons.volume_mute_outlined,
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Delete selected clip',
-                  iconSize: 18,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 30,
-                    height: 30,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  color: selectedClip == null
-                      ? Colors.white24
-                      : const Color(0xFFFF9FA0),
-                  onPressed: selectedClip == null
-                      ? null
-                      : () => _deleteSelectedAutomationClipForTarget(
-                            row,
-                            activeTargetId,
-                          ),
-                  icon: const Icon(Icons.delete_outline),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            height: 30,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.12),
-              border: Border(
-                bottom: BorderSide(color: Colors.white.withOpacity(0.05)),
+                        ),
+                    ],
+                  );
+                },
               ),
             ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                statusText,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.58),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              targetDisplayTitle,
+                              key: const ValueKey('automation_panel_title'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12.4,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              editorSubtitle,
+                              key: const ValueKey('automation_panel_subtitle'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.56),
+                                fontSize: 9.4,
+                                fontWeight: FontWeight.w500,
+                                height: 1.1,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (isOrphanTarget)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Icon(
+                            Icons.warning_amber_rounded,
+                            size: 16,
+                            color: const Color(0xFFFFB3B3),
+                          ),
+                        ),
+                      actionButton(
+                        label: 'Link',
+                        icon: Icons.link_rounded,
+                        onTap: isOrphanTarget
+                            ? null
+                            : () {
+                                unawaited(
+                                  _revealRowAutomationTarget(
+                                      row, activeTargetId),
+                                );
+                              },
+                        accent: const Color(0xFFA6D6FF),
+                        iconOnly: true,
+                      ),
+                      if (onClose != null)
+                        IconButton(
+                          tooltip: 'Close automation editor',
+                          onPressed: onClose,
+                          padding: EdgeInsets.zero,
+                          visualDensity: const VisualDensity(
+                            horizontal: -3,
+                            vertical: -3,
+                          ),
+                          constraints: const BoxConstraints.tightFor(
+                            width: 24,
+                            height: 24,
+                          ),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white70,
+                            size: 16,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 7),
+                  Container(
+                    height: 36,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.07),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.tune_rounded,
+                          size: 14,
+                          color: accentColor.withValues(alpha: 0.85),
+                        ),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: activeTargetId,
+                              isExpanded: true,
+                              dropdownColor: const Color(0xFF1A2233),
+                              iconEnabledColor: Colors.white70,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11.6,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              onChanged: (nextTargetId) {
+                                if (nextTargetId == null ||
+                                    nextTargetId.trim().isEmpty) {
+                                  return;
+                                }
+                                setState(() {
+                                  final resolved =
+                                      _resolveAutomationTabTargetId(
+                                    row,
+                                    nextTargetId,
+                                  );
+                                  if (_isAutomationRangeSelectionModeFor(
+                                        row,
+                                        activeTargetId,
+                                      ) &&
+                                      resolved != activeTargetId) {
+                                    _clearAutomationRangeSelectionMode();
+                                  }
+                                  widget.setSelectedAutomationTargetId(
+                                    row,
+                                    resolved,
+                                  );
+                                  _automationEditorRow = row;
+                                  _automationEditorTargetId = resolved;
+                                });
+                              },
+                              items: availableTargets.map((target) {
+                                final id =
+                                    (target['id'] ?? '').toString().trim();
+                                final fullLabel = (target['fullLabel'] ??
+                                        target['label'] ??
+                                        id)
+                                    .toString()
+                                    .trim();
+                                final label =
+                                    fullLabel.isEmpty ? id : fullLabel;
+                                return DropdownMenuItem<String>(
+                                  value: id,
+                                  child: Text(
+                                    label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                );
+                              }).toList(growable: false),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 7),
+                  SizedBox(
+                    height: 24,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        toolbarAction(
+                          label: 'Copy',
+                          icon: Icons.content_copy_outlined,
+                          onTap: copyAllAutomationPoints,
+                        ),
+                        toolbarAction(
+                          label: 'Paste',
+                          icon: Icons.content_paste_outlined,
+                          onTap: clipboardMatchesSelection
+                              ? pasteAllAutomationPoints
+                              : null,
+                        ),
+                        if (!rangeSelectionActiveForTarget)
+                          toolbarAction(
+                            label: 'Copy range',
+                            icon: Icons.crop_free_rounded,
+                            onTap: copyAutomationArea,
+                          ),
+                        if (rangeSelectionActiveForTarget)
+                          toolbarAction(
+                            label: 'Cancel',
+                            icon: Icons.close_rounded,
+                            onTap: cancelAutomationRangeSelection,
+                          ),
+                        if (rangeSelectionActiveForTarget)
+                          toolbarAction(
+                            label: 'Confirm',
+                            icon: Icons.check_rounded,
+                            onTap: canConfirmRangeSelection
+                                ? confirmAutomationRangeSelection
+                                : null,
+                          ),
+                        toolbarAction(
+                          label: 'Paste here',
+                          icon: Icons.vertical_align_top_rounded,
+                          onTap: areaClipboardMatchesSelection
+                              ? pasteAutomationAreaAtPlayhead
+                              : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final laneHeight = constraints.maxHeight;
-                return _AutomationLane(
-                  rowIndex: row,
-                  points: editorPoints,
-                  pixelsPerMs: _pixelsPerMs,
-                  scrollOffsetMs: _scrollOffsetMs,
-                  laneHeight: laneHeight,
-                  timelineDurationMs: _maxDurationMs,
-                  targetLabel:
-                      targetLabel.isEmpty ? activeTargetId : targetLabel,
-                  targetParamId:
-                      targetParamId.isEmpty ? activeTargetId : targetParamId,
-                  targetMin: targetMin,
-                  targetMax: targetMax,
-                  isVolumeLane: isVolumeTarget,
-                  onChanged: (pts) {
-                    final copiedAfter =
-                        pts.map((p) => p.copy()).toList(growable: false);
-                    if (selectedClip != null) {
-                      final beforeClips = _cloneAutomationClips(
-                        widget.getAutomationClipsForTarget(row, activeTargetId),
-                      );
-                      final changed = _setSelectedAutomationClipPointsForTarget(
-                        row,
-                        activeTargetId,
-                        copiedAfter,
-                        clipsOverride: beforeClips,
-                      );
-                      if (changed) {
-                        final afterClips = _cloneAutomationClips(
-                          widget.getAutomationClipsForTarget(
-                              row, activeTargetId),
-                        );
-                        widget.onAutomationClipsCommit?.call(
-                            row, activeTargetId, beforeClips, afterClips);
-                      }
-                    } else {
-                      final before = lanePoints
-                          .map((p) => p.copy())
-                          .toList(growable: false);
-                      _setActiveAutomationPointsForRow(
-                        row,
-                        activeTargetId,
-                        copiedAfter,
-                      );
-                      if (activeTargetId == 'volume') {
-                        widget.onAutomationCommit
-                            ?.call(row, before, copiedAfter);
-                      } else {
-                        widget.onAutomationTargetCommit
-                            ?.call(row, activeTargetId, before, copiedAfter);
-                      }
-                    }
-                    setState(() {});
-                  },
-                  onPanStartExternal: (pos) =>
-                      _automationPanStart(row, pos, laneHeight),
-                  onPanUpdateExternal: (pos) => _automationPanUpdate(row, pos),
-                  onPanEndExternal: () => _automationPanEnd(row),
-                  onBackgroundPanStartExternal:
-                      _automationLaneBackgroundPanStart,
-                  onBackgroundPanUpdateExternal:
-                      _automationLaneBackgroundPanUpdate,
-                  onBackgroundPanEndExternal: _automationLaneBackgroundPanEnd,
-                );
-              },
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -4991,8 +6919,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   Widget _buildEffectsPanel(int row) {
     Widget panel = Container(
-      decoration:
-          BoxDecoration(color: const Color(0xFF151A26).withOpacity(0.9)),
+      decoration: const BoxDecoration(color: Color(0xFF151A26)),
       child: RowEffectsPanel(
         key: ValueKey("effect_panel_row_${widget.rows[row].rowId}"),
         rowIndex: row,
@@ -5018,13 +6945,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         getTrackPluginParameters: widget.getRowPluginParameters,
         scanPlugins: widget.scanPlugins,
         setTrackEffectParam: widget.setRowEffectParam,
+        onRequestAutomateParameter: _handleRowEffectAutomationRequest,
         onPluginParamCommit: widget.onPluginParamCommit,
         onPresetCommit: widget.onPresetCommit,
+        onTutorialEffectAdded: widget.onTutorialRowEffectAdded,
+        onTutorialEffectOpened: widget.onTutorialRowEffectOpened,
         registerRefresh: (refreshFn) {
           _rowEffectRefreshers[widget.rows[row].rowId] = refreshFn;
         },
         registerPlaybackRefresh: (refreshFn) {
           _rowEffectPlaybackRefreshers[widget.rows[row].rowId] = refreshFn;
+        },
+        registerParameterRevealer: (reveal) {
+          _rowEffectParameterRevealers[widget.rows[row].rowId] = reveal;
         },
         projectBpm: widget.bpm,
         meters: widget.meters,
@@ -5037,7 +6970,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       panel = MultiHalo(
         highlighter: widget.tutorialHighlighter!,
         haloKeys: <HaloKey>[
-          HaloKey('row:$row:effects_tab'),
           HaloKey('row:$row:fx_list'),
           HaloKey('row:$row:effects_panel'),
         ],
@@ -6049,8 +7981,24 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   // === FIX ===: New unified gesture handlers
   void _onScaleStart(ScaleStartDetails details) {
-    if (_interactionMode == 'automation' ||
-        _interactionMode == 'automation_clip') {
+    _tutorialPanStartScrollMs = _scrollOffsetMs;
+    _tutorialPanStartPixelsPerMs = _pixelsPerMs;
+    _tutorialScrollNotifiedForGesture = false;
+    _tutorialZoomNotifiedForGesture = false;
+    if (_timelineHasMultiTouch) {
+      _clearPastePopup();
+      setState(() {
+        _clearPendingClipTapState();
+        _clearPendingAutomationClipSelection();
+        _clearAutomationClipMenu();
+        _isUserInteracting = true;
+        _interactionMode = 'pan';
+        _initialPixelsPerMs = _pixelsPerMs;
+        _initialScrollMs = _scrollOffsetMs;
+      });
+      return;
+    }
+    if (_interactionMode == 'automation') {
       return;
     }
     if (_activeTool == _TimelineTool.cut &&
@@ -6103,6 +8051,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_selectionBoxActive) {
       _isUserInteracting = false;
       _interactionMode = '';
+      _clearPendingClipDrag();
       return;
     }
 
@@ -6127,6 +8076,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _trimEndValue = widget.getTrimEndMs(clip);
         _trimOriginalStartMs = widget.getStartMs(clip);
         _trimStartAnchorX = details.localFocalPoint.dx;
+        _trimTimelineScaleValue = _trimTimelineScaleForClip(
+          clip,
+          trimStartMs: _trimStartValue!,
+          trimEndMs: _trimEndValue!,
+        );
+        newTrimStartUpdate = _trimStartValue;
+        newTrimEndUpdate = _trimEndValue;
+        newStartMsUpdate = null;
       }
 
       setState(() {});
@@ -6134,12 +8091,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
 
     // === 2. DRAG WAS INITIATED IN tapDown? → Continue drag ===
+    if (_pendingDrag && _draggedClipIndex != null) {
+      return;
+    }
+    if (_pendingAutomationClipVisual != null &&
+        _dragStartGlobalOffset != null) {
+      return;
+    }
     if (_interactionMode == 'drag' && _draggedClipIndex != null) {
       // Already in drag mode — just continue
       return;
     }
 
     // --- STEP 3: No clip interaction, start Panning/Zooming ---
+    if (_tentativeClipSelectionActive) {
+      setState(_restoreTentativeClipSelectionIfNeeded);
+    }
     _interactionMode = 'pan';
     _initialScrollMs = _scrollOffsetMs;
   }
@@ -6151,9 +8118,66 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_activeTool == _TimelineTool.delete && _deleteStrokeActive) {
       return;
     }
-    if (!_isUserInteracting) return;
-
-    if (_interactionMode == 'automation_clip') {
+    if (_timelineHasMultiTouch &&
+        _interactionMode != 'automation' &&
+        _interactionMode != 'paint') {
+      if (_pendingDrag ||
+          _pendingAutomationClipVisual != null ||
+          _interactionMode != 'pan') {
+        setState(() {
+          _restoreTentativeClipSelectionIfNeeded();
+          _clearPendingClipTapState();
+          _clearPendingAutomationClipSelection();
+          _clearAutomationClipMenu();
+          _isUserInteracting = true;
+          _interactionMode = 'pan';
+          _draggedClipIndex = null;
+        });
+      }
+      _handlePanZoomUpdate(details);
+      return;
+    }
+    if (_pendingAutomationClipVisual != null &&
+        _dragStartGlobalOffset != null) {
+      final pendingMode = _pendingAutomationClipInteractionMode ?? 'open';
+      final dragDistance =
+          (details.focalPoint - _dragStartGlobalOffset!).distance;
+      const dragStartTolerance = 10.0;
+      if (dragDistance <= dragStartTolerance) {
+        return;
+      }
+      final pendingAutomationClip = _pendingAutomationClipVisual!;
+      if (pendingMode == 'open') {
+        setState(() {
+          _clearPendingAutomationClipSelection();
+          _clearAutomationClipMenu();
+          _isUserInteracting = true;
+          _interactionMode = 'pan';
+          _initialPixelsPerMs = _pixelsPerMs;
+          _initialScrollMs = _scrollOffsetMs;
+        });
+        _handlePanZoomUpdate(details);
+        return;
+      }
+      setState(() {
+        _clearPendingAutomationClipSelection();
+        _clearAutomationClipMenu();
+        _isUserInteracting = true;
+        _beginAutomationClipDrag(
+          pendingAutomationClip.row,
+          pendingAutomationClip.targetId,
+          pendingAutomationClip.clip,
+          _pendingAutomationClipStartLocalOffset ??
+              (details.localFocalPoint - pendingAutomationClip.rect.topLeft),
+          pendingAutomationClip.rect.width,
+          pendingMode,
+        );
+        _interactionMode = switch (_automationClipDragMode) {
+          'trim_start' => 'trim-start',
+          'trim_end' => 'trim-end',
+          _ => 'drag',
+        };
+      });
       final row = _automationClipDragRow;
       final targetId = _automationClipDragTargetId;
       final draggedClip = _activeDraggedAutomationClip();
@@ -6162,12 +8186,45 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           row,
           targetId,
           draggedClip,
-          details.focalPointDelta.dx,
+          details.focalPoint.dx - _dragStartGlobalOffset!.dx,
           details.localFocalPoint,
         );
       }
       return;
     }
+    if (_pendingDrag &&
+        _draggedClipIndex != null &&
+        _dragStartGlobalOffset != null) {
+      if (!_pendingClipDragExceededSlop(details.focalPoint)) {
+        return;
+      }
+      setState(() {
+        _clearPendingClipDrag();
+        _isUserInteracting = true;
+        _interactionMode = 'drag';
+        _clipPopupMs = null;
+        _dragDeltaMs = 0.0;
+        _dragDeltaRows = 0;
+        _dragGroupStartMs.clear();
+        _dragGroupStartRows.clear();
+        final draggedIndex = _draggedClipIndex;
+        if (draggedIndex != null &&
+            draggedIndex >= 0 &&
+            draggedIndex < widget.clips.length) {
+          final draggingGroup = _selectedClipIndices.length > 1 &&
+              _selectedClipIndices.contains(draggedIndex);
+          if (draggingGroup) {
+            final selected = _activeSelectedClipIndices();
+            for (final index in selected) {
+              _dragGroupStartMs[index] = widget.getStartMs(widget.clips[index]);
+              _dragGroupStartRows[index] = widget.clips[index].rowIndex;
+            }
+          }
+        }
+      });
+    }
+    if (!_isUserInteracting) return;
+
     if (_interactionMode == 'automation') return;
 
     if (_interactionMode == 'paint') {
@@ -6195,19 +8252,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onScaleEnd(ScaleEndDetails details) async {
-    if (_interactionMode == 'automation_clip') {
-      final row = _automationClipDragRow;
-      final targetId = _automationClipDragTargetId;
-      if (row != null && targetId != null) {
-        _endAutomationClipDrag(row, targetId);
-      }
-      setState(() {
-        _interactionMode = '';
-        _isUserInteracting = false;
-        _dragStartGlobalOffset = null;
-      });
-      return;
-    }
     if (_interactionMode == 'automation') {
       setState(() {
         _interactionMode = '';
@@ -6247,28 +8291,42 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         await widget.onMoveClipCommit(
             _draggedClipIndex!, _dragStartClipMs!, _dragStartRow!);
       }
+    } else if (_interactionMode == 'drag' && _hasActiveAutomationClipDrag) {
+      final row = _automationClipDragRow;
+      final targetId = _automationClipDragTargetId;
+      if (row != null && targetId != null) {
+        _endAutomationClipDrag(row, targetId);
+      }
     }
 
     if (_interactionMode == 'trim-start' || _interactionMode == 'trim-end') {
-      if (newStartMsUpdate != null) {
-        widget.onTrimClipCommit(
-          _trimClipIndex!,
-          newTrimStartUpdate!,
-          newTrimEndUpdate!,
-          _trimStartValue!,
-          _trimEndValue!,
-          _trimOriginalStartMs!,
-          newStartMs: newStartMsUpdate,
-        );
+      if (_hasActiveAutomationClipDrag) {
+        final row = _automationClipDragRow;
+        final targetId = _automationClipDragTargetId;
+        if (row != null && targetId != null) {
+          _endAutomationClipDrag(row, targetId);
+        }
       } else {
-        widget.onTrimClipCommit(
-          _trimClipIndex!,
-          newTrimStartUpdate!,
-          newTrimEndUpdate!,
-          _trimStartValue!,
-          _trimEndValue!,
-          _trimOriginalStartMs!,
-        );
+        if (newStartMsUpdate != null) {
+          widget.onTrimClipCommit(
+            _trimClipIndex!,
+            newTrimStartUpdate!,
+            newTrimEndUpdate!,
+            _trimStartValue!,
+            _trimEndValue!,
+            _trimOriginalStartMs!,
+            newStartMs: newStartMsUpdate,
+          );
+        } else {
+          widget.onTrimClipCommit(
+            _trimClipIndex!,
+            newTrimStartUpdate!,
+            newTrimEndUpdate!,
+            _trimStartValue!,
+            _trimEndValue!,
+            _trimOriginalStartMs!,
+          );
+        }
       }
     }
 
@@ -6287,9 +8345,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     // Reset all interaction states
     setState(() {
+      _clearPendingClipDrag();
       _isUserInteracting = false;
       _interactionMode = '';
       _draggedClipIndex = null;
+      _pendingDragStartedFromSelection = false;
       _dragStartLocalOffset = null;
       _dragGroupStartMs.clear();
       _dragGroupStartRows.clear();
@@ -6300,6 +8360,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _trimEndValue = null;
       _trimOriginalStartMs = null;
       _trimStartAnchorX = null; // === FIX ===
+      _trimTimelineScaleValue = null;
+      newTrimStartUpdate = null;
+      newTrimEndUpdate = null;
+      newStartMsUpdate = null;
       _stretchClipIndex = null;
       _stretchStartTimelineDurationMs = null;
       _stretchOriginalStartMs = null;
@@ -6313,16 +8377,36 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onTimelineLongPressStart(LongPressStartDetails details) {
+    _clearPendingAutomationClipSelection();
     if (_activeTool != _TimelineTool.pencil &&
         _activeTool != _TimelineTool.stretch) {
       return;
     }
-    if (_interactionMode == 'automation' ||
-        _interactionMode == 'automation_clip') {
+    if (_interactionMode == 'automation' || _hasActiveAutomationClipDrag) {
       return;
     }
-    if (_getClipIndexAt(details.localPosition) != null) return;
+    final tappedAutomationClip =
+        _timelineAutomationClipAt(details.localPosition);
+    if (tappedAutomationClip != null) {
+      widget.setSelectedAutomationTargetId(
+        tappedAutomationClip.row,
+        tappedAutomationClip.targetId,
+      );
+      setState(() {
+        _clearClipSelection();
+        _setSelectedAutomationClipFor(
+          tappedAutomationClip.row,
+          tappedAutomationClip.targetId,
+          tappedAutomationClip.clip.id,
+          lane: tappedAutomationClip.clip.lane,
+        );
+        _setAutomationClipMenuFor(tappedAutomationClip);
+      });
+      return;
+    }
+    if (_getGestureClipIndexAt(details.localPosition) != null) return;
     setState(() {
+      _clearAutomationClipMenu();
       _selectionBoxActive = true;
       _selectionBoxStart = details.localPosition;
       _selectionBoxCurrent = details.localPosition;
@@ -6355,6 +8439,21 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   // --- Drag/Trim/Pan Handlers ---
 
   void _handleDragUpdate(ScaleUpdateDetails details) {
+    if (_hasActiveAutomationClipDrag) {
+      final row = _automationClipDragRow;
+      final targetId = _automationClipDragTargetId;
+      final draggedClip = _activeDraggedAutomationClip();
+      if (row != null && targetId != null && draggedClip != null) {
+        _updateAutomationClipDrag(
+          row,
+          targetId,
+          draggedClip,
+          details.focalPointDelta.dx,
+          details.localFocalPoint,
+        );
+      }
+      return;
+    }
     if (_draggedClipIndex == null || _dragStartGlobalOffset == null) return;
 
     setState(() {
@@ -6403,47 +8502,101 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     });
   }
 
+  double _trimTimelineScaleForClip(
+    AudioTrack clip, {
+    required double trimStartMs,
+    required double trimEndMs,
+  }) {
+    final rawVisibleMs = (trimEndMs - trimStartMs).clamp(1.0, double.infinity);
+    final timelineVisibleMs =
+        widget.getTimelineDurationMs(clip).clamp(1.0, double.infinity);
+    return (timelineVisibleMs / rawVisibleMs).clamp(0.0001, double.infinity);
+  }
+
   void _handleTrimUpdate(ScaleUpdateDetails details) {
+    if (_hasActiveAutomationClipDrag) {
+      final row = _automationClipDragRow;
+      final targetId = _automationClipDragTargetId;
+      final draggedClip = _activeDraggedAutomationClip();
+      if (row != null && targetId != null && draggedClip != null) {
+        _updateAutomationClipDrag(
+          row,
+          targetId,
+          draggedClip,
+          details.focalPointDelta.dx,
+          details.localFocalPoint,
+        );
+      }
+      return;
+    }
     if (_trimClipIndex == null || _trimStartAnchorX == null) return;
 
     final clip = widget.clips[_trimClipIndex!];
     final fullDuration = widget.getFullDurationMs(clip);
+    final isReversed = clip.isReversed;
+    final timelineScale = (_trimTimelineScaleValue ?? 1.0)
+        .clamp(0.0001, double.infinity);
+    const minRawTrimMs = 50.0;
+    final minTimelineTrimMs = minRawTrimMs * timelineScale;
+    final originalStartMs = _trimOriginalStartMs!;
+    final originalVisibleDurationMs =
+        (_trimEndValue! - _trimStartValue!) * timelineScale;
+    final originalVisibleEndMs = originalStartMs + originalVisibleDurationMs;
+    final minVisibleStartMs = math.max(
+      0.0,
+      originalStartMs -
+          ((isReversed ? (fullDuration - _trimEndValue!) : _trimStartValue!) *
+              timelineScale),
+    );
+    final maxVisibleEndMs = originalStartMs +
+        ((isReversed ? _trimEndValue! : (fullDuration - _trimStartValue!)) *
+            timelineScale);
 
     // Amount user moved horizontally in pixels (local to timeline)
     final deltaPx = details.localFocalPoint.dx - _trimStartAnchorX!;
-    // Convert movement delta to ms
-    final deltaMs = deltaPx / _pixelsPerMs;
+    // Convert movement delta to visible timeline ms.
+    final deltaTimelineMs = deltaPx / _pixelsPerMs;
 
     double newTrimStart = _trimStartValue!;
     double newTrimEnd = _trimEndValue!;
 
     double? newStartMs;
-    final originalStartMs = _trimOriginalStartMs!;
 
     if (_interactionMode == 'trim-start') {
-      newTrimStart = (_trimStartValue! + deltaMs).clamp(0.0, newTrimEnd - 50.0);
+      double targetVisibleStartMs = originalStartMs + deltaTimelineMs;
       if (_magnetEnabled) {
-        newTrimStart = _quantizeMs(newTrimStart);
+        targetVisibleStartMs = _quantizeMs(targetVisibleStartMs);
       }
-
-      final deltaTrim = newTrimStart - _trimStartValue!;
-      final attemptedNewStartMs = originalStartMs + deltaTrim;
-
-      if (attemptedNewStartMs < 0.0) {
-        newStartMs = 0.0;
-        final maxAllowedDeltaTrim = -originalStartMs;
-        newTrimStart = (_trimStartValue! + maxAllowedDeltaTrim)
-            .clamp(0.0, newTrimEnd - 50.0);
+      targetVisibleStartMs = targetVisibleStartMs
+          .clamp(minVisibleStartMs, originalVisibleEndMs - minTimelineTrimMs)
+          .toDouble();
+      final deltaVisibleMs = targetVisibleStartMs - originalStartMs;
+      if (isReversed) {
+        newTrimEnd = (_trimEndValue! - (deltaVisibleMs / timelineScale))
+            .clamp(newTrimStart + minRawTrimMs, fullDuration);
       } else {
-        newStartMs =
-            attemptedNewStartMs; // <-- This is the ripple move calculation
+        newTrimStart = (_trimStartValue! + (deltaVisibleMs / timelineScale))
+            .clamp(0.0, newTrimEnd - minRawTrimMs);
       }
+      newStartMs = targetVisibleStartMs;
     } else if (_interactionMode == 'trim-end') {
-      newTrimEnd =
-          (_trimEndValue! + deltaMs).clamp(newTrimStart + 50.0, fullDuration);
-
+      double targetVisibleEndMs = originalVisibleEndMs + deltaTimelineMs;
       if (_magnetEnabled) {
-        newTrimEnd = _quantizeMs(newTrimEnd);
+        targetVisibleEndMs = _quantizeMs(targetVisibleEndMs);
+      }
+      targetVisibleEndMs = targetVisibleEndMs
+          .clamp(
+            originalStartMs + minTimelineTrimMs,
+            maxVisibleEndMs,
+          )
+          .toDouble();
+      final deltaVisibleMs = targetVisibleEndMs - originalVisibleEndMs;
+      if (isReversed) {
+        newTrimStart = (_trimStartValue! - (deltaVisibleMs / timelineScale))
+            .clamp(0.0, newTrimEnd - minRawTrimMs);
+      } else {
+        newTrimEnd = (_trimEndValue! + (deltaVisibleMs / timelineScale))
+            .clamp(newTrimStart + minRawTrimMs, fullDuration);
       }
       // newStartMs remains null, correctly signaling no position change
     }
@@ -6523,11 +8676,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _handlePanZoomUpdate(ScaleUpdateDetails details) {
+    bool didZoom = false;
+    bool didScroll = false;
     setState(() {
       // --- Handle Zoom ---
       if (details.scale != 1.0 && _initialPixelsPerMs != null) {
         final newPixelsPerMs =
             (_initialPixelsPerMs! * details.scale).clamp(0.0025, 1.0);
+        didZoom = didZoom || (newPixelsPerMs - _pixelsPerMs).abs() > 0.0001;
 
         // Zoom around the focal point
         final focalPointPx = details.localFocalPoint.dx;
@@ -6540,6 +8696,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       // --- Handle Pan ---
       if (details.focalPointDelta.dx != 0) {
         _scrollOffsetMs -= details.focalPointDelta.dx / _pixelsPerMs;
+        didScroll = true;
       }
 
       // --- Clamping & Scrub ---
@@ -6547,6 +8704,26 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       final playheadPx = _getPlayheadPx(context);
       widget.onScrubRequested(_scrollOffsetMs + playheadPx / _pixelsPerMs);
     });
+
+    if (!_tutorialScrollNotifiedForGesture) {
+      final start = _tutorialPanStartScrollMs ?? _scrollOffsetMs;
+      final movedEnough = (_scrollOffsetMs - start).abs() >= 80.0;
+      if (didScroll && movedEnough) {
+        _tutorialScrollNotifiedForGesture = true;
+        widget.onTutorialTimelineScrolled?.call();
+      }
+    }
+    if (!_tutorialZoomNotifiedForGesture) {
+      final startZoom = _tutorialPanStartPixelsPerMs ?? _pixelsPerMs;
+      final safeStartZoom = startZoom <= 0 ? 0.0001 : startZoom;
+      final zoomRatio = (_pixelsPerMs / safeStartZoom);
+      final zoomedEnough = (zoomRatio - 1.0).abs() >= 0.08 ||
+          (_pixelsPerMs - startZoom).abs() >= 0.002;
+      if (didZoom && zoomedEnough) {
+        _tutorialZoomNotifiedForGesture = true;
+        widget.onTutorialTimelineZoomed?.call();
+      }
+    }
   }
 
   double msFor128Bars(double bpm) {
@@ -6554,9 +8731,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _clampScroll() {
-    final viewportWidth = _getViewportWidth(context);
     final playheadPx = _getPlayheadPx(context);
-    final viewMs = viewportWidth / _pixelsPerMs;
 
     // Allow scrolling so 0ms is at the playhead
     final minScroll = -(playheadPx) / _pixelsPerMs;
@@ -6626,6 +8801,30 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   // === MODIFIED: Correctly map localY to the actual track row index ===
   int? _getClipIndexAt(Offset localPosition) {
+    return _getClipIndexAtInternal(localPosition);
+  }
+
+  int? _getGestureClipIndexAt(Offset localPosition) {
+    return _getClipIndexAtInternal(
+      localPosition,
+      includeTrimHandleHitbox: true,
+    );
+  }
+
+  bool _isLocalXInLeftTrimHandleHitbox(Rect clipRect, double localX) {
+    return localX >= clipRect.left - kTrimHitboxPadding &&
+        localX <= clipRect.left + kTrimHandleWidth + kTrimHitboxPadding;
+  }
+
+  bool _isLocalXInRightTrimHandleHitbox(Rect clipRect, double localX) {
+    return localX >= clipRect.right - kTrimHandleWidth - kTrimHitboxPadding &&
+        localX <= clipRect.right + kTrimHitboxPadding;
+  }
+
+  int? _getClipIndexAtInternal(
+    Offset localPosition, {
+    bool includeTrimHandleHitbox = false,
+  }) {
     final localX = localPosition.dx;
     final localY = localPosition.dy;
     final tapMs = _scrollOffsetMs + localX / _pixelsPerMs;
@@ -6633,125 +8832,139 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (tapRow == null || !_isLocalYInMainTrackLane(tapRow, localY)) {
       return null;
     }
-
-    // Iterate backwards to prioritize clips drawn later
-    // for (int i = widget.clips.length - 1; i >= 0; i--) {
-    //   final clip = widget.clips[i];
-    //   final startMs = widget.getStartMs(clip);
-    //   // Use the trimmed duration for hit testing
-    //   final visualDuration = widget.getTrimEndMs(clip) - widget.getTrimStartMs(clip);
-    //   final endMs = startMs + visualDuration;
-    //   final clipRow = clip.rowIndex; // <--- This is the definition that was checked
-
-    //   if (clipRow == tapRow && tapMs >= startMs && tapMs <= endMs) {
-    //     return i; // Return the index
-    //   }
-    // }
-    // return null;
-
-    // Collect all clips that collide at this tap (same row + tapMs inside their visible span)
-    final candidates = <int>[];
-
-    for (int i = 0; i < widget.clips.length; i++) {
+    for (int i = widget.clips.length - 1; i >= 0; i--) {
       final clip = widget.clips[i];
-
       if (clip.rowIndex != tapRow) continue;
 
       final startMs = widget.getStartMs(clip);
-      final visualDuration = widget.getTimelineDurationMs(clip);
-      final endMs = startMs + visualDuration;
-
+      final endMs = startMs + widget.getTimelineDurationMs(clip);
       if (tapMs >= startMs && tapMs <= endMs) {
-        candidates.add(i);
+        return i;
+      }
+      if (!includeTrimHandleHitbox) continue;
+      final clipRect = _getClipRect(i);
+      if (clipRect == null) continue;
+      if (_isLocalXInLeftTrimHandleHitbox(clipRect, localX) ||
+          _isLocalXInRightTrimHandleHitbox(clipRect, localX)) {
+        return i;
       }
     }
-    if (candidates.isEmpty) return null;
-
-    // "Top" = drawn last. Your painter draws in list order,
-    // so higher index wins.
-    final int topIndex = candidates.reduce((a, b) => a > b ? a : b);
-
-    // Optional: if you want the *currently selected clip* to win
-    // when it’s part of the overlap stack (DAW-style sticky selection),
-    // uncomment this:
-    //
-    // if (_selectedClipIndex >= 0 && candidates.contains(_selectedClipIndex)) {
-    //   topIndex = _selectedClipIndex;
-    // }
-
-    return topIndex;
+    return null;
   }
 
   void _handleTapDown(TapDownDetails details) {
-    if (_interactionMode == 'automation' ||
-        _interactionMode == 'automation_clip') {
+    if (_interactionMode == 'automation' || _hasActiveAutomationClipDrag) {
       return;
     }
     if (_activeTool == _TimelineTool.cut ||
         _activeTool == _TimelineTool.delete) {
       return;
     }
-    if (_activeTool == _TimelineTool.paint &&
-        _activeSelectedClipIndices().isEmpty) {
-      return;
-    }
     if (_selectionBoxActive) return;
 
     _clearPastePopup();
-
-    // === 1. Reset any previous trim cue ===
-    setState(() {
-      _activeTrimHandleX = null;
-      _trimClipIndex = null;
-      _stretchClipIndex = null;
-      _stretchStartTimelineDurationMs = null;
-      _stretchOriginalStartMs = null;
-      _stretchStartAnchorX = null;
-      _stretchDurationUpdateMs = null;
-    });
+    _tentativeClipSelectionActive = false;
 
     final localPos = details.localPosition;
+    final tappedClipIndexForPaint = _getGestureClipIndexAt(localPos);
+    if (_activeTool == _TimelineTool.paint &&
+        _activeSelectedClipIndices().isEmpty &&
+        tappedClipIndexForPaint == null) {
+      return;
+    }
     final tappedAutomationClip = _timelineAutomationClipAt(localPos);
     if (tappedAutomationClip != null) {
+      final isSelectedClip = _selectedAutomationClipIdFor(
+            tappedAutomationClip.row,
+            tappedAutomationClip.targetId,
+          ) ==
+          tappedAutomationClip.clip.id;
+      String interactionMode = 'open';
+      if (isSelectedClip) {
+        if (_automationClipRightTrimHandleHit(tappedAutomationClip, localPos)) {
+          interactionMode = 'trim_end';
+        } else if (_automationClipLeftTrimHandleHit(
+          tappedAutomationClip,
+          localPos,
+        )) {
+          interactionMode = 'trim_start';
+        } else if (_automationClipMoveHandleRect(tappedAutomationClip)
+            .contains(localPos)) {
+          interactionMode = 'move';
+        }
+      }
       widget.setSelectedAutomationTargetId(
         tappedAutomationClip.row,
         tappedAutomationClip.targetId,
       );
       setState(() {
+        _resetTrimInteractionState();
         _clearClipSelection();
-        _activeTrimHandleX = null;
-        _trimClipIndex = null;
-        _stretchClipIndex = null;
-        _stretchStartTimelineDurationMs = null;
-        _stretchOriginalStartMs = null;
-        _stretchStartAnchorX = null;
-        _stretchDurationUpdateMs = null;
-        _isUserInteracting = true;
-        _interactionMode = 'automation_clip';
-        _beginAutomationClipDrag(
+        _setSelectedAutomationClipFor(
           tappedAutomationClip.row,
           tappedAutomationClip.targetId,
-          tappedAutomationClip.clip,
-          localPos - tappedAutomationClip.rect.topLeft,
-          tappedAutomationClip.rect.width,
+          tappedAutomationClip.clip.id,
+          lane: tappedAutomationClip.clip.lane,
         );
+        _pendingAutomationClipVisual = tappedAutomationClip;
+        _pendingAutomationClipStartLocalOffset =
+            localPos - tappedAutomationClip.rect.topLeft;
+        _pendingAutomationClipInteractionMode = interactionMode;
         _dragStartGlobalOffset = details.globalPosition;
       });
       return;
     }
-    final tappedClipIndex = _getClipIndexAt(localPos);
+    _clearPendingAutomationClipSelection();
+    final tappedClipIndex = tappedClipIndexForPaint;
 
     if (tappedClipIndex == null) {
-      if (_selectedClipIndex >= 0 || _selectedClipIndices.isNotEmpty) {
+      final tapRow = _rowForLocalY(localPos.dy);
+      final rawTapMs = _scrollOffsetMs + localPos.dx / _pixelsPerMs;
+      final quantizedStartMs = _segmentStartMsForTap(rawTapMs);
+      final quantizedEndMs = quantizedStartMs + _quantizeIntervalMs();
+      final tapMsForPaste = _magnetEnabled ? quantizedStartMs : rawTapMs;
+      final canPasteHere = tapRow != null &&
+          (widget.hasCopiedClip || _canPasteAutomationClipAt(tapRow));
+      final needsVisualReset = _selectedClipIndex >= 0 ||
+          _selectedClipIndices.isNotEmpty ||
+          _selectedAutomationClipByLane.isNotEmpty ||
+          _automationClipMenuClipId != null ||
+          _trimClipIndex != null ||
+          _stretchClipIndex != null ||
+          _activeTrimHandleX != null;
+      if (needsVisualReset) {
         setState(() {
+          _resetTrimInteractionState();
           _clearClipSelection();
-          _activeTrimHandleX = null;
-          _trimClipIndex = null;
-          _stretchClipIndex = null;
-          _stretchStartTimelineDurationMs = null;
-          _stretchOriginalStartMs = null;
-          _stretchStartAnchorX = null;
-          _stretchDurationUpdateMs = null;
+          if (canPasteHere && tapRow != null) {
+            _pasteRow = tapRow;
+            _pasteMs = tapMsForPaste;
+            _showPastePopup = true;
+            if (_magnetEnabled) {
+              _highlightedSegmentRow = tapRow;
+              _highlightedSegmentStartMs = quantizedStartMs;
+              _highlightedSegmentEndMs = quantizedEndMs;
+            } else {
+              _highlightedSegmentRow = null;
+              _highlightedSegmentStartMs = null;
+              _highlightedSegmentEndMs = null;
+            }
+          }
+        });
+      } else if (canPasteHere && tapRow != null) {
+        setState(() {
+          _pasteRow = tapRow;
+          _pasteMs = tapMsForPaste;
+          _showPastePopup = true;
+          if (_magnetEnabled) {
+            _highlightedSegmentRow = tapRow;
+            _highlightedSegmentStartMs = quantizedStartMs;
+            _highlightedSegmentEndMs = quantizedEndMs;
+          } else {
+            _highlightedSegmentRow = null;
+            _highlightedSegmentStartMs = null;
+            _highlightedSegmentEndMs = null;
+          }
         });
       }
       return;
@@ -6761,64 +8974,63 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (clipRect == null) {
       if (!wasAlreadySelected) {
         setState(() {
+          _resetTrimInteractionState();
           _setSingleClipSelection(tappedClipIndex, popupMs: null);
+          _tentativeClipSelectionActive = true;
         });
       }
       return;
     }
 
     final localX = localPos.dx;
+    final tapPopupMs = _scrollOffsetMs + localPos.dx / _pixelsPerMs;
     final draggingGroup = _selectedClipIndices.length > 1 &&
         _selectedClipIndices.contains(tappedClipIndex);
 
     // === 3. PRIORITY 1: TRIM HANDLE HIT? (WINS OVER DRAG) ===
-    final leftHandleHit = localX >= clipRect.left - kTrimHitboxPadding &&
-        localX <= clipRect.left + kTrimHandleWidth + kTrimHitboxPadding;
-
-    final rightHandleHit =
-        localX >= clipRect.right - kTrimHandleWidth - kTrimHitboxPadding &&
-            localX <= clipRect.right + kTrimHitboxPadding;
+    final leftHandleHit = _isLocalXInLeftTrimHandleHitbox(clipRect, localX);
+    final rightHandleHit = _isLocalXInRightTrimHandleHitbox(clipRect, localX);
 
     if (!draggingGroup && (leftHandleHit || rightHandleHit)) {
-      // TRIM WINS — show visual cue and prepare for trim
       setState(() {
-        _setSingleClipSelection(tappedClipIndex, popupMs: null);
-        _trimClipIndex = tappedClipIndex;
-        _activeTrimHandleX = leftHandleHit ? clipRect.left : clipRect.right;
-        // DO NOT set _interactionMode here — let onScaleStart do it
-        // This ensures trim gesture starts cleanly
+        _resetTrimInteractionState();
+        _setSingleClipSelection(tappedClipIndex, popupMs: tapPopupMs);
+        _tentativeClipSelectionActive = !wasAlreadySelected;
+        if (wasAlreadySelected) {
+          _trimClipIndex = tappedClipIndex;
+          _activeTrimHandleX = leftHandleHit ? clipRect.left : clipRect.right;
+        }
+        // Only clips that were already selected can arm trim/stretch in the
+        // same gesture. First touch selects; a follow-up gesture can edit.
       });
       return; // STOP — do NOT allow drag
     }
 
-    if (!wasAlreadySelected) {
-      setState(() {
-        _setSingleClipSelection(tappedClipIndex, popupMs: null);
-      });
-      return;
-    }
-
-    // === 4. PRIORITY 2: TAP ON CLIP BODY → PREPARE FOR DRAG ===
+    // === 4. PRIORITY 2: TAP ON CLIP BODY → SELECT FIRST, DRAG ON FOLLOW-UP ===
     if (clipRect.contains(localPos)) {
-      // User tapped on clip body → will likely drag
+      final clip = widget.clips[tappedClipIndex];
+      final canBeginDrag = wasAlreadySelected || draggingGroup;
       setState(() {
-        _isUserInteracting = true;
-        _interactionMode = 'drag'; // ← This disables vertical scroll
-        _draggedClipIndex = tappedClipIndex;
-        _dragStartGlobalOffset = details.globalPosition;
-        _dragStartLocalOffset = localPos;
-        _dragStartClipMs = widget.getStartMs(widget.clips[tappedClipIndex]);
-        _dragStartRow = widget.clips[tappedClipIndex].rowIndex;
-        _dragDeltaMs = 0.0;
-        _dragDeltaRows = 0;
-        _dragGroupStartMs.clear();
-        _dragGroupStartRows.clear();
-        if (draggingGroup) {
-          final selected = _activeSelectedClipIndices();
-          for (final index in selected) {
-            _dragGroupStartMs[index] = widget.getStartMs(widget.clips[index]);
-            _dragGroupStartRows[index] = widget.clips[index].rowIndex;
-          }
+        _resetTrimInteractionState();
+        _clearPendingClipDrag();
+        _setPrimaryClipSelection(
+          tappedClipIndex,
+          preserveExistingSelection: draggingGroup,
+          popupMs: clip.clipKind == ClipKind.midi ? null : tapPopupMs,
+        );
+        _tentativeClipSelectionActive = !wasAlreadySelected && !draggingGroup;
+        if (canBeginDrag) {
+          _pendingDrag = true;
+          _pendingDragStartedFromSelection = wasAlreadySelected;
+          _draggedClipIndex = tappedClipIndex;
+          _dragStartGlobalOffset = details.globalPosition;
+          _dragStartLocalOffset = localPos;
+          _dragStartClipMs = widget.getStartMs(clip);
+          _dragStartRow = clip.rowIndex;
+          _dragDeltaMs = 0.0;
+          _dragDeltaRows = 0;
+          _dragGroupStartMs.clear();
+          _dragGroupStartRows.clear();
         }
       });
       return;
@@ -6826,19 +9038,44 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     // === 5. TAP ELSEWHERE → clear trim cue ===
     setState(() {
-      _activeTrimHandleX = null;
-      _trimClipIndex = null;
-      _stretchClipIndex = null;
-      _stretchStartTimelineDurationMs = null;
-      _stretchOriginalStartMs = null;
-      _stretchStartAnchorX = null;
-      _stretchDurationUpdateMs = null;
+      _resetTrimInteractionState();
     });
   }
 
+  void _onTimelineDoubleTapDown(TapDownDetails details) {
+    final tappedAutomationClip =
+        _timelineAutomationClipAt(details.localPosition);
+    if (tappedAutomationClip == null) return;
+    setState(() {
+      _setSelectedAutomationClipFor(
+        tappedAutomationClip.row,
+        tappedAutomationClip.targetId,
+        tappedAutomationClip.clip.id,
+        lane: tappedAutomationClip.clip.lane,
+      );
+      _clearPendingAutomationClipSelection();
+    });
+    _openAutomationClipEditor(tappedAutomationClip);
+  }
+
   void _onTimelineTap(TapUpDetails details) {
+    if (_pendingDrag) {
+      setState(_clearPendingClipTapState);
+    }
+    final pendingAutomationClip = _pendingAutomationClipVisual;
+    if (pendingAutomationClip != null) {
+      final pendingMode = _pendingAutomationClipInteractionMode ?? 'open';
+      setState(() {
+        _clearPendingAutomationClipSelection();
+        _dragStartGlobalOffset = null;
+      });
+      if (pendingMode == 'open') {
+        _openAutomationClipEditor(pendingAutomationClip);
+      }
+      return;
+    }
     if (_interactionMode == 'automation') return;
-    if (_interactionMode == 'automation_clip') {
+    if (_hasActiveAutomationClipDrag) {
       final row = _automationClipDragRow;
       final targetId = _automationClipDragTargetId;
       if (row != null && targetId != null) {
@@ -6852,14 +9089,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       });
       return;
     }
-
     if (_activeTool == _TimelineTool.cut) {
       // Cut commits on raw pointer-up so drag-to-preview release also cuts.
       return;
     }
 
     if (_activeTool == _TimelineTool.paint) {
-      final topIndex = _getClipIndexAt(details.localPosition);
+      final topIndex = _getGestureClipIndexAt(details.localPosition);
       if (topIndex != null) {
         setState(() {
           _setSingleClipSelection(topIndex,
@@ -6893,7 +9129,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         });
         return;
       }
-      if (!widget.hasCopiedClip) {
+      if (!_hasPasteClipboard) {
         _showPaintClipboardHint();
         return;
       }
@@ -6907,28 +9143,43 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     if (_interactionMode == 'drag') {
       final tappedDragIndex = _draggedClipIndex;
-      final dragStartGlobal = _dragStartGlobalOffset;
-      final dragDistance = dragStartGlobal == null
-          ? double.infinity
-          : (details.globalPosition - dragStartGlobal).distance;
-      const tapMovementTolerance = 8.0;
-      final shouldTreatAsTap = dragDistance <= tapMovementTolerance;
-
-      setState(() {
-        _interactionMode = '';
-        _draggedClipIndex = null;
-        _pendingDrag = false; // unused I think
-        _pendingLocalDown = null; // unused I think
-        _isUserInteracting = false;
-        _dragGroupStartMs.clear();
-        _dragGroupStartRows.clear();
-      });
-      if (shouldTreatAsTap &&
+      final shouldTreatAsTap =
+          !_pendingClipDragExceededSlop(details.globalPosition);
+      final tapPopupMs =
+          _scrollOffsetMs + details.localPosition.dx / _pixelsPerMs;
+      final shouldOpenMidiClip = shouldTreatAsTap &&
           tappedDragIndex != null &&
           tappedDragIndex >= 0 &&
           tappedDragIndex < widget.clips.length &&
-          widget.clips[tappedDragIndex].clipKind == ClipKind.midi) {
+          widget.clips[tappedDragIndex].clipKind == ClipKind.midi;
+      final shouldSelectClip = shouldTreatAsTap &&
+          !shouldOpenMidiClip &&
+          tappedDragIndex != null &&
+          tappedDragIndex >= 0 &&
+          tappedDragIndex < widget.clips.length;
+
+      setState(() {
+        final preserveDraggedGroupSelection = shouldSelectClip &&
+            _selectedClipIndices.length > 1 &&
+            _selectedClipIndices.contains(tappedDragIndex);
+        _interactionMode = '';
+        _draggedClipIndex = null;
+        _clearPendingClipDrag();
+        _isUserInteracting = false;
+        _dragGroupStartMs.clear();
+        _dragGroupStartRows.clear();
+        _resetTrimInteractionState();
+        if (shouldSelectClip) {
+          _setPrimaryClipSelection(
+            tappedDragIndex,
+            popupMs: preserveDraggedGroupSelection ? null : tapPopupMs,
+            preserveExistingSelection: preserveDraggedGroupSelection,
+          );
+        }
+      });
+      if (shouldOpenMidiClip) {
         widget.onOpenMidiClip?.call(tappedDragIndex);
+        return;
       }
       return;
     }
@@ -6942,12 +9193,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     final tapRow = _rowForLocalY(localY);
     if (tapRow == null) return;
-    final topIndex = _getClipIndexAt(details.localPosition);
+    final topIndex = _getGestureClipIndexAt(details.localPosition);
     if (topIndex != null) {
       final topClip = widget.clips[topIndex];
+      final preserveExistingSelection = _selectedClipIndices.length > 1 &&
+          _selectedClipIndices.contains(topIndex);
 
       setState(() {
-        _setSingleClipSelection(topIndex, popupMs: rawTapMs);
+        _resetTrimInteractionState();
+        _setPrimaryClipSelection(
+          topIndex,
+          popupMs: preserveExistingSelection ? null : rawTapMs,
+          preserveExistingSelection: preserveExistingSelection,
+        );
         _showPastePopup = false;
         _pasteRow = null;
         _pasteMs = null;
@@ -6960,10 +9218,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
     } else {
       setState(() {
+        _resetTrimInteractionState();
         _clearClipSelection();
+        final canPasteHere =
+            widget.hasCopiedClip || _canPasteAutomationClipAt(tapRow);
 
         // If we have something copied, show paste popup here
-        if (widget.hasCopiedClip) {
+        if (canPasteHere) {
           _pasteRow = tapRow;
           _pasteMs = tapMsForPaste;
           _showPastePopup = true;
@@ -6986,17 +9247,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         }
       });
     }
-    if (_trimClipIndex != null) {
-      setState(() {
-        _activeTrimHandleX = null;
-        _trimClipIndex = null;
-        _stretchClipIndex = null;
-        _stretchStartTimelineDurationMs = null;
-        _stretchOriginalStartMs = null;
-        _stretchStartAnchorX = null;
-        _stretchDurationUpdateMs = null;
-      });
-    }
   }
 }
 
@@ -7014,21 +9264,27 @@ class _ClipOverlapSpan {
 
 class _TimelineAutomationClipVisual {
   final int row;
+  final int displayRow;
   final String targetId;
   final String targetLabel;
+  final String fullTargetLabel;
   final AutomationClipSnapshot clip;
   final int laneIndex;
   final Rect rect;
   final bool isSelected;
+  final bool isOrphan;
 
   const _TimelineAutomationClipVisual({
     required this.row,
+    required this.displayRow,
     required this.targetId,
     required this.targetLabel,
+    required this.fullTargetLabel,
     required this.clip,
     required this.laneIndex,
     required this.rect,
     required this.isSelected,
+    required this.isOrphan,
   });
 }
 
@@ -7161,6 +9417,8 @@ class _TimelinePainter extends CustomPainter {
     for (final clip in clips) {
       final peaks = getPeaks(clip);
       hash = _hashCombine(hash, clip.rowIndex);
+      hash = _hashCombine(hash, clip.label);
+      hash = _hashCombine(hash, clip.instrumentName);
       hash = _hashCombine(hash, clip.clipKind.index);
       hash = _hashCombine(hash, clip.midiNotes.length);
       hash = _hashCombine(hash, _quantizeDouble(getStartMs(clip)));
@@ -7180,9 +9438,12 @@ class _TimelinePainter extends CustomPainter {
     var hash = 0;
     for (final visual in clips) {
       hash = _hashCombine(hash, visual.row);
+      hash = _hashCombine(hash, visual.displayRow);
       hash = _hashCombine(hash, visual.laneIndex);
       hash = _hashCombine(hash, visual.targetId);
+      hash = _hashCombine(hash, visual.isOrphan);
       hash = _hashCombine(hash, visual.clip.id);
+      hash = _hashCombine(hash, visual.clip.patternId);
       hash = _hashCombine(hash, visual.clip.muted);
       hash = _hashCombine(hash, visual.isSelected);
       hash = _hashCombine(hash, _quantizeDouble(visual.rect.left));
@@ -7639,8 +9900,10 @@ class _TimelinePainter extends CustomPainter {
         peaks,
         rect,
         trimStartMs,
+        trimEndMs,
         fullDurationMs,
         stretchScale,
+        isReversed: clip.isReversed,
       );
 
       canvas.restore();
@@ -7693,7 +9956,13 @@ class _TimelinePainter extends CustomPainter {
     }
   }
 
-  Color _automationColorForTarget(String targetId) {
+  Color _automationColorForTarget(
+    String targetId, {
+    bool isOrphan = false,
+  }) {
+    if (isOrphan) {
+      return const Color(0xFFD25C68);
+    }
     const palette = <Color>[
       Color(0xFF4D8DF0),
       Color(0xFF42B985),
@@ -7794,7 +10063,10 @@ class _TimelinePainter extends CustomPainter {
           rect.intersect(Rect.fromLTWH(0, 0, viewportWidth, size.height));
       if (clipped.width <= 0 || clipped.height <= 0) continue;
       final rrect = RRect.fromRectAndRadius(clipped, const Radius.circular(6));
-      final baseColor = _automationColorForTarget(visual.targetId);
+      final baseColor = _automationColorForTarget(
+        visual.targetId,
+        isOrphan: visual.isOrphan,
+      );
       final fillColor = visual.clip.muted
           ? const Color(0x665E5E5E)
           : (visual.isSelected
@@ -7820,25 +10092,55 @@ class _TimelinePainter extends CustomPainter {
 
       canvas.drawRRect(rrect, borderPaint);
 
-      if (visual.isSelected && clipped.width > 20 && clipped.height > 8) {
-        final handlePaint = Paint()
-          ..color = Colors.white.withOpacity(0.85)
-          ..strokeWidth = 1.15;
-        final yTop = clipped.top + 2.0;
-        final yBottom = clipped.bottom - 2.0;
-        final leftX = clipped.left + 2.0;
-        final rightX = clipped.right - 2.0;
-        canvas.drawLine(
-            Offset(leftX, yTop), Offset(leftX, yBottom), handlePaint);
-        canvas.drawLine(
-            Offset(rightX, yTop), Offset(rightX, yBottom), handlePaint);
+      if (!stretchToolActive &&
+          visual.isSelected &&
+          clipped.width > 20 &&
+          clipped.height > 8) {
+        _drawTrimHandles(
+          canvas,
+          rrect,
+          asStretchHandles: false,
+          stretchEnabled: false,
+          preservePitch: false,
+        );
+
+        final handleWidth =
+            math.min(22.0, math.max(14.0, clipped.width * 0.22));
+        final handleHeight =
+            math.min(20.0, math.max(14.0, clipped.height - 8.0));
+        final handleRect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(
+            clipped.left + 4.0,
+            clipped.top + ((clipped.height - handleHeight) / 2.0),
+            handleWidth,
+            handleHeight,
+          ),
+          const Radius.circular(7),
+        );
+        final handleFill = Paint()
+          ..color = Colors.black.withValues(alpha: 0.22);
+        final handleStroke = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0
+          ..color = Colors.white.withValues(alpha: 0.18);
+        final dotPaint = Paint()
+          ..style = PaintingStyle.fill
+          ..color = Colors.white.withValues(alpha: 0.7);
+        canvas.drawRRect(handleRect, handleFill);
+        canvas.drawRRect(handleRect, handleStroke);
+
+        final centerX = handleRect.left + (handleRect.width / 2.0);
+        final centerY = handleRect.top + (handleRect.height / 2.0);
+        for (final dx in const [-3.0, 3.0]) {
+          for (final dy in const [-4.0, 0.0, 4.0]) {
+            canvas.drawCircle(
+                Offset(centerX + dx, centerY + dy), 1.0, dotPaint);
+          }
+        }
       }
 
       if (clipped.width < 28 || clipped.height < 13) continue;
-      final labelSource = visual.clip.label.trim();
-      final label = labelSource.isEmpty || labelSource == visual.targetLabel
-          ? visual.targetLabel
-          : '${visual.targetLabel}: $labelSource';
+      final label = visual.targetLabel;
       textPainter.text = TextSpan(
         text: label,
         style: TextStyle(
@@ -7849,22 +10151,28 @@ class _TimelinePainter extends CustomPainter {
           fontWeight: FontWeight.w600,
         ),
       );
-      textPainter.layout(maxWidth: math.max(0.0, clipped.width - 8));
+      final labelLeftInset = visual.isSelected
+          ? math.min(30.0, math.max(20.0, clipped.width * 0.28))
+          : 4.0;
+      textPainter.layout(
+        maxWidth: math.max(0.0, clipped.width - (labelLeftInset + 4.0)),
+      );
       if (textPainter.width <= 0.0) continue;
       final textY = (clipped.top + (clipped.height - textPainter.height) / 2.0)
           .toDouble();
-      textPainter.paint(canvas, Offset(clipped.left + 4.0, textY));
+      textPainter.paint(canvas, Offset(clipped.left + labelLeftInset, textY));
     }
   }
 
   void _drawWaveform(
-    Canvas canvas,
-    List<double> peaks,
-    RRect rect,
-    double trimStartMs,
-    double fullDurationMs,
-    double stretchScale,
-  ) {
+      Canvas canvas,
+      List<double> peaks,
+      RRect rect,
+      double trimStartMs,
+      double trimEndMs,
+      double fullDurationMs,
+      double stretchScale,
+      {required bool isReversed}) {
     if (peaks.isEmpty || rect.width <= 0 || rect.height <= 0) return;
     final safeFullDurationMs = fullDurationMs.clamp(1.0, double.infinity);
     final safeStretchScale = stretchScale.clamp(0.0001, double.infinity);
@@ -7890,6 +10198,12 @@ class _TimelinePainter extends CustomPainter {
 
     final lastPeakIndex = peaks.length - 1;
     final sourceToPeak = lastPeakIndex / safeFullDurationMs;
+    // `peaks` already reflects clip reversal through `displayWaveformData`.
+    // For reversed clips, the visible trimmed window therefore starts at the
+    // mirrored source offset rather than the forward trim start.
+    final visibleSourceStartMs = isReversed
+        ? (safeFullDurationMs - trimEndMs).clamp(0.0, safeFullDurationMs)
+        : trimStartMs.clamp(0.0, safeFullDurationMs);
     final path = Path();
 
     // Anchor bucketing to clip-local pixel columns to avoid temporal shimmer
@@ -7901,8 +10215,9 @@ class _TimelinePainter extends CustomPainter {
     for (int col = startCol; col < endCol && col <= maxCol; col++) {
       final x0 = snapToDevicePixel(rect.left + col);
 
-      final startSourceMs = trimStartMs + col.toDouble() * sourceMsPerPixel;
-      final endSourceMs = trimStartMs + (col + 1.0) * sourceMsPerPixel;
+      final startSourceMs =
+          visibleSourceStartMs + col.toDouble() * sourceMsPerPixel;
+      final endSourceMs = visibleSourceStartMs + (col + 1.0) * sourceMsPerPixel;
 
       final clampedStartMs =
           startSourceMs.clamp(0.0, safeFullDurationMs).toDouble();
@@ -8400,10 +10715,13 @@ class _AutomationLane extends StatefulWidget {
   final double targetMin;
   final double targetMax;
   final bool isVolumeLane;
+  final double? highlightStartMs;
+  final double? highlightEndMs;
   final ValueChanged<List<AutomationPoint>> onChanged;
   final void Function(Offset pos) onPanStartExternal;
   final void Function(Offset pos) onPanUpdateExternal;
   final VoidCallback onPanEndExternal;
+  final VoidCallback onPanCancelExternal;
   final VoidCallback onBackgroundPanStartExternal;
   final ValueChanged<double> onBackgroundPanUpdateExternal;
   final VoidCallback onBackgroundPanEndExternal;
@@ -8421,10 +10739,13 @@ class _AutomationLane extends StatefulWidget {
     required this.targetMin,
     required this.targetMax,
     required this.isVolumeLane,
+    this.highlightStartMs,
+    this.highlightEndMs,
     required this.onChanged,
     required this.onPanStartExternal,
     required this.onPanUpdateExternal,
     required this.onPanEndExternal,
+    required this.onPanCancelExternal,
     required this.onBackgroundPanStartExternal,
     required this.onBackgroundPanUpdateExternal,
     required this.onBackgroundPanEndExternal,
@@ -8472,8 +10793,16 @@ class _AutomationLaneBackgroundHorizontalDragRecognizer
 class _AutomationLaneState extends State<_AutomationLane> {
   static const double hitRadius = 20.0;
   static const double verticalPadding = 12.0;
+  static _AutomationPointClipboardEntry? _pointClipboard;
 
   double get _usableHeight => widget.laneHeight - verticalPadding * 2;
+  _AutomationValueFormatter get _valueFormatter => _AutomationValueFormatter(
+        targetLabel: widget.targetLabel,
+        targetParamId: widget.targetParamId,
+        targetMin: widget.targetMin,
+        targetMax: widget.targetMax,
+        isVolumeLane: widget.isVolumeLane,
+      );
 
   double _timeToPx(double timeMs) =>
       (timeMs - widget.scrollOffsetMs) * widget.pixelsPerMs;
@@ -8522,6 +10851,258 @@ class _AutomationLaneState extends State<_AutomationLane> {
     if (widget.points.length <= 1) return; // keep at least one
     final updated = List<AutomationPoint>.from(widget.points)..removeAt(index);
     widget.onChanged(updated);
+  }
+
+  void _setPointValue(int index, double normalized) {
+    if (index < 0 || index >= widget.points.length) return;
+    final updated = widget.points.map((p) => p.copy()).toList(growable: false);
+    updated[index].volume = normalized.clamp(0.0, 1.0).toDouble();
+    widget.onChanged(updated);
+  }
+
+  bool _canMatchPreviousPoint(int index) =>
+      index > 0 && index < widget.points.length;
+
+  void _setPointToPreviousValue(int index) {
+    if (!_canMatchPreviousPoint(index)) return;
+    _setPointValue(index, widget.points[index - 1].volume);
+  }
+
+  String _pointValueLabel(int index) {
+    if (index < 0 || index >= widget.points.length) return '';
+    return _valueFormatter.formatValueLabel(widget.points[index].volume);
+  }
+
+  bool _canPastePointValue() {
+    final clipboard = _pointClipboard;
+    if (clipboard == null) return false;
+    return clipboard.isCompatibleWith(_valueFormatter);
+  }
+
+  String _pasteSubtitle() {
+    final clipboard = _pointClipboard;
+    if (clipboard == null) return 'No copied value';
+    if (!_canPastePointValue()) {
+      return 'Copied value is for another parameter type';
+    }
+    return 'Paste ${clipboard.formattedValue}';
+  }
+
+  void _copyPointValue(int index) {
+    if (index < 0 || index >= widget.points.length) return;
+    final formatter = _valueFormatter;
+    final normalized = widget.points[index].volume;
+    _pointClipboard = _AutomationPointClipboardEntry(
+      kind: formatter.valueKind,
+      rawValue: formatter.rawValueForNormalized(normalized),
+      formattedValue: formatter.formatValueLabel(normalized),
+      signature: formatter.signature,
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text('Copied automation value ${_pointValueLabel(index)}')),
+    );
+  }
+
+  void _pastePointValue(int index) {
+    final clipboard = _pointClipboard;
+    if (clipboard == null) return;
+    if (!clipboard.isCompatibleWith(_valueFormatter)) return;
+    final normalized =
+        _valueFormatter.normalizedForRawValue(clipboard.rawValue);
+    _setPointValue(index, normalized);
+  }
+
+  Future<void> _typePointValue(int index) async {
+    if (index < 0 || index >= widget.points.length) return;
+    final formatter = _valueFormatter;
+    final controller = TextEditingController(
+      text: formatter.editableValueText(widget.points[index].volume),
+    );
+    final focusNode = FocusNode();
+    bool focusScheduled = false;
+
+    final typedNormalized = await showDialog<double>(
+      context: context,
+      builder: (dialogContext) {
+        String? errorText;
+        void submit(StateSetter setDialogState) {
+          final parsed = formatter.parseInputToNormalized(controller.text);
+          if (parsed == null) {
+            setDialogState(() {
+              errorText = 'Enter a valid ${formatter.inputLabel.toLowerCase()}';
+            });
+            return;
+          }
+          Navigator.pop(dialogContext, parsed);
+        }
+
+        if (!focusScheduled) {
+          focusScheduled = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!focusNode.canRequestFocus) return;
+            focusNode.requestFocus();
+            controller.selection = TextSelection(
+              baseOffset: 0,
+              extentOffset: controller.text.length,
+            );
+          });
+        }
+
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1A2233),
+              title: const Text(
+                'Type Automation Value',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.targetLabel,
+                    style: TextStyle(color: Colors.white.withOpacity(0.72)),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    autofocus: false,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                      signed: true,
+                    ),
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => submit(setDialogState),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: formatter.inputHint,
+                      hintStyle: const TextStyle(color: Colors.white54),
+                      errorText: errorText,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => submit(setDialogState),
+                  child: const Text('Set Value'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    controller.dispose();
+    focusNode.dispose();
+    if (!mounted || typedNormalized == null) return;
+    _setPointValue(index, typedNormalized);
+  }
+
+  Future<void> _showPointMenu(int index) async {
+    if (index < 0 || index >= widget.points.length) return;
+    final currentValue = _pointValueLabel(index);
+    final canMatchPrevious = _canMatchPreviousPoint(index);
+    final canPaste = _canPastePointValue();
+    final previousValue =
+        canMatchPrevious ? _pointValueLabel(index - 1) : 'No left point';
+    final canDelete =
+        index > 0 && widget.points.length > 1 && index < widget.points.length;
+    await AppHaptics.impact(AppHapticImpact.medium);
+    if (!mounted) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1B2233),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                widget.targetLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              subtitle: Text(
+                'Automation point',
+                style: TextStyle(color: Colors.white.withOpacity(0.62)),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.content_copy_outlined),
+              title: const Text('Copy value'),
+              subtitle: Text(currentValue),
+              onTap: () => Navigator.pop(sheetContext, 'copy'),
+            ),
+            ListTile(
+              enabled: canPaste,
+              leading: const Icon(Icons.content_paste_outlined),
+              title: const Text('Paste value'),
+              subtitle: Text(_pasteSubtitle()),
+              onTap:
+                  canPaste ? () => Navigator.pop(sheetContext, 'paste') : null,
+            ),
+            ListTile(
+              leading: const Icon(Icons.pin_outlined),
+              title: const Text('Type value'),
+              subtitle: Text(currentValue),
+              onTap: () => Navigator.pop(sheetContext, 'type'),
+            ),
+            ListTile(
+              enabled: canMatchPrevious,
+              leading: const Icon(Icons.keyboard_double_arrow_left_rounded),
+              title: const Text(
+                'Set to Value of Previous Point',
+              ),
+              subtitle: Text(
+                canMatchPrevious ? 'Match $previousValue' : previousValue,
+              ),
+              onTap: canMatchPrevious
+                  ? () => Navigator.pop(sheetContext, 'match_previous')
+                  : null,
+            ),
+            ListTile(
+              enabled: canDelete,
+              leading: const Icon(Icons.delete_outline_rounded),
+              title: const Text('Delete point'),
+              onTap: canDelete
+                  ? () => Navigator.pop(sheetContext, 'delete')
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'copy':
+        _copyPointValue(index);
+        break;
+      case 'paste':
+        _pastePointValue(index);
+        break;
+      case 'type':
+        await _typePointValue(index);
+        break;
+      case 'match_previous':
+        _setPointToPreviousValue(index);
+        break;
+      case 'delete':
+        _deletePoint(index);
+        break;
+    }
   }
 
   // ---------- Build ----------
@@ -8597,7 +11178,15 @@ class _AutomationLaneState extends State<_AutomationLane> {
       child: GestureDetector(
         dragStartBehavior: DragStartBehavior.down,
         behavior: HitTestBehavior.translucent,
-        onLongPressStart: (d) => _addPoint(d.localPosition),
+        onLongPressStart: (d) async {
+          final hit = _hitPoint(d.localPosition);
+          if (hit != null) {
+            widget.onPanCancelExternal();
+            await _showPointMenu(hit);
+            return;
+          }
+          _addPoint(d.localPosition);
+        },
         onDoubleTapDown: (d) {
           final hit = _hitPoint(d.localPosition);
           if (hit != null) {
@@ -8617,6 +11206,8 @@ class _AutomationLaneState extends State<_AutomationLane> {
             targetMin: widget.targetMin,
             targetMax: widget.targetMax,
             isVolumeLane: widget.isVolumeLane,
+            highlightStartMs: widget.highlightStartMs,
+            highlightEndMs: widget.highlightEndMs,
           ),
           size: Size(double.infinity, widget.laneHeight),
         ),
@@ -8640,6 +11231,8 @@ class _AutomationPainter extends CustomPainter {
   final double targetMin;
   final double targetMax;
   final bool isVolumeLane;
+  final double? highlightStartMs;
+  final double? highlightEndMs;
 
   _AutomationPainter({
     required this.points,
@@ -8652,6 +11245,8 @@ class _AutomationPainter extends CustomPainter {
     required this.targetMin,
     required this.targetMax,
     required this.isVolumeLane,
+    required this.highlightStartMs,
+    required this.highlightEndMs,
   });
 
   double get _usableHeight => laneHeight - verticalPadding * 2;
@@ -8864,14 +11459,18 @@ class _AutomationPainter extends CustomPainter {
       style: const TextStyle(color: Colors.white70, fontSize: 10),
     );
     tp.layout(maxWidth: 64);
-    final dy =
-        (centerY - tp.height / 2).clamp(0.0, laneHeight - tp.height).toDouble();
+    final maxDy = math.max(0.0, laneHeight - tp.height);
+    final dy = (centerY - tp.height / 2).clamp(0.0, maxDy).toDouble();
     tp.paint(canvas, Offset(4, dy));
   }
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.height <= 0.0 || laneHeight <= 0.0) return;
     const double axisWidth = 44;
+    final hasHighlightWindow = highlightStartMs != null &&
+        highlightEndMs != null &&
+        highlightEndMs! > highlightStartMs!;
 
     // 1) Dark background
     final bg = Paint()..color = const Color(0xFF151A26).withOpacity(0.9);
@@ -8969,6 +11568,39 @@ class _AutomationPainter extends CustomPainter {
     canvas.save();
     canvas.clipRect(clipRect);
 
+    if (hasHighlightWindow) {
+      final startX = _timeToPx(highlightStartMs!).clamp(axisWidth, size.width);
+      final endX = _timeToPx(highlightEndMs!).clamp(axisWidth, size.width);
+      final left = math.min(startX, endX).toDouble();
+      final right = math.max(startX, endX).toDouble();
+      final windowRect = Rect.fromLTRB(left, 0, right, size.height);
+      if (windowRect.width > 0.0) {
+        final outsideShade = Paint()
+          ..color = const Color(0xFF02060D).withValues(alpha: 0.34);
+        final windowFill = Paint()
+          ..color = const Color(0xFF6EA7FF).withValues(alpha: 0.07);
+        final windowStroke = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.1
+          ..color = Colors.white.withValues(alpha: 0.22);
+
+        if (windowRect.left > axisWidth) {
+          canvas.drawRect(
+            Rect.fromLTRB(axisWidth, 0, windowRect.left, size.height),
+            outsideShade,
+          );
+        }
+        if (windowRect.right < size.width) {
+          canvas.drawRect(
+            Rect.fromLTRB(windowRect.right, 0, size.width, size.height),
+            outsideShade,
+          );
+        }
+        canvas.drawRect(windowRect, windowFill);
+        canvas.drawRect(windowRect, windowStroke);
+      }
+    }
+
     // ----- Automation curve inside the clipped area -----
     final linePaint = Paint()
       ..color = const Color(0xFF7AB9FF)
@@ -9046,7 +11678,31 @@ class _AutomationPainter extends CustomPainter {
         old.targetParamId != targetParamId ||
         old.targetMin != targetMin ||
         old.targetMax != targetMax ||
+        old.highlightStartMs != highlightStartMs ||
+        old.highlightEndMs != highlightEndMs ||
         old.isVolumeLane != isVolumeLane;
+  }
+}
+
+class _AutomationPointClipboardEntry {
+  final _AutomationValueKind kind;
+  final double rawValue;
+  final String formattedValue;
+  final String signature;
+
+  const _AutomationPointClipboardEntry({
+    required this.kind,
+    required this.rawValue,
+    required this.formattedValue,
+    required this.signature,
+  });
+
+  bool isCompatibleWith(_AutomationValueFormatter formatter) {
+    if (kind != formatter.valueKind) return false;
+    if (kind == _AutomationValueKind.generic) {
+      return signature == formatter.signature;
+    }
+    return true;
   }
 }
 
@@ -9063,6 +11719,354 @@ enum _AutomationValueKind {
   generic,
 }
 
+class _AutomationValueFormatter {
+  final String targetLabel;
+  final String targetParamId;
+  final double targetMin;
+  final double targetMax;
+  final bool isVolumeLane;
+
+  const _AutomationValueFormatter({
+    required this.targetLabel,
+    required this.targetParamId,
+    required this.targetMin,
+    required this.targetMax,
+    required this.isVolumeLane,
+  });
+
+  String get signature =>
+      '${targetLabel.trim().toLowerCase()}|${targetParamId.trim().toLowerCase()}|$targetMin|$targetMax|$isVolumeLane';
+
+  double _normalizedToTargetValue(double normalized) {
+    final span = targetMax - targetMin;
+    if (!span.isFinite || span.abs() < 1e-9) {
+      return normalized.clamp(0.0, 1.0).toDouble();
+    }
+    return targetMin + span * normalized.clamp(0.0, 1.0).toDouble();
+  }
+
+  double _targetValueToNormalized(double rawValue) {
+    final span = targetMax - targetMin;
+    if (!span.isFinite || span.abs() < 1e-9) {
+      return rawValue.clamp(0.0, 1.0).toDouble();
+    }
+    return ((rawValue - targetMin) / span).clamp(0.0, 1.0).toDouble();
+  }
+
+  String _trimTrailingZeros(String text) {
+    if (!text.contains('.')) return text;
+    return text.replaceFirst(RegExp(r'\.?0+$'), '');
+  }
+
+  String _formatNumber(double value, {int maxDecimals = 2}) {
+    if (!value.isFinite) return value.toString();
+    final absValue = value.abs();
+    final decimals = absValue >= 1000
+        ? 0
+        : (absValue >= 100
+            ? 1
+            : (absValue >= 10 ? math.min(maxDecimals, 1) : maxDecimals));
+    return _trimTrailingZeros(value.toStringAsFixed(decimals));
+  }
+
+  bool _containsAny(String haystack, List<String> needles) {
+    for (final needle in needles) {
+      if (haystack.contains(needle)) return true;
+    }
+    return false;
+  }
+
+  String get _targetContext {
+    return '${targetLabel.trim().toLowerCase()} ${targetParamId.trim().toLowerCase()}';
+  }
+
+  _AutomationValueKind get valueKind {
+    if (isVolumeLane) return _AutomationValueKind.volumeDb;
+
+    final context = _targetContext;
+    final min = targetMin;
+    final max = targetMax;
+    final span = max - min;
+    final hasValidRange = span.isFinite && span.abs() >= 1e-9;
+    final looksNormalizedRange = min >= -0.001 && max <= 1.001;
+    final looksPercentRange = min >= -0.1 && max <= 100.1;
+
+    if (_containsAny(context, const [
+          'freq',
+          'frequency',
+          'cutoff',
+          'hz',
+          'highpass',
+          'lowpass',
+          'band'
+        ]) ||
+        (hasValidRange && min >= 0.0 && max >= 1500.0 && max <= 50000.0)) {
+      return _AutomationValueKind.hz;
+    }
+
+    if (_containsAny(context, const [
+      'attack',
+      'release',
+      'decay',
+      'delay',
+      'predelay',
+      'pre-delay',
+      'pre delay',
+      'hold',
+      'time',
+      'ms',
+      'sec',
+      'second'
+    ])) {
+      if (_containsAny(context, const ['ms', 'millisecond']) ||
+          (hasValidRange && max > 20.0)) {
+        return _AutomationValueKind.milliseconds;
+      }
+      return _AutomationValueKind.seconds;
+    }
+
+    if (_containsAny(context, const ['semitone', 'semi-tone'])) {
+      return _AutomationValueKind.semitone;
+    }
+    if (_containsAny(context, const ['cents'])) {
+      return _AutomationValueKind.cents;
+    }
+    if (_containsAny(context, const ['ratio'])) {
+      return _AutomationValueKind.ratio;
+    }
+
+    final hasDbHint =
+        _containsAny(context, const ['db', 'threshold', 'ceiling']);
+    final hasGainHint = _containsAny(
+      context,
+      const ['gain', 'level', 'trim', 'makeup', 'boost', 'attenuation'],
+    );
+    if (hasDbHint || (hasGainHint && (min < 0.0 || max > 2.5))) {
+      return _AutomationValueKind.db;
+    }
+
+    final hasPercentHint = _containsAny(
+      context,
+      const [
+        'mix',
+        'wet',
+        'dry',
+        'amount',
+        'depth',
+        'feedback',
+        'width',
+        'pan',
+        '%'
+      ],
+    );
+    if (looksPercentRange && (hasPercentHint || looksNormalizedRange)) {
+      return _AutomationValueKind.percent;
+    }
+
+    return _AutomationValueKind.generic;
+  }
+
+  double _volToDb(double value) {
+    if (value <= 0.0001) return double.negativeInfinity;
+    final rawDb = 20 * math.log(value) / math.log(10);
+    return 2.401921537 * rawDb + 6.0;
+  }
+
+  double _dbToVol(double db) {
+    if (!db.isFinite && db.isNegative) return 0.0;
+    final rawDb = (db - 6.0) / 2.401921537;
+    return math.pow(10.0, rawDb / 20.0).toDouble().clamp(0.0, 1.0);
+  }
+
+  double rawValueForNormalized(double normalized) {
+    final clamped = normalized.clamp(0.0, 1.0).toDouble();
+    if (valueKind == _AutomationValueKind.volumeDb) {
+      return _volToDb(clamped);
+    }
+    return _normalizedToTargetValue(clamped);
+  }
+
+  double normalizedForRawValue(double rawValue) {
+    if (valueKind == _AutomationValueKind.volumeDb) {
+      return _dbToVol(rawValue);
+    }
+    return _targetValueToNormalized(rawValue);
+  }
+
+  String formatValueLabel(double normalized) {
+    final clamped = normalized.clamp(0.0, 1.0).toDouble();
+
+    if (isVolumeLane) {
+      final db = _volToDb(clamped);
+      if (db.isInfinite) return '-∞';
+      final value = _formatNumber(db.abs(), maxDecimals: 1);
+      final sign = db >= 0 ? '+' : '-';
+      return '$sign$value dB';
+    }
+
+    final raw = _normalizedToTargetValue(clamped);
+    switch (valueKind) {
+      case _AutomationValueKind.volumeDb:
+        final db = _volToDb(clamped);
+        if (db.isInfinite) return '-∞';
+        final value = _formatNumber(db.abs(), maxDecimals: 1);
+        final sign = db >= 0 ? '+' : '-';
+        return '$sign$value dB';
+      case _AutomationValueKind.percent:
+        final looksNormalizedRange = targetMin >= -0.001 && targetMax <= 1.001;
+        final pct = looksNormalizedRange ? raw * 100.0 : raw;
+        return '${_formatNumber(pct, maxDecimals: 1)}%';
+      case _AutomationValueKind.db:
+        final sign = raw > 0 ? '+' : '';
+        return '$sign${_formatNumber(raw, maxDecimals: 1)} dB';
+      case _AutomationValueKind.hz:
+        if (raw.abs() >= 1000.0) {
+          return '${_formatNumber(raw / 1000.0, maxDecimals: 2)} kHz';
+        }
+        return '${_formatNumber(raw, maxDecimals: raw.abs() >= 100 ? 0 : 1)} Hz';
+      case _AutomationValueKind.seconds:
+        if (raw.abs() < 1.0) {
+          return '${_formatNumber(raw * 1000.0, maxDecimals: 0)} ms';
+        }
+        return '${_formatNumber(raw, maxDecimals: 2)} s';
+      case _AutomationValueKind.milliseconds:
+        if (raw.abs() >= 1000.0) {
+          return '${_formatNumber(raw / 1000.0, maxDecimals: 2)} s';
+        }
+        return '${_formatNumber(raw, maxDecimals: raw.abs() >= 100 ? 0 : 1)} ms';
+      case _AutomationValueKind.ratio:
+        if (raw <= 0.0) return _formatNumber(raw, maxDecimals: 2);
+        return '${_formatNumber(raw, maxDecimals: 2)}:1';
+      case _AutomationValueKind.semitone:
+        final sign = raw > 0 ? '+' : '';
+        return '$sign${_formatNumber(raw, maxDecimals: 1)} st';
+      case _AutomationValueKind.cents:
+        final sign = raw > 0 ? '+' : '';
+        return '$sign${_formatNumber(raw, maxDecimals: 0)} ct';
+      case _AutomationValueKind.generic:
+        return _formatNumber(raw, maxDecimals: 2);
+    }
+  }
+
+  String editableValueText(double normalized) => formatValueLabel(normalized);
+
+  String get inputLabel {
+    switch (valueKind) {
+      case _AutomationValueKind.volumeDb:
+        return 'volume value';
+      case _AutomationValueKind.percent:
+        return 'percent value';
+      case _AutomationValueKind.db:
+        return 'dB value';
+      case _AutomationValueKind.hz:
+        return 'frequency value';
+      case _AutomationValueKind.seconds:
+      case _AutomationValueKind.milliseconds:
+        return 'time value';
+      case _AutomationValueKind.ratio:
+        return 'ratio value';
+      case _AutomationValueKind.semitone:
+        return 'semitone value';
+      case _AutomationValueKind.cents:
+        return 'cent value';
+      case _AutomationValueKind.generic:
+        return 'numeric value';
+    }
+  }
+
+  String get inputHint {
+    switch (valueKind) {
+      case _AutomationValueKind.volumeDb:
+        return 'e.g. 0 dB, -12, -inf';
+      case _AutomationValueKind.percent:
+        return 'e.g. 50%';
+      case _AutomationValueKind.db:
+        return 'e.g. -6 dB';
+      case _AutomationValueKind.hz:
+        return 'e.g. 1200 Hz or 1.2 kHz';
+      case _AutomationValueKind.seconds:
+      case _AutomationValueKind.milliseconds:
+        return 'e.g. 250 ms or 0.25 s';
+      case _AutomationValueKind.ratio:
+        return 'e.g. 4:1';
+      case _AutomationValueKind.semitone:
+        return 'e.g. +7 st';
+      case _AutomationValueKind.cents:
+        return 'e.g. -25 ct';
+      case _AutomationValueKind.generic:
+        return 'Enter a numeric value';
+    }
+  }
+
+  double? _extractFirstNumber(String input) {
+    final match = RegExp(r'[-+]?\d*\.?\d+').firstMatch(input);
+    if (match == null) return null;
+    return double.tryParse(match.group(0)!);
+  }
+
+  bool _hasSecondsUnit(String input) {
+    return RegExp(r'(^|[^a-z])s(ec(ond)?s?)?($|[^a-z])').hasMatch(input) &&
+        !input.contains('ms');
+  }
+
+  double? parseInputToNormalized(String input) {
+    final lower = input.trim().toLowerCase();
+    if (lower.isEmpty) return null;
+
+    if (valueKind == _AutomationValueKind.volumeDb) {
+      if (lower == '-∞' ||
+          lower == '-inf' ||
+          lower == 'inf-' ||
+          lower == 'off') {
+        return 0.0;
+      }
+      final db = _extractFirstNumber(lower);
+      if (db == null) return null;
+      return _dbToVol(db);
+    }
+
+    var parsed = _extractFirstNumber(lower);
+    if (parsed == null) return null;
+
+    switch (valueKind) {
+      case _AutomationValueKind.volumeDb:
+        return _dbToVol(parsed);
+      case _AutomationValueKind.percent:
+        final looksNormalizedRange = targetMin >= -0.001 && targetMax <= 1.001;
+        if (looksNormalizedRange) {
+          parsed /= 100.0;
+        }
+        return _targetValueToNormalized(parsed);
+      case _AutomationValueKind.db:
+        return _targetValueToNormalized(parsed);
+      case _AutomationValueKind.hz:
+        if (lower.contains('khz') ||
+            RegExp(r'(^|[^a-z])k($|[^a-z])').hasMatch(lower)) {
+          parsed *= 1000.0;
+        }
+        return _targetValueToNormalized(parsed);
+      case _AutomationValueKind.seconds:
+        if (lower.contains('ms')) {
+          parsed /= 1000.0;
+        }
+        return _targetValueToNormalized(parsed);
+      case _AutomationValueKind.milliseconds:
+        if (_hasSecondsUnit(lower)) {
+          parsed *= 1000.0;
+        }
+        return _targetValueToNormalized(parsed);
+      case _AutomationValueKind.ratio:
+        return _targetValueToNormalized(parsed);
+      case _AutomationValueKind.semitone:
+        return _targetValueToNormalized(parsed);
+      case _AutomationValueKind.cents:
+        return _targetValueToNormalized(parsed);
+      case _AutomationValueKind.generic:
+        return _targetValueToNormalized(parsed);
+    }
+  }
+}
+
 // -----------------------------------------------------------------------------
 // BEAUTIFUL STYLED SLIDERS — Matches your screenshot exactly
 // -----------------------------------------------------------------------------
@@ -9070,6 +12074,7 @@ enum _AutomationValueKind {
 class PrettyStereoSlider extends StatefulWidget {
   final double value; // 0 to 1
   final ValueChanged<double> onChangeStart, onChanged, onChangeEnd;
+  final VoidCallback? onLongPress;
 
   const PrettyStereoSlider({
     super.key,
@@ -9077,6 +12082,7 @@ class PrettyStereoSlider extends StatefulWidget {
     required this.onChangeStart,
     required this.onChanged,
     required this.onChangeEnd,
+    this.onLongPress,
   });
 
   @override
@@ -9096,6 +12102,7 @@ class _PrettyStereoSliderState extends State<PrettyStereoSlider> {
         Expanded(
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
+            onLongPress: widget.onLongPress,
             onDoubleTap: () {
               setState(() {
                 widget.onChanged(0.5); // RESET to default
@@ -9160,9 +12167,9 @@ class ZeroSlopPanGestureRecognizer extends PanGestureRecognizer {
 
   ZeroSlopPanGestureRecognizer() {
     // Remove slop so drag starts immediately
-    this.dragStartBehavior = DragStartBehavior.down;
-    this.minFlingDistance = 0;
-    this.minFlingVelocity = 0;
+    dragStartBehavior = DragStartBehavior.down;
+    minFlingDistance = 0;
+    minFlingVelocity = 0;
   }
 
   @override
@@ -9180,6 +12187,7 @@ class PrettyGainSlider extends StatefulWidget {
   final bool showLabel;
   final Color trackColor;
   final Color thumbColor;
+  final VoidCallback? onLongPress;
 
   const PrettyGainSlider({
     super.key,
@@ -9191,6 +12199,7 @@ class PrettyGainSlider extends StatefulWidget {
     this.showLabel = true,
     this.trackColor = const Color(0xFF4D5566),
     this.thumbColor = const Color(0xFFB7BECC),
+    this.onLongPress,
   });
 
   @override
@@ -9228,6 +12237,7 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
         Expanded(
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
+            onLongPress: widget.onLongPress,
             onDoubleTap: () {
               const uiUnity = 2.0;
               final unity = math.min(uiUnity, widget.maxValue);
@@ -9349,7 +12359,7 @@ class _MiniStereoMeterPainter extends CustomPainter {
 
     final halfW = s.width / 2;
 
-    double barH(double v) => (v.clamp(0.0, 1.0) as double) * s.height;
+    double barH(double v) => v.clamp(0.0, 1.0).toDouble() * s.height;
 
     // L
     final rmsLH = barH(f.rmsL);

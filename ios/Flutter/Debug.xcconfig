@@ -1,3 +1,4 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
 #include "Generated.xcconfig"
+#include? "AppSecrets.xcconfig"
 JUCE_IOS_AUDIO_EXPLICIT_SAMPLERATES=44100

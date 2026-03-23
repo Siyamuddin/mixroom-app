@@ -7,40 +7,73 @@ class LocaleProvider with ChangeNotifier {
   static const String _localePrefKey = 'language_code';
 
   Locale? _locale;
+  Future<void>? _loadFuture;
 
   Locale? get locale => _locale;
 
   Future<void> loadLocale() async {
+    final existingLoad = _loadFuture;
+    if (existingLoad != null) {
+      return existingLoad;
+    }
+
+    final future = _loadLocaleInternal();
+    _loadFuture = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_loadFuture, future)) {
+        _loadFuture = null;
+      }
+    }
+  }
+
+  Future<void> _loadLocaleInternal() async {
     final prefs = await SharedPreferences.getInstance();
     final storedLanguageCode = prefs.getString(_localePrefKey);
 
+    if (_locale != null) {
+      final current = LocaleConfig.resolveLocale(_locale);
+      if (storedLanguageCode != current.languageCode) {
+        await prefs.setString(_localePrefKey, current.languageCode);
+      }
+      return;
+    }
+
+    Locale resolvedLocale;
     if (storedLanguageCode != null) {
-      _locale = LocaleConfig.resolveLanguageCode(storedLanguageCode);
+      resolvedLocale = LocaleConfig.resolveLanguageCode(storedLanguageCode);
     } else {
       final deviceLocales = WidgetsBinding.instance.platformDispatcher.locales;
-      Locale resolvedLocale = LocaleConfig.fallbackLocale;
+      resolvedLocale = LocaleConfig.fallbackLocale;
       for (final deviceLocale in deviceLocales) {
         if (LocaleConfig.isSupportedLanguageCode(deviceLocale.languageCode)) {
           resolvedLocale = LocaleConfig.resolveLocale(deviceLocale);
           break;
         }
       }
-      _locale = resolvedLocale;
-      await prefs.setString(_localePrefKey, _locale!.languageCode);
     }
 
-    if (_locale != null && storedLanguageCode != _locale!.languageCode) {
-      await prefs.setString(_localePrefKey, _locale!.languageCode);
+    if (_locale != null) {
+      return;
+    }
+
+    _locale = resolvedLocale;
+    if (storedLanguageCode != resolvedLocale.languageCode) {
+      await prefs.setString(_localePrefKey, resolvedLocale.languageCode);
     }
 
     notifyListeners();
   }
 
   Future<void> setLocale(Locale newLocale) async {
-    final prefs = await SharedPreferences.getInstance();
     final resolvedLocale = LocaleConfig.resolveLocale(newLocale);
-    await prefs.setString(_localePrefKey, resolvedLocale.languageCode);
+    if (_locale == resolvedLocale) return;
+
     _locale = resolvedLocale;
     notifyListeners();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_localePrefKey, resolvedLocale.languageCode);
   }
 }

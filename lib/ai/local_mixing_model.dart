@@ -21,6 +21,7 @@ class LocalMixingModel {
   static const String fxDistortionContains = 'Distortion';
   static const String fxCompressor = 'Compressor';
   static const String fxLimiter = 'Limiter';
+  static const String fxClipper = 'Clipper';
 
   // -----------------------------
   // UI-exposed param safety rail
@@ -61,6 +62,7 @@ class LocalMixingModel {
     'De-Esser': ['Threshold', 'Frequency'],
     'Compressor': ['Threshold', 'Attack', 'Release', 'Ratio', 'Makeup', 'Mix'],
     'Limiter': ['Threshold', 'Release', 'Ceiling'],
+    'Clipper': ['Threshold', 'Ceiling'],
   };
 
   static const bool preferLoudCleanOverConservative = true;
@@ -105,6 +107,7 @@ class LocalMixingModel {
       'deesser',
       'compressor',
       'limiter',
+      'clipper',
       'balance'
     };
     final allowedDirs = <String>{
@@ -163,131 +166,11 @@ class LocalMixingModel {
 
     return GoalVector(
       type: goal.type,
-      userText: goal.userText,
       intents: normIntents.take(4).toList(),
       target: goal.target,
       intensity: goal.intensity,
       resetFx: goal.resetFx,
     );
-  }
-
-  String _normKind(String s) {
-    final t = s.trim().toLowerCase();
-    if (t.isEmpty) return '';
-    if (_textAny(t, const ['balance', 'level', 'mix'])) return 'balance';
-    if (_textAny(t, const ['gain', 'volume', 'louder', 'quieter']))
-      return 'gain';
-    if (_textAny(t, const ['pan', 'stereo', 'width', 'widen', 'narrow']))
-      return 'pan';
-    if (_textAny(t, const ['reverb', 'verb', 'space', 'room'])) return 'reverb';
-    if (_textAny(t, const ['delay', 'echo'])) return 'delay';
-    if (_textAny(t, const [
-      'eq',
-      'tone',
-      'bright',
-      'dull',
-      'mud',
-      'harsh',
-      'thin',
-      'boomy'
-    ])) return 'eq';
-    if (_textAny(t, const ['deesser', 'de-esser', 'sibilance', 'ess']))
-      return 'de-esser';
-    if (_textAny(t, const ['distortion', 'drive', 'crunch', 'grit', 'saturat']))
-      return 'distortion';
-    if (_textAny(t, const ['limiter', 'limit', 'brickwall', 'ceiling']))
-      return 'limiter';
-    return t;
-  }
-
-  String? _normDir(String? s) {
-    if (s == null) return null;
-    final t = s.trim().toLowerCase();
-    if (t.isEmpty) return null;
-
-    if (_textAny(t, const ['up', 'more', 'add', 'increase', 'raise', 'boost']))
-      return 'up';
-    if (_textAny(
-        t, const ['down', 'less', 'reduce', 'lower', 'decrease', 'remove']))
-      return 'down';
-
-    if (_textAny(t, const ['left'])) return 'left';
-    if (_textAny(t, const ['right'])) return 'right';
-    if (_textAny(t, const ['center', 'centre'])) return 'center';
-
-    if (_textAny(t, const ['widen', 'wide'])) return 'widen';
-    if (_textAny(t, const ['narrow'])) return 'narrow';
-
-    // keep original if unknown
-    return t;
-  }
-
-  String? _inferDirectionFromUserText(String text, String kind) {
-    final t = text.toLowerCase();
-
-    final wantsUp = t.contains('stand out') ||
-        t.contains('bring out') ||
-        t.contains('cut through') ||
-        t.contains('quiet') ||
-        t.contains('too quiet') ||
-        t.contains('more');
-
-    final wantsDown = t.contains('too loud') ||
-        t.contains('harsh') ||
-        t.contains('muddy') ||
-        t.contains('reduce');
-
-    if (kind == 'gain' || kind == 'balance') {
-      if (wantsUp && !wantsDown) return 'up';
-      if (wantsDown && !wantsUp) return 'down';
-    }
-
-    if (kind == 'eq') {
-      if (t.contains('presence') ||
-          t.contains('cut through') ||
-          t.contains('stand out')) {
-        return 'up';
-      }
-    }
-
-    return null;
-  }
-
-  List<MixIntent> _inferExtraIntentsFromUserText(String text) {
-    final t = text.toLowerCase();
-    final out = <MixIntent>[];
-
-    if (t.contains('stand out') ||
-        t.contains('cut through') ||
-        t.contains('quiet')) {
-      out.add(MixIntent(kind: 'gain', direction: 'up', confidence: 0.55));
-      out.add(MixIntent(
-          kind: 'eq',
-          direction: 'up',
-          descriptor: 'presence',
-          confidence: 0.45));
-    }
-
-    return out;
-  }
-
-  String? _normDesc(String? s) {
-    if (s == null) return null;
-    final t = s.trim().toLowerCase();
-    if (t.isEmpty) return null;
-
-    // Normalize common tone words
-    if (_textAny(t, const ['mud', 'muddy', 'box', 'boxy', 'boomy']))
-      return 'mud';
-    if (_textAny(t, const ['harsh', 'piercing', 'shrill', 'bright', 'icepick']))
-      return 'harsh';
-    if (_textAny(
-        t, const ['air', 'presence', 'clarity', 'shine', 'open', 'sparkle'])) {
-      return 'air';
-    }
-
-    if (_textAny(t, const ['thin', 'weak'])) return 'thin';
-    return t;
   }
 
   // -----------------------------
@@ -337,7 +220,6 @@ class LocalMixingModel {
     // Rebuild target with normalized values
     normGoal = GoalVector(
       type: normGoal.type,
-      userText: normGoal.userText,
       intents: normGoal.intents,
       target: MixTarget(
         role: role,
@@ -382,7 +264,6 @@ class LocalMixingModel {
         // reduce intensity by 25% for multi-overlapping role stacks
         normGoal = GoalVector(
           type: normGoal.type,
-          userText: normGoal.userText,
           intents: normGoal.intents,
           target: normGoal.target,
           intensity: (normGoal.intensity * 0.75).clamp(0.0, 1.0),
@@ -461,7 +342,6 @@ class LocalMixingModel {
         target: normGoal.target,
         kind: kind,
         strict: strict,
-        userText: normGoal.userText,
       );
 
       // rows to operate on
@@ -587,6 +467,16 @@ class LocalMixingModel {
         if (shouldPlanMaster) {
           actions.addAll(
               _planMasterLimiter(dir ?? 'up', intensity: normGoal.intensity));
+        }
+        continue;
+      }
+
+      if (kind == 'clipper') {
+        actions.addAll(
+            _planClipper(rows, dir ?? 'up', intensity: normGoal.intensity));
+        if (shouldPlanMaster) {
+          actions.addAll(
+              _planMasterClipper(dir ?? 'up', intensity: normGoal.intensity));
         }
         continue;
       }
@@ -1141,29 +1031,9 @@ class LocalMixingModel {
     required MixTarget target,
     required String kind,
     required bool strict,
-    required String userText,
   }) {
     if (target.scope == 'master') return true;
     if (target.scope == 'row') return false;
-
-    final t = userText.toLowerCase();
-    final finishing = _textAny(t, const [
-      'master',
-      'master bus',
-      'mixbus',
-      'whole mix',
-      'overall',
-      'finish',
-      'final',
-      'commercial',
-      'publishable',
-      'polish',
-      'glue',
-      'release',
-      'loudness',
-    ]);
-
-    if (finishing) return true;
     if (!strict && kind == 'balance') return true;
     return false;
   }
@@ -1753,6 +1623,56 @@ class LocalMixingModel {
     return out;
   }
 
+  List<MixAction> _planClipper(List<RowState> rows, String direction,
+      {required double intensity}) {
+    final out = <MixAction>[];
+    final dir = direction.toLowerCase();
+
+    if (dir == 'remove') {
+      for (final r in rows) {
+        out.add(MixAction('delete_effect',
+            {'row': r.rowIndex, 'effect_name_contains': fxClipper}));
+      }
+      return out;
+    }
+
+    final scale = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+    final thresholdDelta =
+        ((dir == 'down') ? 1.0 : -1.0) * (5.0 * scale).clamp(1.2, 6.8);
+    final ceilingDb = (dir == 'down') ? -0.1 : (-0.6 - 0.8 * intensity);
+
+    for (final r in rows) {
+      out.add(MixAction('ensure_effect',
+          {'row': r.rowIndex, 'effect_name_contains': fxClipper}));
+
+      if (_isAllowedFxParam(fxClipper, const ['Threshold'])) {
+        out.add(MixAction('adjust_effect_param_by_name', {
+          'row': r.rowIndex,
+          'effect_name_contains': fxClipper,
+          'param_name_contains_any': const ['Threshold'],
+          'mode': 'delta',
+          'delta': thresholdDelta,
+          'clamp_min': -40.0,
+          'clamp_max': 0.0,
+          'skip_if_missing_effect': false,
+        }));
+      }
+
+      if (_isAllowedFxParam(fxClipper, const ['Ceiling'])) {
+        out.add(MixAction('adjust_effect_param_by_name', {
+          'row': r.rowIndex,
+          'effect_name_contains': fxClipper,
+          'param_name_contains_any': const ['Ceiling'],
+          'mode': 'set',
+          'value': ceilingDb.clamp(-40.0, 0.0),
+          'skip_if_missing_effect': false,
+        }));
+      }
+    }
+
+    return out;
+  }
+
   List<MixAction> _planMasterGain(
       {required bool up, required double intensity}) {
     final mag = (0.04 + 0.10 * intensity).clamp(0.03, 0.16);
@@ -2095,6 +2015,41 @@ class LocalMixingModel {
       }),
       MixAction('adjust_master_effect_param_by_name', {
         'effect_name_contains': fxLimiter,
+        'param_name_contains_any': const ['Ceiling'],
+        'mode': 'set',
+        'value': ceilingDb.clamp(-40.0, 0.0),
+        'skip_if_missing_effect': true,
+      }),
+    ];
+  }
+
+  List<MixAction> _planMasterClipper(String direction,
+      {required double intensity}) {
+    final dir = direction.toLowerCase();
+    if (dir == 'remove') {
+      return [
+        MixAction('delete_master_effect', {'effect_name_contains': fxClipper})
+      ];
+    }
+
+    final scale = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+    final thresholdDelta =
+        ((dir == 'down') ? 1.0 : -1.0) * (4.0 * scale).clamp(1.0, 5.5);
+    final ceilingDb = (dir == 'down') ? -0.1 : (-0.7 - 0.8 * intensity);
+
+    return [
+      MixAction('ensure_master_effect', {'effect_name_contains': fxClipper}),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxClipper,
+        'param_name_contains_any': const ['Threshold'],
+        'mode': 'delta',
+        'delta': thresholdDelta,
+        'clamp_min': -40.0,
+        'clamp_max': 0.0,
+        'skip_if_missing_effect': false,
+      }),
+      MixAction('adjust_master_effect_param_by_name', {
+        'effect_name_contains': fxClipper,
         'param_name_contains_any': const ['Ceiling'],
         'mode': 'set',
         'value': ceilingDb.clamp(-40.0, 0.0),

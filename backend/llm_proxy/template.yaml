@@ -1,0 +1,309 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Mixroom authenticated LLM proxy for beta chat
+
+Parameters:
+  StageName:
+    Type: String
+    Default: staging
+  AppAuthSecretArn:
+    Type: String
+  AppAuthIssuer:
+    Type: String
+    Default: mixroom-native-auth
+  AppAuthAudience:
+    Type: String
+    Default: mixroom-app
+  AuthAccountsTableName:
+    Type: String
+  AuthSessionsTableName:
+    Type: String
+  LlmProvider:
+    Type: String
+    Default: openai
+    AllowedValues:
+      - openai
+      - claude
+      - gemini
+  OpenAiApiKeySecretArn:
+    Type: String
+  OpenAiModel:
+    Type: String
+    Default: gpt-4.1-mini
+  AllowClientModelOverride:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+  OpenAiSecretCacheTtlSeconds:
+    Type: Number
+    Default: 300
+  EntitlementsTableName:
+    Type: String
+  MaxRequestBytes:
+    Type: Number
+    Default: 200000
+  LlmMaxOutputTokens:
+    Type: Number
+    Default: 1024
+  ApiThrottleBurstLimit:
+    Type: Number
+    Default: 200
+  ApiThrottleRateLimit:
+    Type: Number
+    Default: 100
+  WebAclArn:
+    Type: String
+    Default: ''
+  PostHogApiKey:
+    Type: String
+    Default: phc_t3pSmXe8NYEv8jrpk3dfMnxU6iud4EySnHzAAwFL28g
+  PostHogHost:
+    Type: String
+    Default: https://us.i.posthog.com
+  SentryDsn:
+    Type: String
+    Default: https://5e8e9f0b08714d2c26591bce7b3e057f@o4511009749729280.ingest.us.sentry.io/4511012111712256
+  AlarmTopicArn:
+    Type: String
+    Default: ''
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        LLM_PROVIDER: !Ref LlmProvider
+        LLM_API_KEY_SECRET_ARN: !Ref OpenAiApiKeySecretArn
+        LLM_MODEL: !Ref OpenAiModel
+        LLM_SECRET_CACHE_TTL_SECONDS: !Ref OpenAiSecretCacheTtlSeconds
+        LLM_TIMEOUT_SECONDS: 30
+        ANTHROPIC_VERSION: 2023-06-01
+        OPENAI_API_KEY_SECRET_ARN: !Ref OpenAiApiKeySecretArn
+        OPENAI_MODEL: !Ref OpenAiModel
+        ALLOW_CLIENT_MODEL_OVERRIDE: !Ref AllowClientModelOverride
+        OPENAI_SECRET_CACHE_TTL_SECONDS: !Ref OpenAiSecretCacheTtlSeconds
+        MAX_REQUEST_BYTES: !Ref MaxRequestBytes
+        OPENAI_TIMEOUT_SECONDS: 30
+        POSTHOG_API_KEY: !Ref PostHogApiKey
+        POSTHOG_HOST: !Ref PostHogHost
+        SENTRY_DSN: !Ref SentryDsn
+        ENVIRONMENT: !Ref StageName
+        APP_AUTH_SECRET_ARN: !Ref AppAuthSecretArn
+        APP_AUTH_ISSUER: !Ref AppAuthIssuer
+        APP_AUTH_AUDIENCE: !Ref AppAuthAudience
+        AUTH_ACCOUNTS_TABLE: !Ref AuthAccountsTableName
+        AUTH_SESSIONS_TABLE: !Ref AuthSessionsTableName
+        AI_USAGE_STATE_TABLE: !Ref AiUsageMetricsTable
+        AI_USAGE_METRICS_TABLE: !Ref AiUsageMetricsTable
+        AI_USAGE_EVENTS_TABLE: !Ref AiUsageEventsTable
+        ENTITLEMENTS_TABLE: !Ref EntitlementsTableName
+        LLM_MAX_OUTPUT_TOKENS: !Ref LlmMaxOutputTokens
+
+Conditions:
+  HasWebAclArn: !Not
+    - !Equals
+      - !Ref WebAclArn
+      - ''
+  HasAlarmTopicArn: !Not
+    - !Equals
+      - !Ref AlarmTopicArn
+      - ''
+
+Resources:
+  AiUsageMetricsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub mixroom-ai-usage-metrics-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+
+  AiUsageEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub mixroom-ai-usage-events-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+        - AttributeName: feature
+          AttributeType: S
+        - AttributeName: record_type
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user_created_at_idx
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: feature_created_at_idx
+          KeySchema:
+            - AttributeName: feature
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: created_at_idx
+          KeySchema:
+            - AttributeName: record_type
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  LlmApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref StageName
+      DefaultRouteSettings:
+        DetailedMetricsEnabled: true
+        ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
+        ThrottlingRateLimit: !Ref ApiThrottleRateLimit
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+
+  LlmApiWebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Condition: HasWebAclArn
+    Properties:
+      ResourceArn: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/${LlmApi}/stages/${StageName}
+      WebACLArn: !Ref WebAclArn
+
+  ProxyResponsesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_responses.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - !Ref OpenAiApiKeySecretArn
+                - !Ref AppAuthSecretArn
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiUsageMetricsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiUsageEventsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref EntitlementsTableName
+        - DynamoDBReadPolicy:
+            TableName: !Ref AuthAccountsTableName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthSessionsTableName
+      Events:
+        ProxyResponses:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LlmApi
+            Path: /v1/llm/responses
+            Method: POST
+        PromptLimits:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LlmApi
+            Path: /v1/llm/limits
+            Method: GET
+
+  LlmApi5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlarmTopicArn
+    Properties:
+      AlarmName: !Sub mixroom-llm-proxy-${StageName}-api-5xx
+      AlarmDescription: !Sub Prod LLM proxy API is returning 5XX responses in ${StageName}.
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref LlmApi
+        - Name: Stage
+          Value: !Ref StageName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopicArn
+
+  ProxyResponsesFunctionErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlarmTopicArn
+    Properties:
+      AlarmName: !Sub mixroom-llm-proxy-${StageName}-lambda-errors
+      AlarmDescription: !Sub LLM proxy Lambda is returning errors in ${StageName}.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ProxyResponsesFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopicArn
+
+  ProxyResponsesFunctionThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlarmTopicArn
+    Properties:
+      AlarmName: !Sub mixroom-llm-proxy-${StageName}-lambda-throttles
+      AlarmDescription: !Sub LLM proxy Lambda is throttling in ${StageName}.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ProxyResponsesFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopicArn
+
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL for the LLM proxy API
+    Value: !Sub https://${LlmApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
+  AiUsageStateTableName:
+    Value: !Ref AiUsageMetricsTable
+  AiUsageEventsTableName:
+    Value: !Ref AiUsageEventsTable

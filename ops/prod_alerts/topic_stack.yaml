@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Mixroom production alert topic for CloudWatch alarms
+
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+
+Resources:
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub mixroom-prod-alerts-${StageName}
+
+Outputs:
+  AlertTopicArn:
+    Description: SNS topic ARN for production CloudWatch alarms
+    Value: !Ref AlertTopic

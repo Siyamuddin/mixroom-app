@@ -13,58 +13,21 @@ import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../helpers/youtube_upload.dart';
 
-// import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
-// import 'package:ffmpeg_kit_flutter_full_gpl/ffprobe_kit.dart';
-// import 'package:ffmpeg_kit_flutter_full_gpl/log.dart';
-// import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
-// import 'package:ffmpeg_kit_flutter_full_gpl/session.dart';
-
-import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_full/ffprobe_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_full/log.dart';
-import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
-import 'package:ffmpeg_kit_flutter_new_full/session.dart';
-
-// import 'package:ffmpeg_kit_16kb/ffmpeg_kit.dart';
-// import 'package:ffmpeg_kit_16kb/abstract_session.dart';
-// import 'package:ffmpeg_kit_16kb/arch_detect.dart';
-// import 'package:ffmpeg_kit_16kb/chapter.dart';
-// import 'package:ffmpeg_kit_16kb/ffmpeg_kit.dart';
-// import 'package:ffmpeg_kit_16kb/ffmpeg_kit_config.dart';
-// import 'package:ffmpeg_kit_16kb/ffmpeg_session.dart';
-// import 'package:ffmpeg_kit_16kb/ffmpeg_session_complete_callback.dart';
-// import 'package:ffmpeg_kit_16kb/ffprobe_kit.dart';
-// import 'package:ffmpeg_kit_16kb/ffprobe_session.dart';
-// import 'package:ffmpeg_kit_16kb/ffprobe_session_complete_callback.dart';
-// import 'package:ffmpeg_kit_16kb/level.dart';
-// import 'package:ffmpeg_kit_16kb/log.dart';
-// import 'package:ffmpeg_kit_16kb/log_callback.dart';
-// import 'package:ffmpeg_kit_16kb/log_redirection_strategy.dart';
-// import 'package:ffmpeg_kit_16kb/media_information.dart';
-// import 'package:ffmpeg_kit_16kb/media_information_json_parser.dart';
-// import 'package:ffmpeg_kit_16kb/media_information_session.dart';
-// import 'package:ffmpeg_kit_16kb/media_information_session_complete_callback.dart';
-// import 'package:ffmpeg_kit_16kb/packages.dart';
-// import 'package:ffmpeg_kit_16kb/platform_interface/ffmpeg_kit_flutter_platform_interface.dart';
-// import 'package:ffmpeg_kit_16kb/platform_interface/method_channel_ffmpeg_kit_flutter.dart';
-// import 'package:ffmpeg_kit_16kb/return_code.dart';
-// import 'package:ffmpeg_kit_16kb/session.dart';
-// import 'package:ffmpeg_kit_16kb/session_state.dart';
-// import 'package:ffmpeg_kit_16kb/signal.dart';
-// import 'package:ffmpeg_kit_16kb/statistics.dart';
-// import 'package:ffmpeg_kit_16kb/statistics_callback.dart';
-// import 'package:ffmpeg_kit_16kb/stream_information.dart';
+import 'package:mixroom/ffmpeg/ffmpeg.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_file_dialog/flutter_file_dialog.dart';
+import 'package:mixroom/helpers/audio_export_plan.dart';
+import 'package:mixroom/helpers/export_save_dialog.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
-import 'package:mixroom/helpers/subscription_service.dart';
-import 'package:mixroom/models/subscription_models.dart';
+import 'package:mixroom/helpers/entitlement_service.dart';
+import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/widgets/side_menu.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -146,9 +109,7 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   bool _subscriptionCapabilityOrLegacy(String capability) {
     try {
-      return context
-          .read<SubscriptionService>()
-          .canUseCapability(capability);
+      return context.read<EntitlementService>().canUseCapability(capability);
     } catch (_) {
       return widget.mode == 'Pro';
     }
@@ -438,6 +399,14 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         // _videoController?.pause(); // Optionally pause on leaving
         // _videoController?.dispose();
         // _videoController = null; // Set to null to ensure re-initialization
+      }
+    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+      if (state == AppLifecycleState.paused) {
+        _pausePlayback();
+        _stopTicker();
+        setState(() {
+          _isPlaying = false;
+        });
       }
     }
   }
@@ -1659,17 +1628,18 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                           ),
                           const SizedBox(height: 10),
                           buildDropdownField(
-                            label: 'Resample quality',
+                            label: L10n.translate(context, 'Resample quality'),
                             value: selectedResampleQuality,
                             options: _ExportResampleQuality.values,
                             textBuilder: (value) {
                               switch (value) {
                                 case _ExportResampleQuality.draft:
-                                  return 'Draft (fast)';
+                                  return L10n.translate(
+                                      context, 'Draft (fast)');
                                 case _ExportResampleQuality.good:
-                                  return 'Good';
+                                  return L10n.translate(context, 'Good');
                                 case _ExportResampleQuality.best:
-                                  return 'Best';
+                                  return L10n.translate(context, 'Best');
                               }
                             },
                             onChanged: (value) {
@@ -1682,7 +1652,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                           const SizedBox(height: 6),
                           SwitchListTile(
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('Normalize loudness'),
+                            title: Text(
+                              L10n.translate(context, 'Normalize loudness'),
+                            ),
                             value: selectedNormalize,
                             onChanged: (value) {
                               setSheetState(() {
@@ -1693,7 +1665,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                           if (selectedNormalize) ...[
                             const SizedBox(height: 4),
                             buildDropdownField(
-                              label: 'Limiter ceiling (dBTP)',
+                              label: L10n.translate(
+                                  context, 'Limiter ceiling (dBTP)'),
                               value: selectedNormalizeTargetDb,
                               options: _kExportNormalizeTargetsDb,
                               textBuilder: (value) =>
@@ -1709,7 +1682,7 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                           const SizedBox(height: 10),
                           if (selectedFormat == _ExportAudioFormat.wav) ...[
                             buildDropdownField(
-                              label: 'Bit depth',
+                              label: L10n.translate(context, 'Bit depth'),
                               value: selectedWavBitDepth,
                               options: _kExportWavBitDepths,
                               textBuilder: (value) => '$value-bit',
@@ -1723,7 +1696,9 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                             const SizedBox(height: 6),
                             SwitchListTile(
                               contentPadding: EdgeInsets.zero,
-                              title: const Text('Enable dithering'),
+                              title: Text(
+                                L10n.translate(context, 'Enable dithering'),
+                              ),
                               value: selectedWavDithering,
                               onChanged: (value) {
                                 setSheetState(() {
@@ -1733,7 +1708,7 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                             ),
                           ] else ...[
                             buildDropdownField(
-                              label: 'Encoding mode',
+                              label: L10n.translate(context, 'Encoding mode'),
                               value: selectedMp3Mode,
                               options: _ExportMp3Mode.values,
                               textBuilder: (value) =>
@@ -1748,7 +1723,7 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                             const SizedBox(height: 10),
                             if (selectedMp3Mode == _ExportMp3Mode.cbr)
                               buildDropdownField(
-                                label: 'Bit rate',
+                                label: L10n.translate(context, 'Bit rate'),
                                 value: selectedMp3Bitrate,
                                 options: _kExportMp3Bitrates,
                                 textBuilder: (value) => '${value} kbps',
@@ -1761,11 +1736,11 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                               )
                             else
                               buildDropdownField(
-                                label: 'VBR quality',
+                                label: L10n.translate(context, 'VBR quality'),
                                 value: selectedMp3VbrQuality,
                                 options: _kExportMp3VbrQualities,
                                 textBuilder: (value) =>
-                                    'V$value (${value == 0 ? "highest" : "smaller file"})',
+                                    'V$value (${L10n.translate(context, value == 0 ? "highest" : "smaller file")})',
                                 onChanged: (value) {
                                   if (value == null) return;
                                   setSheetState(() {
@@ -1797,7 +1772,8 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
                                 ),
                               );
                             },
-                            child: const Text('Start export'),
+                            child:
+                                Text(L10n.translate(context, 'Start export')),
                           ),
                         ),
                       ],
@@ -1812,52 +1788,6 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     );
   }
 
-  String _wavCodecForBitDepth(int bitDepth) {
-    switch (bitDepth) {
-      case 24:
-        return 'pcm_s24le';
-      case 32:
-        return 'pcm_f32le';
-      case 16:
-      default:
-        return 'pcm_s16le';
-    }
-  }
-
-  String _buildResampleFilter(_AudioExportSettings settings) {
-    final isWav = settings.format == _ExportAudioFormat.wav;
-    final ditherMethod = settings.wavDithering ? 'triangular' : 'none';
-    switch (settings.resampleQuality) {
-      case _ExportResampleQuality.draft:
-        return isWav
-            ? 'aresample=${settings.sampleRate}:resampler=swr:dither_method=$ditherMethod'
-            : 'aresample=${settings.sampleRate}:resampler=swr';
-      case _ExportResampleQuality.good:
-        return isWav
-            ? 'aresample=${settings.sampleRate}:resampler=soxr:precision=20:dither_method=$ditherMethod'
-            : 'aresample=${settings.sampleRate}:resampler=soxr:precision=20';
-      case _ExportResampleQuality.best:
-        return isWav
-            ? 'aresample=${settings.sampleRate}:resampler=soxr:precision=28:dither_method=$ditherMethod'
-            : 'aresample=${settings.sampleRate}:resampler=soxr:precision=28';
-    }
-  }
-
-  String _buildExportFilter(_AudioExportSettings settings) {
-    final List<String> filters = [_buildResampleFilter(settings)];
-    if (settings.channelMode == _ExportChannelMode.mono) {
-      filters.add('aformat=channel_layouts=mono');
-    } else {
-      filters.add('aformat=channel_layouts=stereo');
-    }
-    if (settings.normalize) {
-      filters.add(
-        'loudnorm=I=-14:LRA=11:TP=${settings.normalizeTargetDb.toStringAsFixed(1)}:linear=true',
-      );
-    }
-    return filters.join(',');
-  }
-
   Future<String> _convertMixWithExportSettings({
     required String inputPath,
     required _AudioExportSettings settings,
@@ -1866,46 +1796,21 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     final outPath =
         '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.${settings.fileExtension}';
 
-    final filter = _buildExportFilter(settings);
-    final channelCount =
-        settings.channelMode == _ExportChannelMode.mono ? '1' : '2';
-    final List<String> ffmpegCmd;
-    if (settings.format == _ExportAudioFormat.wav) {
-      ffmpegCmd = [
-        '-i',
-        '"$inputPath"',
-        if (filter.isNotEmpty) ...['-af', filter],
-        '-c:a',
-        _wavCodecForBitDepth(settings.wavBitDepth),
-        '-ac',
-        channelCount,
-        '-ar',
-        '${settings.sampleRate}',
-        '-y',
-        '"$outPath"',
-      ];
-    } else {
-      ffmpegCmd = [
-        '-i',
-        '"$inputPath"',
-        if (filter.isNotEmpty) ...['-af', filter],
-        '-c:a',
-        'libmp3lame',
-        if (settings.mp3Mode == _ExportMp3Mode.cbr) ...[
-          '-b:a',
-          '${settings.mp3BitrateKbps}k',
-        ] else ...[
-          '-q:a',
-          '${settings.mp3VbrQuality}',
-        ],
-        '-ac',
-        channelCount,
-        '-ar',
-        '${settings.sampleRate}',
-        '-y',
-        '"$outPath"',
-      ];
-    }
+    final ffmpegCmd = AudioExportPlan.buildFfmpegArgs(
+      inputPath: inputPath,
+      outputPath: outPath,
+      format: settings.format.name,
+      sampleRate: settings.sampleRate,
+      wavBitDepth: settings.wavBitDepth,
+      wavDithering: settings.wavDithering,
+      mp3BitrateKbps: settings.mp3BitrateKbps,
+      mp3Mode: settings.mp3Mode.name,
+      mp3VbrQuality: settings.mp3VbrQuality,
+      channelMode: settings.channelMode.name,
+      normalize: settings.normalize,
+      normalizeTargetDb: settings.normalizeTargetDb,
+      resampleQuality: settings.resampleQuality.name,
+    );
 
     try {
       final Session session = await FFmpegKit.execute(ffmpegCmd.join(' '));
@@ -3708,7 +3613,11 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
           debugPrint('Retry open export dialog failed: $retryError');
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open export options.')),
+            SnackBar(
+              content: Text(
+                L10n.translate(context, 'Could not open export options.'),
+              ),
+            ),
           );
           return;
         }
@@ -3759,12 +3668,18 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     }
 
     final exportExt = exportPath.split('.').last;
-
-    final params = SaveFileDialogParams(
-      sourceFilePath: exportPath,
-      fileName: 'export_file.$exportExt',
+    final exportBaseName = _videoFile != null
+        ? p.basenameWithoutExtension(_videoFile!.path)
+        : (_audioOnly ? 'Mixroom Export' : 'Mixroom Video');
+    final suggestedFileName = ExportSaveDialog.buildSuggestedFileName(
+      baseName: exportBaseName,
+      extension: exportExt,
     );
-    final savedPath = await FlutterFileDialog.saveFile(params: params);
+    final savedPath = await ExportSaveDialog.saveExportedFile(
+      sourceFilePath: exportPath,
+      suggestedFileName: suggestedFileName,
+      desktopDialogTitle: L10n.translate(context, 'Save export'),
+    );
 
     if (savedPath != null) {
       // final success_str = L10n.translate(context, 'Exported file saved!');
@@ -3775,11 +3690,20 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         context,
         MaterialPageRoute(
           builder: (context) => ExportSuccessScreen(
-            filePath: exportPath, // savedPath,
+            filePath: exportPath,
+            savedFilePath: savedPath,
+            savedFileName: suggestedFileName,
             isVideo: !_audioOnly,
           ),
         ),
       );
+
+      try {
+        final tempExport = File(exportPath);
+        if (await tempExport.exists()) {
+          await tempExport.delete();
+        }
+      } catch (_) {}
 
       if (done == true) {
         //****TEMPORARY: REMOVE return LINE FOR Mixroom FULL RELEASE****
@@ -6799,20 +6723,125 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
 
 class ExportSuccessScreen extends StatelessWidget {
   final String filePath;
+  final String? savedFilePath;
+  final String? savedFileName;
   final bool isVideo;
 
   const ExportSuccessScreen(
-      {super.key, required this.filePath, required this.isVideo});
+      {super.key,
+      required this.filePath,
+      required this.isVideo,
+      this.savedFilePath,
+      this.savedFileName});
+
+  String _resolvedFileName() {
+    final explicit = savedFileName?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
+    }
+
+    final saved = savedFilePath?.trim();
+    if (saved != null && saved.isNotEmpty) {
+      return p.basename(saved);
+    }
+
+    return p.basename(filePath);
+  }
+
+  String _openSavedLabel(BuildContext context) {
+    if (!kIsWeb && (Platform.isIOS || Platform.isAndroid)) {
+      return L10n.translate(context, 'Open in Files');
+    }
+    return L10n.translate(context, 'Open saved file');
+  }
+
+  bool _isUriLikePath(String path) {
+    final trimmed = path.trim();
+    if (trimmed.isEmpty) return false;
+    return trimmed.contains('://');
+  }
+
+  String _normalizedCandidatePath(String path) {
+    final trimmed = path.trim();
+    if (trimmed.isEmpty) return trimmed;
+    if (!_isUriLikePath(trimmed)) return trimmed;
+
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null) return trimmed;
+    if (uri.scheme == 'file') {
+      return uri.toFilePath();
+    }
+    return trimmed;
+  }
+
+  String _resolvedActionPath() {
+    final saved = savedFilePath?.trim();
+    if (saved != null && saved.isNotEmpty) {
+      return _normalizedCandidatePath(saved);
+    }
+    return _normalizedCandidatePath(filePath);
+  }
+
+  String _resolvedPreviewPath() {
+    final saved = savedFilePath?.trim();
+    if (saved == null || saved.isEmpty) {
+      return filePath;
+    }
+    final normalizedSaved = _normalizedCandidatePath(saved);
+    if (!_isUriLikePath(normalizedSaved) &&
+        File(normalizedSaved).existsSync()) {
+      return normalizedSaved;
+    }
+    return filePath;
+  }
 
   Future<void> _shareFile(BuildContext context) async {
     try {
-      await Share.shareXFiles(
-          [XFile(filePath)]); // doesn't work on android (only iOS)
+      await Share.shareXFiles([
+        XFile(
+          _resolvedActionPath(),
+          name: _resolvedFileName(),
+        )
+      ]);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to share.')), // ${e.toString()}')),
       );
     }
+  }
+
+  Future<void> _openSavedFile(BuildContext context) async {
+    final candidates = <String>[
+      if ((savedFilePath ?? '').trim().isNotEmpty)
+        _normalizedCandidatePath(savedFilePath!),
+      _normalizedCandidatePath(filePath),
+    ];
+
+    for (final candidate in candidates) {
+      try {
+        if (_isUriLikePath(candidate)) {
+          final launched = await launchUrl(Uri.parse(candidate));
+          if (launched) {
+            return;
+          }
+        }
+        final result = await OpenFile.open(candidate);
+        if (result.type == ResultType.done) {
+          return;
+        }
+      } catch (_) {
+        // Try the next candidate before surfacing a failure.
+      }
+    }
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          L10n.translate(context, 'Could not open the saved export.'),
+        ),
+      ),
+    );
   }
 
   Future<void> _openSocialMedia(String deepLink, String fallbackUrl) async {
@@ -6829,7 +6858,11 @@ class ExportSuccessScreen extends StatelessWidget {
 
   void _showUploadComingSoon(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Platform upload coming soon')),
+      SnackBar(
+        content: Text(
+          L10n.translate(context, 'Platform upload coming soon'),
+        ),
+      ),
     );
   }
 
@@ -6842,24 +6875,29 @@ class ExportSuccessScreen extends StatelessWidget {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Upload to YouTube'),
+          title: Text(L10n.translate(context, 'Upload to YouTube')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: titleController,
-                decoration: InputDecoration(labelText: 'Title'),
+                decoration: InputDecoration(
+                  labelText: L10n.translate(context, 'Title'),
+                ),
               ),
               TextField(
                 controller: descController,
-                decoration: InputDecoration(labelText: 'Description'),
+                decoration: InputDecoration(
+                  labelText: L10n.translate(context, 'Description'),
+                ),
                 maxLines: 2,
               ),
             ],
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(context), child: Text('Cancel')),
+                onPressed: () => Navigator.pop(context),
+                child: Text(L10n.translate(context, 'Cancel'))),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.primary,
@@ -6872,7 +6910,7 @@ class ExportSuccessScreen extends StatelessWidget {
                   'description': descController.text
                 });
               },
-              child: Text('Upload'),
+              child: Text(L10n.translate(context, 'Upload')),
             ),
           ],
         );
@@ -6940,12 +6978,12 @@ class ExportSuccessScreen extends StatelessWidget {
       context: context,
       builder: (_) {
         return AlertDialog(
-          title: Text('🎉 Video Uploaded'),
+          title: Text(L10n.translate(context, 'Video Uploaded')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Your video is live!'),
-              SizedBox(height: 12),
+              Text(L10n.translate(context, 'Your video is live!')),
+              const SizedBox(height: 12),
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Image.file(qrImage,
@@ -6953,16 +6991,16 @@ class ExportSuccessScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               ElevatedButton.icon(
-                icon: Icon(Icons.download),
-                label: Text("Save Image"),
+                icon: const Icon(Icons.download),
+                label: Text(L10n.translate(context, 'Save Image')),
                 onPressed: () async {
                   final result = await ImageGallerySaver.saveFile(qrImage.path);
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                         content: Text(result['isSuccess'] == true
-                            ? '✅ Saved to gallery!'
-                            : '❌ Failed to save')),
+                            ? L10n.translate(context, 'Saved to gallery!')
+                            : L10n.translate(context, 'Failed to save'))),
                   );
                 },
               ),
@@ -7019,7 +7057,8 @@ class ExportSuccessScreen extends StatelessWidget {
                   onPressed: () {
                     Navigator.pop(context, true);
                   },
-                  icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
+                  icon:
+                      const Icon(Icons.check_circle_outline_rounded, size: 18),
                   label: Text(L10n.translate(context, 'Done')),
                 ),
               ),
@@ -7064,27 +7103,34 @@ class ExportSuccessScreen extends StatelessWidget {
                       // ),
                       Text(
                         message,
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 40),
-                      ExportSuccessPreviewPlayer(filePath: filePath, isVideo: isVideo),
+                      ExportSuccessPreviewPlayer(
+                        filePath: _resolvedPreviewPath(),
+                        displayName: _resolvedFileName(),
+                        isVideo: isVideo,
+                      ),
                       const SizedBox(height: 16),
                       Row(
                         children: [
                           Expanded(
                             child: FilledButton.icon(
                               onPressed: () => _shareFile(context),
-                              icon: const Icon(Icons.ios_share_rounded, size: 20),
+                              icon:
+                                  const Icon(Icons.ios_share_rounded, size: 20),
                               label: Text(L10n.translate(context, 'share')),
                               style: FilledButton.styleFrom(
                                 minimumSize: const Size.fromHeight(48),
                                 backgroundColor: accent,
                                 foregroundColor: Colors.white,
-                                textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                                textStyle: const TextStyle(
+                                    fontWeight: FontWeight.w600),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
@@ -7094,17 +7140,18 @@ class ExportSuccessScreen extends StatelessWidget {
                           const SizedBox(width: 12),
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: () => _showUploadComingSoon(context),
-                              icon: const Icon(Icons.cloud_upload_rounded, size: 20),
-                              label: const Text('Upload to platform'),
+                              onPressed: () => _openSavedFile(context),
+                              icon: const Icon(Icons.folder_open_rounded,
+                                  size: 20),
+                              label: Text(_openSavedLabel(context)),
                               style: OutlinedButton.styleFrom(
                                 minimumSize: const Size.fromHeight(48),
                                 foregroundColor: Colors.white70,
                                 side: const BorderSide(
                                   color: Color(0xFF4F5A73),
                                 ),
-                                textStyle:
-                                    const TextStyle(fontWeight: FontWeight.w600),
+                                textStyle: const TextStyle(
+                                    fontWeight: FontWeight.w600),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
@@ -7112,6 +7159,30 @@ class ExportSuccessScreen extends StatelessWidget {
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _showUploadComingSoon(context),
+                          icon:
+                              const Icon(Icons.cloud_upload_rounded, size: 20),
+                          label: Text(
+                            L10n.translate(context, 'Upload to platform'),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(46),
+                            foregroundColor: Colors.white70,
+                            side: const BorderSide(
+                              color: Color(0xFF4F5A73),
+                            ),
+                            textStyle:
+                                const TextStyle(fontWeight: FontWeight.w600),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 24),
                       // const SizedBox(height: 40),
@@ -7162,25 +7233,31 @@ class QRThumbnailScreen extends StatelessWidget {
     final file = File('${tempDir.path}/youtube_qr_thumb.png');
     await file.writeAsBytes(byteData!.buffer.asUint8List());
 
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Thumbnail saved to ${file.path}')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content:
+          Text('${L10n.translate(context, 'Thumbnail saved to ')}${file.path}'),
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('YouTube QR Thumbnail')),
+      appBar: AppBar(
+        title: Text(L10n.translate(context, 'YouTube QR Thumbnail')),
+      ),
       body: Center(
         child: Column(
           children: [
             const SizedBox(height: 20),
-            Text('Your video has been uploaded!'),
+            Text(L10n.translate(context, 'Your video has been uploaded!')),
             const SizedBox(height: 20),
             QrImageView(data: videoUrl, size: 200),
             const SizedBox(height: 20),
             ElevatedButton(
                 onPressed: () => _saveThumbnailWithQR(context),
-                child: const Text('Download QR Thumbnail')),
+                child: Text(
+                  L10n.translate(context, 'Download QR Thumbnail'),
+                )),
           ],
         ),
       ),
@@ -7241,8 +7318,7 @@ class EffectsDrawer extends StatefulWidget {
     required this.trackIndex,
     this.mode = "Basic",
     this.isProEntitled,
-  })
-      : super(key: key);
+  }) : super(key: key);
 
   @override
   _EffectsDrawerState createState() => _EffectsDrawerState();
@@ -7255,9 +7331,7 @@ class _EffectsDrawerState extends State<EffectsDrawer> {
 
   bool _subscriptionCapabilityOrLegacy(String capability) {
     try {
-      return context
-          .read<SubscriptionService>()
-          .canUseCapability(capability);
+      return context.read<EntitlementService>().canUseCapability(capability);
     } catch (_) {
       return widget.mode == 'Pro';
     }

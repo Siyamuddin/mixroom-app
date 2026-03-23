@@ -28,6 +28,7 @@ FEATURE_COLUMNS = [
     "kind_eq",
     "kind_compressor",
     "kind_limiter",
+    "kind_clipper",
     "kind_reverb",
     "kind_delay",
     "kind_deesser",
@@ -87,7 +88,7 @@ FEATURE_COLUMNS = [
     "action_hard_reset_master_fx",
     "action_other",
 ]
-EXPECTED_FEATURE_COUNT = 76
+EXPECTED_FEATURE_COUNT = 77
 
 
 def parse_args():

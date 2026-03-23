@@ -48,14 +48,14 @@ Do not pre-mix everything manually before giving prompts.
 2. Let AI apply changes.
 3. Listen.
 4. Correct only what is needed.
-5. Stop when result is at professional quality (you would ship it).
+5. Press **Capture Final** when result is at professional quality (you would ship it).
 
 **KR**
 1. 현실적인 믹스 프롬프트 1개를 입력합니다.
 2. AI가 변경을 적용하게 둡니다.
 3. 들어봅니다.
 4. 필요한 부분만 보정합니다.
-5. 본인이 릴리즈 가능하다고 판단되는 품질에서 멈춥니다.
+5. 본인이 릴리즈 가능하다고 판단되는 품질에서 **Capture Final**을 누릅니다.
 
 ### Step C. Repeat / 반복
 **EN**  
@@ -69,11 +69,13 @@ Repeat Step B with different prompts on the same project, then move to another p
 1. Export with UI **Export** button or `/producer export`.
 2. Keep the exported `.json` file path.
 3. At end of day, send all exported session `.json` files.
+Note: Export also auto-finalizes the current prompt cycle if you forgot to press **Capture Final**.
 
 **KR**
 1. UI의 **Export** 버튼 또는 `/producer export`로 내보냅니다.
 2. 출력된 `.json` 파일 경로를 보관합니다.
 3. 작업 종료 시 세션 `.json` 파일들을 모두 전달합니다.
+참고: **Capture Final**을 누르지 않았더라도 Export 시 현재 프롬프트 사이클은 자동으로 종료 표시됩니다.
 
 ### Step E. Close / 종료
 **EN**  
@@ -122,13 +124,13 @@ Turn off capture with UI toggle or `/producer off` before leaving the project.
 - Genre diversity: pop, rock, hip-hop, EDM, acoustic, etc.
 - Source diversity: clean stems + rough/problematic recordings.
 - Arrangement diversity: sparse and dense mixes.
-- Action diversity: gain/pan/EQ/compressor/reverb/delay/de-esser/distortion/limiter.
+- Action diversity: gain/pan/EQ/compressor/reverb/delay/de-esser/distortion/limiter/clipper.
 
 **KR**
 - 장르 다양성: pop, rock, hip-hop, EDM, acoustic 등.
 - 소스 다양성: 깨끗한 스템 + 거친/문제 있는 녹음.
 - 편성 다양성: 트랙이 적은 믹스와 많은 믹스 모두.
-- 액션 다양성: gain/pan/EQ/compressor/reverb/delay/de-esser/distortion/limiter.
+- 액션 다양성: gain/pan/EQ/compressor/reverb/delay/de-esser/distortion/limiter/clipper.
 
 ---
 
@@ -179,6 +181,7 @@ Send:
 **EN - Do**
 - Let AI act first.
 - Make minimal necessary corrections.
+- Press **Capture Final** once the prompt cycle is done.
 - Keep decisions consistent and intentional.
 - Export frequently.
 
@@ -197,4 +200,3 @@ Send:
 - 프롬프트 전에 미리 전부 수동 믹스하지 마세요.
 - 모든 것을 과하게 수정하지 마세요.
 - 충분히 듣지 않고 빠르게만 진행하지 마세요.
-

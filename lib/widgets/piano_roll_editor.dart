@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/models.dart';
 
 typedef MidiCommitCallback = Future<void> Function({
@@ -1070,9 +1071,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1B2333),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: const Text(
-          'Piano Roll Quick Guide',
-          style: TextStyle(color: Colors.white),
+        title: Text(
+          L10n.translate(ctx, 'Piano Roll Quick Guide'),
+          style: const TextStyle(color: Colors.white),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1080,39 +1081,48 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             tipCard(
               icon: Icons.touch_app_rounded,
               accent: const Color(0xFF7DB4FF),
-              title: 'Create + shape notes',
-              body:
-                  'Tap empty grid to add. Drag to move. Pull right edge to resize.',
+              title: L10n.translate(ctx, 'Create + shape notes'),
+              body: L10n.translate(
+                ctx,
+                'Tap empty grid to add. Drag to move. Pull right edge to resize.',
+              ),
             ),
             const SizedBox(height: 8),
             tipCard(
               icon: Icons.select_all_rounded,
               accent: const Color(0xFF83D4B9),
-              title: 'Select groups quickly',
-              body: 'Hold empty space and drag a box to multi-select notes.',
+              title: L10n.translate(ctx, 'Select groups quickly'),
+              body: L10n.translate(
+                ctx,
+                'Hold empty space and drag a box to multi-select notes.',
+              ),
             ),
             const SizedBox(height: 8),
             tipCard(
               icon: Icons.pinch_rounded,
               accent: const Color(0xFFF7C56D),
-              title: 'Zoom + edit faster',
-              body:
-                  'Pinch with two fingers or use +/- buttons to zoom in time and pitch.',
+              title: L10n.translate(ctx, 'Zoom + edit faster'),
+              body: L10n.translate(
+                ctx,
+                'Pinch with two fingers or use +/- buttons to zoom in time and pitch.',
+              ),
             ),
             const SizedBox(height: 8),
             tipCard(
               icon: Icons.tune_rounded,
               accent: const Color(0xFFE78CF3),
-              title: 'Use the bottom tray',
-              body:
-                  'Duplicate, delete, and adjust length/velocity for selected notes.',
+              title: L10n.translate(ctx, 'Use the bottom tray'),
+              body: L10n.translate(
+                ctx,
+                'Duplicate, delete, and adjust length/velocity for selected notes.',
+              ),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Got it'),
+            child: Text(L10n.translate(ctx, 'Got it')),
           ),
         ],
       ),
@@ -1595,42 +1605,40 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  accent.withValues(alpha: 0.34),
-                  const Color(0xFF182335),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: accent.withValues(alpha: 0.58)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.20),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+              color: Colors.white.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
             ),
             child: Row(
               children: [
                 Container(
-                  width: 34,
-                  height: 34,
+                  width: 32,
+                  height: 32,
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.22),
+                    color: accent.withValues(alpha: 0.16),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(_instrumentVisualIcon(category), color: accent),
+                  child: Icon(
+                    _instrumentVisualIcon(category),
+                    color: accent,
+                    size: 18,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Text(
+                        'Instrument',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.58),
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       Text(
                         _instrumentName.isEmpty
                             ? 'Instrument'
@@ -1639,21 +1647,27 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 13.6,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      Text(
-                        sampled
-                            ? '$category sampled instrument'
-                            : '$category synth controls',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.74),
-                          fontSize: 10.8,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 13.4,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    category,
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
@@ -1761,7 +1775,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                       final id = (spec['id'] as String?) ?? '';
                       final selected = id == _instrumentId;
                       final name = (spec['name'] as String?) ?? id;
-                      final source = (spec['sourceProject'] as String?) ?? '';
                       final rowAccent = _instrumentVisualAccent(
                         _instrumentCategoryForSpec(spec),
                       );
@@ -1796,35 +1809,17 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        name,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12.2,
-                                          fontWeight: selected
-                                              ? FontWeight.w800
-                                              : FontWeight.w600,
-                                        ),
-                                      ),
-                                      if (source.isNotEmpty)
-                                        Text(
-                                          source,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.56),
-                                            fontSize: 10.4,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                    ],
+                                  child: Text(
+                                    name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12.2,
+                                      fontWeight: selected
+                                          ? FontWeight.w800
+                                          : FontWeight.w600,
+                                    ),
                                   ),
                                 ),
                                 if (selected)

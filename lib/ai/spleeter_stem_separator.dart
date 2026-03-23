@@ -3,8 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
+import 'package:mixroom/ffmpeg/ffmpeg.dart';
 import 'package:fftea/fftea.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';

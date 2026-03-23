@@ -134,12 +134,12 @@ class SequencerClip {
       trackType: parseType(json['trackType'] as String?),
       sourcePath: (json['sourcePath'] as String?) ?? '',
       label: (json['label'] as String?) ?? 'Clip',
-      timelineStart:
-          Duration(milliseconds: (json['timelineStartMs'] as num?)?.round() ?? 0),
+      timelineStart: Duration(
+          milliseconds: (json['timelineStartMs'] as num?)?.round() ?? 0),
       sourceStart:
           Duration(milliseconds: (json['sourceStartMs'] as num?)?.round() ?? 0),
-      sourceDuration:
-          Duration(milliseconds: (json['sourceDurationMs'] as num?)?.round() ?? 0),
+      sourceDuration: Duration(
+          milliseconds: (json['sourceDurationMs'] as num?)?.round() ?? 0),
       sourceTotalDuration: Duration(
           milliseconds: (json['sourceTotalDurationMs'] as num?)?.round() ?? 0),
       volume: ((json['volume'] as num?)?.toDouble() ?? 1.0).clamp(0.0, 2.0),
@@ -353,8 +353,7 @@ class VideoSequencerEngine extends ChangeNotifier {
 
   void seek(Duration value) {
     final max = totalDuration.inMilliseconds;
-    final ms =
-        value.inMilliseconds.clamp(0, math.max(max, 0)).toInt();
+    final ms = value.inMilliseconds.clamp(0, math.max(max, 0)).toInt();
     final next = Duration(milliseconds: ms);
     if (next == _playhead) return;
     _playhead = next;
@@ -404,8 +403,10 @@ class VideoSequencerEngine extends ChangeNotifier {
     Duration? sourceTotalDuration,
     String? thumbnailPath,
   }) {
-    final typedTracks = _tracks.where((t) => t.type == type).toList(growable: false);
-    final track = typedTracks.isNotEmpty ? typedTracks.last : _ensureTrack(type);
+    final typedTracks =
+        _tracks.where((t) => t.type == type).toList(growable: false);
+    final track =
+        typedTracks.isNotEmpty ? typedTracks.last : _ensureTrack(type);
     final duration =
         sourceDuration < minClipDuration ? minClipDuration : sourceDuration;
     final maxSource = sourceTotalDuration ?? sourceDuration;
@@ -491,6 +492,15 @@ class VideoSequencerEngine extends ChangeNotifier {
     if (located == null) return false;
     if (located.clip.muted == muted) return false;
     located.clip.muted = muted;
+    notifyListeners();
+    return true;
+  }
+
+  bool setClipThumbnailPath(String clipId, String? thumbnailPath) {
+    final located = _findClip(clipId);
+    if (located == null) return false;
+    if (located.clip.thumbnailPath == thumbnailPath) return false;
+    located.clip.thumbnailPath = thumbnailPath;
     notifyListeners();
     return true;
   }
@@ -607,7 +617,8 @@ class VideoSequencerEngine extends ChangeNotifier {
     return true;
   }
 
-  bool moveClipToNeighborTrack(String clipId, int direction, {Duration? desiredStart}) {
+  bool moveClipToNeighborTrack(String clipId, int direction,
+      {Duration? desiredStart}) {
     if (direction == 0) return false;
     final located = _findClip(clipId);
     if (located == null) return false;
@@ -660,7 +671,8 @@ class VideoSequencerEngine extends ChangeNotifier {
       ),
     );
 
-    if (clip.sourceStart == boundedStart && clip.sourceDuration == finalDuration) {
+    if (clip.sourceStart == boundedStart &&
+        clip.sourceDuration == finalDuration) {
       return false;
     }
 
@@ -913,7 +925,23 @@ class VideoSequencerEngine extends ChangeNotifier {
     return null;
   }
 
-  Duration localSourcePositionForClip(SequencerClip clip, Duration timelinePos) {
+  List<SequencerClip> clipsAtPlayhead(SequencerTrackType type) {
+    final result = <SequencerClip>[];
+    final scoped = _tracks.where((t) => t.type == type).toList(growable: false);
+    final tracksInZOrder =
+        type == SequencerTrackType.video ? scoped.reversed : scoped;
+    for (final track in tracksInZOrder) {
+      for (final clip in track.clips) {
+        if (_playhead >= clip.timelineStart && _playhead < clip.timelineEnd) {
+          result.add(clip);
+        }
+      }
+    }
+    return result;
+  }
+
+  Duration localSourcePositionForClip(
+      SequencerClip clip, Duration timelinePos) {
     final local = timelinePos - clip.timelineStart;
     final raw = clip.sourceStart + local;
     final minMs = clip.sourceStart.inMilliseconds;
@@ -973,7 +1001,8 @@ class VideoSequencerEngine extends ChangeNotifier {
     final bMs = b.sourceDuration.inMilliseconds;
     final pairMs = math.min(aMs, bMs);
     final adaptive = (pairMs * 0.45).floor();
-    return math.min(maxTransitionDuration.inMilliseconds, math.max(40, adaptive));
+    return math.min(
+        maxTransitionDuration.inMilliseconds, math.max(40, adaptive));
   }
 
   void _removeTransitionsTouchingClip(String clipId) {

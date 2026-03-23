@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Mixroom Slack channel config for production alerts
+
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+  AlertTopicArn:
+    Type: String
+  SlackWorkspaceId:
+    Type: String
+  SlackChannelId:
+    Type: String
+  SlackChannelName:
+    Type: String
+
+Resources:
+  SlackChannelRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub mixroom-slack-alerts-${StageName}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: chatbot.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+
+  SlackChannelConfiguration:
+    Type: AWS::Chatbot::SlackChannelConfiguration
+    Properties:
+      ConfigurationName: !Sub mixroom-prod-alerts-${StageName}
+      IamRoleArn: !GetAtt SlackChannelRole.Arn
+      SlackWorkspaceId: !Ref SlackWorkspaceId
+      SlackChannelId: !Ref SlackChannelId
+      SlackChannelName: !Ref SlackChannelName
+      SnsTopicArns:
+        - !Ref AlertTopicArn
+      GuardrailPolicies:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      LoggingLevel: ERROR
+
+Outputs:
+  SlackConfigurationArn:
+    Description: Amazon Q Developer in chat applications Slack configuration ARN
+    Value: !Ref SlackChannelConfiguration

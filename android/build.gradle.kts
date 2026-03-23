@@ -1,6 +1,8 @@
+import com.android.build.gradle.AppExtension
+import com.android.build.gradle.LibraryExtension
+
 allprojects {
     repositories {
-        maven { url = uri("$rootDir/local-maven") }
         google()
         mavenCentral()
         maven { url = uri("https://storage.googleapis.com/download.flutter.io") }
@@ -13,6 +15,17 @@ rootProject.layout.buildDirectory.value(newBuildDir)
 subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
+}
+subprojects {
+    afterEvaluate {
+        extensions.findByType(AppExtension::class.java)?.let { androidExt ->
+            androidExt.compileSdkVersion(36)
+        }
+        extensions.findByType(LibraryExtension::class.java)?.let { androidExt ->
+            androidExt.compileSdk = 36
+            androidExt.defaultConfig.minSdk = 29
+        }
+    }
 }
 subprojects {
     project.evaluationDependsOn(":app")

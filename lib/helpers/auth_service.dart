@@ -1,38 +1,66 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:mixroom/config/cognito_config.dart';
 import 'package:mixroom/config/dev_flags.dart';
+import 'package:mixroom/config/app_api_config.dart';
+import 'package:mixroom/core/analytics/analytics_events.dart';
+import 'package:mixroom/core/analytics/analytics_service.dart';
+import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
+import 'package:mixroom/core/security/sensitive_storage.dart';
 import 'package:mixroom/helpers/cognito_auth_client.dart';
+import 'package:mixroom/helpers/native_social_sign_in.dart';
 import 'package:mixroom/helpers/password_policy.dart';
 import 'package:mixroom/models/auth_user_profile.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService extends ChangeNotifier {
   static const String _prefsSessionKey = 'mixroom.auth.session.v2';
 
-  AuthService() {
-    unawaited(_restoreSession());
+  AuthService({
+    CognitoAuthClient? cognitoClient,
+    http.Client? httpClient,
+    bool restoreSessionOnInit = true,
+  })  : _cognito = cognitoClient ?? CognitoAuthClient(),
+        _httpClient = httpClient ?? http.Client() {
+    if (restoreSessionOnInit) {
+      unawaited(_restoreSession());
+    } else {
+      _isInitializing = false;
+    }
   }
 
-  final CognitoAuthClient _cognito = CognitoAuthClient();
+  final CognitoAuthClient _cognito;
+  final http.Client _httpClient;
 
   bool _isInitializing = true;
   bool _isBusy = false;
   AuthUserProfile? _currentUser;
   CognitoTokens? _tokens;
-  String? _pendingRegistrationUseCase;
+  String? _pendingEmailUsername;
+  bool _lastSocialSignInRequiresSignupCompletion = false;
 
   bool get isInitializing => _isInitializing;
   bool get isBusy => _isBusy;
-  bool get isSignedIn => _currentUser != null;
+  bool get isSignedIn => signedInUser != null;
+  bool get hasActiveSessionTokens => _hasUsableSessionTokens(_tokens);
+  bool get lastSocialSignInRequiresSignupCompletion =>
+      _lastSocialSignInRequiresSignupCompletion;
   AuthUserProfile? get currentUser => _currentUser;
+  AuthUserProfile? get signedInUser =>
+      _hasAppAccess(user: _currentUser, tokens: _tokens) ? _currentUser : null;
+  bool get hasPendingEmailVerification =>
+      _currentUser?.provider == AuthProviderType.email &&
+      !(_currentUser?.emailVerified ?? true);
 
   Future<String?> getIdTokenOrNull() async {
-    final user = _currentUser;
+    final user = signedInUser;
     final tokens = _tokens;
     if (user == null || tokens == null) return null;
+    final fallbackIdToken = tokens.idToken.trim();
+    final canUseFallbackToken =
+        fallbackIdToken.isNotEmpty && tokens.expiresAtUtc.isAfter(DateTime.now().toUtc());
 
     try {
       final refreshed = await _refreshSessionIfNeeded(provider: user.provider);
@@ -41,7 +69,34 @@ class AuthService extends ChangeNotifier {
           refreshed,
           provider: user.provider,
           createdAt: user.createdAt,
-          fallbackUseMixroomFor: user.useMixroomFor,
+        );
+        await _persistSession();
+      }
+    } catch (_) {
+      if (canUseFallbackToken) {
+        return fallbackIdToken;
+      }
+      return null;
+    }
+
+    final idToken = _tokens?.idToken.trim() ?? '';
+    return idToken.isEmpty ? null : idToken;
+  }
+
+  Future<String?> refreshIdTokenOrNull() async {
+    final user = signedInUser;
+    if (user == null) return null;
+
+    try {
+      final refreshed = await _refreshSessionIfNeeded(
+        provider: user.provider,
+        forceRefresh: true,
+      );
+      if (refreshed != null) {
+        _setSession(
+          refreshed,
+          provider: user.provider,
+          createdAt: user.createdAt,
         );
         await _persistSession();
       }
@@ -53,13 +108,39 @@ class AuthService extends ChangeNotifier {
     return idToken.isEmpty ? null : idToken;
   }
 
+  Future<http.Response> authorizedRequest(
+    Future<http.Response> Function(String token) send,
+  ) async {
+    final token = await getIdTokenOrNull();
+    if (token == null || token.trim().isEmpty) {
+      throw StateError('Session token unavailable.');
+    }
+
+    var response = await send(token.trim());
+    if (response.statusCode != 401 && response.statusCode != 403) {
+      return response;
+    }
+
+    final refreshedToken = await refreshIdTokenOrNull();
+    if (refreshedToken == null || refreshedToken.trim().isEmpty) {
+      throw StateError('Session token unavailable.');
+    }
+
+    response = await send(refreshedToken.trim());
+    return response;
+  }
+
   Future<void> _restoreSession() async {
     try {
       if (isAuthBypassEnabled) {
         _currentUser = _debugUser;
       } else {
-        final prefs = await SharedPreferences.getInstance();
-        final rawSession = prefs.getString(_prefsSessionKey);
+        final rawSession = await SensitiveStorage.instance
+            .readWithMigration(_prefsSessionKey)
+            .timeout(
+              const Duration(seconds: 4),
+              onTimeout: () => null,
+            );
         if (rawSession != null && rawSession.isNotEmpty) {
           final decoded = jsonDecode(rawSession);
           final map = _asStringDynamicMap(decoded);
@@ -76,6 +157,10 @@ class AuthService extends ChangeNotifier {
             if (tokenMap.isNotEmpty) {
               _tokens = CognitoTokens.fromJson(tokenMap);
             }
+            final pendingEmailUsername =
+                (map['pendingEmailUsername'] ?? '').toString().trim();
+            _pendingEmailUsername =
+                pendingEmailUsername.isEmpty ? null : pendingEmailUsername;
           }
         }
 
@@ -85,19 +170,24 @@ class AuthService extends ChangeNotifier {
           try {
             final refreshed = await _refreshSessionIfNeeded(
               provider: current.provider,
+            ).timeout(
+              const Duration(seconds: 5),
+              onTimeout: () => null,
             );
             if (refreshed != null) {
               _setSession(
                 refreshed,
                 provider: current.provider,
                 createdAt: current.createdAt,
-                fallbackUseMixroomFor: current.useMixroomFor,
               );
               await _persistSession();
+            } else if (_needsNativeSessionUpgrade(tokens)) {
+              await _clearSession();
             }
           } catch (_) {
-            // Keep cached user profile for offline continuity; next auth action
-            // will revalidate token state with Cognito.
+            if (_needsNativeSessionUpgrade(tokens)) {
+              await _clearSession();
+            }
           }
         }
       }
@@ -105,6 +195,7 @@ class AuthService extends ChangeNotifier {
       _currentUser = null;
       _tokens = null;
     } finally {
+      unawaited(_syncObservabilityUser());
       _isInitializing = false;
       notifyListeners();
     }
@@ -114,15 +205,23 @@ class AuthService extends ChangeNotifier {
     required String email,
     required String password,
   }) async {
-    final safeEmail = email.trim().toLowerCase();
-    if (safeEmail.isEmpty || password.isEmpty) {
-      throw StateError('Please enter both email and password.');
+    final rawIdentifier = email.trim();
+    final normalizedIdentifier = _normalizeLoginIdentifier(rawIdentifier);
+    if (normalizedIdentifier.isEmpty || password.isEmpty) {
+      throw StateError('Please enter both email/username and password.');
     }
 
     await _runBusyTask(() async {
+      if (AppApiConfig.hasApiBaseUrl) {
+        await _signInWithBackendIdentifier(
+          identifier: normalizedIdentifier,
+          password: password,
+        );
+        return;
+      }
       try {
         final session = await _cognito.signInWithEmail(
-          email: safeEmail,
+          email: normalizedIdentifier,
           password: password,
         );
         _setSession(
@@ -131,12 +230,26 @@ class AuthService extends ChangeNotifier {
           createdAt: DateTime.now(),
         );
         await _persistSession();
+        await _syncObservabilityUser();
+        unawaited(
+          AnalyticsService.instance.track(
+            AnalyticsEvents.userLoggedIn(
+                loginMethod: AuthProviderType.email.value),
+          ),
+        );
       } on CognitoApiException catch (e) {
         if (e.code == 'UserNotConfirmedException') {
+          _setPendingEmailSession(
+            email: normalizedIdentifier.toLowerCase(),
+            displayName: _nameFromEmail(normalizedIdentifier.toLowerCase()),
+            pendingUsername: normalizedIdentifier,
+          );
+          await _persistSession();
+          await _syncObservabilityUser();
           throw AuthEmailConfirmationRequiredException(
-            email: safeEmail,
+            email: normalizedIdentifier.toLowerCase(),
             message:
-                'Please verify your email first. Enter the code sent to $safeEmail.',
+                'Email not verified yet. Verify your email to finish signing in.',
           );
         }
         if (e.code == 'NotAuthorizedException' ||
@@ -145,7 +258,7 @@ class AuthService extends ChangeNotifier {
         }
         if (e.code == 'InvalidParameterException') {
           throw StateError(
-            'App client auth flow is not enabled yet. Enable USER_PASSWORD_AUTH in Cognito app client.',
+            'Authentication is not configured correctly yet. Please try again later.',
           );
         }
         throw StateError(_friendlyErrorMessage(e));
@@ -153,34 +266,112 @@ class AuthService extends ChangeNotifier {
     });
   }
 
+  Future<void> _signInWithBackendIdentifier({
+    required String identifier,
+    required String password,
+  }) async {
+    final response = await _httpClient
+        .post(
+          _subscriptionApiUri('/v1/auth/sign-in'),
+          headers: <String, String>{
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(<String, dynamic>{
+            'identifier': identifier,
+            'password': password,
+          }),
+        )
+        .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final backendDetails = _extractBackendErrorDetails(response.body);
+      final backendCode = _extractBackendErrorCode(response.body);
+      final backendMessage = _extractBackendError(
+            response.body,
+            fallback:
+                'Sign-in failed (${response.statusCode}). Please try again.',
+          ) ??
+          'Sign-in failed (${response.statusCode}). Please try again.';
+
+      if (backendCode == 'EMAIL_CONFIRMATION_REQUIRED') {
+        final pendingEmail =
+            (backendDetails['email'] ?? '').toString().trim().toLowerCase();
+        final pendingUsername =
+            (backendDetails['pending_username'] ?? '').toString().trim();
+        final fallbackEmail = _looksLikeEmail(identifier)
+            ? identifier.toLowerCase()
+            : pendingEmail;
+        _setPendingEmailSession(
+          email: fallbackEmail,
+          displayName: _nameFromEmail(fallbackEmail),
+          pendingUsername:
+              pendingUsername.isNotEmpty ? pendingUsername : fallbackEmail,
+        );
+        await _persistSession();
+        await _syncObservabilityUser();
+        throw AuthEmailConfirmationRequiredException(
+          email: fallbackEmail,
+          message: backendMessage,
+        );
+      }
+      if (backendCode == 'INVALID_CREDENTIALS') {
+        throw StateError('Incorrect email, username, or password.');
+      }
+      if (backendCode == 'AUTH_FLOW_NOT_ENABLED') {
+        throw StateError(
+          'Authentication is not configured correctly yet. Please try again later.',
+        );
+      }
+      throw StateError(backendMessage);
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map) {
+      throw const FormatException('Sign-in response shape is invalid.');
+    }
+    final payloadJson = _asStringDynamicMap(decoded);
+    final session = _parseSocialSignInPayload(
+      payloadJson,
+      fallbackProvider: AuthProviderType.email,
+    );
+    if (session == null) {
+      throw const FormatException('Sign-in response is incomplete.');
+    }
+
+    _tokens = session.tokens;
+    _currentUser = session.user;
+    _lastSocialSignInRequiresSignupCompletion = false;
+    await _persistSession();
+    await _syncObservabilityUser();
+    unawaited(
+      AnalyticsService.instance.track(
+        AnalyticsEvents.userLoggedIn(loginMethod: AuthProviderType.email.value),
+      ),
+    );
+  }
+
   Future<void> registerWithEmail({
-    required String name,
+    String? name,
+    String? givenName,
+    String? familyName,
+    String? birthdate,
     required String email,
     required String password,
-    required DateTime? birthday,
-    required String useMixroomFor,
   }) async {
-    final safeName = name.trim();
+    final safeName = (name ?? '').trim();
+    final safeGivenName = (givenName ?? '').trim();
+    final safeFamilyName = (familyName ?? '').trim();
+    final safeBirthdate = (birthdate ?? '').trim();
     final safeEmail = email.trim().toLowerCase();
-    final safeUseCase = useMixroomFor.trim();
 
-    if (safeName.isEmpty) {
-      throw StateError('Please enter your name.');
-    }
     if (safeEmail.isEmpty || password.isEmpty) {
       throw StateError('Please enter email and password.');
     }
-    final passwordIssue = PasswordPolicy.validate(password);
-    if (passwordIssue != null) {
-      throw StateError(passwordIssue);
+    final passwordIssues = PasswordPolicy.validateIssues(password);
+    if (passwordIssues.isNotEmpty) {
+      throw StateError(passwordIssues.join('\n'));
     }
-    if (birthday == null) {
-      throw StateError('Please select your birthday.');
-    }
-    if (safeUseCase.isEmpty) {
-      throw StateError('Please tell us what you use Mixroom for.');
-    }
-    _pendingRegistrationUseCase = safeUseCase;
 
     await _runBusyTask(() async {
       try {
@@ -188,34 +379,63 @@ class AuthService extends ChangeNotifier {
           email: safeEmail,
           password: password,
           name: safeName,
-          birthday: birthday,
-          useMixroomFor: safeUseCase,
+          givenName: safeGivenName,
+          familyName: safeFamilyName,
+          birthdate: safeBirthdate,
         );
         if (signUp.userConfirmed) {
           final session = await _cognito.signInWithEmail(
             email: safeEmail,
             password: password,
           );
-          _setSession(
-            session,
-            provider: AuthProviderType.email,
-            createdAt: DateTime.now(),
-            fallbackUseMixroomFor: safeUseCase,
-          );
-          _pendingRegistrationUseCase = null;
-          await _persistSession();
-          return;
+          if (session.user.emailVerified) {
+            _setSession(
+              session,
+              provider: AuthProviderType.email,
+              createdAt: DateTime.now(),
+            );
+            await _persistSession();
+            await _syncObservabilityUser();
+            unawaited(
+              AnalyticsService.instance.track(
+                AnalyticsEvents.userSignedUp(
+                  signupMethod: AuthProviderType.email.value,
+                ),
+              ),
+            );
+            unawaited(
+              AnalyticsService.instance.track(
+                AnalyticsEvents.userLoggedIn(
+                  loginMethod: AuthProviderType.email.value,
+                ),
+              ),
+            );
+            return;
+          }
         }
 
+        unawaited(
+          AnalyticsService.instance.track(
+            AnalyticsEvents.userSignedUp(
+              signupMethod: AuthProviderType.email.value,
+            ),
+          ),
+        );
+        _setPendingEmailSession(
+          email: safeEmail,
+          displayName: safeName,
+          pendingUsername: signUp.username,
+        );
+        await _persistSession();
+        await _syncObservabilityUser();
         throw AuthEmailConfirmationRequiredException(
           email: safeEmail,
           message:
-              'Account created. Enter the verification code sent to $safeEmail.',
+              'Account created. Verify your email before you can use Mixroom.',
         );
       } on AuthEmailConfirmationRequiredException {
         rethrow;
       } on CognitoApiException catch (e) {
-        _pendingRegistrationUseCase = null;
         if (e.code == 'UsernameExistsException') {
           throw StateError('An account with this email already exists.');
         }
@@ -231,34 +451,32 @@ class AuthService extends ChangeNotifier {
   }) async {
     final safeEmail = email.trim().toLowerCase();
     final safeCode = code.trim();
-    final safePassword = (passwordToSignIn ?? '').trim();
     if (safeEmail.isEmpty || safeCode.isEmpty) {
       throw StateError('Please provide both email and verification code.');
     }
 
     await _runBusyTask(() async {
       try {
-        await _cognito.confirmSignUp(
-          email: safeEmail,
+        final session = await _cognito.confirmSignUp(
+          username: _resolvePendingEmailUsername(safeEmail),
           code: safeCode,
+          password: (passwordToSignIn ?? '').trim(),
         );
-        if (safePassword.isNotEmpty) {
-          final session = await _cognito.signInWithEmail(
-            email: safeEmail,
-            password: safePassword,
-          );
-          _setSession(
-            session,
-            provider: AuthProviderType.email,
-            createdAt: DateTime.now(),
-            fallbackUseMixroomFor: _pendingRegistrationUseCase,
-          );
-          _pendingRegistrationUseCase = null;
-          await _persistSession();
-        }
+        _setSession(
+          session,
+          provider: AuthProviderType.email,
+          createdAt: DateTime.now(),
+        );
+        await _persistSession();
+        await _syncObservabilityUser();
+        unawaited(
+          AnalyticsService.instance.track(
+            AnalyticsEvents.userLoggedIn(
+                loginMethod: AuthProviderType.email.value),
+          ),
+        );
       } on CognitoApiException catch (e) {
-        if (e.code == 'CodeMismatchException' ||
-            e.code == 'ExpiredCodeException') {
+        if (e.code == 'INVALID_VERIFICATION_CODE') {
           throw StateError('Invalid or expired verification code.');
         }
         throw StateError(_friendlyErrorMessage(e));
@@ -276,7 +494,9 @@ class AuthService extends ChangeNotifier {
 
     await _runBusyTask(() async {
       try {
-        await _cognito.resendSignUpCode(email: safeEmail);
+        await _cognito.resendSignUpCode(
+          username: _resolvePendingEmailUsername(safeEmail),
+        );
       } on CognitoApiException catch (e) {
         throw StateError(_friendlyErrorMessage(e));
       }
@@ -284,46 +504,121 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<void> signInWithGoogle() async {
-    await _signInWithSocial(
-      provider: AuthProviderType.google,
-      identityProviderName: CognitoConfig.googleIdentityProviderName,
-    );
+    if (!CognitoConfig.enableGoogleSignIn) {
+      throw StateError('Google sign-in is not enabled in this build.');
+    }
+    await _signInWithNativeSocial(NativeSocialSignInClient.signInWithGoogle);
   }
 
   Future<void> signInWithApple() async {
-    await _signInWithSocial(
-      provider: AuthProviderType.apple,
-      identityProviderName: CognitoConfig.appleIdentityProviderName,
-    );
+    if (!CognitoConfig.enableAppleSignIn) {
+      throw StateError('Apple sign-in is not enabled in this build.');
+    }
+    await _signInWithNativeSocial(NativeSocialSignInClient.signInWithApple);
   }
 
   Future<void> signInWithKakao() async {
-    await _signInWithSocial(
-      provider: AuthProviderType.kakao,
-      identityProviderName: CognitoConfig.kakaoIdentityProviderName,
-    );
+    if (!CognitoConfig.enableKakaoSignIn) {
+      throw StateError('Kakao sign-in is not enabled in this build.');
+    }
+    await _signInWithNativeSocial(NativeSocialSignInClient.signInWithKakao);
   }
 
-  Future<void> _signInWithSocial({
-    required AuthProviderType provider,
-    required String identityProviderName,
-  }) async {
+  Future<void> _signInWithNativeSocial(
+    Future<NativeSocialSignInPayload> Function() beginSignIn,
+  ) async {
+    if (!AppApiConfig.hasApiBaseUrl) {
+      final platformLabel = switch (defaultTargetPlatform) {
+        TargetPlatform.iOS => 'iOS',
+        TargetPlatform.android => 'Android',
+        _ => 'this',
+      };
+      throw StateError(
+        'Social sign-in backend is not configured in this $platformLabel build. '
+        'Rebuild with APP_API_BASE_URL before testing Google, Apple, or Kakao sign-in.',
+      );
+    }
+    _lastSocialSignInRequiresSignupCompletion = false;
     await _runBusyTask(() async {
       try {
-        final session = await _cognito.signInWithSocial(
-          identityProviderName: identityProviderName,
+        final payload = await beginSignIn();
+        final response = await _httpClient
+            .post(
+              _subscriptionApiUri('/v1/auth/social/sign-in'),
+              headers: <String, String>{
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode(payload.body),
+            )
+            .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds));
+
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          final backendDetails = _extractBackendErrorDetails(response.body);
+          final backendCode = _extractBackendErrorCode(response.body);
+          final backendMessage = _extractBackendError(
+                response.body,
+                fallback:
+                    'Social sign-in failed (${response.statusCode}). Please try again.',
+              ) ??
+              'Social sign-in failed (${response.statusCode}). Please try again.';
+          if (backendCode == 'AUTH_METHOD_CONFLICT') {
+            final backendEmail =
+                (backendDetails['email'] ?? '').toString().trim().toLowerCase();
+            throw AuthSocialAccountConflictException(
+              email: backendEmail.isNotEmpty
+                  ? backendEmail
+                  : (payload.body['email'] ?? '')
+                      .toString()
+                      .trim()
+                      .toLowerCase(),
+              provider: payload.provider,
+              message: backendMessage,
+              existingProvider: _extractBackendProvider(
+                backendDetails['existing_provider'],
+              ),
+              existingProviderLabel:
+                  (backendDetails['existing_provider_label'] ?? '')
+                      .toString()
+                      .trim(),
+              verificationRequired:
+                  backendDetails['verification_required'] == true,
+              passwordResetAvailable:
+                  backendDetails['password_reset_available'] == true,
+              suggestedAction:
+                  (backendDetails['suggested_action'] ?? '').toString().trim(),
+            );
+          }
+          throw StateError(backendMessage);
+        }
+
+        final decoded = jsonDecode(response.body);
+        if (decoded is! Map) {
+          throw const FormatException(
+              'Social sign-in response shape is invalid.');
+        }
+        final payloadJson = _asStringDynamicMap(decoded);
+        final socialSession = _parseSocialSignInPayload(
+          payloadJson,
+          fallbackProvider: payload.provider,
         );
-        _setSession(
-          session,
-          provider: provider,
-          createdAt: DateTime.now(),
-          fallbackUseMixroomFor: _currentUser?.useMixroomFor,
-        );
+        if (socialSession == null) {
+          throw const FormatException('Social sign-in response is incomplete.');
+        }
+
+        _tokens = socialSession.tokens;
+        _currentUser = socialSession.user;
+        _lastSocialSignInRequiresSignupCompletion =
+            socialSession.requiresSignupCompletion;
         await _persistSession();
-      } on CognitoApiException catch (e) {
-        throw StateError(_friendlyErrorMessage(e));
+        await _syncObservabilityUser();
+        unawaited(
+          AnalyticsService.instance.track(
+            AnalyticsEvents.userLoggedIn(loginMethod: payload.provider.value),
+          ),
+        );
       } catch (_) {
-        throw StateError('Social sign-in was cancelled.');
+        rethrow;
       }
     });
   }
@@ -340,6 +635,12 @@ class AuthService extends ChangeNotifier {
       try {
         await _cognito.requestPasswordReset(email: safeEmail);
       } on CognitoApiException catch (e) {
+        if (e.code == 'PASSWORD_RESET_UNAVAILABLE' ||
+            _looksLikeSocialPasswordFlowError(e)) {
+          throw StateError(
+            'Password reset is not available for this account. Try signing in with Google, Apple, or Kakao instead.',
+          );
+        }
         throw StateError(_friendlyErrorMessage(e));
       }
     });
@@ -358,9 +659,9 @@ class AuthService extends ChangeNotifier {
     if (safeCode.isEmpty) {
       throw StateError('Please enter the verification code.');
     }
-    final passwordIssue = PasswordPolicy.validate(newPassword);
-    if (passwordIssue != null) {
-      throw StateError(passwordIssue);
+    final passwordIssues = PasswordPolicy.validateIssues(newPassword);
+    if (passwordIssues.isNotEmpty) {
+      throw StateError(passwordIssues.join('\n'));
     }
 
     await _runBusyTask(() async {
@@ -371,9 +672,54 @@ class AuthService extends ChangeNotifier {
           newPassword: newPassword,
         );
       } on CognitoApiException catch (e) {
-        if (e.code == 'CodeMismatchException' ||
-            e.code == 'ExpiredCodeException') {
+        if (e.code == 'INVALID_RESET_CODE') {
           throw StateError('Invalid or expired verification code.');
+        }
+        if (e.code == 'PASSWORD_RESET_UNAVAILABLE' ||
+            _looksLikeSocialPasswordFlowError(e)) {
+          throw StateError(
+            'Password reset is not available for this account. Try signing in with Google, Apple, or Kakao instead.',
+          );
+        }
+        throw StateError(_friendlyErrorMessage(e));
+      }
+    });
+  }
+
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final user = _currentUser;
+    if (user == null) {
+      throw StateError('No active account.');
+    }
+    if (user.provider != AuthProviderType.email) {
+      throw StateError(
+        'This account uses ${user.provider.label} sign-in. Password login is not available for it yet.',
+      );
+    }
+
+    final safeCurrentPassword = currentPassword.trim();
+    if (safeCurrentPassword.isEmpty) {
+      throw StateError('Please enter your current password.');
+    }
+    final passwordIssues = PasswordPolicy.validateIssues(newPassword);
+    if (passwordIssues.isNotEmpty) {
+      throw StateError(passwordIssues.join('\n'));
+    }
+
+    await _runBusyTask(() async {
+      try {
+        final accessToken = await _requireAccessToken();
+        await _cognito.changePassword(
+          accessToken: accessToken,
+          currentPassword: currentPassword,
+          newPassword: newPassword,
+        );
+      } on CognitoApiException catch (e) {
+        if (e.code == 'NotAuthorizedException') {
+          throw StateError('Current password is incorrect.');
         }
         throw StateError(_friendlyErrorMessage(e));
       }
@@ -394,6 +740,12 @@ class AuthService extends ChangeNotifier {
 
     await _runBusyTask(() async {
       try {
+        if (_tokens == null) {
+          await _cognito.resendSignUpCode(
+            username: _resolvePendingEmailUsername(user.email),
+          );
+          return;
+        }
         final accessToken = await _requireAccessToken();
         await _cognito.resendEmailVerification(accessToken: accessToken);
       } on CognitoApiException catch (e) {
@@ -411,8 +763,6 @@ class AuthService extends ChangeNotifier {
         await _cognito.updateUserAttributes(
           accessToken: accessToken,
           displayName: updated.displayName,
-          birthday: updated.birthday,
-          useMixroomFor: updated.useMixroomFor,
         );
 
         final refreshed =
@@ -421,7 +771,6 @@ class AuthService extends ChangeNotifier {
           refreshed,
           provider: existing.provider,
           createdAt: existing.createdAt,
-          fallbackUseMixroomFor: updated.useMixroomFor,
         );
         await _persistSession();
       } on CognitoApiException catch (e) {
@@ -432,8 +781,48 @@ class AuthService extends ChangeNotifier {
 
   Future<void> signOut() async {
     await _runBusyTask(() async {
-      // Temporary local-only logout until backend sign-out is finalized.
-      await _clearSession();
+      final previousUser = _currentUser;
+      try {
+        final user = _currentUser;
+        final tokens = _tokens;
+        if (user != null && tokens != null) {
+          try {
+            final refreshed = await _refreshSessionIfNeeded(
+              provider: user.provider,
+            );
+            if (refreshed != null) {
+              _setSession(
+                refreshed,
+                provider: user.provider,
+                createdAt: user.createdAt,
+              );
+              await _persistSession();
+            }
+          } catch (_) {
+            // Continue with best-effort sign-out using existing tokens.
+          }
+
+          final accessToken = _tokens?.accessToken.trim() ?? '';
+          if (accessToken.isNotEmpty) {
+            try {
+              await _cognito.signOut(accessToken: accessToken);
+            } on CognitoApiException {
+              // Clear local state even if remote sign-out cannot complete.
+            }
+          }
+        }
+      } finally {
+        if (previousUser != null) {
+          unawaited(
+            AnalyticsService.instance.track(AnalyticsEvents.userLoggedOut()),
+          );
+        }
+        if (previousUser != null) {
+          await NativeSocialSignInClient.signOut(previousUser.provider);
+        }
+        await _clearSession();
+        await _syncObservabilityUser();
+      }
     });
   }
 
@@ -442,10 +831,10 @@ class AuthService extends ChangeNotifier {
       try {
         final accessToken = await _requireAccessToken();
         await _cognito.deleteUser(accessToken: accessToken);
+        await _clearSession();
+        await _syncObservabilityUser();
       } on CognitoApiException catch (e) {
         throw StateError(_friendlyErrorMessage(e));
-      } finally {
-        await _clearSession();
       }
     });
   }
@@ -454,32 +843,105 @@ class AuthService extends ChangeNotifier {
     await _runBusyTask(() async {
       _currentUser = _debugUser;
       _tokens = null;
-      _pendingRegistrationUseCase = null;
+      _lastSocialSignInRequiresSignupCompletion = false;
 
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
+      await SensitiveStorage.instance.write(
         _prefsSessionKey,
         jsonEncode({
           'user': _currentUser!.toJson(),
         }),
       );
+      await _syncObservabilityUser();
     });
   }
 
   Future<void> _persistSession() async {
     final user = _currentUser;
     final tokens = _tokens;
-    if (user == null || tokens == null) return;
+    if (user == null) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
+    final payload = <String, dynamic>{
+      'user': user.toJson(),
+    };
+    if (tokens != null) {
+      payload['tokens'] = tokens.toJson();
+    }
+    final pendingEmailUsername = _pendingEmailUsername?.trim() ?? '';
+    if (pendingEmailUsername.isNotEmpty) {
+      payload['pendingEmailUsername'] = pendingEmailUsername;
+    }
+
+    await SensitiveStorage.instance.write(
       _prefsSessionKey,
-      jsonEncode({
-        'user': user.toJson(),
-        'tokens': tokens.toJson(),
-      }),
+      jsonEncode(payload),
     );
     notifyListeners();
+  }
+
+  Uri _subscriptionApiUri(String path) {
+    final base = AppApiConfig.apiBaseUrl.trim();
+    final normalizedBase =
+        base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+    final normalizedPath = path.startsWith('/') ? path : '/$path';
+    return Uri.parse('$normalizedBase$normalizedPath');
+  }
+
+  String? _extractBackendError(
+    String rawBody, {
+    String? fallback,
+  }) {
+    try {
+      final decoded = jsonDecode(rawBody);
+      if (decoded is Map) {
+        final message = decoded['error']?.toString().trim() ?? '';
+        if (message.isNotEmpty) return message;
+      }
+    } catch (_) {
+      // Ignore parse failures and use fallback.
+    }
+    return fallback;
+  }
+
+  String? _extractBackendErrorCode(String rawBody) {
+    try {
+      final decoded = jsonDecode(rawBody);
+      if (decoded is Map) {
+        final code = decoded['code']?.toString().trim() ?? '';
+        if (code.isNotEmpty) return code;
+      }
+    } catch (_) {
+      // Ignore parse failures and use generic handling.
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _extractBackendErrorDetails(String rawBody) {
+    try {
+      final decoded = jsonDecode(rawBody);
+      if (decoded is Map) {
+        return _asStringDynamicMap(decoded['details']);
+      }
+    } catch (_) {
+      // Ignore parse failures and use generic handling.
+    }
+    return <String, dynamic>{};
+  }
+
+  AuthProviderType? _extractBackendProvider(Object? rawValue) {
+    final value = rawValue?.toString().trim() ?? '';
+    if (value.isEmpty) return null;
+    switch (value) {
+      case 'email':
+        return AuthProviderType.email;
+      case 'google':
+        return AuthProviderType.google;
+      case 'apple':
+        return AuthProviderType.apple;
+      case 'kakao':
+        return AuthProviderType.kakao;
+      default:
+        return null;
+    }
   }
 
   Future<void> _runBusyTask(Future<void> Function() action) async {
@@ -511,27 +973,36 @@ class AuthService extends ChangeNotifier {
   Future<void> _clearSession() async {
     _currentUser = null;
     _tokens = null;
-    _pendingRegistrationUseCase = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_prefsSessionKey);
+    _pendingEmailUsername = null;
+    _lastSocialSignInRequiresSignupCompletion = false;
+    await SensitiveStorage.instance.delete(_prefsSessionKey);
   }
 
   Future<String> _requireAccessToken() async {
     final tokens = _tokens;
-    final user = _currentUser;
+    final user = signedInUser;
     if (tokens == null || user == null) {
       throw StateError('No active account.');
     }
+    final fallbackAccessToken = tokens.accessToken.trim();
+    final canUseFallbackToken = fallbackAccessToken.isNotEmpty &&
+        tokens.expiresAtUtc.isAfter(DateTime.now().toUtc());
 
-    final refreshed = await _refreshSessionIfNeeded(provider: user.provider);
-    if (refreshed != null) {
-      _setSession(
-        refreshed,
-        provider: user.provider,
-        createdAt: user.createdAt,
-        fallbackUseMixroomFor: user.useMixroomFor,
-      );
-      await _persistSession();
+    try {
+      final refreshed = await _refreshSessionIfNeeded(provider: user.provider);
+      if (refreshed != null) {
+        _setSession(
+          refreshed,
+          provider: user.provider,
+          createdAt: user.createdAt,
+        );
+        await _persistSession();
+      }
+    } catch (_) {
+      if (canUseFallbackToken) {
+        return fallbackAccessToken;
+      }
+      rethrow;
     }
 
     final accessToken = _tokens?.accessToken ?? '';
@@ -543,9 +1014,14 @@ class AuthService extends ChangeNotifier {
 
   Future<CognitoSession?> _refreshSessionIfNeeded({
     required AuthProviderType provider,
+    bool forceRefresh = false,
   }) async {
     final tokens = _tokens;
-    if (tokens == null || !tokens.isExpiringSoon) return null;
+    if (tokens == null) return null;
+    final requiresNativeUpgrade = _needsNativeSessionUpgrade(tokens);
+    if (!forceRefresh && !requiresNativeUpgrade && !tokens.isExpiringSoon) {
+      return null;
+    }
     if (tokens.refreshToken.trim().isEmpty) {
       throw StateError('Session expired. Please sign in again.');
     }
@@ -556,8 +1032,8 @@ class AuthService extends ChangeNotifier {
     );
 
     // Preserve provider in local profile.
-    if (_currentUser != null && _currentUser!.provider != provider) {
-      _currentUser = _currentUser!.copyWith(provider: provider);
+    if (signedInUser != null && signedInUser!.provider != provider) {
+      _currentUser = signedInUser!.copyWith(provider: provider);
     }
     return refreshed;
   }
@@ -566,14 +1042,68 @@ class AuthService extends ChangeNotifier {
     CognitoSession session, {
     required AuthProviderType provider,
     required DateTime createdAt,
-    String? fallbackUseMixroomFor,
   }) {
+    _pendingEmailUsername = null;
+    _lastSocialSignInRequiresSignupCompletion = false;
     _tokens = session.tokens;
     _currentUser = _mapUser(
       session.user,
       provider: provider,
       createdAt: createdAt,
-      fallbackUseMixroomFor: fallbackUseMixroomFor,
+    );
+  }
+
+  void _setPendingEmailSession({
+    required String email,
+    required String displayName,
+    required String pendingUsername,
+  }) {
+    _tokens = null;
+    _lastSocialSignInRequiresSignupCompletion = false;
+    _pendingEmailUsername = pendingUsername.trim().isEmpty
+        ? email.trim().toLowerCase()
+        : pendingUsername.trim();
+    _currentUser = AuthUserProfile(
+      userId:
+          _currentUser?.userId ?? 'pending-email:${email.trim().toLowerCase()}',
+      email: email.trim().toLowerCase(),
+      displayName: displayName.trim().isEmpty
+          ? _nameFromEmail(email)
+          : displayName.trim(),
+      provider: AuthProviderType.email,
+      emailVerified: false,
+      createdAt: _currentUser?.createdAt ?? DateTime.now(),
+    );
+  }
+
+  String _resolvePendingEmailUsername(String email) {
+    final safeEmail = email.trim().toLowerCase();
+    final currentUserEmail = _currentUser?.email.trim().toLowerCase() ?? '';
+    if (currentUserEmail == safeEmail) {
+      final pending = _pendingEmailUsername?.trim() ?? '';
+      if (pending.isNotEmpty) return pending;
+    }
+    return safeEmail;
+  }
+
+  Future<void> _syncObservabilityUser() async {
+    final user = _currentUser;
+    if (user == null) {
+      await AnalyticsService.instance.resetUser();
+      await CrashReportingService.instance.clearUser();
+      return;
+    }
+
+    AnalyticsService.instance.setSubscriptionTier(null);
+    await AnalyticsService.instance.identifyUser(
+      userId: user.userId,
+      email: user.email,
+      name: user.displayName,
+    );
+    await CrashReportingService.instance.setUser(
+      id: user.userId,
+      email: user.email,
+      username: user.displayName,
     );
   }
 
@@ -581,7 +1111,6 @@ class AuthService extends ChangeNotifier {
     CognitoUserAttributes user, {
     required AuthProviderType provider,
     required DateTime createdAt,
-    String? fallbackUseMixroomFor,
   }) {
     final safeEmail = user.email.trim().toLowerCase();
     return AuthUserProfile(
@@ -592,12 +1121,6 @@ class AuthService extends ChangeNotifier {
           : user.name!.trim(),
       provider: provider,
       emailVerified: user.emailVerified || provider != AuthProviderType.email,
-      birthday: user.birthdate,
-      useMixroomFor: (user.mixroomUseCase ?? '').trim().isEmpty
-          ? ((fallbackUseMixroomFor ?? '').trim().isEmpty
-              ? 'Music production'
-              : fallbackUseMixroomFor!.trim())
-          : user.mixroomUseCase!.trim(),
       createdAt: createdAt,
     );
   }
@@ -616,12 +1139,30 @@ class AuthService extends ChangeNotifier {
     switch (error.code) {
       case 'UserNotFoundException':
       case 'NotAuthorizedException':
+      case 'INVALID_CREDENTIALS':
         return 'Incorrect email or password.';
       case 'UserNotConfirmedException':
+      case 'EMAIL_CONFIRMATION_REQUIRED':
         return 'Please verify your email first.';
+      case 'EMAIL_DELIVERY_UNAVAILABLE':
+        return 'Email delivery is not configured yet. Please try again later.';
+      case 'PASSWORD_RESET_UNAVAILABLE':
+        return 'Password reset is not available for this account.';
+      case 'INVALID_VERIFICATION_CODE':
+      case 'INVALID_RESET_CODE':
+        return 'Invalid or expired verification code.';
+      case 'SESSION_INVALID':
+      case 'SESSION_EXPIRED':
+        return 'Session expired. Please sign in again.';
       case 'LimitExceededException':
       case 'TooManyRequestsException':
         return 'Too many attempts. Please try again shortly.';
+      case 'UnsupportedPlatform':
+        return 'Social sign-in is only supported on iOS and Android.';
+      case 'UserCancelledException':
+        return 'Social sign-in was cancelled.';
+      case 'AuthorizationFailed':
+        return 'Social sign-in did not complete. Please try again.';
       case 'NetworkError':
         return 'Network error. Please check your connection and try again.';
       default:
@@ -631,6 +1172,19 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  bool _looksLikeSocialPasswordFlowError(CognitoApiException error) {
+    if (error.code != 'InvalidParameterException' &&
+        error.code != 'NotAuthorizedException') {
+      return false;
+    }
+    final message = error.message.toLowerCase();
+    return message.contains('cannot reset password') ||
+        message.contains('password reset is not supported') ||
+        message.contains('no registered/verified email') ||
+        message.contains('external provider') ||
+        message.contains('federated');
+  }
+
   AuthUserProfile get _debugUser {
     return AuthUserProfile(
       userId: 'debug-user',
@@ -638,9 +1192,113 @@ class AuthService extends ChangeNotifier {
       displayName: 'Dev Test User',
       provider: AuthProviderType.email,
       emailVerified: false,
-      birthday: DateTime(1999, 6, 24),
-      useMixroomFor: 'Testing app builds',
       createdAt: DateTime(2026, 1, 1),
+    );
+  }
+
+  @override
+  void dispose() {
+    _httpClient.close();
+    super.dispose();
+  }
+
+  @visibleForTesting
+  void debugPrimeSession({
+    AuthUserProfile? user,
+    CognitoTokens? tokens,
+    String? pendingEmailUsername,
+  }) {
+    _currentUser = user;
+    _tokens = tokens;
+    _pendingEmailUsername = pendingEmailUsername;
+    _isInitializing = false;
+    notifyListeners();
+  }
+
+  bool _hasAppAccess({
+    required AuthUserProfile? user,
+    required CognitoTokens? tokens,
+  }) {
+    if (user == null) {
+      return false;
+    }
+    if (user.userId == _debugUser.userId) {
+      return true;
+    }
+    if (!_hasUsableSessionTokens(tokens)) {
+      return false;
+    }
+    if (user.provider == AuthProviderType.email && !user.emailVerified) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _hasUsableSessionTokens(CognitoTokens? tokens) {
+    if (tokens == null) return false;
+    return tokens.accessToken.trim().isNotEmpty &&
+        tokens.idToken.trim().isNotEmpty &&
+        tokens.expiresAtUtc.isAfter(DateTime.now().toUtc());
+  }
+
+  bool _needsNativeSessionUpgrade(CognitoTokens tokens) {
+    return !_isNativeRefreshToken(tokens.refreshToken);
+  }
+
+  bool _isNativeRefreshToken(String value) {
+    return value.trim().startsWith('rt_');
+  }
+
+  bool _looksLikeEmail(String value) {
+    final safe = value.trim();
+    return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(safe);
+  }
+
+  String _normalizeLoginIdentifier(String value) {
+    final safe = value.trim();
+    if (_looksLikeEmail(safe)) {
+      return safe.toLowerCase();
+    }
+    return safe.startsWith('@') ? safe.substring(1).trim() : safe;
+  }
+
+  _ParsedSocialSignInPayload? _parseSocialSignInPayload(
+    Map<String, dynamic> payload, {
+    required AuthProviderType fallbackProvider,
+  }) {
+    final nestedTokens = _asStringDynamicMap(payload['tokens']);
+    final nestedUser = _asStringDynamicMap(payload['user']);
+    final tokensJson = nestedTokens.isNotEmpty ? nestedTokens : payload;
+    final userJson = nestedUser.isNotEmpty ? nestedUser : payload;
+
+    final tokens = CognitoTokens.fromJson(tokensJson);
+    final user = AuthUserProfile.fromJson(userJson);
+    if (!_hasUsableSessionTokens(tokens)) {
+      return null;
+    }
+
+    final resolvedProvider = user.provider == AuthProviderType.email
+        ? fallbackProvider
+        : user.provider;
+    final safeEmail = user.email.trim().toLowerCase();
+    final resolvedName = user.displayName.trim().isEmpty
+        ? _nameFromEmail(safeEmail)
+        : user.displayName.trim();
+    final normalizedUser = user.copyWith(
+      email: safeEmail,
+      displayName: resolvedName,
+      provider: resolvedProvider,
+      emailVerified:
+          user.emailVerified || resolvedProvider != AuthProviderType.email,
+      createdAt: user.createdAt.toUtc(),
+    );
+    final requiresSignupCompletion =
+        payload['requiresSignupCompletion'] == true ||
+            payload['requires_signup_completion'] == true;
+    return _ParsedSocialSignInPayload(
+      tokens: tokens,
+      user: normalizedUser,
+      requiresSignupCompletion: requiresSignupCompletion,
     );
   }
 }
@@ -656,4 +1314,41 @@ class AuthEmailConfirmationRequiredException implements Exception {
 
   @override
   String toString() => message;
+}
+
+class AuthSocialAccountConflictException implements Exception {
+  const AuthSocialAccountConflictException({
+    required this.email,
+    required this.provider,
+    required this.message,
+    this.existingProvider,
+    this.existingProviderLabel,
+    this.verificationRequired = false,
+    this.passwordResetAvailable = false,
+    this.suggestedAction = '',
+  });
+
+  final String email;
+  final AuthProviderType provider;
+  final String message;
+  final AuthProviderType? existingProvider;
+  final String? existingProviderLabel;
+  final bool verificationRequired;
+  final bool passwordResetAvailable;
+  final String suggestedAction;
+
+  @override
+  String toString() => message;
+}
+
+class _ParsedSocialSignInPayload {
+  const _ParsedSocialSignInPayload({
+    required this.tokens,
+    required this.user,
+    required this.requiresSignupCompletion,
+  });
+
+  final CognitoTokens tokens;
+  final AuthUserProfile user;
+  final bool requiresSignupCompletion;
 }

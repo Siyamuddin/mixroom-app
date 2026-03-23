@@ -26,6 +26,7 @@ FEATURE_COLUMNS = [
     "kind_eq",
     "kind_compressor",
     "kind_limiter",
+    "kind_clipper",
     "kind_reverb",
     "kind_delay",
     "kind_deesser",
@@ -85,7 +86,7 @@ FEATURE_COLUMNS = [
     "action_hard_reset_master_fx",
     "action_other",
 ]
-EXPECTED_FEATURE_COUNT = 76
+EXPECTED_FEATURE_COUNT = 77
 
 CANONICAL_KINDS = (
     "balance",
@@ -94,6 +95,7 @@ CANONICAL_KINDS = (
     "eq",
     "compressor",
     "limiter",
+    "clipper",
     "reverb",
     "delay",
     "deesser",
@@ -217,6 +219,104 @@ def _lookup_param_value(effect_state, action_data):
     return None
 
 
+def _lookup_effect_state(snapshot, action):
+    action_type = str(action.get("type") or "")
+    data = action.get("data", {}) or {}
+    if action_type in (
+        "adjust_master_effect_param_by_name",
+        "ensure_master_effect",
+        "delete_master_effect",
+        "hard_reset_master_fx",
+    ):
+        return _lookup_master_effect(snapshot, data.get("effect_name_contains"))
+
+    row = data.get("row")
+    if isinstance(row, (int, float)):
+        row_state = _lookup_row_by_index(snapshot, int(row))
+        return _lookup_effect_in_row(row_state, data.get("effect_name_contains"))
+    return None
+
+
+def _lookup_action_target_value(snapshot, action):
+    action_type = str(action.get("type") or "")
+    data = action.get("data", {}) or {}
+
+    if action_type == "set_row_gain":
+        row = data.get("row")
+        if isinstance(row, (int, float)):
+            row_state = _lookup_row_by_index(snapshot, int(row))
+            return _safe_get(row_state or {}, "mix", "gain_0to3", default=None)
+        return None
+
+    if action_type == "set_row_pan":
+        row = data.get("row")
+        if isinstance(row, (int, float)):
+            row_state = _lookup_row_by_index(snapshot, int(row))
+            return _safe_get(row_state or {}, "mix", "pan_0to1", default=None)
+        return None
+
+    if action_type == "set_master_gain":
+        return _safe_get(snapshot, "master", "gain", default=None)
+
+    if action_type == "set_master_pan":
+        return _safe_get(snapshot, "master", "pan", default=None)
+
+    if action_type in (
+        "adjust_effect_param_by_name",
+        "adjust_master_effect_param_by_name",
+    ):
+        effect_state = _lookup_effect_state(snapshot, action)
+        return _lookup_param_value(effect_state, data)
+
+    if action_type in ("ensure_effect", "ensure_master_effect"):
+        return _lookup_effect_state(snapshot, action) is not None
+
+    if action_type in ("delete_effect", "delete_master_effect"):
+        return _lookup_effect_state(snapshot, action) is not None
+
+    return None
+
+
+def _infer_scale_from_final_snapshot(action, pre_snapshot, ai_post_snapshot, final_snapshot):
+    action_type = str(action.get("type") or "")
+    if action_type in ("ensure_effect", "ensure_master_effect"):
+        final_present = _lookup_action_target_value(final_snapshot, action)
+        if isinstance(final_present, bool):
+            return (1, 1.0) if final_present else (0, 0.0)
+        return None
+
+    if action_type in ("delete_effect", "delete_master_effect"):
+        final_present = _lookup_action_target_value(final_snapshot, action)
+        if isinstance(final_present, bool):
+            return (1, 1.0) if not final_present else (0, 0.0)
+        return None
+
+    pre_value = _lookup_action_target_value(pre_snapshot, action)
+    ai_value = _lookup_action_target_value(ai_post_snapshot, action)
+    final_value = _lookup_action_target_value(final_snapshot, action)
+
+    if isinstance(pre_value, (int, float)) and isinstance(ai_value, (int, float)) and isinstance(final_value, (int, float)):
+        ai_delta = float(ai_value) - float(pre_value)
+        final_delta = float(final_value) - float(pre_value)
+        if abs(ai_delta) < 1e-6:
+            return None
+        if ai_delta * final_delta < 0:
+            return (0, 0.0)
+        scale = abs(final_delta / ai_delta)
+        apply = 0 if abs(final_delta) < max(1e-4, abs(ai_delta) * 0.05) else 1
+        return apply, max(0.0, min(3.0, scale))
+
+    if isinstance(ai_value, (int, float)) and isinstance(final_value, (int, float)):
+        ai_mag = abs(float(ai_value))
+        if ai_mag < 1e-6:
+            return None
+        scale = abs(float(final_value) / ai_mag)
+        apply = 0 if abs(float(final_value)) < ai_mag * 0.05 else 1
+        return apply, max(0.0, min(3.0, scale))
+
+    return None
+
+
 def _extract_action_magnitude(action, pre_snapshot):
     data = action.get("data", {}) or {}
 
@@ -325,6 +425,10 @@ def _normalize_kind(kind):
         "de-esser": "deesser",
         "de_esser": "deesser",
         "saturation": "distortion",
+        "clip": "clipper",
+        "clipping": "clipper",
+        "soft clip": "clipper",
+        "hard clip": "clipper",
     }
     k = aliases.get(k, k)
     if k in CANONICAL_KINDS:
@@ -804,25 +908,161 @@ def _infer_manual_scale(ai_row, manual_events, start_index, end_index):
     return None
 
 
-def build_rows(session_path):
-    with open(session_path, "r", encoding="utf-8") as f:
-        session = json.load(f)
+def _rows_for_action_unit(
+    *,
+    project_id,
+    session_id,
+    cycle_id,
+    unit_index,
+    pre_snapshot,
+    ai_post_snapshot,
+    final_snapshot,
+    llm_payload,
+    resolved_actions,
+    manual_events=None,
+    manual_start_index=None,
+    manual_end_index=None,
+):
+    proj = _project_stats(pre_snapshot)
+    counts = _count_action_groups(resolved_actions)
+    rows = []
 
+    for a in resolved_actions:
+        if not isinstance(a, dict):
+            continue
+
+        action_type = str(a.get("type") or "")
+        goal = _goal_meta_for_action(llm_payload, a)
+
+        row = {
+            "project_id": project_id,
+            "session_id": session_id,
+            "cycle_id": cycle_id,
+            "event_index": unit_index,
+            "action_type": action_type,
+            "is_master_action": 1 if _is_master_action(action_type) else 0,
+            **goal,
+            **proj,
+            **counts,
+            **_action_type_features(action_type),
+            "action_row_index": _action_row_index(a),
+            "ai_action_magnitude": _extract_action_magnitude(a, pre_snapshot),
+            "label_apply": 1,
+            "label_magnitude_scale": 1.0,
+            "action_param_hints": _tokenize_action_param_hints(a),
+        }
+
+        snapshot_label = None
+        if isinstance(final_snapshot, dict) and final_snapshot:
+            snapshot_label = _infer_scale_from_final_snapshot(
+                a,
+                pre_snapshot,
+                ai_post_snapshot,
+                final_snapshot,
+            )
+        if snapshot_label is not None:
+            row["label_apply"], row["label_magnitude_scale"] = snapshot_label
+        elif manual_events is not None and manual_start_index is not None and manual_end_index is not None:
+            manual_scale = _infer_manual_scale(
+                row,
+                manual_events,
+                manual_start_index,
+                manual_end_index,
+            )
+            if manual_scale is not None:
+                row["label_magnitude_scale"] = manual_scale
+                if manual_scale < 0.05:
+                    row["label_apply"] = 0
+
+        row["label_magnitude_scale"] = float(max(0.0, min(3.0, row["label_magnitude_scale"])))
+        row.pop("action_param_hints", None)
+        rows.append(row)
+
+    return rows
+
+
+def _build_rows_from_prompt_cycles(session, session_path):
+    session_id = str(session.get("session_id") or os.path.basename(session_path))
+    project_id = str(session.get("project_id") or session_id)
+    prompt_cycles = session.get("prompt_cycles", [])
+    if not isinstance(prompt_cycles, list):
+        return []
+
+    rows = []
+    for idx, cycle in enumerate(prompt_cycles):
+        if not isinstance(cycle, dict):
+            continue
+
+        status = str(cycle.get("status") or "").strip().lower()
+        if status and status != "complete":
+            continue
+
+        pre_snapshot = cycle.get("before_prompt_snapshot") if isinstance(cycle.get("before_prompt_snapshot"), dict) else {}
+        ai_post_snapshot = cycle.get("ai_after_snapshot") if isinstance(cycle.get("ai_after_snapshot"), dict) else {}
+        final_snapshot = cycle.get("producer_final_snapshot") if isinstance(cycle.get("producer_final_snapshot"), dict) else {}
+        resolved_actions = cycle.get("resolved_ai_actions") if isinstance(cycle.get("resolved_ai_actions"), list) else []
+        llm_payload = cycle.get("llm_payload") if isinstance(cycle.get("llm_payload"), dict) else {}
+
+        if not pre_snapshot or not ai_post_snapshot or not resolved_actions:
+            continue
+        if not final_snapshot:
+            final_snapshot = ai_post_snapshot
+
+        cycle_index = cycle.get("cycle_index")
+        if not isinstance(cycle_index, int):
+            cycle_index = idx
+        cycle_id = str(cycle.get("cycle_id") or f"{session_id}_cycle_{cycle_index:04d}")
+
+        rows.extend(
+            _rows_for_action_unit(
+                project_id=project_id,
+                session_id=session_id,
+                cycle_id=cycle_id,
+                unit_index=cycle_index,
+                pre_snapshot=pre_snapshot,
+                ai_post_snapshot=ai_post_snapshot,
+                final_snapshot=final_snapshot,
+                llm_payload=llm_payload,
+                resolved_actions=resolved_actions,
+            )
+        )
+
+    return rows
+
+
+def _build_rows_from_legacy_events(session, session_path):
     session_id = str(session.get("session_id") or os.path.basename(session_path))
     project_id = str(session.get("project_id") or session_id)
     events = session.get("events", []) if isinstance(session.get("events"), list) else []
 
     manual_events = []
+    prompt_cycle_stops = []
+    ai_events_by_index = {}
     for e in events:
-        if isinstance(e, dict) and e.get("type") == "manual_edit":
+        if not isinstance(e, dict):
+            continue
+        event_index = int(e.get("index") or 0)
+        event_type = str(e.get("type") or "")
+        if event_type == "manual_edit":
             manual_events.append(
                 {
-                    "event_index": int(e.get("index") or 0),
+                    "event_index": event_index,
                     "kind": e.get("kind"),
                     "payload": e.get("payload") if isinstance(e.get("payload"), dict) else {},
                 }
             )
+        elif event_type == "prompt_cycle_stop":
+            prompt_cycle_stops.append(
+                {
+                    "event_index": event_index,
+                    "ai_event_index": int(e.get("ai_event_index") or -1),
+                    "final_snapshot": e.get("final_snapshot") if isinstance(e.get("final_snapshot"), dict) else {},
+                }
+            )
+        elif event_type == "ai_step":
+            ai_events_by_index[event_index] = e
     manual_events.sort(key=lambda x: x["event_index"])
+    prompt_cycle_stops.sort(key=lambda x: x["event_index"])
 
     ai_step_indices = [
         int(e.get("index") or 0)
@@ -845,53 +1085,57 @@ def build_rows(session_path):
         if next_ai_index is None:
             next_ai_index = 1 << 30
 
+        next_ai_event = ai_events_by_index.get(next_ai_index)
+        final_snapshot = None
+        for stop in prompt_cycle_stops:
+            if stop["ai_event_index"] != event_index:
+                continue
+            if stop["event_index"] <= event_index:
+                continue
+            if stop["event_index"] >= next_ai_index:
+                continue
+            final_snapshot = stop["final_snapshot"]
+        if final_snapshot is None and isinstance(next_ai_event, dict):
+            candidate = next_ai_event.get("pre_snapshot")
+            if isinstance(candidate, dict):
+                final_snapshot = candidate
+
         pre_snapshot = ev.get("pre_snapshot") if isinstance(ev.get("pre_snapshot"), dict) else {}
+        ai_post_snapshot = ev.get("post_snapshot") if isinstance(ev.get("post_snapshot"), dict) else {}
         llm_payload = ev.get("llm_payload") if isinstance(ev.get("llm_payload"), dict) else {}
         resolved_actions = ev.get("resolved_actions") if isinstance(ev.get("resolved_actions"), list) else []
 
-        proj = _project_stats(pre_snapshot)
-        counts = _count_action_groups(resolved_actions)
-
-        for a in resolved_actions:
-            if not isinstance(a, dict):
-                continue
-
-            action_type = str(a.get("type") or "")
-            goal = _goal_meta_for_action(llm_payload, a)
-
-            row = {
-                "project_id": project_id,
-                "session_id": session_id,
-                "event_index": event_index,
-                "action_type": action_type,
-                "is_master_action": 1 if _is_master_action(action_type) else 0,
-                **goal,
-                **proj,
-                **counts,
-                **_action_type_features(action_type),
-                "action_row_index": _action_row_index(a),
-                "ai_action_magnitude": _extract_action_magnitude(a, pre_snapshot),
-                "label_apply": 1,
-                "label_magnitude_scale": 1.0,
-                "action_param_hints": _tokenize_action_param_hints(a),
-            }
-
-            manual_scale = _infer_manual_scale(
-                row,
-                manual_events,
-                event_index,
-                next_ai_index,
+        rows.extend(
+            _rows_for_action_unit(
+                project_id=project_id,
+                session_id=session_id,
+                cycle_id=f"{session_id}_legacy_{event_index}",
+                unit_index=event_index,
+                pre_snapshot=pre_snapshot,
+                ai_post_snapshot=ai_post_snapshot,
+                final_snapshot=final_snapshot,
+                llm_payload=llm_payload,
+                resolved_actions=resolved_actions,
+                manual_events=manual_events,
+                manual_start_index=event_index,
+                manual_end_index=next_ai_index,
             )
-            if manual_scale is not None:
-                row["label_magnitude_scale"] = manual_scale
-                if manual_scale < 0.05:
-                    row["label_apply"] = 0
-
-            row["label_magnitude_scale"] = float(max(0.0, min(3.0, row["label_magnitude_scale"])))
-            row.pop("action_param_hints", None)
-            rows.append(row)
+        )
 
     return rows
+
+
+def build_rows(session_path):
+    with open(session_path, "r", encoding="utf-8") as f:
+        session = json.load(f)
+
+    prompt_cycles = session.get("prompt_cycles")
+    if isinstance(prompt_cycles, list) and prompt_cycles:
+        rows = _build_rows_from_prompt_cycles(session, session_path)
+        if rows:
+            return rows
+
+    return _build_rows_from_legacy_events(session, session_path)
 
 
 def main():

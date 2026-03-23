@@ -26,24 +26,31 @@ class PasswordPolicy {
     defaultValue: true,
   );
 
-  static String? validate(String password) {
+  static List<String> validateIssues(String password) {
     final safe = password.trim();
+    final issues = <String>[];
     if (safe.length < minLength) {
-      return 'Password must be at least $minLength characters.';
+      issues.add('Password must be at least $minLength characters.');
     }
     if (requireUppercase && !RegExp(r'[A-Z]').hasMatch(safe)) {
-      return 'Password must include an uppercase letter.';
+      issues.add('Password must include an uppercase letter.');
     }
     if (requireLowercase && !RegExp(r'[a-z]').hasMatch(safe)) {
-      return 'Password must include a lowercase letter.';
+      issues.add('Password must include a lowercase letter.');
     }
     if (requireNumber && !RegExp(r'\d').hasMatch(safe)) {
-      return 'Password must include a number.';
+      issues.add('Password must include a number.');
     }
     if (requireSymbol && !RegExp(r'[^A-Za-z0-9]').hasMatch(safe)) {
-      return 'Password must include a symbol.';
+      issues.add('Password must include a symbol.');
     }
-    return null;
+    return issues;
+  }
+
+  static String? validate(String password) {
+    final issues = validateIssues(password);
+    if (issues.isEmpty) return null;
+    return issues.first;
   }
 
   static String requirementsText() {

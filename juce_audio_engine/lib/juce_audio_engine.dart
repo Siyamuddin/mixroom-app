@@ -53,14 +53,29 @@ class JuceAudioEngine {
       .map((e) => Map<String, dynamic>.from(e));
 
   static void initialiseEventListeners() {
-    _events.listen((event) {
-      if (event['event'] == 'pluginLoaded') {
-        final track = event['track'] as int;
-        final path = event['path'] as String;
-        final success = event['success'] as bool;
-        debugPrint("Plugin loaded: $success for $path on track $track");
-      }
-    });
+    try {
+      _events.listen(
+        (event) {
+          if (event['event'] == 'pluginLoaded') {
+            final track = event['track'] as int;
+            final path = event['path'] as String;
+            final success = event['success'] as bool;
+            debugPrint("Plugin loaded: $success for $path on track $track");
+          }
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          if (error is MissingPluginException || error is PlatformException) {
+            _logError('initialiseEventListeners', error);
+            return;
+          }
+          _logError('initialiseEventListeners', error);
+        },
+      );
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('initialiseEventListeners', e);
+    }
   }
 
   // -------------------------------
@@ -758,6 +773,17 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> setClipReversed(int clipIndex, bool reversed) async {
+    try {
+      await _ch.invokeMethod('setClipReversed', {
+        'clip': clipIndex,
+        'reversed': reversed,
+      });
+    } on PlatformException catch (e) {
+      _logError('setClipReversed', e);
+    }
+  }
+
   static Future<void> setClipStretchOptions(
     int clipIndex, {
     required double tempoRatio,
@@ -1090,6 +1116,34 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> setRowGainAutomationPoints(
+    int row,
+    List<Map<String, dynamic>> points,
+  ) async {
+    try {
+      await _ch.invokeMethod('setRowGainAutomationPoints', {
+        'row': row,
+        'points': points,
+      });
+    } on PlatformException catch (e) {
+      _logError('setRowGainAutomationPoints', e);
+    }
+  }
+
+  static Future<void> setRowPanAutomationPoints(
+    int row,
+    List<Map<String, dynamic>> points,
+  ) async {
+    try {
+      await _ch.invokeMethod('setRowPanAutomationPoints', {
+        'row': row,
+        'points': points,
+      });
+    } on PlatformException catch (e) {
+      _logError('setRowPanAutomationPoints', e);
+    }
+  }
+
   static Future<void> setRowGain(int row, double gain0to3) async {
     try {
       await _ch.invokeMethod('setRowGain', {
@@ -1257,6 +1311,58 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> setMasterGainAutomationPoints(
+    List<Map<String, dynamic>> points,
+  ) async {
+    try {
+      await _ch.invokeMethod('setMasterGainAutomationPoints', {
+        'points': points,
+      });
+    } on PlatformException catch (e) {
+      _logError('setMasterGainAutomationPoints', e);
+    }
+  }
+
+  static Future<void> setMasterPanAutomationPoints(
+    List<Map<String, dynamic>> points,
+  ) async {
+    try {
+      await _ch.invokeMethod('setMasterPanAutomationPoints', {
+        'points': points,
+      });
+    } on PlatformException catch (e) {
+      _logError('setMasterPanAutomationPoints', e);
+    }
+  }
+
+  static Future<void> setMasterEffectAutomationPoints(
+    int effectIndex,
+    String paramId,
+    double minValue,
+    double maxValue,
+    List<Map<String, dynamic>> points,
+  ) async {
+    try {
+      await _ch.invokeMethod('setMasterEffectAutomationPoints', {
+        'effect': effectIndex,
+        'paramId': paramId,
+        'min': minValue,
+        'max': maxValue,
+        'points': points,
+      });
+    } on PlatformException catch (e) {
+      _logError('setMasterEffectAutomationPoints', e);
+    }
+  }
+
+  static Future<void> clearMasterEffectAutomation() async {
+    try {
+      await _ch.invokeMethod('clearMasterEffectAutomation');
+    } on PlatformException catch (e) {
+      _logError('clearMasterEffectAutomation', e);
+    }
+  }
+
   // ===============================
   // TRANSPORT / DEBUG
   // ===============================
@@ -1387,6 +1493,34 @@ class JuceAudioEngine {
     } on PlatformException catch (e) {
       _logError('getNumInputChannels', e);
       return 0;
+    }
+  }
+
+  static Future<bool> prepareRecordingInputs(
+    int desiredInputChannels, {
+    String reason = 'dart',
+  }) async {
+    try {
+      final res = await _ch.invokeMethod<bool>('prepareRecordingInputs', {
+        'desiredInputChannels': desiredInputChannels,
+        'reason': reason,
+      });
+      return res ?? false;
+    } on PlatformException catch (e) {
+      _logError('prepareRecordingInputs', e);
+      return false;
+    }
+  }
+
+  static Future<void> refreshAudioRoute({
+    String reason = 'dart',
+  }) async {
+    try {
+      await _ch.invokeMethod('refreshAudioRoute', {
+        'reason': reason,
+      });
+    } on PlatformException catch (e) {
+      _logError('refreshAudioRoute', e);
     }
   }
 

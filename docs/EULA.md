@@ -1,68 +1,110 @@
 # Mixroom End User License Agreement (EULA)
 
-Last updated: 2026-02-26
+Last updated: 2026-03-16
 
 This End User License Agreement ("EULA") is a legal agreement between you and
-Mixroom for use of the Mixroom application and related software components.
+(주)믹스룸 (Mixroom) ("Mixroom," "we," "us," or "our") for your use of the
+Mixroom application and related software components ("App").
 
 ## 1. License Grant
 
-Subject to your compliance with this EULA, Mixroom grants you a limited,
-non-exclusive, non-transferable, revocable license to install and use the
-Mixroom application for personal or internal business use.
+Subject to your compliance with this EULA, we grant you a limited,
+non-exclusive, non-transferable, non-sublicensable, revocable license to
+install and use the App on devices you own or control for your personal or
+internal business use.
 
-## 2. Restrictions
+## 2. Scope and Platform Terms
 
-You may not, except where prohibited by law:
+This EULA applies to the App and updates or supplements we provide, unless an
+update is accompanied by separate terms.
 
-- copy, modify, distribute, sell, lease, or sublicense the app,
-- reverse engineer, decompile, or disassemble the app,
-- remove or alter copyright, trademark, or other proprietary notices,
-- use the app in ways that violate law or third-party rights.
+If you downloaded the App from the Apple App Store, your use of the App is also
+subject to the App Store terms that apply to you. If this EULA grants you fewer
+rights than the applicable mandatory platform terms, the platform terms control
+to that extent.
 
-## 3. Ownership
+If you downloaded the App from the Apple App Store, Apple and its subsidiaries
+are third-party beneficiaries of this EULA and may enforce it against you.
 
-The app and all associated intellectual property rights are and remain the
-exclusive property of Mixroom and its licensors.
+## 3. Restrictions
 
-## 4. Updates
+You may not, except where prohibited by applicable law:
 
-Mixroom may provide updates, patches, or upgrades at its discretion. Updates
-may be required to continue using all or part of the app.
+- copy, modify, distribute, sell, lease, sublicense, or commercially exploit
+  the App;
+- reverse engineer, decompile, disassemble, or attempt to derive source code
+  from the App;
+- remove or alter copyright, trademark, or other proprietary notices;
+- use the App in violation of law, export controls, sanctions, or third-party
+  rights;
+- use the App to interfere with, abuse, or gain unauthorized access to systems,
+  accounts, services, or data.
 
-## 5. Third-Party Components
+## 4. Ownership
 
-The app may include third-party open-source or commercial components that are
+The App, including its software, models, design, branding, and all associated
+intellectual-property rights, is and remains the property of Mixroom and its
+licensors.
+
+## 5. Accounts, Services, and External Features
+
+Some App features require an account, internet access, third-party services, or
+paid entitlements. Those features may be unavailable, interrupted, modified, or
+discontinued at any time.
+
+The App may enable access to third-party services such as identity providers,
+cloud AI services, app stores, billing systems, and content platforms. Your use
+of those services is at your own risk and subject to those third parties' own
+terms.
+
+## 6. User Content
+
+You retain ownership of content you create or submit through the App. Your use
+of user content in connection with the App is governed by the Mixroom Terms of
+Service and Privacy Policy.
+
+## 7. Updates
+
+We may provide updates, patches, or upgrades at our discretion. Some updates
+may be required for security, compatibility, or continued functionality.
+
+## 8. Third-Party Components
+
+The App may include third-party open-source or commercial components that are
 subject to their own license terms. Applicable notices are provided in:
 
 - `docs/THIRD_PARTY_NOTICES.md`
-- in-app open-source license screen
+- the in-app open-source license screen
 
-## 6. Privacy
+## 9. Privacy
 
-Your use of the app is subject to the Mixroom Privacy Policy:
+Your use of the App is subject to the Mixroom Privacy Policy:
 
-https://www.mixroom.ai/privacypolicy
+https://mixroom.ai/privacy
 
-## 7. Termination
+## 10. Termination
 
-This EULA is effective until terminated. It terminates automatically if you
-fail to comply with any term of this EULA. Upon termination, you must stop
-using and uninstall the app.
+This EULA remains effective until terminated. It terminates automatically if
+you fail to comply with this EULA. Upon termination, you must stop using and
+uninstall the App.
 
-## 8. Disclaimer of Warranties
+## 11. Disclaimer of Warranties
 
-To the fullest extent permitted by law, the app is provided "as is" and "as
-available" without warranties of any kind.
+To the fullest extent permitted by law, the App is provided "as is" and "as
+available," with all faults and without warranties of any kind, whether
+express, implied, statutory, or otherwise.
 
-## 9. Limitation of Liability
+## 12. Limitation of Liability
 
-To the fullest extent permitted by law, Mixroom will not be liable for any
-indirect, incidental, special, consequential, or punitive damages, or for loss
-of data, revenue, or profits arising from your use of the app.
+To the fullest extent permitted by law, Mixroom and its affiliates, licensors,
+and service providers will not be liable for any indirect, incidental, special,
+consequential, exemplary, or punitive damages, or for any loss of data,
+revenue, profits, or goodwill arising from or related to your use of the App.
 
-## 10. Contact
+## 13. Contact
+
+(주)믹스룸 (Mixroom)
 
 General inquiries: contact@mixroom.ai
-
 Support requests: support@mixroom.ai
+Privacy requests: privacy@mixroom.ai

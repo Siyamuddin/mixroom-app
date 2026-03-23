@@ -8,6 +8,12 @@
     native <methods>;
 }
 
+# Flutter release builds still need GeneratedPluginRegistrant and plugin classes
+# available for reflection/automatic registration.
+-keep class io.flutter.plugins.GeneratedPluginRegistrant { *; }
+-keep class io.flutter.plugins.** { *; }
+-keep class ** implements io.flutter.embedding.engine.plugins.FlutterPlugin { *; }
+
 # MediaPipe proto symbols are referenced by optional profiler/template APIs.
 # These classes are not packaged in this app build and can be safely ignored.
 -dontwarn com.google.mediapipe.proto.CalculatorProfileProto$CalculatorProfile

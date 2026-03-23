@@ -91,6 +91,96 @@ class AssistantActionUtils {
     return fallback;
   }
 
+  static int resolveBeatsPerBar(
+    Map<String, dynamic> data,
+    Map<String, dynamic> target, {
+    int fallback = 4,
+  }) {
+    final raw = toActionInt(
+          data['beats_per_bar'] ??
+              target['beats_per_bar'] ??
+              data['meter_numerator'] ??
+              target['meter_numerator'],
+        ) ??
+        fallback;
+    return raw.clamp(1, 32);
+  }
+
+  static double? resolveMoveMusicalStartMs({
+    required Map<String, dynamic> data,
+    required Map<String, dynamic> target,
+    required double bpm,
+    int defaultBeatsPerBar = 4,
+  }) {
+    final beatsPerBar = resolveBeatsPerBar(
+      data,
+      target,
+      fallback: defaultBeatsPerBar,
+    );
+    final msPerBeat = 60000.0 / bpm.clamp(1.0, 400.0);
+
+    final measure = toActionDouble(
+      data['new_start_measure'] ??
+          target['new_start_measure'] ??
+          data['new_start_bar'] ??
+          target['new_start_bar'] ??
+          data['measure_index'] ??
+          target['measure_index'] ??
+          data['bar_index'] ??
+          target['bar_index'],
+    );
+    if (measure != null && measure.isFinite) {
+      final clampedMeasure = math.max(1.0, measure);
+      return (clampedMeasure - 1.0) * beatsPerBar * msPerBeat;
+    }
+
+    final beat = toActionDouble(
+      data['new_start_beat'] ??
+          target['new_start_beat'] ??
+          data['beat_index'] ??
+          target['beat_index'],
+    );
+    if (beat != null && beat.isFinite) {
+      final clampedBeat = math.max(1.0, beat);
+      return (clampedBeat - 1.0) * msPerBeat;
+    }
+
+    return null;
+  }
+
+  static double? resolveMoveMusicalDeltaMs({
+    required Map<String, dynamic> data,
+    required Map<String, dynamic> target,
+    required double bpm,
+    int defaultBeatsPerBar = 4,
+  }) {
+    final beatsPerBar = resolveBeatsPerBar(
+      data,
+      target,
+      fallback: defaultBeatsPerBar,
+    );
+    final msPerBeat = 60000.0 / bpm.clamp(1.0, 400.0);
+
+    final measureDelta = toActionDouble(
+      data['delta_measures'] ??
+          target['delta_measures'] ??
+          data['delta_bars'] ??
+          target['delta_bars'],
+    );
+    if (measureDelta != null && measureDelta.isFinite) {
+      return measureDelta * beatsPerBar * msPerBeat;
+    }
+
+    final beatDelta = toActionDouble(
+      data['delta_beats'] ?? target['delta_beats'],
+    );
+    if (beatDelta != null && beatDelta.isFinite) {
+      return beatDelta * msPerBeat;
+    }
+
+    return null;
+  }
+
   static String? normalizeTutorialTargetId(String raw) {
     final t = raw.trim();
     if (t.isEmpty) return null;

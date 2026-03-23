@@ -14,24 +14,23 @@ class L10n {
   }
 
   static Locale getDeviceLocale(BuildContext context) {
+    final localizationsLocale = Localizations.maybeLocaleOf(context);
+    if (localizationsLocale != null) {
+      return LocaleConfig.resolveLocale(localizationsLocale);
+    }
+
     try {
-      // Always use listen: false for utility functions
       final providerLocale =
           Provider.of<LocaleProvider>(context, listen: false).locale;
       if (providerLocale != null) {
         return LocaleConfig.resolveLocale(providerLocale);
       }
-
-      final localizationsLocale = Localizations.maybeLocaleOf(context);
-      if (localizationsLocale != null) {
-        return LocaleConfig.resolveLocale(localizationsLocale);
-      }
-
-      final platformLocale = WidgetsBinding.instance.platformDispatcher.locale;
-      return LocaleConfig.resolveLocale(platformLocale);
     } catch (_) {
-      return LocaleConfig.fallbackLocale; // Fallback
+      // Fall through to the platform locale when provider access is unavailable.
     }
+
+    final platformLocale = WidgetsBinding.instance.platformDispatcher.locale;
+    return LocaleConfig.resolveLocale(platformLocale);
   }
 
   static String languageName(Locale locale) {
@@ -183,6 +182,101 @@ class L10n {
       'No new notifications': 'No new notifications',
       'Welcome to Mixroom': 'Welcome to Mixroom',
       'Language': 'Language',
+      'OK': 'OK',
+      'Audio platform coming soon.': 'Audio platform coming soon.',
+      'Video Projects': 'Video Projects',
+      'New Project': 'New Project',
+      'Project limit reached': 'Project limit reached',
+      'Create a new project': 'Create a new project',
+      'Delete one to continue': 'Delete one to continue',
+      'Import': 'Import',
+      'Projects are saved locally.': 'Projects are saved locally.',
+      'Could not load projects.': 'Could not load projects.',
+      'Retry': 'Retry',
+      'No saved projects yet.': 'No saved projects yet.',
+      'Rename Project': 'Rename Project',
+      'Project name': 'Project name',
+      'Save': 'Save',
+      'Project renamed': 'Project renamed',
+      'Rename failed': 'Rename failed',
+      'Delete project?': 'Delete project?',
+      'will be permanently deleted.': 'will be permanently deleted.',
+      'Opening project…': 'Opening project…',
+      'Preparing export…': 'Preparing export…',
+      'Creating project…': 'Creating project…',
+      'Untitled Project': 'Untitled Project',
+      'Exporting…': 'Exporting…',
+      'Please select a .mixroom project file':
+          'Please select a .mixroom project file',
+      'Importing…': 'Importing…',
+      'Import failed': 'Import failed',
+      'Projects are temporarily unavailable on this device. Please try again in a moment.':
+          'Projects are temporarily unavailable on this device. Please try again in a moment.',
+      'We couldn\'t load your projects right now. Please try again.':
+          'We couldn\'t load your projects right now. Please try again.',
+      'Delete a project to create or import a new one.':
+          'Delete a project to create or import a new one.',
+      'Last opened': 'Last opened',
+      'Edit': 'Edit',
+      'Rename': 'Rename',
+      'Share / Export': 'Share / Export',
+      'Share (.mixroom)': 'Share (.mixroom)',
+      'Export WAV': 'Export WAV',
+      'Export MP3': 'Export MP3',
+      'Piano Roll Quick Guide': 'Piano Roll Quick Guide',
+      'Create + shape notes': 'Create + shape notes',
+      'Tap empty grid to add. Drag to move. Pull right edge to resize.':
+          'Tap empty grid to add. Drag to move. Pull right edge to resize.',
+      'Select groups quickly': 'Select groups quickly',
+      'Hold empty space and drag a box to multi-select notes.':
+          'Hold empty space and drag a box to multi-select notes.',
+      'Zoom + edit faster': 'Zoom + edit faster',
+      'Pinch with two fingers or use +/- buttons to zoom in time and pitch.':
+          'Pinch with two fingers or use +/- buttons to zoom in time and pitch.',
+      'Use the bottom tray': 'Use the bottom tray',
+      'Duplicate, delete, and adjust length/velocity for selected notes.':
+          'Duplicate, delete, and adjust length/velocity for selected notes.',
+      'Got it': 'Got it',
+      'Custom': 'Custom',
+      'Resample quality': 'Resample quality',
+      'Draft (fast)': 'Draft (fast)',
+      'Good': 'Good',
+      'Best': 'Best',
+      'Normalize loudness': 'Normalize loudness',
+      'Limiter ceiling (dBTP)': 'Limiter ceiling (dBTP)',
+      'Bit depth': 'Bit depth',
+      'Enable dithering': 'Enable dithering',
+      'Encoding mode': 'Encoding mode',
+      'Bit rate': 'Bit rate',
+      'VBR quality': 'VBR quality',
+      'highest': 'highest',
+      'smaller file': 'smaller file',
+      'Start export': 'Start export',
+      'Could not open export options.': 'Could not open export options.',
+      'Save export': 'Save export',
+      'Allow media access': 'Allow media access',
+      'Mixroom needs access to audio files to browse sample folders and import local media on Android.':
+          'Mixroom needs access to audio files to browse sample folders and import local media on Android.',
+      'Not now': 'Not now',
+      'Open settings': 'Open settings',
+      'Could not open the saved export.': 'Could not open the saved export.',
+      'Platform upload coming soon': 'Platform upload coming soon',
+      'Upload to YouTube': 'Upload to YouTube',
+      'Title': 'Title',
+      'Description': 'Description',
+      'Upload': 'Upload',
+      'Video Uploaded': 'Video Uploaded',
+      'Your video is live!': 'Your video is live!',
+      'Save Image': 'Save Image',
+      'Saved to gallery!': 'Saved to gallery!',
+      'Failed to save': 'Failed to save',
+      'Upload to platform': 'Upload to platform',
+      'Open in Files': 'Open in Files',
+      'Open saved file': 'Open saved file',
+      'Thumbnail saved to ': 'Thumbnail saved to ',
+      'YouTube QR Thumbnail': 'YouTube QR Thumbnail',
+      'Your video has been uploaded!': 'Your video has been uploaded!',
+      'Download QR Thumbnail': 'Download QR Thumbnail',
       'Please enter a valid email address.':
           'Please enter a valid email address.',
       'Password should be at least 8 characters.':
@@ -193,8 +287,8 @@ class L10n {
       'Please enter your password.': 'Please enter your password.',
       'Please choose what you use Mixroom for.':
           'Please choose what you use Mixroom for.',
-      'Authentication is powered by AWS Cognito.':
-          'Authentication is powered by AWS Cognito.',
+      'Authentication is powered by Mixroom native auth.':
+          'Authentication is powered by Mixroom native auth.',
       'Email': 'Email',
       'Continue': 'Continue',
       'Enter password': 'Enter password',
@@ -217,8 +311,8 @@ class L10n {
           'Email verified. You are now signed in.',
       'Verification code resent.': 'Verification code resent.',
       'Verify your email': 'Verify your email',
-      'Enter the verification code sent by AWS Cognito.':
-          'Enter the verification code sent by AWS Cognito.',
+      'Enter the verification code sent to your email.':
+          'Enter the verification code sent to your email.',
       'Verification Code': 'Verification Code',
       'Enter code': 'Enter code',
       'Resend code': 'Resend code',
@@ -275,8 +369,8 @@ class L10n {
       'For work': 'For work',
       'Songwriting': 'Songwriting',
       'Mix/master practice': 'Mix/master practice',
-      'Account data sync target: AWS Cognito user attributes.':
-          'Account data sync target: AWS Cognito user attributes.',
+      'Account data sync target: Mixroom account profile.':
+          'Account data sync target: Mixroom account profile.',
     },
     'ko': {
       'hello': '안녕하세요',
@@ -405,6 +499,100 @@ class L10n {
       'No new notifications': '새 알림이 없습니다',
       'Welcome to Mixroom': '믹스룸에 오신 것을 환영합니다',
       'Language': '언어',
+      'OK': '확인',
+      'Audio platform coming soon.': '오디오 플랫폼은 곧 제공됩니다.',
+      'Video Projects': '비디오 프로젝트',
+      'New Project': '새 프로젝트',
+      'Project limit reached': '프로젝트 한도에 도달했습니다',
+      'Create a new project': '새 프로젝트 만들기',
+      'Delete one to continue': '계속하려면 하나를 삭제하세요',
+      'Import': '가져오기',
+      'Projects are saved locally.': '프로젝트는 로컬에 저장됩니다.',
+      'Could not load projects.': '프로젝트를 불러올 수 없습니다.',
+      'Retry': '다시 시도',
+      'No saved projects yet.': '저장된 프로젝트가 아직 없습니다.',
+      'Rename Project': '프로젝트 이름 변경',
+      'Project name': '프로젝트 이름',
+      'Save': '저장',
+      'Project renamed': '프로젝트 이름을 변경했습니다',
+      'Rename failed': '이름 변경 실패',
+      'Delete project?': '프로젝트를 삭제할까요?',
+      'will be permanently deleted.': '영구적으로 삭제됩니다.',
+      'Opening project…': '프로젝트 여는 중…',
+      'Preparing export…': '내보내기 준비 중…',
+      'Creating project…': '프로젝트 생성 중…',
+      'Untitled Project': '제목 없는 프로젝트',
+      'Exporting…': '내보내는 중…',
+      'Please select a .mixroom project file': '.mixroom 프로젝트 파일을 선택해 주세요',
+      'Importing…': '가져오는 중…',
+      'Import failed': '가져오기 실패',
+      'Projects are temporarily unavailable on this device. Please try again in a moment.':
+          '이 기기에서는 프로젝트를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
+      'We couldn\'t load your projects right now. Please try again.':
+          '지금은 프로젝트를 불러올 수 없습니다. 다시 시도하세요.',
+      'Delete a project to create or import a new one.':
+          '새 프로젝트를 만들거나 가져오려면 프로젝트를 삭제하세요.',
+      'Last opened': '마지막으로 연 시간',
+      'Edit': '편집',
+      'Rename': '이름 변경',
+      'Share / Export': '공유 / 내보내기',
+      'Share (.mixroom)': '공유 (.mixroom)',
+      'Export WAV': 'WAV 내보내기',
+      'Export MP3': 'MP3 내보내기',
+      'Piano Roll Quick Guide': '피아노 롤 빠른 안내',
+      'Create + shape notes': '노트 만들기 및 형태 조정',
+      'Tap empty grid to add. Drag to move. Pull right edge to resize.':
+          '빈 그리드를 눌러 노트를 추가하세요. 드래그해 이동하고 오른쪽 끝을 끌어 길이를 조절하세요.',
+      'Select groups quickly': '빠르게 그룹 선택',
+      'Hold empty space and drag a box to multi-select notes.':
+          '빈 공간을 길게 누른 뒤 박스를 드래그해 여러 노트를 선택하세요.',
+      'Zoom + edit faster': '빠르게 확대하고 편집하기',
+      'Pinch with two fingers or use +/- buttons to zoom in time and pitch.':
+          '두 손가락으로 핀치하거나 +/- 버튼을 사용해 시간과 음높이를 확대하세요.',
+      'Use the bottom tray': '하단 트레이 활용',
+      'Duplicate, delete, and adjust length/velocity for selected notes.':
+          '선택한 노트를 복제, 삭제하거나 길이와 벨로시티를 조정하세요.',
+      'Got it': '확인',
+      'Custom': '사용자 지정',
+      'Resample quality': '리샘플 품질',
+      'Draft (fast)': '초안 (빠름)',
+      'Good': '좋음',
+      'Best': '최고',
+      'Normalize loudness': '라우드니스 정규화',
+      'Limiter ceiling (dBTP)': '리미터 상한 (dBTP)',
+      'Bit depth': '비트 심도',
+      'Enable dithering': '디더링 사용',
+      'Encoding mode': '인코딩 모드',
+      'Bit rate': '비트레이트',
+      'VBR quality': 'VBR 품질',
+      'highest': '최고 품질',
+      'smaller file': '작은 파일',
+      'Start export': '내보내기 시작',
+      'Could not open export options.': '내보내기 옵션을 열 수 없습니다.',
+      'Save export': '내보내기 저장',
+      'Allow media access': '미디어 접근 허용',
+      'Mixroom needs access to audio files to browse sample folders and import local media on Android.':
+          'Mixroom은 Android에서 샘플 폴더를 탐색하고 로컬 미디어를 가져오기 위해 오디오 파일 접근 권한이 필요합니다.',
+      'Not now': '지금 안 함',
+      'Open settings': '설정 열기',
+      'Could not open the saved export.': '저장한 내보내기 파일을 열 수 없습니다.',
+      'Platform upload coming soon': '플랫폼 업로드는 곧 제공됩니다',
+      'Upload to YouTube': 'YouTube에 업로드',
+      'Title': '제목',
+      'Description': '설명',
+      'Upload': '업로드',
+      'Video Uploaded': '동영상 업로드 완료',
+      'Your video is live!': '동영상이 게시되었습니다!',
+      'Save Image': '이미지 저장',
+      'Saved to gallery!': '갤러리에 저장되었습니다!',
+      'Failed to save': '저장 실패',
+      'Upload to platform': '플랫폼에 업로드',
+      'Open in Files': '파일에서 열기',
+      'Open saved file': '저장한 파일 열기',
+      'Thumbnail saved to ': '썸네일이 다음 위치에 저장되었습니다: ',
+      'YouTube QR Thumbnail': 'YouTube QR 썸네일',
+      'Your video has been uploaded!': '동영상이 업로드되었습니다!',
+      'Download QR Thumbnail': 'QR 썸네일 다운로드',
       'Please enter a valid email address.': '유효한 이메일 주소를 입력해주세요.',
       'Password should be at least 8 characters.': '비밀번호는 8자 이상이어야 합니다.',
       'Passwords do not match.': '비밀번호가 일치하지 않습니다.',
@@ -412,7 +600,8 @@ class L10n {
       'Please select your birthday.': '생년월일을 선택해주세요.',
       'Please enter your password.': '비밀번호를 입력해주세요.',
       'Please choose what you use Mixroom for.': 'Mixroom 사용 목적을 선택해주세요.',
-      'Authentication is powered by AWS Cognito.': '인증은 AWS Cognito로 제공됩니다.',
+      'Authentication is powered by Mixroom native auth.':
+          '인증은 Mixroom 자체 인증으로 제공됩니다.',
       'Email': '이메일',
       'Continue': '계속',
       'Enter password': '비밀번호 입력',
@@ -434,8 +623,8 @@ class L10n {
       'Email verified. You are now signed in.': '이메일 인증이 완료되었습니다. 이제 로그인되었습니다.',
       'Verification code resent.': '인증 코드를 다시 보냈습니다.',
       'Verify your email': '이메일 인증',
-      'Enter the verification code sent by AWS Cognito.':
-          'AWS Cognito에서 전송한 인증 코드를 입력하세요.',
+      'Enter the verification code sent to your email.':
+          '이메일로 전송된 인증 코드를 입력하세요.',
       'Verification Code': '인증 코드',
       'Enter code': '코드 입력',
       'Resend code': '코드 다시 보내기',
@@ -490,8 +679,8 @@ class L10n {
       'For work': '업무용',
       'Songwriting': '작곡',
       'Mix/master practice': '믹싱/마스터링 연습',
-      'Account data sync target: AWS Cognito user attributes.':
-          '계정 데이터 동기화 대상: AWS Cognito 사용자 속성.',
+      'Account data sync target: Mixroom account profile.':
+          '계정 데이터 동기화 대상: Mixroom 계정 프로필.',
     },
     'zh': {
       'hello': '你好',
@@ -743,6 +932,100 @@ class L10n {
       'No new notifications': '新しい通知はありません',
       'Welcome to Mixroom': 'Mixroomへようこそ',
       'Language': '言語',
+      'OK': 'OK',
+      'Audio platform coming soon.': 'オーディオプラットフォームは近日公開です。',
+      'Video Projects': 'ビデオプロジェクト',
+      'New Project': '新規プロジェクト',
+      'Project limit reached': 'プロジェクト上限に達しました',
+      'Create a new project': '新しいプロジェクトを作成',
+      'Delete one to continue': '続けるには1つ削除してください',
+      'Import': 'インポート',
+      'Projects are saved locally.': 'プロジェクトはこの端末に保存されます。',
+      'Could not load projects.': 'プロジェクトを読み込めませんでした。',
+      'Retry': '再試行',
+      'No saved projects yet.': '保存されたプロジェクトはまだありません。',
+      'Rename Project': 'プロジェクト名を変更',
+      'Project name': 'プロジェクト名',
+      'Save': '保存',
+      'Project renamed': 'プロジェクト名を変更しました',
+      'Rename failed': '名前の変更に失敗しました',
+      'Delete project?': 'プロジェクトを削除しますか？',
+      'will be permanently deleted.': '完全に削除されます。',
+      'Opening project…': 'プロジェクトを開いています…',
+      'Preparing export…': '書き出しを準備しています…',
+      'Creating project…': 'プロジェクトを作成しています…',
+      'Untitled Project': '無題のプロジェクト',
+      'Exporting…': '書き出しています…',
+      'Please select a .mixroom project file': '.mixroom プロジェクトファイルを選択してください',
+      'Importing…': 'インポート中…',
+      'Import failed': 'インポートに失敗しました',
+      'Projects are temporarily unavailable on this device. Please try again in a moment.':
+          'この端末では現在プロジェクトを利用できません。しばらくしてからもう一度お試しください。',
+      'We couldn\'t load your projects right now. Please try again.':
+          '現在プロジェクトを読み込めません。もう一度お試しください。',
+      'Delete a project to create or import a new one.':
+          '新しいプロジェクトを作成または読み込むには、プロジェクトを削除してください。',
+      'Last opened': '最終オープン',
+      'Edit': '編集',
+      'Rename': '名前を変更',
+      'Share / Export': '共有 / 書き出し',
+      'Share (.mixroom)': '共有 (.mixroom)',
+      'Export WAV': 'WAVを書き出す',
+      'Export MP3': 'MP3を書き出す',
+      'Piano Roll Quick Guide': 'ピアノロールのクイックガイド',
+      'Create + shape notes': 'ノートを作成して形を調整',
+      'Tap empty grid to add. Drag to move. Pull right edge to resize.':
+          '空いているグリッドをタップして追加します。ドラッグで移動し、右端を引いて長さを変えます。',
+      'Select groups quickly': '素早くグループ選択',
+      'Hold empty space and drag a box to multi-select notes.':
+          '空白部分を長押ししてボックスをドラッグすると、複数のノートを選択できます。',
+      'Zoom + edit faster': 'すばやくズームして編集',
+      'Pinch with two fingers or use +/- buttons to zoom in time and pitch.':
+          '2本指でピンチするか +/- ボタンを使って、時間と音程を拡大できます。',
+      'Use the bottom tray': '下部トレイを使う',
+      'Duplicate, delete, and adjust length/velocity for selected notes.':
+          '選択したノートを複製、削除し、長さやベロシティを調整できます。',
+      'Got it': '了解',
+      'Custom': 'カスタム',
+      'Resample quality': 'リサンプル品質',
+      'Draft (fast)': 'ドラフト (高速)',
+      'Good': '良い',
+      'Best': '最高',
+      'Normalize loudness': 'ラウドネスを正規化',
+      'Limiter ceiling (dBTP)': 'リミッター上限 (dBTP)',
+      'Bit depth': 'ビット深度',
+      'Enable dithering': 'ディザリングを有効化',
+      'Encoding mode': 'エンコードモード',
+      'Bit rate': 'ビットレート',
+      'VBR quality': 'VBR品質',
+      'highest': '最高品質',
+      'smaller file': 'ファイルサイズ小',
+      'Start export': '書き出し開始',
+      'Could not open export options.': '書き出しオプションを開けませんでした。',
+      'Save export': '書き出しを保存',
+      'Allow media access': 'メディアへのアクセスを許可',
+      'Mixroom needs access to audio files to browse sample folders and import local media on Android.':
+          'Mixroom が Android でサンプルフォルダを参照し、ローカルメディアを読み込むには、音声ファイルへのアクセスが必要です。',
+      'Not now': '後で',
+      'Open settings': '設定を開く',
+      'Could not open the saved export.': '保存した書き出しファイルを開けませんでした。',
+      'Platform upload coming soon': 'プラットフォームへのアップロードは近日公開です',
+      'Upload to YouTube': 'YouTube にアップロード',
+      'Title': 'タイトル',
+      'Description': '説明',
+      'Upload': 'アップロード',
+      'Video Uploaded': '動画をアップロードしました',
+      'Your video is live!': '動画が公開されました！',
+      'Save Image': '画像を保存',
+      'Saved to gallery!': 'ギャラリーに保存しました！',
+      'Failed to save': '保存に失敗しました',
+      'Upload to platform': 'プラットフォームにアップロード',
+      'Open in Files': 'ファイルで開く',
+      'Open saved file': '保存したファイルを開く',
+      'Thumbnail saved to ': 'サムネイルを保存しました: ',
+      'YouTube QR Thumbnail': 'YouTube QR サムネイル',
+      'Your video has been uploaded!': '動画がアップロードされました！',
+      'Download QR Thumbnail': 'QRサムネイルをダウンロード',
       'Please enter a valid email address.': '有効なメールアドレスを入力してください。',
       'Password should be at least 8 characters.': 'パスワードは8文字以上で入力してください。',
       'Passwords do not match.': 'パスワードが一致しません。',
@@ -750,7 +1033,8 @@ class L10n {
       'Please select your birthday.': '生年月日を選択してください。',
       'Please enter your password.': 'パスワードを入力してください。',
       'Please choose what you use Mixroom for.': 'Mixroomの利用目的を選択してください。',
-      'Authentication is powered by AWS Cognito.': '認証はAWS Cognitoを利用しています。',
+      'Authentication is powered by Mixroom native auth.':
+          '認証はMixroomの独自認証を利用しています。',
       'Email': 'メール',
       'Continue': '続行',
       'Enter password': 'パスワードを入力',
@@ -772,8 +1056,8 @@ class L10n {
       'Email verified. You are now signed in.': 'メール認証が完了しました。サインインしました。',
       'Verification code resent.': '認証コードを再送しました。',
       'Verify your email': 'メール認証',
-      'Enter the verification code sent by AWS Cognito.':
-          'AWS Cognitoから送信された認証コードを入力してください。',
+      'Enter the verification code sent to your email.':
+          'メールに送信された認証コードを入力してください。',
       'Verification Code': '認証コード',
       'Enter code': 'コードを入力',
       'Resend code': 'コードを再送',
@@ -827,8 +1111,8 @@ class L10n {
       'For work': '仕事用',
       'Songwriting': '作曲',
       'Mix/master practice': 'ミックス/マスタリング練習',
-      'Account data sync target: AWS Cognito user attributes.':
-          'アカウントデータ同期先: AWS Cognito ユーザー属性。',
+      'Account data sync target: Mixroom account profile.':
+          'アカウントデータ同期先: Mixroom アカウントプロファイル。',
     },
   };
 

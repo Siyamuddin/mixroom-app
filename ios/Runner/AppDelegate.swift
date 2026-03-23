@@ -27,18 +27,17 @@ import AVFAudio
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey : Any] = [:]
   ) -> Bool {
-
-    handleIncomingURL(url)
-    return true
+    if handleIncomingURL(url) {
+      return true
+    }
+    return super.application(app, open: url, options: options)
   }
 
-  override func applicationDidBecomeActive(_ application: UIApplication) {
-    super.applicationDidBecomeActive(application)
-  }
-
-  func handleIncomingURL(_ url: URL) {
-    // Only .mixroom files
-    if !url.path.lowercased().hasSuffix(".mixroom") { return }
+  @discardableResult
+  func handleIncomingURL(_ url: URL) -> Bool {
+    // Only .mixroom file imports are handled here. OAuth/AppAuth callbacks
+    // must keep flowing through Flutter/plugin delegates.
+    if !url.path.lowercased().hasSuffix(".mixroom") { return false }
 
     // Security scoped (Files/iCloud providers)
     var didStartAccess = false
@@ -63,6 +62,7 @@ import AVFAudio
       // fallback: try original path (might fail in Flutter if security scoped)
       deliverPath(url.path)
     }
+    return true
   }
 
   private func deliverPath(_ path: String) {

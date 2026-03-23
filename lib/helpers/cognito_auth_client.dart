@@ -1,9 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:http/http.dart' as http;
-import 'package:mixroom/config/cognito_config.dart';
+import 'package:mixroom/config/app_api_config.dart';
 
 class CognitoApiException implements Exception {
   const CognitoApiException({
@@ -46,13 +46,22 @@ class CognitoTokens {
   }
 
   factory CognitoTokens.fromJson(Map<String, dynamic> json) {
+    final expiresAtRaw = (json['expiresAtUtc'] ??
+            json['expires_at_utc'] ??
+            json['expiresAt'] ??
+            json['expires_at'] ??
+            '')
+        .toString();
+    final expiresInRaw = json['expiresIn'] ?? json['expires_in'];
+    final expiresInSec = expiresInRaw is num ? expiresInRaw.toInt() : null;
     return CognitoTokens(
-      accessToken: (json['accessToken'] ?? '').toString(),
-      idToken: (json['idToken'] ?? '').toString(),
-      refreshToken: (json['refreshToken'] ?? '').toString(),
-      expiresAtUtc:
-          DateTime.tryParse((json['expiresAtUtc'] ?? '').toString())?.toUtc() ??
-              DateTime.now().toUtc(),
+      accessToken:
+          (json['accessToken'] ?? json['access_token'] ?? '').toString(),
+      idToken: (json['idToken'] ?? json['id_token'] ?? '').toString(),
+      refreshToken:
+          (json['refreshToken'] ?? json['refresh_token'] ?? '').toString(),
+      expiresAtUtc: DateTime.tryParse(expiresAtRaw)?.toUtc() ??
+          DateTime.now().toUtc().add(Duration(seconds: expiresInSec ?? 3600)),
     );
   }
 }
@@ -63,16 +72,12 @@ class CognitoUserAttributes {
     required this.email,
     required this.emailVerified,
     this.name,
-    this.birthdate,
-    this.mixroomUseCase,
   });
 
   final String sub;
   final String email;
   final bool emailVerified;
   final String? name;
-  final DateTime? birthdate;
-  final String? mixroomUseCase;
 }
 
 class CognitoSession {
@@ -88,95 +93,69 @@ class CognitoSession {
 class CognitoSignUpResult {
   const CognitoSignUpResult({
     required this.userConfirmed,
+    required this.username,
   });
 
   final bool userConfirmed;
+  final String username;
 }
 
 class CognitoAuthClient {
   CognitoAuthClient({
     http.Client? httpClient,
-    FlutterAppAuth? appAuth,
-  })  : _httpClient = httpClient ?? http.Client(),
-        _appAuth = appAuth ?? const FlutterAppAuth();
+  }) : _httpClient = httpClient ?? http.Client();
 
   final http.Client _httpClient;
-  final FlutterAppAuth _appAuth;
 
   Future<CognitoSignUpResult> signUpEmail({
     required String email,
     required String password,
-    required String name,
-    DateTime? birthday,
-    String? useMixroomFor,
+    String? name,
+    String? givenName,
+    String? familyName,
+    String? birthdate,
   }) async {
-    final attrs = <Map<String, String>>[
-      {'Name': 'email', 'Value': email},
-      if (name.trim().isNotEmpty) {'Name': 'name', 'Value': name.trim()},
-      if (birthday != null)
-        {'Name': 'birthdate', 'Value': _formatBirthdate(birthday)},
-      if (CognitoConfig.enableUseCaseCustomAttribute &&
-          (useMixroomFor ?? '').trim().isNotEmpty)
-        {
-          'Name': CognitoConfig.useCaseCustomAttributeName,
-          'Value': useMixroomFor!.trim(),
-        },
-    ];
-
-    Future<Map<String, dynamic>> performSignUp(String username) {
-      return _post(
-        target: 'SignUp',
-        payload: {
-          'ClientId': CognitoConfig.appClientId,
-          'Username': username,
-          'Password': password,
-          'UserAttributes': attrs,
-        },
-      );
-    }
-
-    Map<String, dynamic> result;
-    try {
-      // Works for pools configured with email as the username.
-      result = await performSignUp(email);
-    } on CognitoApiException catch (e) {
-      // For pools configured with email alias, Cognito requires a non-email
-      // username while still allowing email sign-in via alias.
-      final message = e.message.toLowerCase();
-      final needsAliasStyleUsername = e.code == 'InvalidParameterException' &&
-          (message.contains('username cannot be of email format') ||
-              message.contains('cannot be of email format'));
-      if (!needsAliasStyleUsername) rethrow;
-      result = await performSignUp(_generatedAliasUsername(email));
-    }
-
+    final result = await _post(
+      path: '/v1/auth/sign-up',
+      body: {
+        'email': email,
+        'password': password,
+        'name': name,
+        'given_name': givenName,
+        'family_name': familyName,
+        'birthdate': birthdate,
+      },
+    );
+    final user = _asMap(result['user']);
     return CognitoSignUpResult(
-      userConfirmed: result['UserConfirmed'] == true,
+      userConfirmed: false,
+      username: (user['email'] ?? email).toString().trim(),
     );
   }
 
-  Future<void> confirmSignUp({
-    required String email,
+  Future<CognitoSession> confirmSignUp({
+    required String username,
     required String code,
+    String? password,
   }) async {
-    await _post(
-      target: 'ConfirmSignUp',
-      payload: {
-        'ClientId': CognitoConfig.appClientId,
-        'Username': email,
-        'ConfirmationCode': code,
+    final result = await _post(
+      path: '/v1/auth/confirm-sign-up',
+      body: {
+        'email': username,
+        'code': code,
+        if ((password ?? '').trim().isNotEmpty) 'password': password!.trim(),
       },
     );
+    return _sessionFromPayload(result);
   }
 
   Future<void> resendSignUpCode({
-    required String email,
+    required String username,
   }) async {
     await _post(
-      target: 'ResendConfirmationCode',
-      payload: {
-        'ClientId': CognitoConfig.appClientId,
-        'Username': email,
+      path: '/v1/auth/resend-sign-up-code',
+      body: {
+        'email': username,
       },
     );
   }
@@ -186,21 +165,13 @@ class CognitoAuthClient {
     required String password,
   }) async {
     final result = await _post(
-      target: 'InitiateAuth',
-      payload: {
-        'AuthFlow': 'USER_PASSWORD_AUTH',
-        'ClientId': CognitoConfig.appClientId,
-        'AuthParameters': {
-          'USERNAME': email,
-          'PASSWORD': password,
-        },
+      path: '/v1/auth/sign-in',
+      body: {
+        'identifier': email,
+        'password': password,
       },
     );
-
-    final auth = _asMap(result['AuthenticationResult']);
-    final tokens = _tokensFromAuthResult(auth);
-    final user = await getCurrentUser(accessToken: tokens.accessToken);
-    return CognitoSession(tokens: tokens, user: user);
+    return _sessionFromPayload(result);
   }
 
   Future<CognitoSession> refreshSession({
@@ -208,80 +179,23 @@ class CognitoAuthClient {
     required String fallbackIdToken,
   }) async {
     final result = await _post(
-      target: 'InitiateAuth',
-      payload: {
-        'AuthFlow': 'REFRESH_TOKEN_AUTH',
-        'ClientId': CognitoConfig.appClientId,
-        'AuthParameters': {
-          'REFRESH_TOKEN': refreshToken,
-        },
+      path: '/v1/auth/refresh',
+      body: {
+        'refresh_token': refreshToken,
+        if (fallbackIdToken.trim().isNotEmpty)
+          'fallback_id_token': fallbackIdToken.trim(),
       },
     );
-
-    final auth = _asMap(result['AuthenticationResult']);
-    final tokens = _tokensFromAuthResult(
-      auth,
-      fallbackRefreshToken: refreshToken,
-      fallbackIdToken: fallbackIdToken,
-    );
-    final user = await getCurrentUser(accessToken: tokens.accessToken);
-    return CognitoSession(tokens: tokens, user: user);
-  }
-
-  Future<CognitoSession> signInWithSocial({
-    required String identityProviderName,
-  }) async {
-    if (kIsWeb) {
-      throw const CognitoApiException(
-        code: 'UnsupportedPlatform',
-        message: 'Social sign-in is only supported on iOS/Android.',
-      );
-    }
-
-    final redirectUri = switch (defaultTargetPlatform) {
-      TargetPlatform.android => CognitoConfig.androidRedirectUri,
-      TargetPlatform.iOS => CognitoConfig.iosRedirectUri,
-      _ => throw const CognitoApiException(
-          code: 'UnsupportedPlatform',
-          message: 'Social sign-in is only supported on iOS/Android.',
-        ),
-    };
-
-    final response = await _appAuth.authorizeAndExchangeCode(
-      AuthorizationTokenRequest(
-        CognitoConfig.appClientId,
-        redirectUri,
-        scopes: CognitoConfig.scopes,
-        serviceConfiguration: AuthorizationServiceConfiguration(
-          authorizationEndpoint: '${CognitoConfig.domainUrl}/oauth2/authorize',
-          tokenEndpoint: '${CognitoConfig.domainUrl}/oauth2/token',
-        ),
-        additionalParameters: {
-          'identity_provider': identityProviderName,
-        },
-      ),
-    );
-
-    if ((response.accessToken ?? '').isEmpty) {
-      throw const CognitoApiException(
-        code: 'AuthorizationFailed',
-        message: 'Sign-in was cancelled or did not return a token.',
-      );
-    }
-
-    final tokens = _tokensFromAppAuth(response);
-    final user = await getCurrentUser(accessToken: tokens.accessToken);
-    return CognitoSession(tokens: tokens, user: user);
+    return _sessionFromPayload(result);
   }
 
   Future<void> requestPasswordReset({
     required String email,
   }) async {
     await _post(
-      target: 'ForgotPassword',
-      payload: {
-        'ClientId': CognitoConfig.appClientId,
-        'Username': email,
+      path: '/v1/auth/password-reset/request',
+      body: {
+        'email': email,
       },
     );
   }
@@ -292,12 +206,26 @@ class CognitoAuthClient {
     required String newPassword,
   }) async {
     await _post(
-      target: 'ConfirmForgotPassword',
-      payload: {
-        'ClientId': CognitoConfig.appClientId,
-        'Username': email,
-        'ConfirmationCode': code,
-        'Password': newPassword,
+      path: '/v1/auth/password-reset/confirm',
+      body: {
+        'email': email,
+        'code': code,
+        'new_password': newPassword,
+      },
+    );
+  }
+
+  Future<void> changePassword({
+    required String accessToken,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    await _post(
+      path: '/v1/auth/change-password',
+      authToken: accessToken,
+      body: {
+        'current_password': currentPassword,
+        'new_password': newPassword,
       },
     );
   }
@@ -306,39 +234,21 @@ class CognitoAuthClient {
     required String accessToken,
   }) async {
     await _post(
-      target: 'GetUserAttributeVerificationCode',
-      payload: {
-        'AccessToken': accessToken,
-        'AttributeName': 'email',
-      },
+      path: '/v1/auth/resend-email-verification',
+      authToken: accessToken,
+      body: const <String, dynamic>{},
     );
   }
 
   Future<void> updateUserAttributes({
     required String accessToken,
     required String displayName,
-    DateTime? birthday,
-    required String useMixroomFor,
   }) async {
-    final attrs = <Map<String, String>>[
-      if (displayName.trim().isNotEmpty)
-        {'Name': 'name', 'Value': displayName.trim()},
-      if (birthday != null)
-        {'Name': 'birthdate', 'Value': _formatBirthdate(birthday)},
-      if (CognitoConfig.enableUseCaseCustomAttribute &&
-          useMixroomFor.trim().isNotEmpty)
-        {
-          'Name': CognitoConfig.useCaseCustomAttributeName,
-          'Value': useMixroomFor.trim(),
-        },
-    ];
-    if (attrs.isEmpty) return;
-
-    await _post(
-      target: 'UpdateUserAttributes',
-      payload: {
-        'AccessToken': accessToken,
-        'UserAttributes': attrs,
+    await _patch(
+      path: '/v1/users/me',
+      authToken: accessToken,
+      body: {
+        'display_name': displayName,
       },
     );
   }
@@ -347,65 +257,149 @@ class CognitoAuthClient {
     required String accessToken,
   }) async {
     await _post(
-      target: 'GlobalSignOut',
-      payload: {
-        'AccessToken': accessToken,
-      },
+      path: '/v1/auth/sign-out',
+      authToken: accessToken,
+      body: const <String, dynamic>{},
     );
   }
 
   Future<void> deleteUser({
     required String accessToken,
   }) async {
-    await _post(
-      target: 'DeleteUser',
-      payload: {
-        'AccessToken': accessToken,
-      },
+    await _delete(
+      path: '/v1/users/me',
+      authToken: accessToken,
     );
   }
 
   Future<CognitoUserAttributes> getCurrentUser({
     required String accessToken,
   }) async {
-    final result = await _post(
-      target: 'GetUser',
-      payload: {
-        'AccessToken': accessToken,
-      },
+    final result = await _get(
+      path: '/v1/users/me',
+      authToken: accessToken,
     );
-
-    final attrs = _parseAttributes(result['UserAttributes']);
     return CognitoUserAttributes(
-      sub: attrs['sub'] ?? '',
-      email: attrs['email'] ?? '',
-      emailVerified: (attrs['email_verified'] ?? '').toLowerCase() == 'true',
-      name: _nullIfBlank(attrs['name']),
-      birthdate: DateTime.tryParse(attrs['birthdate'] ?? ''),
-      mixroomUseCase:
-          _nullIfBlank(attrs[CognitoConfig.useCaseCustomAttributeName]),
+      sub: (result['user_id'] ?? result['userId'] ?? '').toString().trim(),
+      email: (result['email'] ?? '').toString().trim().toLowerCase(),
+      emailVerified: result['email_verified'] == true ||
+          result['emailVerified'] == true,
+      name: _nullIfBlank((result['display_name'] ?? result['displayName'] ?? '')
+          .toString()
+          .trim()),
+    );
+  }
+
+  Future<Map<String, dynamic>> _get({
+    required String path,
+    required String authToken,
+  }) {
+    return _request(
+      method: 'GET',
+      path: path,
+      authToken: authToken,
     );
   }
 
   Future<Map<String, dynamic>> _post({
-    required String target,
-    required Map<String, dynamic> payload,
-  }) async {
-    final response = await _httpClient.post(
-      Uri.parse(CognitoConfig.cognitoIdpEndpoint),
-      headers: {
-        'Content-Type': 'application/x-amz-json-1.1',
-        'X-Amz-Target': 'AWSCognitoIdentityProviderService.$target',
-      },
-      body: jsonEncode(payload),
+    required String path,
+    required Map<String, dynamic> body,
+    String? authToken,
+  }) {
+    return _request(
+      method: 'POST',
+      path: path,
+      body: body,
+      authToken: authToken,
     );
+  }
 
-    final body = response.body;
-    final decoded = body.isEmpty ? <String, dynamic>{} : jsonDecode(body);
-    final map = decoded is Map<String, dynamic>
-        ? decoded
-        : <String, dynamic>{'message': 'Unexpected response format.'};
+  Future<Map<String, dynamic>> _patch({
+    required String path,
+    required String authToken,
+    required Map<String, dynamic> body,
+  }) {
+    return _request(
+      method: 'PATCH',
+      path: path,
+      body: body,
+      authToken: authToken,
+    );
+  }
 
+  Future<Map<String, dynamic>> _delete({
+    required String path,
+    required String authToken,
+  }) {
+    return _request(
+      method: 'DELETE',
+      path: path,
+      authToken: authToken,
+    );
+  }
+
+  Future<Map<String, dynamic>> _request({
+    required String method,
+    required String path,
+    Map<String, dynamic>? body,
+    String? authToken,
+  }) async {
+    if (!AppApiConfig.hasApiBaseUrl) {
+      throw const CognitoApiException(
+        code: 'BackendNotConfigured',
+        message: 'APP_API_BASE_URL is not configured for authentication.',
+      );
+    }
+
+    final uri = _uri(path);
+    final headers = <String, String>{
+      'Accept': 'application/json',
+      if (body != null) 'Content-Type': 'application/json',
+      if ((authToken ?? '').trim().isNotEmpty)
+        'Authorization': 'Bearer ${authToken!.trim()}',
+    };
+
+    late final http.Response response;
+    try {
+      switch (method) {
+        case 'GET':
+          response = await _httpClient
+              .get(uri, headers: headers)
+              .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds));
+          break;
+        case 'PATCH':
+          response = await _httpClient
+              .patch(uri, headers: headers, body: jsonEncode(body ?? {}))
+              .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds));
+          break;
+        case 'DELETE':
+          response = await _httpClient
+              .delete(uri, headers: headers)
+              .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds));
+          break;
+        default:
+          response = await _httpClient
+              .post(uri, headers: headers, body: jsonEncode(body ?? {}))
+              .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds));
+      }
+    } on TimeoutException {
+      throw const CognitoApiException(
+        code: 'NetworkError',
+        message: 'Network error. Please check your connection and try again.',
+      );
+    } on SocketException {
+      throw const CognitoApiException(
+        code: 'NetworkError',
+        message: 'Network error. Please check your connection and try again.',
+      );
+    } on http.ClientException {
+      throw const CognitoApiException(
+        code: 'NetworkError',
+        message: 'Network error. Please check your connection and try again.',
+      );
+    }
+
+    final map = _decodeBody(response.body);
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return map;
     }
@@ -415,9 +409,19 @@ class CognitoAuthClient {
     throw CognitoApiException(code: code, message: message);
   }
 
+  Map<String, dynamic> _decodeBody(String body) {
+    if (body.trim().isEmpty) return <String, dynamic>{};
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, dynamic>) return decoded;
+    if (decoded is Map) {
+      return decoded.map((key, value) => MapEntry(key.toString(), value));
+    }
+    return <String, dynamic>{};
+  }
+
   String _extractErrorCode(Map<String, dynamic> payload) {
-    final raw = (payload['__type'] ?? payload['code'] ?? payload['Code'] ?? '')
-        .toString();
+    final raw =
+        (payload['code'] ?? payload['Code'] ?? payload['__type'] ?? '').toString();
     if (raw.isEmpty) return 'UnknownException';
     final hashIndex = raw.lastIndexOf('#');
     return hashIndex >= 0 ? raw.substring(hashIndex + 1) : raw;
@@ -427,58 +431,28 @@ class CognitoAuthClient {
     Map<String, dynamic> payload, {
     required String fallbackCode,
   }) {
-    final message = (payload['message'] ?? payload['Message'] ?? '')
-        .toString()
-        .trim();
+    final message =
+        (payload['error'] ?? payload['message'] ?? payload['Message'] ?? '')
+            .toString()
+            .trim();
     if (message.isNotEmpty) return message;
     return fallbackCode;
   }
 
-  CognitoTokens _tokensFromAuthResult(
-    Map<String, dynamic> authResult, {
-    String? fallbackRefreshToken,
-    String? fallbackIdToken,
-  }) {
-    final accessToken = (authResult['AccessToken'] ?? '').toString();
-    if (accessToken.isEmpty) {
-      throw const CognitoApiException(
-        code: 'TokenMissing',
-        message: 'Authentication succeeded but access token was missing.',
-      );
-    }
-
-    final idToken = (authResult['IdToken'] ?? fallbackIdToken ?? '').toString();
-    final refreshToken =
-        (authResult['RefreshToken'] ?? fallbackRefreshToken ?? '').toString();
-    final expiresInSec = (authResult['ExpiresIn'] as num?)?.toInt() ?? 3600;
-    final expiresAtUtc =
-        DateTime.now().toUtc().add(Duration(seconds: expiresInSec));
-
-    return CognitoTokens(
-      accessToken: accessToken,
-      idToken: idToken,
-      refreshToken: refreshToken,
-      expiresAtUtc: expiresAtUtc,
+  CognitoSession _sessionFromPayload(Map<String, dynamic> payload) {
+    final tokens = CognitoTokens.fromJson(_asMap(payload['tokens']));
+    final userPayload = _asMap(payload['user']);
+    final user = CognitoUserAttributes(
+      sub: (userPayload['userId'] ?? userPayload['user_id'] ?? '').toString(),
+      email: (userPayload['email'] ?? '').toString().trim().toLowerCase(),
+      emailVerified: userPayload['emailVerified'] == true ||
+          userPayload['email_verified'] == true,
+      name: _nullIfBlank(
+          (userPayload['displayName'] ?? userPayload['display_name'] ?? '')
+              .toString()
+              .trim()),
     );
-  }
-
-  CognitoTokens _tokensFromAppAuth(TokenResponse response) {
-    final accessToken = (response.accessToken ?? '').trim();
-    if (accessToken.isEmpty) {
-      throw const CognitoApiException(
-        code: 'TokenMissing',
-        message: 'Authentication succeeded but access token was missing.',
-      );
-    }
-
-    return CognitoTokens(
-      accessToken: accessToken,
-      idToken: (response.idToken ?? '').trim(),
-      refreshToken: (response.refreshToken ?? '').trim(),
-      expiresAtUtc:
-          response.accessTokenExpirationDateTime?.toUtc() ??
-              DateTime.now().toUtc().add(const Duration(hours: 1)),
-    );
+    return CognitoSession(tokens: tokens, user: user);
   }
 
   Map<String, dynamic> _asMap(Object? value) {
@@ -491,36 +465,14 @@ class CognitoAuthClient {
     return <String, dynamic>{};
   }
 
-  Map<String, String> _parseAttributes(Object? value) {
-    if (value is! List) return <String, String>{};
-
-    final out = <String, String>{};
-    for (final item in value) {
-      if (item is! Map) continue;
-      final name = item['Name']?.toString() ?? '';
-      if (name.isEmpty) continue;
-      out[name] = item['Value']?.toString() ?? '';
-    }
-    return out;
-  }
-
-  String _formatBirthdate(DateTime date) {
-    final d = date.toUtc();
-    final month = d.month.toString().padLeft(2, '0');
-    final day = d.day.toString().padLeft(2, '0');
-    return '${d.year}-$month-$day';
-  }
-
   String? _nullIfBlank(String? value) {
     final safe = value?.trim() ?? '';
     return safe.isEmpty ? null : safe;
   }
 
-  String _generatedAliasUsername(String email) {
-    final local = email.split('@').first;
-    final seed = local.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '');
-    final prefix = seed.isEmpty ? 'mixroom' : seed.toLowerCase();
-    final ts = DateTime.now().millisecondsSinceEpoch;
-    return '${prefix}_$ts';
+  Uri _uri(String path) {
+    final base = AppApiConfig.apiBaseUrl.trim().replaceFirst(RegExp(r'/$'), '');
+    final normalizedPath = path.startsWith('/') ? path : '/$path';
+    return Uri.parse('$base$normalizedPath');
   }
 }

@@ -32,6 +32,10 @@ class VideoProjectManager {
       File(p.join(dir.path, 'project.json'));
   static File _stateJsonFile(Directory dir) =>
       File(p.join(dir.path, 'sequencer_state.json'));
+  static Directory _mediaDir(Directory dir) =>
+      Directory(p.join(dir.path, 'media'));
+  static Directory _thumbDir(Directory dir) =>
+      Directory(p.join(dir.path, '.thumbnails'));
 
   static String _sanitizeFolderName(String name) {
     final cleaned = name
@@ -40,6 +44,16 @@ class VideoProjectManager {
         .replaceAll(RegExp(r'\s+'), ' ');
     final safe = cleaned.isEmpty ? 'Untitled Video Project' : cleaned;
     return safe.length > 70 ? safe.substring(0, 70).trim() : safe;
+  }
+
+  static String _sanitizeFileStem(String name) {
+    final cleaned = name
+        .trim()
+        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'[. ]+$'), '');
+    final safe = cleaned.isEmpty ? 'asset' : cleaned;
+    return safe.length > 80 ? safe.substring(0, 80).trim() : safe;
   }
 
   static Future<Directory> _nextAvailableProjectDirName(
@@ -69,7 +83,8 @@ class VideoProjectManager {
       if (!await file.exists()) continue;
 
       try {
-        final json = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        final json =
+            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
         metas.add(
           VideoProjectMeta(
             dir: dir,
@@ -118,6 +133,8 @@ class VideoProjectManager {
       'chatMessages': <Map<String, dynamic>>[],
     };
     await _stateJsonFile(dir).writeAsString(jsonEncode(initialState));
+    await _mediaDir(dir).create(recursive: true);
+    await _thumbDir(dir).create(recursive: true);
     return dir;
   }
 
@@ -126,7 +143,8 @@ class VideoProjectManager {
     if (!await file.exists()) return;
 
     try {
-      final json = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final json =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
       json['lastOpenedAt'] = DateTime.now().millisecondsSinceEpoch;
       await file.writeAsString(jsonEncode(json));
     } catch (_) {}
@@ -183,7 +201,8 @@ class VideoProjectManager {
     }
 
     final jsonFileNew = _projectJsonFile(finalDir);
-    final json = jsonDecode(await jsonFileNew.readAsString()) as Map<String, dynamic>;
+    final json =
+        jsonDecode(await jsonFileNew.readAsString()) as Map<String, dynamic>;
     json['name'] = p.basename(finalDir.path);
     await jsonFileNew.writeAsString(jsonEncode(json));
     return finalDir;
@@ -211,5 +230,98 @@ class VideoProjectManager {
     };
     await file.writeAsString(jsonEncode(merged));
   }
-}
 
+  static Future<Map<String, dynamic>> readProjectDocument(Directory dir) async {
+    final file = _projectJsonFile(dir);
+    if (!await file.exists()) {
+      return <String, dynamic>{};
+    }
+    try {
+      return jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    } catch (_) {
+      return <String, dynamic>{};
+    }
+  }
+
+  static Future<String> ensureProjectId(Directory dir) async {
+    final file = _projectJsonFile(dir);
+    if (!await file.exists()) {
+      final generated = DateTime.now().millisecondsSinceEpoch.toString();
+      return generated;
+    }
+
+    try {
+      final json =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final existing = (json['projectId'] as String?)?.trim() ?? '';
+      if (existing.isNotEmpty) return existing;
+      final generated = DateTime.now().millisecondsSinceEpoch.toString();
+      json['projectId'] = generated;
+      await file.writeAsString(jsonEncode(json));
+      return generated;
+    } catch (_) {
+      return DateTime.now().millisecondsSinceEpoch.toString();
+    }
+  }
+
+  static Future<String> importMediaIntoProject(
+    Directory projectDir,
+    String sourcePath, {
+    String? preferredName,
+  }) async {
+    final source = File(sourcePath);
+    if (!await source.exists()) {
+      throw FileSystemException('Source file missing', sourcePath);
+    }
+
+    final sourceAbs = p.normalize(source.absolute.path);
+    final projectAbs = p.normalize(projectDir.absolute.path);
+    if (sourceAbs == projectAbs || p.isWithin(projectAbs, sourceAbs)) {
+      return sourceAbs;
+    }
+
+    final mediaDir = _mediaDir(projectDir);
+    if (!await mediaDir.exists()) {
+      await mediaDir.create(recursive: true);
+    }
+
+    final ext = p.extension(sourceAbs);
+    final stem = _sanitizeFileStem(
+      preferredName?.trim().isNotEmpty == true
+          ? preferredName!
+          : p.basenameWithoutExtension(sourceAbs),
+    );
+
+    var candidateName = '$stem$ext';
+    var candidate = File(p.join(mediaDir.path, candidateName));
+    var suffix = 1;
+    while (await candidate.exists()) {
+      candidateName = '$stem #$suffix$ext';
+      candidate = File(p.join(mediaDir.path, candidateName));
+      suffix += 1;
+    }
+
+    await candidate.parent.create(recursive: true);
+    await source.copy(candidate.path);
+    return candidate.path;
+  }
+
+  static Future<String> nextThumbnailPath(
+    Directory projectDir, {
+    required String stem,
+  }) async {
+    final thumbDir = _thumbDir(projectDir);
+    if (!await thumbDir.exists()) {
+      await thumbDir.create(recursive: true);
+    }
+
+    final safeStem = _sanitizeFileStem(stem);
+    var candidate = File(p.join(thumbDir.path, '$safeStem.jpg'));
+    var suffix = 1;
+    while (await candidate.exists()) {
+      candidate = File(p.join(thumbDir.path, '$safeStem #$suffix.jpg'));
+      suffix += 1;
+    }
+    return candidate.path;
+  }
+}

@@ -5,13 +5,17 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:mixroom/core/analytics/analytics_events.dart';
+import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
+import 'package:mixroom/l10n/l10n.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/helpers/project_manager.dart';
-import 'package:mixroom/helpers/subscription_service.dart';
-import 'package:mixroom/models/subscription_models.dart';
+import 'package:mixroom/helpers/entitlement_service.dart';
+import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/screens/audio_editor.dart';
+import 'package:mixroom/widgets/app_responsive_body.dart';
 import 'package:provider/provider.dart';
 
 class _NoSwipeMaterialPageRoute<T> extends MaterialPageRoute<T> {
@@ -31,10 +35,35 @@ class ProjectsScreen extends StatefulWidget {
 const double kActionCardHeight = 72;
 
 class _ProjectsScreenState extends State<ProjectsScreen> {
+  static const Key _projectsScreenKey = Key('projects_screen');
+  static const Key _newProjectCardKey = Key('projects_new_project_card');
+  static const Key _projectsListKey = Key('projects_list');
+  static const Key _renameDialogKey = ValueKey('projects_rename_dialog');
+  static const Key _renameFieldKey = ValueKey('projects_rename_field');
+  static const Key _renameCancelKey = ValueKey('projects_rename_cancel');
+  static const Key _renameSaveKey = ValueKey('projects_rename_save');
+  static const Key _deleteDialogKey = ValueKey('projects_delete_dialog');
+  static const Key _deleteCancelKey = ValueKey('projects_delete_cancel');
+  static const Key _deleteConfirmKey = ValueKey('projects_delete_confirm');
   List<ProjectMeta> _projects = [];
   bool _loading = true;
   bool _filePickerInFlight = false;
   StreamSubscription<String>? _importSub;
+  String? _loadError;
+
+  String _projectActionKeyToken(String name) =>
+      Uri.encodeComponent(name.trim());
+
+  String _friendlyLoadError(Object error) {
+    final raw = error.toString().toLowerCase();
+    if (raw.contains('path_provider') ||
+        raw.contains('getapplicationdocumentspath') ||
+        raw.contains('shared_preferences') ||
+        raw.contains('channel-error')) {
+      return 'Projects are temporarily unavailable on this device. Please try again in a moment.';
+    }
+    return 'We couldn\'t load your projects right now. Please try again.';
+  }
 
   @override
   void initState() {
@@ -64,9 +93,20 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _loading = true);
-    _projects = await ProjectManager.listProjects();
-    setState(() => _loading = false);
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+    try {
+      _projects = await ProjectManager.listProjects();
+    } catch (e) {
+      _projects = <ProjectMeta>[];
+      _loadError = _friendlyLoadError(e);
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
   }
 
   Future<void> _openProject(
@@ -79,7 +119,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     // 1. Show loading spinner immediately
     showLoadingDialog(
       context,
-      message: initialAction == null ? 'Opening project…' : 'Preparing export…',
+      message: L10n.translate(
+        context,
+        initialAction == null ? 'Opening project…' : 'Preparing export…',
+      ),
     );
 
     // 2. Let UI render the dialog
@@ -113,13 +156,29 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final resolvedMode = _resolvedEditorMode();
     final isProEntitled = _isProEntitled();
 
-    showLoadingDialog(context, message: 'Creating project…');
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Creating project…'),
+    );
 
     // TODO: arbitrary delay to prevent bad UX from (probably) unavoidable blocking UI lag when going to DAW screen
     await Future.delayed(const Duration(milliseconds: 300));
 
-    final dir =
-        await ProjectManager.createNewProjectDir(name: "Untitled Project");
+    final dir = await ProjectManager.createNewProjectDir(
+      name: L10n.translate(context, 'Untitled Project'),
+    );
+    final projectId = await ProjectManager.ensureProjectId(dir);
+    unawaited(
+      AnalyticsService.instance.track(
+        AnalyticsEvents.projectCreated(
+          projectId: projectId,
+          initialTrackCount: 0,
+        ),
+      ),
+    );
+    await AnalyticsService.instance.trackFirstProjectCreated(
+      projectId: projectId,
+    );
 
     await Navigator.push(
       context,
@@ -171,101 +230,101 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _renameProject(ProjectMeta meta) async {
     final controller = TextEditingController(text: meta.name);
-    final focusNode = FocusNode();
-    bool focusScheduled = false;
     final res = await showDialog<String>(
       context: context,
       builder: (ctx) {
-        if (!focusScheduled) {
-          focusScheduled = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!focusNode.canRequestFocus) return;
-            focusNode.requestFocus();
-          });
-        }
         final theme = Theme.of(ctx);
         final cs = theme.colorScheme;
         return MediaQuery.removeViewInsets(
           context: ctx,
           removeBottom: true,
           child: Dialog(
+            key: _renameDialogKey,
             alignment: Alignment.topCenter,
             insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.drive_file_rename_outline, color: cs.primary),
-                      const SizedBox(width: 8),
-                      const Text(
-                        "Rename Project",
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.06),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.12)),
-                    ),
-                    child: TextField(
-                      controller: controller,
-                      focusNode: focusNode,
-                      autofocus: false,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) =>
-                          Navigator.pop(ctx, controller.text.trim()),
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: "Project name",
-                        hintStyle: const TextStyle(color: Colors.white54),
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 12),
-                        suffixIconColor: cs.primary,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text("Cancel"),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: () =>
-                            Navigator.pop(ctx, controller.text.trim()),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: cs.primary,
-                          foregroundColor: cs.onPrimary,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.drive_file_rename_outline,
+                            color: cs.primary),
+                        const SizedBox(width: 8),
+                        Text(
+                          L10n.translate(ctx, 'Rename Project'),
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700),
                         ),
-                        child: const Text("Save"),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(12),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.12)),
                       ),
-                    ],
-                  ),
-                ],
+                      child: TextField(
+                        key: _renameFieldKey,
+                        controller: controller,
+                        autofocus: true,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) =>
+                            Navigator.pop(ctx, controller.text.trim()),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: L10n.translate(ctx, 'Project name'),
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 12),
+                          suffixIconColor: cs.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        TextButton(
+                          key: _renameCancelKey,
+                          onPressed: () => Navigator.pop(ctx),
+                          child: Text(L10n.translate(ctx, 'Cancel')),
+                        ),
+                        ElevatedButton(
+                          key: _renameSaveKey,
+                          onPressed: () =>
+                              Navigator.pop(ctx, controller.text.trim()),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: cs.primary,
+                            foregroundColor: cs.onPrimary,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: Text(L10n.translate(ctx, 'Save')),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         );
       },
     );
-    controller.dispose();
-    focusNode.dispose();
+    Future<void>.delayed(const Duration(milliseconds: 400), () {
+      controller.dispose();
+    });
 
     if (res == null) return;
     final newName = res.trim();
@@ -278,14 +337,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (!mounted) return;
       showAppSnackBar(
         context,
-        "Project renamed",
+        L10n.translate(context, 'Project renamed'),
         tone: AppPopupTone.success,
       );
     } catch (e) {
       if (!mounted) return;
       showAppSnackBar(
         context,
-        "Rename failed: $e",
+        '${L10n.translate(context, 'Rename failed')}: $e',
         tone: AppPopupTone.error,
       );
     }
@@ -295,18 +354,22 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        key: _deleteDialogKey,
         backgroundColor: const Color(0xFF0C1A32),
-        title: const Text("Delete project?",
-            style: TextStyle(color: Colors.white)),
-        content: Text("“${meta.name}” will be permanently deleted.",
+        title: Text(L10n.translate(context, 'Delete project?'),
+            style: const TextStyle(color: Colors.white)),
+        content: Text(
+            '“${meta.name}” ${L10n.translate(context, 'will be permanently deleted.')}',
             style: const TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
+              key: _deleteCancelKey,
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Cancel")),
+              child: Text(L10n.translate(context, 'Cancel'))),
           ElevatedButton(
+              key: _deleteConfirmKey,
               onPressed: () => Navigator.pop(context, true),
-              child: const Text("Delete")),
+              child: Text(L10n.translate(context, 'Delete'))),
         ],
       ),
     );
@@ -318,7 +381,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _shareProject(ProjectMeta meta) async {
     try {
-      showLoadingDialog(context, message: 'Exporting…');
+      showLoadingDialog(
+        context,
+        message: L10n.translate(context, 'Exporting…'),
+      );
       await Future.delayed(const Duration(milliseconds: 200));
 
       final bundlePath = await ProjectBundle.exportMixroomBundle(
@@ -339,7 +405,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
       showAppSnackBar(
         context,
-        'Export failed: $e',
+        '${L10n.translate(context, 'Export failed')}: $e',
         tone: AppPopupTone.error,
       );
     }
@@ -368,12 +434,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (!path.toLowerCase().endsWith('.mixroom')) {
         showAppSnackBar(
           context,
-          'Please select a .mixroom project file',
+          L10n.translate(context, 'Please select a .mixroom project file'),
           tone: AppPopupTone.warning,
         );
         return;
       }
-      showLoadingDialog(context, message: 'Importing…');
+      showLoadingDialog(
+        context,
+        message: L10n.translate(context, 'Importing…'),
+      );
       await Future.delayed(const Duration(milliseconds: 200));
 
       // If your engine expects WAV only, use convertFlacToWav48k.
@@ -404,7 +473,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
       showAppSnackBar(
         context,
-        'Import failed: $e',
+        '${L10n.translate(context, 'Import failed')}: $e',
         tone: AppPopupTone.error,
       );
     }
@@ -417,10 +486,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   bool _isProEntitled() {
     try {
       return context
-          .read<SubscriptionService>()
+          .read<EntitlementService>()
           .canUseCapability(SubscriptionCapability.proEditor);
     } catch (_) {
-      return true;
+      return false;
     }
   }
 
@@ -428,7 +497,157 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return DateFormat('MMM d, h:mm a').format(dateTime.toLocal());
   }
 
+  Future<void> _handleCompactProjectMenuAction(
+    String action,
+    ProjectMeta project,
+  ) async {
+    switch (action) {
+      case 'rename':
+        await _renameProject(project);
+        return;
+      case 'delete':
+        await _deleteProject(project);
+        return;
+      case 'share_mixroom':
+        await _shareProject(project);
+        return;
+      case 'export_wav':
+        await _startProjectExport(project, AudioEditorInitialAction.exportWav);
+        return;
+      case 'export_mp3':
+        await _startProjectExport(project, AudioEditorInitialAction.exportMp3);
+        return;
+    }
+  }
+
+  Widget _buildProjectTrailingActions({
+    required BuildContext context,
+    required ProjectMeta project,
+    required String keyToken,
+    required bool compact,
+  }) {
+    if (compact) {
+      return PopupMenuButton<String>(
+        key: ValueKey('project_actions_$keyToken'),
+        tooltip: L10n.translate(context, 'Project actions'),
+        icon: const Icon(
+          Icons.more_horiz_rounded,
+          color: Colors.white70,
+        ),
+        onSelected: (value) => _handleCompactProjectMenuAction(value, project),
+        itemBuilder: (_) => [
+          PopupMenuItem(
+            value: 'rename',
+            child: Text(L10n.translate(context, 'Rename')),
+          ),
+          PopupMenuItem(
+            value: 'delete',
+            child: Text(L10n.translate(context, 'Delete')),
+          ),
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            value: 'share_mixroom',
+            child: Text(L10n.translate(context, 'Share (.mixroom)')),
+          ),
+          PopupMenuItem(
+            value: 'export_wav',
+            child: Text(L10n.translate(context, 'Export WAV')),
+          ),
+          PopupMenuItem(
+            value: 'export_mp3',
+            child: Text(L10n.translate(context, 'Export MP3')),
+          ),
+        ],
+      );
+    }
+
+    return SizedBox(
+      width: 108,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          PopupMenuButton<String>(
+            key: ValueKey('project_edit_$keyToken'),
+            tooltip: L10n.translate(context, 'Edit'),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            constraints: const BoxConstraints(minWidth: 40),
+            icon: const Icon(
+              Icons.edit_outlined,
+              size: 23,
+              color: Colors.white70,
+            ),
+            iconSize: 23,
+            onSelected: (value) async {
+              if (value == 'rename') {
+                await _renameProject(project);
+              }
+              if (value == 'delete') {
+                await _deleteProject(project);
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'rename',
+                child: Text(L10n.translate(context, 'Rename')),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Text(L10n.translate(context, 'Delete')),
+              ),
+            ],
+          ),
+          const SizedBox(width: 8),
+          PopupMenuButton<String>(
+            key: ValueKey('project_share_$keyToken'),
+            tooltip: L10n.translate(context, 'Share / Export'),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            constraints: const BoxConstraints(minWidth: 40),
+            icon: const Icon(
+              Icons.ios_share_rounded,
+              size: 23,
+              color: Colors.white70,
+            ),
+            iconSize: 23,
+            onSelected: (value) async {
+              if (value == 'share_mixroom') {
+                await _shareProject(project);
+              }
+              if (value == 'export_wav') {
+                await _startProjectExport(
+                  project,
+                  AudioEditorInitialAction.exportWav,
+                );
+              }
+              if (value == 'export_mp3') {
+                await _startProjectExport(
+                  project,
+                  AudioEditorInitialAction.exportMp3,
+                );
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'share_mixroom',
+                child: Text(L10n.translate(context, 'Share (.mixroom)')),
+              ),
+              PopupMenuItem(
+                value: 'export_wav',
+                child: Text(L10n.translate(context, 'Export WAV')),
+              ),
+              PopupMenuItem(
+                value: 'export_mp3',
+                child: Text(L10n.translate(context, 'Export MP3')),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _compactActionCard({
+    Key? key,
     required IconData icon,
     required String title,
     String? subtitle,
@@ -436,6 +655,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }) {
     final isCompactLabel = subtitle == null;
     return _GlassCard(
+      key: key,
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
@@ -492,9 +712,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   void _showProjectLimitDialog() {
     showAppMessageDialog(
       context: context,
-      title: "Project limit reached",
-      message: "Delete a project to create or import a new one.",
-      buttonLabel: "OK",
+      title: L10n.translate(context, 'Project limit reached'),
+      message: L10n.translate(
+        context,
+        'Delete a project to create or import a new one.',
+      ),
+      buttonLabel: L10n.translate(context, 'OK'),
       icon: Icons.folder_off_outlined,
     );
   }
@@ -504,6 +727,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final canCreate = _projects.length < ProjectManager.maxProjects;
 
     return Scaffold(
+      key: _projectsScreenKey,
       resizeToAvoidBottomInset: false,
       // appBar: AppBar(
       //   title: const Text("Projects"),
@@ -522,195 +746,212 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         centerTitle: true,
       ),
 
-      body: Padding(
+      body: AppResponsiveBody(
+        maxWidth: 980,
+        expandToHeight: true,
         padding: const EdgeInsets.all(16),
         child: _loading
             ? const Center(child: CircularProgressIndicator())
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: 12),
-                  Row(
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  final useCompactProjectMenus = constraints.maxWidth < 520;
+
+                  final newProjectCard = SizedBox(
+                    height: kActionCardHeight,
+                    child: _compactActionCard(
+                      key: _newProjectCardKey,
+                      icon: Icons.add_circle_outline,
+                      title: L10n.translate(
+                        context,
+                        canCreate ? 'New Project' : 'Project limit reached',
+                      ),
+                      subtitle: L10n.translate(
+                        context,
+                        canCreate
+                            ? 'Create a new project'
+                            : 'Delete one to continue',
+                      ),
+                      onTap: () {
+                        if (!canCreate) {
+                          _showProjectLimitDialog();
+                          return;
+                        }
+                        _newProject();
+                      },
+                    ),
+                  );
+
+                  final importCard = SizedBox(
+                    height: kActionCardHeight,
+                    child: _compactActionCard(
+                      icon: Icons.file_download_outlined,
+                      title: L10n.translate(context, 'Import'),
+                      subtitle: null,
+                      onTap: () async {
+                        if (!canCreate) {
+                          _showProjectLimitDialog();
+                          return;
+                        }
+
+                        final res = await _pickFilesSafely(
+                          type: FileType.any,
+                          withData: false,
+                        );
+                        if (res == null || res.files.isEmpty) return;
+
+                        final path = res.files.single.path;
+                        if (path == null) return;
+                        _importProjectFromFile(path);
+                      },
+                    ),
+                  );
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        flex: 2,
-                        child: SizedBox(
-                          height: kActionCardHeight,
-                          child: _compactActionCard(
-                            icon: Icons.add_circle_outline,
-                            title: canCreate
-                                ? "New Project"
-                                : "Project limit reached",
-                            subtitle: canCreate
-                                ? "Create a new project"
-                                : "Delete one to continue",
-                            onTap: () {
-                              if (!canCreate) {
-                                _showProjectLimitDialog();
-                                return;
-                              }
-                              _newProject();
-                            },
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(flex: 2, child: newProjectCard),
+                          const SizedBox(width: 10),
+                          Expanded(child: importCard),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(
+                          L10n.translate(
+                              context, 'Projects are saved locally.'),
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.62),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(height: 10),
                       Expanded(
-                        flex: 1,
-                        child: SizedBox(
-                          height: kActionCardHeight,
-                          child: _compactActionCard(
-                            icon: Icons.file_download_outlined,
-                            title: "Import",
-                            subtitle: null,
-                            onTap: () async {
-                              if (!canCreate) {
-                                _showProjectLimitDialog();
-                                return;
-                              }
-
-                              final res = await _pickFilesSafely(
-                                type: FileType.any,
-                                // allowedExtensions: ['mixroom', 'zip'], // allow zip just in case
-                                withData: false,
-                              );
-                              if (res == null || res.files.isEmpty) return;
-
-                              final path = res.files.single.path;
-                              if (path == null) return;
-                              _importProjectFromFile(path);
-                            },
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: _projects.isEmpty
-                        ? const Center(
-                            child: Text("No saved projects yet.",
-                                style: TextStyle(color: Colors.white70)),
-                          )
-                        : ListView.separated(
-                            itemCount: _projects.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 10),
-                            itemBuilder: (_, i) {
-                              final p = _projects[i];
-                              return _GlassCard(
-                                child: ListTile(
-                                  contentPadding:
-                                      const EdgeInsetsDirectional.only(
-                                    start: 10,
-                                    end: 8,
+                        child: (_loadError ?? '').trim().isNotEmpty
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 24,
                                   ),
-                                  horizontalTitleGap: 10,
-                                  minLeadingWidth: 30,
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(18)),
-                                  leading: const Icon(Icons.folder_open_rounded,
-                                      color: Colors.white),
-                                  title: Text(
-                                    p.name,
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w600),
-                                  ),
-                                  subtitle: Text(
-                                    "Last opened: ${_formatLastOpened(p.lastOpenedAt)}",
-                                    maxLines: 1,
-                                    softWrap: false,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        color: Colors.white60, fontSize: 11),
-                                  ),
-                                  onTap: () => _openProject(p.dir),
-                                  trailing: SizedBox(
-                                    width: 108,
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        PopupMenuButton<String>(
-                                          tooltip: "Edit",
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 4),
-                                          constraints: const BoxConstraints(
-                                            minWidth: 40,
-                                          ),
-                                          icon: const Icon(Icons.edit_outlined,
-                                              size: 23, color: Colors.white70),
-                                          iconSize: 23,
-                                          onSelected: (v) async {
-                                            if (v == "rename") {
-                                              await _renameProject(p);
-                                            }
-                                            if (v == "delete") {
-                                              await _deleteProject(p);
-                                            }
-                                          },
-                                          itemBuilder: (_) => const [
-                                            PopupMenuItem(
-                                                value: "rename",
-                                                child: Text("Rename")),
-                                            PopupMenuItem(
-                                                value: "delete",
-                                                child: Text("Delete")),
-                                          ],
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.folder_off_rounded,
+                                        color: Colors.white54,
+                                        size: 36,
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        L10n.translate(
+                                          context,
+                                          'Could not load projects.',
                                         ),
-                                        const SizedBox(width: 8),
-                                        PopupMenuButton<String>(
-                                          tooltip: "Share / Export",
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 4),
-                                          constraints: const BoxConstraints(
-                                            minWidth: 40,
-                                          ),
-                                          icon: const Icon(Icons.ios_share_rounded,
-                                              size: 23, color: Colors.white70),
-                                          iconSize: 23,
-                                          onSelected: (v) async {
-                                            if (v == "share_mixroom") {
-                                              await _shareProject(p);
-                                            }
-                                            if (v == "export_wav") {
-                                              await _startProjectExport(
-                                                  p,
-                                                  AudioEditorInitialAction
-                                                      .exportWav);
-                                            }
-                                            if (v == "export_mp3") {
-                                              await _startProjectExport(
-                                                  p,
-                                                  AudioEditorInitialAction
-                                                      .exportMp3);
-                                            }
-                                          },
-                                          itemBuilder: (_) => const [
-                                            PopupMenuItem(
-                                              value: "share_mixroom",
-                                              child: Text("Share (.mixroom)"),
-                                            ),
-                                            PopupMenuItem(
-                                              value: "export_wav",
-                                              child: Text("Export WAV"),
-                                            ),
-                                            PopupMenuItem(
-                                              value: "export_mp3",
-                                              child: Text("Export MP3"),
-                                            ),
-                                          ],
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
                                         ),
-                                      ],
-                                    ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        L10n.translate(context, _loadError!),
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 14),
+                                      ElevatedButton(
+                                        onPressed: _refresh,
+                                        child: Text(
+                                          L10n.translate(context, 'Retry'),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
+                              )
+                            : _projects.isEmpty
+                                ? Center(
+                                    child: Text(
+                                      L10n.translate(
+                                        context,
+                                        'No saved projects yet.',
+                                      ),
+                                      style: const TextStyle(
+                                          color: Colors.white70),
+                                    ),
+                                  )
+                                : ListView.separated(
+                                    key: _projectsListKey,
+                                    itemCount: _projects.length,
+                                    separatorBuilder: (_, __) =>
+                                        const SizedBox(height: 10),
+                                    itemBuilder: (_, i) {
+                                      final project = _projects[i];
+                                      final keyToken =
+                                          _projectActionKeyToken(project.name);
+                                      return _GlassCard(
+                                        child: ListTile(
+                                          key: ValueKey(
+                                            'project_tile_$keyToken',
+                                          ),
+                                          contentPadding:
+                                              const EdgeInsetsDirectional.only(
+                                            start: 10,
+                                            end: 8,
+                                          ),
+                                          horizontalTitleGap: 10,
+                                          minLeadingWidth: 30,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(18),
+                                          ),
+                                          leading: const Icon(
+                                            Icons.folder_open_rounded,
+                                            color: Colors.white,
+                                          ),
+                                          title: Text(
+                                            project.name,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            '${L10n.translate(context, 'Last opened')}: ${_formatLastOpened(project.lastOpenedAt)}',
+                                            maxLines: 1,
+                                            softWrap: false,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white60,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                          onTap: () =>
+                                              _openProject(project.dir),
+                                          trailing:
+                                              _buildProjectTrailingActions(
+                                            context: context,
+                                            project: project,
+                                            keyToken: keyToken,
+                                            compact: useCompactProjectMenus,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                      ),
+                    ],
+                  );
+                },
               ),
       ),
     );
@@ -719,7 +960,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
 class _GlassCard extends StatelessWidget {
   final Widget child;
-  const _GlassCard({required this.child});
+  const _GlassCard({
+    super.key,
+    required this.child,
+  });
 
   @override
   Widget build(BuildContext context) {

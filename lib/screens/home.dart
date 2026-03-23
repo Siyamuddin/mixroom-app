@@ -1,10 +1,9 @@
 import 'dart:ui';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_neumorphic_plus/flutter_neumorphic.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
-import 'package:mixroom/screens/video_projects.dart';
+import 'package:mixroom/screens/video_projects_placeholder.dart';
 import 'package:provider/provider.dart';
 import 'package:mixroom/widgets/main_drawer.dart';
 
@@ -20,7 +19,8 @@ class _HomeScreenState extends State<HomeScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color.fromARGB(255, 36, 36, 36),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) {
         return SizedBox(
           height: 300,
@@ -30,11 +30,15 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Text(
                   L10n.translate(context, 'Notifications'),
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white),
                 ),
                 Divider(color: Colors.white24),
                 SizedBox(height: 12),
-                Text(L10n.translate(context, 'No new notifications'), style: TextStyle(color: Colors.white70)),
+                Text(L10n.translate(context, 'No new notifications'),
+                    style: TextStyle(color: Colors.white70)),
               ],
             ),
           ),
@@ -106,17 +110,21 @@ class _HomePage extends StatelessWidget {
                             children: [
                               Builder(
                                 builder: (context) => IconButton(
-                                  icon: const Icon(Icons.menu, color: Colors.white),
+                                  icon: const Icon(Icons.menu,
+                                      color: Colors.white),
                                   onPressed: () {
                                     Scaffold.of(context).openDrawer();
                                   },
                                 ),
                               ),
-                              Image.asset('assets/mixroom_logo_white.png', height: 24, width: 24),
+                              Image.asset('assets/mixroom_logo_white.png',
+                                  height: 24, width: 24),
                               IconButton(
-                                icon: const Icon(Icons.notifications_none, color: Colors.white),
+                                icon: const Icon(Icons.notifications_none,
+                                    color: Colors.white),
                                 onPressed: () {
-                                  final state = context.findAncestorStateOfType<_HomeScreenState>();
+                                  final state = context.findAncestorStateOfType<
+                                      _HomeScreenState>();
                                   state?._showNotificationDrawer();
                                 },
                               ),
@@ -126,8 +134,12 @@ class _HomePage extends StatelessWidget {
 
                           Center(
                             child: Text(
-                              L10n.translate(context, 'Welcome to Mixroom'), //Mixroom',
-                              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: Colors.white),
+                              L10n.translate(
+                                  context, 'Welcome to Mixroom'), //Mixroom',
+                              style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white),
                             ),
                           ),
                           const SizedBox(height: 20),
@@ -144,13 +156,16 @@ class _HomePage extends StatelessWidget {
                                     style: TextStyle(color: Colors.white),
                                   ),
                                   content: Text(
-                                    L10n.translate(context, 'Search feature coming soon!'),
+                                    L10n.translate(
+                                        context, 'Search feature coming soon!'),
                                     style: TextStyle(color: Colors.white70),
                                   ),
                                   actions: [
                                     TextButton(
                                       onPressed: () => Navigator.pop(context),
-                                      child: const Text('OK'), //, style: TextStyle(color: Color(0xFF2F44FF))),
+                                      child: Text(
+                                        L10n.translate(context, 'OK'),
+                                      ), //, style: TextStyle(color: Color(0xFF2F44FF))),
                                     ),
                                   ],
                                 ),
@@ -160,11 +175,13 @@ class _HomePage extends StatelessWidget {
                               depth: 0,
                               intensity: 0.3,
                               color: Colors.white.withOpacity(0.1),
-                              boxShape: NeumorphicBoxShape.roundRect(BorderRadius.circular(20)),
+                              boxShape: NeumorphicBoxShape.roundRect(
+                                  BorderRadius.circular(20)),
                               shadowDarkColor: Colors.black,
                               shadowLightColor: Colors.grey.shade800,
                             ),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 14),
                             child: Row(
                               children: [
                                 Icon(Icons.search, color: Colors.white70),
@@ -176,10 +193,13 @@ class _HomePage extends StatelessWidget {
                                 Expanded(
                                   // 👈 this forces the text to respect available width
                                   child: Text(
-                                    L10n.translate(context, 'Title / Artist / Genre / etc...'),
-                                    style: const TextStyle(color: Colors.white70),
+                                    L10n.translate(context,
+                                        'Title / Artist / Genre / etc...'),
+                                    style:
+                                        const TextStyle(color: Colors.white70),
                                     maxLines: 1, // keep to one line
-                                    overflow: TextOverflow.ellipsis, // show "…" if too long
+                                    overflow: TextOverflow
+                                        .ellipsis, // show "…" if too long
                                   ),
                                 ),
                               ],
@@ -199,13 +219,16 @@ class _HomePage extends StatelessWidget {
                                     style: TextStyle(color: Colors.white),
                                   ),
                                   content: Text(
-                                    L10n.translate(context, 'Explore feature coming soon!'),
+                                    L10n.translate(context,
+                                        'Explore feature coming soon!'),
                                     style: TextStyle(color: Colors.white70),
                                   ),
                                   actions: [
                                     TextButton(
                                       onPressed: () => Navigator.pop(context),
-                                      child: const Text('OK'), //, style: TextStyle(color: Color(0xFF2F44FF))),
+                                      child: Text(
+                                        L10n.translate(context, 'OK'),
+                                      ), //, style: TextStyle(color: Color(0xFF2F44FF))),
                                     ),
                                   ],
                                 ),
@@ -216,7 +239,8 @@ class _HomePage extends StatelessWidget {
                               intensity: 0.7,
                               surfaceIntensity: 0.2,
                               color: const Color(0xFF1A1A1A),
-                              boxShape: NeumorphicBoxShape.roundRect(BorderRadius.circular(20)),
+                              boxShape: NeumorphicBoxShape.roundRect(
+                                  BorderRadius.circular(20)),
                               shadowDarkColor: Colors.black,
                               shadowLightColor: Colors.grey.shade800,
                             ),
@@ -237,7 +261,10 @@ class _HomePage extends StatelessWidget {
                                     color: Colors.black.withOpacity(0),
                                     child: Text(
                                       L10n.translate(context, 'Explore'),
-                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20),
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 20),
                                     ),
                                   ),
                                 ],
@@ -250,11 +277,17 @@ class _HomePage extends StatelessWidget {
                           Row(
                             children: [
                               Expanded(
-                                child: _ModeCard(title: "Basic", mode: "Basic", icon: Icons.smart_toy),
+                                child: _ModeCard(
+                                    title: "Basic",
+                                    mode: "Basic",
+                                    icon: Icons.smart_toy),
                               ),
                               SizedBox(width: 16),
                               Expanded(
-                                child: _ModeCard(title: "Pro", mode: "Pro", icon: Icons.grid_view_rounded),
+                                child: _ModeCard(
+                                    title: "Pro",
+                                    mode: "Pro",
+                                    icon: Icons.grid_view_rounded),
                               ),
                             ],
                           ),
@@ -277,7 +310,8 @@ class _ModeCard extends StatelessWidget {
   final String mode;
   final IconData icon;
 
-  const _ModeCard({required this.title, required this.mode, required this.icon});
+  const _ModeCard(
+      {required this.title, required this.mode, required this.icon});
 
   @override
   Widget build(BuildContext context) {
@@ -286,18 +320,23 @@ class _ModeCard extends StatelessWidget {
         Navigator.push(
           context,
           PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) => const VideoProjectsScreen(),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                const VideoProjectsPlaceholderScreen(showAppBar: true),
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
               const beginScale = 0.96;
               const endScale = 1.0;
               const curve = Curves.easeOutCubic;
 
-              final tween = Tween<double>(begin: beginScale, end: endScale).chain(CurveTween(curve: curve));
-              final fadeTween = Tween<double>(begin: 0.0, end: 1.0).chain(CurveTween(curve: curve));
+              final tween = Tween<double>(begin: beginScale, end: endScale)
+                  .chain(CurveTween(curve: curve));
+              final fadeTween = Tween<double>(begin: 0.0, end: 1.0)
+                  .chain(CurveTween(curve: curve));
 
               return FadeTransition(
                 opacity: animation.drive(fadeTween),
-                child: ScaleTransition(scale: animation.drive(tween), child: child),
+                child: ScaleTransition(
+                    scale: animation.drive(tween), child: child),
               );
             },
             transitionDuration: const Duration(milliseconds: 300),
@@ -324,7 +363,9 @@ class _ModeCard extends StatelessWidget {
             children: [
               Positioned.fill(
                 child: Image.asset(
-                  mode == "Basic" ? 'assets/basic_icon.png' : 'assets/pro_icon.png',
+                  mode == "Basic"
+                      ? 'assets/basic_icon.png'
+                      : 'assets/pro_icon.png',
                   fit: BoxFit.cover,
                 ),
               ),
@@ -332,15 +373,19 @@ class _ModeCard extends StatelessWidget {
                 bottom: 0,
                 right: 0,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: Colors.black.withOpacity(0),
-                    borderRadius: const BorderRadius.only(topLeft: Radius.circular(12)),
+                    borderRadius:
+                        const BorderRadius.only(topLeft: Radius.circular(12)),
                   ),
                   child: Text(
                     L10n.translate(context, title),
                     style: TextStyle(
-                      color: mode == "Basic" ? Colors.white : const Color(0xFF2F44FF),
+                      color: mode == "Basic"
+                          ? Colors.white
+                          : const Color(0xFF2F44FF),
                       fontWeight: FontWeight.bold,
                       fontSize: 20,
                     ),

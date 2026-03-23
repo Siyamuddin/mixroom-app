@@ -8,14 +8,24 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
-import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:mixroom/core/analytics/analytics_events.dart';
+import 'package:mixroom/core/analytics/analytics_service.dart';
+import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
+import 'package:mixroom/helpers/midi_clip_arming.dart';
+import 'package:mixroom/helpers/automation_clip_overlap.dart';
+import 'package:mixroom/helpers/automation_target_labels.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
+import 'package:mixroom/helpers/auth_service.dart';
+import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
+import 'package:mixroom/helpers/feedback_service.dart';
+import 'package:mixroom/helpers/project_chat_history.dart';
 import 'package:mixroom/models/mixing_result.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -27,7 +37,6 @@ import 'package:mixroom/ai/assistant_action_utils.dart';
 import 'package:mixroom/ai/ai_debug.dart';
 import 'package:mixroom/ai/chat_pipeline.dart';
 import 'package:mixroom/ai/spleeter_stem_separator.dart';
-import 'package:mixroom/ai/goal_vector_builder.dart';
 import 'package:mixroom/ai/instrument_classifier.dart';
 // import 'package:mixroom/ai/local_llm_service.dart';
 import 'package:mixroom/ai/cloud_llm_service.dart';
@@ -37,64 +46,28 @@ import 'package:mixroom/ai/magnitude_predictor_flags.dart';
 import 'package:mixroom/ai/onnx_magnitude_predictor.dart';
 import 'package:mixroom/ai/producer_data_collector.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
-import 'package:mixroom/models/goal_vector.dart';
 
 // import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 
-// import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
-// import 'package:ffmpeg_kit_flutter_full_gpl/ffprobe_kit.dart';
-// import 'package:ffmpeg_kit_flutter_full_gpl/log.dart';
-// import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
-// import 'package:ffmpeg_kit_flutter_full_gpl/session.dart';
-
-import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_full/ffprobe_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
-import 'package:ffmpeg_kit_flutter_new_full/session.dart';
-
-// import 'package:ffmpeg_kit_16kb/ffmpeg_kit.dart';
-// import 'package:ffmpeg_kit_16kb/abstract_session.dart';
-// import 'package:ffmpeg_kit_16kb/arch_detect.dart';
-// import 'package:ffmpeg_kit_16kb/chapter.dart';
-// import 'package:ffmpeg_kit_16kb/ffmpeg_kit.dart';
-// import 'package:ffmpeg_kit_16kb/ffmpeg_kit_config.dart';
-// import 'package:ffmpeg_kit_16kb/ffmpeg_session.dart';
-// import 'package:ffmpeg_kit_16kb/ffmpeg_session_complete_callback.dart';
-// import 'package:ffmpeg_kit_16kb/ffprobe_kit.dart';
-// import 'package:ffmpeg_kit_16kb/ffprobe_session.dart';
-// import 'package:ffmpeg_kit_16kb/ffprobe_session_complete_callback.dart';
-// import 'package:ffmpeg_kit_16kb/level.dart';
-// import 'package:ffmpeg_kit_16kb/log.dart';
-// import 'package:ffmpeg_kit_16kb/log_callback.dart';
-// import 'package:ffmpeg_kit_16kb/log_redirection_strategy.dart';
-// import 'package:ffmpeg_kit_16kb/media_information.dart';
-// import 'package:ffmpeg_kit_16kb/media_information_json_parser.dart';
-// import 'package:ffmpeg_kit_16kb/media_information_session.dart';
-// import 'package:ffmpeg_kit_16kb/media_information_session_complete_callback.dart';
-// import 'package:ffmpeg_kit_16kb/packages.dart';
-// import 'package:ffmpeg_kit_16kb/platform_interface/ffmpeg_kit_flutter_platform_interface.dart';
-// import 'package:ffmpeg_kit_16kb/platform_interface/method_channel_ffmpeg_kit_flutter.dart';
-// import 'package:ffmpeg_kit_16kb/return_code.dart';
-// import 'package:ffmpeg_kit_16kb/session.dart';
-// import 'package:ffmpeg_kit_16kb/session_state.dart';
-// import 'package:ffmpeg_kit_16kb/signal.dart';
-// import 'package:ffmpeg_kit_16kb/statistics.dart';
-// import 'package:ffmpeg_kit_16kb/statistics_callback.dart';
-// import 'package:ffmpeg_kit_16kb/stream_information.dart';
+import 'package:mixroom/ffmpeg/ffmpeg.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:accessing_security_scoped_resource/accessing_security_scoped_resource.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:mixroom/helpers/audio_export_plan.dart';
 import 'package:mixroom/helpers/export_save_dialog.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
+import 'package:mixroom/config/llm_config.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
-import 'package:mixroom/helpers/subscription_service.dart';
+import 'package:mixroom/helpers/entitlement_service.dart';
+import 'package:open_file/open_file.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'dart:typed_data';
 import 'dart:math';
@@ -107,8 +80,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 import 'package:mixroom/screens/home.dart';
-import 'package:mixroom/models/subscription_models.dart';
+import 'package:mixroom/models/entitlement_models.dart';
+import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
+import 'package:mixroom/widgets/feedback_sheet.dart';
 import 'package:mixroom/widgets/piano_roll_editor.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:just_audio/just_audio.dart' as ja;
@@ -2292,6 +2267,8 @@ class _AutomationTargetMeta {
   final double min;
   final double max;
   final double initialNormalized;
+  final bool isOrphan;
+  final bool uiVisible;
 
   const _AutomationTargetMeta({
     required this.targetId,
@@ -2302,20 +2279,51 @@ class _AutomationTargetMeta {
     required this.min,
     required this.max,
     this.initialNormalized = 0.5,
+    this.isOrphan = false,
+    this.uiVisible = true,
   });
 
   bool get isVolume => targetId == 'volume';
 
+  _AutomationTargetMeta copyWith({
+    String? targetId,
+    String? label,
+    int? effectIndex,
+    String? paramId,
+    String? type,
+    double? min,
+    double? max,
+    double? initialNormalized,
+    bool? isOrphan,
+    bool? uiVisible,
+  }) {
+    return _AutomationTargetMeta(
+      targetId: targetId ?? this.targetId,
+      label: label ?? this.label,
+      effectIndex: effectIndex ?? this.effectIndex,
+      paramId: paramId ?? this.paramId,
+      type: type ?? this.type,
+      min: min ?? this.min,
+      max: max ?? this.max,
+      initialNormalized: initialNormalized ?? this.initialNormalized,
+      isOrphan: isOrphan ?? this.isOrphan,
+      uiVisible: uiVisible ?? this.uiVisible,
+    );
+  }
+
   Map<String, dynamic> toUiMap() => <String, dynamic>{
         'id': targetId,
         'label': label,
+        'fullLabel': label,
         'isVolume': isVolume,
+        'isOrphan': isOrphan,
         'effectIndex': effectIndex,
         'paramId': paramId,
         'type': type,
         'min': min,
         'max': max,
         'initialNormalized': initialNormalized.clamp(0.0, 1.0),
+        'uiVisible': uiVisible,
       };
 
   AutomationLaneSnapshot toLaneSnapshot(List<AutomationPoint> points) {
@@ -2344,22 +2352,34 @@ class _AutomationTargetMeta {
       min: lane.min,
       max: lane.max,
       initialNormalized: laneInitial,
+      isOrphan: false,
     );
   }
 }
 
 class _ParsedAutomationTargetId {
+  final String scope;
+  final String section;
   final bool isVolume;
   final int legacyEffectIndex;
   final String effectKey;
   final String paramId;
+  final String mixParamId;
 
   const _ParsedAutomationTargetId({
+    required this.scope,
+    required this.section,
     required this.isVolume,
     required this.legacyEffectIndex,
     required this.effectKey,
     required this.paramId,
+    this.mixParamId = '',
   });
+
+  bool get isMaster => scope == 'master';
+  bool get isRowScoped => !isMaster;
+  bool get isEffectParameter => section == 'effect';
+  bool get isMixParameter => section == 'mix' || isVolume;
 }
 
 class _ClipMono16kSegment {
@@ -2419,6 +2439,72 @@ class _EditorLayoutSpec {
   }
 }
 
+enum _DawTutorialAdvanceMode { next, interaction, done }
+
+enum _DawTutorialCardPlacement {
+  topLeft,
+  topCenter,
+  topRight,
+  centerLeft,
+  centerRight,
+  bottomLeft,
+  bottomCenter,
+  bottomRight,
+}
+
+enum _DawTutorialStepId {
+  timelineIntro,
+  timelineScroll,
+  timelineZoom,
+  addButton,
+  addAudio,
+  addInstrument,
+  rowExpand,
+  rowVolume,
+  rowEffectsTab,
+  rowAddEffect,
+  rowOpenEffect,
+  rowParams,
+  rowAutomationTab,
+  rowAutomationInfo,
+  masterOpen,
+  masterTabs,
+  chatOpen,
+  chatPromptInfo,
+  chatSend,
+  chatWaiting,
+  oneButtonMix,
+  exportInfo,
+}
+
+class _DawTutorialStepSpec {
+  const _DawTutorialStepSpec({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.accent,
+    required this.placement,
+    required this.mode,
+    required this.haloKeys,
+    this.helperText,
+    this.ctaLabel,
+    this.cardPadding,
+    this.cardMaxWidth,
+  });
+
+  final _DawTutorialStepId id;
+  final String title;
+  final String body;
+  final Color accent;
+  final _DawTutorialCardPlacement placement;
+  final _DawTutorialAdvanceMode mode;
+  final List<String> haloKeys;
+  final String? helperText;
+  final String? ctaLabel;
+  final EdgeInsets? cardPadding;
+  final double? cardMaxWidth;
+}
+
 class AudioEditorScreen extends StatefulWidget {
   final String mode;
   final Directory projectDir;
@@ -2438,6 +2524,23 @@ class AudioEditorScreen extends StatefulWidget {
 
 class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     with WidgetsBindingObserver {
+  static const Key _editorScaffoldKey = Key('audio_editor_screen');
+  static const Key _editorBackButtonKey = Key('audio_editor_back_button');
+  static const Key _projectSettingsButtonKey =
+      Key('audio_editor_project_settings_button');
+  static const Key _masterPluginsButtonKey =
+      Key('audio_editor_master_plugins_button');
+  static const Key _exportButtonKey = Key('audio_editor_export_button');
+  static const Key _masterRackKey = Key('audio_editor_master_rack');
+  static const Key _projectSettingsDialogKey = Key('project_settings_dialog');
+  static const Key _projectSettingsNameFieldKey =
+      Key('project_settings_name_field');
+  static const Key _projectSettingsMetronomeSwitchKey =
+      Key('project_settings_metronome_switch');
+  static const Key _projectSettingsProducerCaptureSwitchKey =
+      Key('project_settings_producer_capture_switch');
+  static const Key _projectSettingsCloseButtonKey =
+      Key('project_settings_close_button');
   static const double _kTransportBarHeight = 94.0;
   static const double _kChatBarStackHeight = 70.0;
   static const double _kChatHistoryHeight = 380.0;
@@ -2461,10 +2564,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     '.opus',
     '.caf',
   };
+  static const List<_DawTutorialStepId> _kDawTutorialSequence =
+      <_DawTutorialStepId>[
+    _DawTutorialStepId.timelineIntro,
+    _DawTutorialStepId.timelineScroll,
+    _DawTutorialStepId.timelineZoom,
+    _DawTutorialStepId.addButton,
+    _DawTutorialStepId.addAudio,
+    _DawTutorialStepId.addInstrument,
+    _DawTutorialStepId.rowExpand,
+    _DawTutorialStepId.rowVolume,
+    _DawTutorialStepId.rowEffectsTab,
+    _DawTutorialStepId.rowAddEffect,
+    _DawTutorialStepId.rowOpenEffect,
+    _DawTutorialStepId.rowParams,
+    _DawTutorialStepId.rowAutomationTab,
+    _DawTutorialStepId.rowAutomationInfo,
+    _DawTutorialStepId.masterOpen,
+    _DawTutorialStepId.masterTabs,
+    _DawTutorialStepId.chatOpen,
+    _DawTutorialStepId.chatPromptInfo,
+    _DawTutorialStepId.chatSend,
+    _DawTutorialStepId.chatWaiting,
+    _DawTutorialStepId.oneButtonMix,
+    _DawTutorialStepId.exportInfo,
+  ];
 
   bool _subscriptionCapabilityOrLegacy(String capability) {
     try {
-      return context.read<SubscriptionService>().canUseCapability(capability);
+      return context.read<EntitlementService>().canUseCapability(capability);
     } catch (_) {
       return widget.mode == 'Pro';
     }
@@ -2487,10 +2615,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static void _noopRefreshRowFx(int row) {}
 
   late Directory _projectDir;
+  String _projectId = '';
   String _projectName = "Untitled Project";
-  bool _everSaved = false;
+  bool _requiresProjectNaming = false;
   bool _loadedOnce = false;
   bool _handledInitialAction = false;
+  bool _hasTrackedAiAssistantScreen = false;
 
   Duration _scrubPosition = Duration.zero;
   bool _isPlaying = false;
@@ -2551,7 +2681,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final int kMinSamples = 1024; // ensure enough resolution for short clips
   final int kMaxSamples = 200000; // safety cap for very long files
 
-  static const List<int> _kExportSampleRates = [44100, 48000, 88200, 96000];
   static const List<int> _kExportWavBitDepths = [16, 24, 32];
   static const List<int> _kExportMp3Bitrates = [128, 192, 256, 320];
   static const List<int> _kExportMp3VbrQualities = [0, 2, 4, 6];
@@ -2571,6 +2700,45 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     resampleQuality: _ExportResampleQuality.best,
   );
   _AudioExportSettings? _activeAudioExportSettings;
+
+  List<int> _exportSampleRatesForFormat(_ExportAudioFormat format) {
+    return AudioExportPlan.uiSampleRatesForFormat(format.name);
+  }
+
+  int _normalizeExportSampleRateForFormat(
+    _ExportAudioFormat format,
+    int sampleRate,
+  ) {
+    final normalized = AudioExportPlan.normalizeSampleRate(
+      format: format.name,
+      sampleRate: sampleRate,
+    );
+    final supportedRates = _exportSampleRatesForFormat(format);
+    if (supportedRates.contains(normalized)) return normalized;
+    return supportedRates.first;
+  }
+
+  _AudioExportSettings _normalizeAudioExportSettings(
+    _AudioExportSettings settings,
+  ) {
+    final normalizedSampleRate = _normalizeExportSampleRateForFormat(
+      settings.format,
+      settings.sampleRate,
+    );
+    return _AudioExportSettings(
+      format: settings.format,
+      sampleRate: normalizedSampleRate,
+      wavBitDepth: settings.wavBitDepth,
+      wavDithering: settings.wavDithering,
+      mp3BitrateKbps: settings.mp3BitrateKbps,
+      mp3Mode: settings.mp3Mode,
+      mp3VbrQuality: settings.mp3VbrQuality,
+      channelMode: settings.channelMode,
+      normalize: settings.normalize,
+      normalizeTargetDb: settings.normalizeTargetDb,
+      resampleQuality: settings.resampleQuality,
+    );
+  }
 
   static const int kMaxRows = 100; // source of truth is from JuceEngine.h
   static const int kNumClips =
@@ -2737,6 +2905,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _pianoRollFullscreen = false;
   int? _activeMidiClipEngineId;
   bool _liveMidiEventPlaybackSupported = false;
+  int _lastLiveMidiInputTargetClipId = -2;
   Timer? _midiDevicePollTimer;
   bool _midiDevicePollBusy = false;
   Map<String, String> _knownMidiDevicesById = <String, String>{};
@@ -2752,10 +2921,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   // master rack
   bool _showMasterRack = false;
+  final AudioCanvasTimelineController _timelineController =
+      AudioCanvasTimelineController();
+  final GlobalKey<_DynamicRackContentState> _masterRackContentKey =
+      GlobalKey<_DynamicRackContentState>();
   double _masterGain = _kGainUiUnity;
   double _masterPan = 0.5;
   double? _masterGainDragStart;
   double? _masterPanDragStart;
+  Future<void> Function(int effectIndex, String paramId)?
+      _masterParameterRevealer;
   final Map<int, double> _masterRackRowGainDragStart = <int, double>{};
   Map<int, List<bool>> _rowFxBypassSnapshot = {};
   List<bool> _masterFxBypassSnapshot = [];
@@ -2787,8 +2962,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _numInputChannels = 0;
   int _selectedChannelStart = 0;
   int _selectedChannelCount = 1;
+  String? _lastPreparedRecordingDevice;
+  int? _lastPreparedRecordingInputOpenChannels;
+  bool _recordingInputPrewarmInFlight = false;
+  Future<bool>? _recordingInputPrewarmFuture;
 
   bool _loadingDevices = false;
+  bool _microphoneAccessBlocked = false;
+  PermissionStatus _microphonePermissionStatus = PermissionStatus.denied;
 
   bool _metronomeEnabled = false;
   double _metronomeVolume = 0.5; // 0–1
@@ -2798,10 +2979,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _chatExpanded = false;
   bool _chatInputActive = false;
   bool _chatHasText = false;
+  bool _feedbackSubmissionInFlight = false;
   final TextEditingController _chatTextController = TextEditingController();
   late final InstrumentClassifier _classifier;
   late final SpleeterStemSeparator _spleeterStemSeparator;
   final FocusNode _chatFocusNode = FocusNode();
+  final ScrollController _chatHistoryScrollController = ScrollController();
   late final ChatPipeline _chatPipeline;
   late final MixingMagnitudePredictor _magnitudePredictor;
   Future<void>? _aiModelsWarmupFuture;
@@ -2810,15 +2993,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _showProducerCaptureUi = false;
   bool _producerUiBusy = false;
   late final ChatController _chatController;
+  Timer? _chatHistoryPersistTimer;
+  Timer? _copiedChatMessageTimer;
+  String? _copiedChatMessageId;
+  AiPromptRateLimitStatus? _promptRateLimitStatus;
+  Timer? _promptRateLimitRefreshTimer;
+  bool _promptRateLimitLoading = false;
   void Function(int row) _refreshRowFx = _noopRefreshRowFx;
   void Function(int row) _refreshRowFxPlayback = _noopRefreshRowFx;
   bool _isThinking = false;
   late final MixChangeHighlighter _mixHighlighter = MixChangeHighlighter();
   bool _chatWarm = false;
+  bool _showDawOnboarding = false;
+  int _dawOnboardingStepIndex = 0;
+  int? _dawTutorialRowIndex;
+  int? _dawTutorialEffectIndex;
+  bool _dawTutorialChatPromptLocked = false;
+  bool _dawTutorialAwaitingChatReply = false;
+  bool _dawTutorialChatAdvanceInFlight = false;
+  int _dawTutorialAssistantCountAtPromptSend = 0;
   bool _isDialogOpen =
       false; // to fix weird issue on iPad iOS 26 where opening some dialogue would insta-close it
   bool _isMasterPopupOpen = false; // same thing as above
   StateSetter? _projectSettingsStateSetter;
+  final GlobalKey _feedbackScreenshotBoundaryKey =
+      GlobalKey(debugLabel: 'audio_editor_feedback_screenshot_boundary');
 
   bool _sampleBrowserVisible = false;
   bool _sampleBrowserExpanded = false;
@@ -2869,6 +3068,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return _rows.indexWhere((r) => r.rowId == rowId);
   }
 
+  String _rowDisplayName(int row) {
+    if (row < 0 || row >= _rows.length) {
+      return 'Track ${row + 1}';
+    }
+    final name = _rows[row].name.trim();
+    return name.isEmpty ? 'Track ${row + 1}' : name;
+  }
+
   int _allocateEngineClipId() {
     final usedIds = <int>{};
     for (final track in _audioTracks) {
@@ -2888,6 +3095,172 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     setState(() {
       _chatHasText = hasText;
     });
+  }
+
+  Map<String, dynamic> _buildFeedbackProjectSettings() {
+    final selectedClip = (_timelinePrimarySelectedClipIndex >= 0 &&
+            _timelinePrimarySelectedClipIndex < _audioTracks.length)
+        ? _audioTracks[_timelinePrimarySelectedClipIndex]
+        : null;
+    final visibleRowNames = _rows
+        .take(12)
+        .map((row) => row.name.trim())
+        .where((name) => name.isNotEmpty)
+        .toList(growable: false);
+    return <String, dynamic>{
+      'project_id': _projectId,
+      'project_name': _projectName,
+      'mode': _resolvedMode,
+      'tempo_bpm': _tempo,
+      'metronome_enabled': _metronomeEnabled,
+      'loop_enabled': _loopEnabled,
+      if (_loopEnabled) 'loop_start_ms': _loopStartMs,
+      if (_loopEnabled) 'loop_end_ms': _loopEndMs,
+      'row_count': _rows.length,
+      'track_count': _audioTracks.length,
+      'selected_row_index': _selectedRow,
+      if (selectedClip != null) 'selected_clip_label': selectedClip.label,
+      'producer_capture_enabled': _showProducerCaptureUi || _producerDataMode,
+      'sample_browser_open': _sampleBrowserVisible,
+      'master_rack_open': _showMasterRack,
+      if (visibleRowNames.isNotEmpty) 'row_names': visibleRowNames,
+    };
+  }
+
+  Future<FeedbackScreenshotAttachment> _captureFeedbackScreenshot() async {
+    final previousChatExpanded = _chatExpanded;
+    final previousChatInputActive = _chatInputActive;
+    final pixelRatio =
+        MediaQuery.maybeDevicePixelRatioOf(context)?.clamp(1.0, 2.0) ?? 1.0;
+
+    if (mounted) {
+      setState(() {
+        _chatExpanded = false;
+        _chatInputActive = false;
+      });
+    }
+    _chatFocusNode.unfocus();
+
+    await Future<void>.delayed(const Duration(milliseconds: 90));
+    await WidgetsBinding.instance.endOfFrame;
+
+    try {
+      final boundaryContext = _feedbackScreenshotBoundaryKey.currentContext;
+      final boundaryRenderObject = boundaryContext?.findRenderObject();
+      if (boundaryRenderObject is! RenderRepaintBoundary) {
+        throw StateError('Could not capture the editor screenshot.');
+      }
+
+      final capturedImage =
+          await boundaryRenderObject.toImage(pixelRatio: pixelRatio);
+      final byteData =
+          await capturedImage.toByteData(format: ui.ImageByteFormat.png);
+      capturedImage.dispose();
+      if (byteData == null) {
+        throw StateError('Could not capture the editor screenshot.');
+      }
+
+      final pngBytes = byteData.buffer.asUint8List();
+      final decoded = img.decodeImage(pngBytes);
+      if (decoded == null) {
+        throw StateError('Could not capture the editor screenshot.');
+      }
+
+      img.Image workingImage = decoded;
+      if (workingImage.width > 1280) {
+        workingImage = img.copyResize(workingImage, width: 1280);
+      }
+
+      Uint8List encoded = Uint8List.fromList(
+        img.encodeJpg(workingImage, quality: 74),
+      );
+      int quality = 74;
+      while (encoded.lengthInBytes > 120 * 1024 && quality > 38) {
+        quality -= 8;
+        encoded = Uint8List.fromList(
+          img.encodeJpg(workingImage, quality: quality),
+        );
+      }
+      while (encoded.lengthInBytes > 120 * 1024 && workingImage.width > 720) {
+        final nextWidth = (workingImage.width * 0.82).round();
+        workingImage = img.copyResize(workingImage, width: nextWidth);
+        encoded = Uint8List.fromList(
+          img.encodeJpg(workingImage, quality: quality),
+        );
+      }
+
+      if (encoded.lengthInBytes > 120 * 1024) {
+        throw StateError('Screenshot is too large to attach.');
+      }
+
+      return FeedbackScreenshotAttachment(
+        bytes: encoded,
+        mimeType: 'image/jpeg',
+        width: workingImage.width,
+        height: workingImage.height,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _chatExpanded = previousChatExpanded;
+          _chatInputActive = previousChatInputActive;
+        });
+      }
+    }
+  }
+
+  Future<void> _openDawFeedbackComposer() async {
+    if (_feedbackSubmissionInFlight) return;
+
+    final authService = context.read<AuthService>();
+    final draft = await showFeedbackSheet(
+      context,
+      source: FeedbackSource.dawChat,
+    );
+    if (draft == null || !mounted) return;
+
+    setState(() => _feedbackSubmissionInFlight = true);
+    try {
+      FeedbackContextPayload? contextPayload;
+      if (draft.includeDawContext) {
+        contextPayload = FeedbackContextPayload(
+          chatHistory:
+              ProjectChatHistory.fromChatMessages(_chatController.messages)
+                  .toConversation(),
+          projectSettings: _buildFeedbackProjectSettings(),
+        );
+      }
+
+      FeedbackScreenshotAttachment? screenshot;
+      if (draft.includeDawScreenshot) {
+        screenshot = await _captureFeedbackScreenshot();
+      }
+
+      await FeedbackService.instance.submit(
+        auth: authService,
+        request: FeedbackSubmissionRequest(
+          category: draft.category,
+          source: FeedbackSource.dawChat,
+          message: draft.message,
+          allowEmailContact: draft.allowEmailContact,
+          context: contextPayload,
+          screenshot: screenshot,
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Thank you for your submission!')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Bad state: ', ''))),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _feedbackSubmissionInFlight = false);
+      }
+    }
   }
 
   // This is needed in iOS so that hold actions (like track headers) are immediately responsive
@@ -3207,32 +3580,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             magnitudeModelAsset: kMixMagnitudeRegressorAsset,
           )
         : const NoopMixingMagnitudePredictor();
+    final authService = context.read<AuthService>();
 
     _chatPipeline = ChatPipeline(
       llm: CloudLlmService(
-        apiKey:
-            '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',
-        //TODO: keep API key in the backend server. const String.fromEnvironment('OPENAI_API_KEY'),
-        /*
-        Prod-safe high level:
-
-        1) Move OpenAI calls to your backend.
-          App never sees OpenAI API key.
-          Backend stores key in secret manager/env.
-        2) App calls your API endpoint (e.g. /mix/llm).
-          Send prompt + project snapshot.
-          Backend forwards to OpenAI Responses API and returns tool output.
-        3) Protect backend.
-          Authenticate users (JWT/session).
-          Rate-limit per user/device/IP.
-          Add abuse checks, logging, and request size limits.
-        4) Keep behavior stable.
-          Reuse same system prompt/tools schema on server.
-          Version prompts/models server-side for rollback.
-        5) Ship keys safely.
-          Rotate keys without app update.
-          Separate dev/staging/prod keys.
-        */
+        apiKey: LlmConfig.canUseDirectOpenAi ? LlmConfig.openAiApiKey : '',
+        model: LlmConfig.openAiModel,
+        proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
+        proxyPath: LlmConfig.proxyPath,
+        requestTimeout: Duration(seconds: LlmConfig.requestTimeoutSeconds),
+        authTokenProvider: authService.getIdTokenOrNull,
+        refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
       ), // LocalLlmService(),
       projectBuilder: ProjectStateBuilder(classifier: _classifier),
       mixModel: LocalMixingModel(),
@@ -3246,6 +3604,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     _chatController = InMemoryChatController();
     _chatTextController.addListener(_handleChatTextChanged);
+    unawaited(_refreshPromptRateLimitStatus());
 
     _samplePreviewPlayer = ja.AudioPlayer(handleAudioSessionActivation: false);
     _samplePreviewStateSub =
@@ -3259,17 +3618,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       });
     });
-
-    // Optional welcome message
-    _chatController.insertMessage(
-      TextMessage(
-        id: const Uuid().v4(),
-        authorId: 'assistant',
-        createdAt: DateTime.now().toUtc(),
-        text: "I'm your AI Co-Producer. Ask me about your mix.",
-      ),
-    );
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       setState(() {
         _chatWarm = true;
@@ -3282,6 +3630,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await JuceAudioEngine.initialise(); // heavy blocking native call
       JuceAudioEngine.initialiseEventListeners();
+      unawaited(_refreshMicrophonePermissionState());
+      unawaited(_loadInputDevicesFromJuce());
       await _loadBundledInstrumentCatalog();
       _liveMidiEventPlaybackSupported =
           await JuceAudioEngine.supportsLiveMidiClipPlayback();
@@ -3292,6 +3642,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _loadProjectIfAny();
       setState(() => _isLoadingNextScreen = false);
       await _runInitialActionIfNeeded();
+      await _maybeShowDawOnboarding();
     });
   }
 
@@ -3324,6 +3675,681 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await Future.delayed(const Duration(milliseconds: 120));
     if (!mounted) return;
     await _exportAndNavigate();
+  }
+
+  String? _currentOnboardingUserId() {
+    try {
+      return context.read<AuthService>().signedInUser?.userId;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  int get _safeDawOnboardingStepIndex {
+    if (_kDawTutorialSequence.isEmpty) return 0;
+    if (_dawOnboardingStepIndex < 0) return 0;
+    if (_dawOnboardingStepIndex >= _kDawTutorialSequence.length) {
+      return _kDawTutorialSequence.length - 1;
+    }
+    return _dawOnboardingStepIndex;
+  }
+
+  int get _dawTutorialTargetRow {
+    if (_rowCount <= 0) return 0;
+    final stored = _dawTutorialRowIndex;
+    if (stored != null && stored >= 0 && stored < _rowCount) {
+      return stored;
+    }
+    return _selectedRow.clamp(0, _rowCount - 1).toInt();
+  }
+
+  _DawTutorialStepId get _currentDawOnboardingStepId =>
+      _kDawTutorialSequence[_safeDawOnboardingStepIndex];
+
+  _DawTutorialStepSpec get _currentDawOnboardingStep =>
+      _buildDawTutorialStepSpec(_currentDawOnboardingStepId);
+
+  static const String _kDawTutorialAiPrompt =
+      'Take out the plugin on the first track';
+
+  _DawTutorialStepSpec _buildDawTutorialStepSpec(_DawTutorialStepId stepId) {
+    final row = _dawTutorialTargetRow;
+    final effectIndex = _dawTutorialEffectIndex ?? 0;
+    switch (stepId) {
+      case _DawTutorialStepId.timelineIntro:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.timelineIntro,
+          title: 'This is the timeline.',
+          body:
+              'Every clip lives here. Move, trim, and arrange your song from left to right.',
+          accent: Color(0xFF86D8FF),
+          placement: _DawTutorialCardPlacement.topLeft,
+          mode: _DawTutorialAdvanceMode.next,
+          haloKeys: <String>['tutorial:timeline'],
+        );
+      case _DawTutorialStepId.timelineScroll:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.timelineScroll,
+          title: 'Scroll across the song.',
+          body: 'Swipe sideways to move through the arrangement.',
+          accent: Color(0xFF86D8FF),
+          placement: _DawTutorialCardPlacement.topLeft,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>['tutorial:timeline'],
+          helperText: 'Scroll once to continue.',
+        );
+      case _DawTutorialStepId.timelineZoom:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.timelineZoom,
+          title: 'Zoom for detail.',
+          body: 'Pinch or trackpad zoom to get tighter or wider timing detail.',
+          accent: Color(0xFF86D8FF),
+          placement: _DawTutorialCardPlacement.topLeft,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>['tutorial:timeline'],
+          helperText: 'Try zooming in or out.',
+        );
+      case _DawTutorialStepId.addButton:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.addButton,
+          title: 'Add from here.',
+          body: 'Use + to bring in audio, samples, or instruments.',
+          accent: Color(0xFF9BF3C7),
+          placement: _DawTutorialCardPlacement.bottomRight,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>['tutorial:add_button'],
+          helperText: 'Tap + once to continue.',
+          cardMaxWidth: 270,
+          cardPadding: EdgeInsets.fromLTRB(16, 16, 74, 106),
+        );
+      case _DawTutorialStepId.addAudio:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.addAudio,
+          title: 'Audio tracks start here.',
+          body:
+              'Here is where you can add audio files or recordings to the project.',
+          accent: Color(0xFF9BF3C7),
+          placement: _DawTutorialCardPlacement.topLeft,
+          mode: _DawTutorialAdvanceMode.next,
+          haloKeys: <String>['tutorial:add_button', 'tutorial:add_audio'],
+          cardMaxWidth: 270,
+        );
+      case _DawTutorialStepId.addInstrument:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.addInstrument,
+          title: 'Instruments live here too.',
+          body:
+              'Here is where you can add an instrument track with a ready-to-play sound.',
+          accent: Color(0xFF9BF3C7),
+          placement: _DawTutorialCardPlacement.topLeft,
+          mode: _DawTutorialAdvanceMode.next,
+          haloKeys: <String>['tutorial:add_button', 'tutorial:add_instrument'],
+          cardMaxWidth: 270,
+        );
+      case _DawTutorialStepId.rowExpand:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.rowExpand,
+          title: 'Open a track header.',
+          body: 'Tap a selected track header to open its controls.',
+          accent: const Color(0xFFFFCB78),
+          placement: _DawTutorialCardPlacement.centerRight,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>['row:$row:header'],
+          helperText: 'Open one track to continue.',
+          cardMaxWidth: 216,
+          cardPadding: const EdgeInsets.fromLTRB(16, 120, 12, 140),
+        );
+      case _DawTutorialStepId.rowVolume:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.rowVolume,
+          title: 'Volume lives here.',
+          body: 'This tab holds level, pan, and the main volume lane.',
+          accent: const Color(0xFFFFCB78),
+          placement: _DawTutorialCardPlacement.topRight,
+          mode: _DawTutorialAdvanceMode.next,
+          haloKeys: <String>['row:$row:volume_tab', 'row:$row:mixer'],
+          cardMaxWidth: 212,
+          cardPadding: const EdgeInsets.fromLTRB(16, 84, 12, 16),
+        );
+      case _DawTutorialStepId.rowEffectsTab:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.rowEffectsTab,
+          title: 'Effects are on this tab.',
+          body: 'Tap Effects to see the plugins on this track.',
+          accent: const Color(0xFFFFCB78),
+          placement: _DawTutorialCardPlacement.topRight,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>['row:$row:effects_tab'],
+          helperText: 'Open Effects to continue.',
+          cardMaxWidth: 212,
+          cardPadding: const EdgeInsets.fromLTRB(16, 84, 12, 16),
+        );
+      case _DawTutorialStepId.rowAddEffect:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.rowAddEffect,
+          title: 'Add an effect here.',
+          body: 'Use Add Effect to load any sound-shaping tool you want.',
+          accent: const Color(0xFFFFCB78),
+          placement: _DawTutorialCardPlacement.topCenter,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>['row:$row:add_effect'],
+          helperText: 'Add one effect to continue.',
+          cardMaxWidth: 248,
+          cardPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        );
+      case _DawTutorialStepId.rowOpenEffect:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.rowOpenEffect,
+          title: 'Open the effect you added.',
+          body: 'Tap the effect to open its controls.',
+          accent: const Color(0xFFFFCB78),
+          placement: _DawTutorialCardPlacement.topCenter,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>[
+            'row:$row:fx_list',
+            'row:$row:fx_index:$effectIndex',
+          ],
+          helperText: 'Open any effect to continue.',
+          cardMaxWidth: 248,
+          cardPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        );
+      case _DawTutorialStepId.rowParams:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.rowParams,
+          title: 'These are the effect controls.',
+          body: 'Adjust the sliders here to shape the sound.',
+          accent: const Color(0xFFFFCB78),
+          placement: _DawTutorialCardPlacement.topCenter,
+          mode: _DawTutorialAdvanceMode.next,
+          haloKeys: <String>['row:$row:fx_params'],
+          cardMaxWidth: 248,
+          cardPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        );
+      case _DawTutorialStepId.rowAutomationTab:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.rowAutomationTab,
+          title: 'Automation is here.',
+          body:
+              'Automation lets a setting move over time instead of staying fixed.',
+          accent: const Color(0xFFFFCB78),
+          placement: _DawTutorialCardPlacement.centerRight,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>['row:$row:automation_tab'],
+          helperText: 'Open Automation to continue.',
+          cardMaxWidth: 212,
+          cardPadding: const EdgeInsets.fromLTRB(16, 120, 12, 140),
+        );
+      case _DawTutorialStepId.rowAutomationInfo:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.rowAutomationInfo,
+          title: 'This lane draws the movement.',
+          body:
+              'Use automation when you want volume or effect changes over time.',
+          accent: const Color(0xFFFFCB78),
+          placement: _DawTutorialCardPlacement.topCenter,
+          mode: _DawTutorialAdvanceMode.next,
+          haloKeys: <String>[
+            'row:$row:automation_tab',
+            'row:$row:automation_lane',
+          ],
+          cardMaxWidth: 248,
+          cardPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        );
+      case _DawTutorialStepId.masterOpen:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.masterOpen,
+          title: 'This is the master bus.',
+          body: 'Open it to control the full mix instead of one track.',
+          accent: Color(0xFFFFC86F),
+          placement: _DawTutorialCardPlacement.topRight,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>['tutorial:master_button'],
+          helperText: 'Tap the master button to continue.',
+          cardMaxWidth: 232,
+          cardPadding: EdgeInsets.fromLTRB(16, 74, 74, 16),
+        );
+      case _DawTutorialStepId.masterTabs:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.masterTabs,
+          title: 'Same idea, but for the whole mix.',
+          body:
+              'Master Volume controls overall balance. Master Effects processes everything together.',
+          accent: Color(0xFFFFC86F),
+          placement: _DawTutorialCardPlacement.bottomCenter,
+          mode: _DawTutorialAdvanceMode.next,
+          haloKeys: <String>['master:tab:volume', 'master:tab:effects'],
+          cardMaxWidth: 232,
+          cardPadding: EdgeInsets.fromLTRB(16, 16, 16, 136),
+        );
+      case _DawTutorialStepId.chatOpen:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.chatOpen,
+          title: 'Mixroom AI starts here.',
+          body:
+              'Tap the chat bar to ask for edits, mix help, or where a tool lives.',
+          accent: Color(0xFFBFA8FF),
+          placement: _DawTutorialCardPlacement.topRight,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>['tutorial:chatbar'],
+          helperText: 'Open chat to continue.',
+          cardMaxWidth: 280,
+        );
+      case _DawTutorialStepId.chatPromptInfo:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.chatPromptInfo,
+          title: 'Use normal language.',
+          body:
+              'Ask for mix changes, editing help, or where tools live. This badge shows how many prompts you have left.',
+          accent: const Color(0xFFBFA8FF),
+          placement: _DawTutorialCardPlacement.topRight,
+          mode: _DawTutorialAdvanceMode.next,
+          haloKeys: const <String>[
+            'tutorial:chatbar',
+            'tutorial:prompt_limits',
+          ],
+          helperText: 'This badge shows how many AI prompts are available.',
+          cardMaxWidth: 280,
+        );
+      case _DawTutorialStepId.chatSend:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.chatSend,
+          title: 'Send this example.',
+          body:
+              'We loaded a sample prompt. If you press send, it will use 1 AI credit and run the real workflow.',
+          accent: const Color(0xFFBFA8FF),
+          placement: _DawTutorialCardPlacement.topRight,
+          mode: _DawTutorialAdvanceMode.next,
+          haloKeys: const <String>[
+            'tutorial:chatbar',
+            'tutorial:prompt_limits',
+            'tutorial:chat_send',
+          ],
+          helperText: 'Send it to try it now, or tap Next to keep moving.',
+          cardMaxWidth: 280,
+        );
+      case _DawTutorialStepId.chatWaiting:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.chatWaiting,
+          title: 'Waiting for the reply.',
+          body:
+              'Mixroom AI is applying the request and writing back in the project chat.',
+          accent: const Color(0xFFBFA8FF),
+          placement: _DawTutorialCardPlacement.topRight,
+          mode: _DawTutorialAdvanceMode.interaction,
+          haloKeys: <String>['tutorial:chatbar'],
+          helperText: 'This will continue after the reply is visible.',
+          cardMaxWidth: 280,
+        );
+      case _DawTutorialStepId.oneButtonMix:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.oneButtonMix,
+          title: 'Need a fast cleanup?',
+          body:
+              'One-Button Mix gives you a quick automatic polish pass on the current session.',
+          accent: Color(0xFF69A5FF),
+          placement: _DawTutorialCardPlacement.bottomCenter,
+          mode: _DawTutorialAdvanceMode.next,
+          haloKeys: <String>['tutorial:one_button_mix'],
+          cardMaxWidth: 270,
+          cardPadding: EdgeInsets.fromLTRB(16, 16, 16, 104),
+        );
+      case _DawTutorialStepId.exportInfo:
+        return const _DawTutorialStepSpec(
+          id: _DawTutorialStepId.exportInfo,
+          title: 'Export when you are done.',
+          body: 'Tap here to render the finished result out of the project.',
+          accent: Color(0xFFFFD87A),
+          placement: _DawTutorialCardPlacement.topRight,
+          mode: _DawTutorialAdvanceMode.done,
+          haloKeys: <String>['tutorial:export'],
+          ctaLabel: 'Done',
+          cardMaxWidth: 252,
+          cardPadding: EdgeInsets.fromLTRB(16, 76, 72, 16),
+        );
+    }
+  }
+
+  void _startDawOnboarding() {
+    if (!mounted || _kDawTutorialSequence.isEmpty) return;
+    setState(() {
+      _showDawOnboarding = true;
+      _dawOnboardingStepIndex = 0;
+      _dawTutorialRowIndex = null;
+      _dawTutorialEffectIndex = null;
+      _dawTutorialChatPromptLocked = false;
+      _dawTutorialAwaitingChatReply = false;
+      _dawTutorialChatAdvanceInFlight = false;
+      _dawTutorialAssistantCountAtPromptSend = 0;
+      _showAddActionsPanel = false;
+      _activeAddActionId = null;
+      _chatExpanded = false;
+      _chatInputActive = false;
+      _showMasterRack = false;
+      _isMasterPopupOpen = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _prepareCurrentDawOnboardingStep();
+    });
+  }
+
+  void _prepareCurrentDawOnboardingStep() {
+    if (!_showDawOnboarding || _kDawTutorialSequence.isEmpty) return;
+    _syncDawOnboardingUiForStep(_currentDawOnboardingStepId);
+    _highlightDawOnboardingStep(_currentDawOnboardingStep);
+  }
+
+  void _highlightDawOnboardingStep(_DawTutorialStepSpec step) {
+    if (!_showDawOnboarding) return;
+    final keys = step.haloKeys
+        .map((key) => key.trim())
+        .where((key) => key.isNotEmpty)
+        .map(HaloKey.new)
+        .toList(growable: false);
+    _mixHighlighter.clear();
+    if (keys.isEmpty) return;
+    _mixHighlighter.trigger(
+      keys,
+      duration: const Duration(seconds: 24),
+    );
+  }
+
+  void _syncDawOnboardingUiForStep(_DawTutorialStepId stepId) {
+    final row = _dawTutorialTargetRow;
+    switch (stepId) {
+      case _DawTutorialStepId.addAudio:
+      case _DawTutorialStepId.addInstrument:
+        if (!_showAddActionsPanel) {
+          _openAddActionsPanel();
+        }
+        break;
+      case _DawTutorialStepId.rowVolume:
+        _timelineController.ensureRowExpanded(row, tab: 0);
+        break;
+      case _DawTutorialStepId.rowEffectsTab:
+        _timelineController.ensureRowExpanded(row, tab: 0);
+        break;
+      case _DawTutorialStepId.rowAddEffect:
+      case _DawTutorialStepId.rowOpenEffect:
+      case _DawTutorialStepId.rowParams:
+      case _DawTutorialStepId.rowAutomationTab:
+        _timelineController.ensureRowExpanded(row, tab: 1);
+        break;
+      case _DawTutorialStepId.rowAutomationInfo:
+        _timelineController.ensureRowExpanded(row, tab: 2);
+        break;
+      case _DawTutorialStepId.masterTabs:
+        if (!_showMasterRack) {
+          setState(() {
+            _showMasterRack = true;
+            _isMasterPopupOpen = true;
+          });
+        }
+        break;
+      case _DawTutorialStepId.chatPromptInfo:
+        if (!_chatExpanded) {
+          setState(() {
+            _chatExpanded = true;
+          });
+        }
+        _dawTutorialChatPromptLocked = false;
+        _chatFocusNode.unfocus();
+        break;
+      case _DawTutorialStepId.chatSend:
+        _chatTextController.value = TextEditingValue(
+          text: _kDawTutorialAiPrompt,
+          selection:
+              TextSelection.collapsed(offset: _kDawTutorialAiPrompt.length),
+        );
+        setState(() {
+          _chatExpanded = true;
+          _chatInputActive = true;
+          _dawTutorialChatPromptLocked = true;
+          _dawTutorialAwaitingChatReply = false;
+        });
+        _chatFocusNode.unfocus();
+        break;
+      case _DawTutorialStepId.chatWaiting:
+        setState(() {
+          _chatExpanded = true;
+          _chatInputActive = true;
+          _dawTutorialChatPromptLocked = true;
+        });
+        _chatFocusNode.unfocus();
+        break;
+      case _DawTutorialStepId.oneButtonMix:
+        _closeTutorialChatWindow();
+        break;
+      default:
+        break;
+    }
+  }
+
+  void _closeTutorialChatWindow() {
+    if (!mounted) return;
+    setState(() {
+      _chatExpanded = false;
+      _chatInputActive = false;
+      _dawTutorialChatPromptLocked = false;
+      _dawTutorialAwaitingChatReply = false;
+    });
+    _chatFocusNode.unfocus();
+  }
+
+  void _cleanupBeforeLeavingDawOnboardingStep(_DawTutorialStepId stepId) {
+    switch (stepId) {
+      case _DawTutorialStepId.addInstrument:
+        _closeAddActionsPanel();
+        break;
+      case _DawTutorialStepId.rowAutomationInfo:
+        _timelineController.collapseExpandedRows();
+        break;
+      case _DawTutorialStepId.masterTabs:
+        if (_showMasterRack || _isMasterPopupOpen) {
+          setState(() {
+            _showMasterRack = false;
+            _isMasterPopupOpen = false;
+          });
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  void _setDawOnboardingStep(int index) {
+    if (_kDawTutorialSequence.isEmpty) return;
+    if (index >= _kDawTutorialSequence.length) {
+      unawaited(_finishDawOnboarding());
+      return;
+    }
+    final boundedIndex =
+        index.clamp(0, _kDawTutorialSequence.length - 1).toInt();
+    final previousStep =
+        _showDawOnboarding ? _currentDawOnboardingStepId : null;
+    if (previousStep != null) {
+      _cleanupBeforeLeavingDawOnboardingStep(previousStep);
+    }
+    setState(() {
+      _dawOnboardingStepIndex = boundedIndex;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _prepareCurrentDawOnboardingStep();
+    });
+  }
+
+  Future<void> _finishDawOnboarding({bool markSeen = true}) async {
+    final userId = _currentOnboardingUserId();
+    _mixHighlighter.clear();
+    if (mounted) {
+      setState(() {
+        _showDawOnboarding = false;
+        _dawTutorialChatPromptLocked = false;
+        _dawTutorialAwaitingChatReply = false;
+      });
+    }
+    _closeTutorialChatWindow();
+    _closeAddActionsPanel();
+    _timelineController.collapseExpandedRows();
+    if (_showMasterRack || _isMasterPopupOpen) {
+      setState(() {
+        _showMasterRack = false;
+        _isMasterPopupOpen = false;
+      });
+    }
+    if (markSeen) {
+      await DawOnboardingPrefs.markSeen(userId);
+    }
+  }
+
+  Future<void> _maybeShowDawOnboarding() async {
+    if (!mounted ||
+        widget.initialAction != null ||
+        _kDawTutorialSequence.isEmpty) {
+      return;
+    }
+    final userId = _currentOnboardingUserId();
+    final pendingQuickTour =
+        await DawOnboardingPrefs.consumePendingQuickTour(userId);
+    final hasSeen = await DawOnboardingPrefs.hasSeen(userId);
+    if (!mounted) return;
+    if (!pendingQuickTour && hasSeen) return;
+    _startDawOnboarding();
+  }
+
+  void _advanceDawOnboardingStep() {
+    var nextIndex = _safeDawOnboardingStepIndex + 1;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.chatSend &&
+        !_dawTutorialAwaitingChatReply &&
+        nextIndex < _kDawTutorialSequence.length &&
+        _kDawTutorialSequence[nextIndex] == _DawTutorialStepId.chatWaiting) {
+      nextIndex += 1;
+    }
+    _setDawOnboardingStep(nextIndex);
+  }
+
+  void _handleDawOnboardingTimelineScrolled() {
+    if (!_showDawOnboarding) return;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.timelineScroll) {
+      _advanceDawOnboardingStep();
+    }
+  }
+
+  void _handleDawOnboardingTimelineZoomed() {
+    if (!_showDawOnboarding) return;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.timelineZoom) {
+      _advanceDawOnboardingStep();
+    }
+  }
+
+  void _handleDawOnboardingAddButtonOpened() {
+    if (!_showDawOnboarding) return;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.addButton) {
+      _advanceDawOnboardingStep();
+    }
+  }
+
+  void _handleDawOnboardingRowExpansionChanged(int row, bool expanded) {
+    if (!_showDawOnboarding || !expanded) return;
+    _dawTutorialRowIndex = row;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.rowExpand) {
+      _advanceDawOnboardingStep();
+    }
+  }
+
+  void _handleDawOnboardingRowTabSelected(int row, int tab) {
+    if (!_showDawOnboarding) return;
+    _dawTutorialRowIndex = row;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.rowEffectsTab &&
+        tab == 1) {
+      _advanceDawOnboardingStep();
+      return;
+    }
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.rowAutomationTab &&
+        tab == 2) {
+      _advanceDawOnboardingStep();
+    }
+  }
+
+  void _handleDawOnboardingEffectAdded(
+    int row,
+    int effectIndex,
+    String effectName,
+  ) {
+    if (!_showDawOnboarding) return;
+    _dawTutorialRowIndex = row;
+    _dawTutorialEffectIndex = effectIndex;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.rowAddEffect) {
+      _advanceDawOnboardingStep();
+    }
+  }
+
+  void _handleDawOnboardingEffectOpened(
+    int row,
+    int effectIndex,
+    String effectName,
+  ) {
+    if (!_showDawOnboarding) return;
+    _dawTutorialRowIndex = row;
+    _dawTutorialEffectIndex = effectIndex;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.rowOpenEffect) {
+      _advanceDawOnboardingStep();
+    }
+  }
+
+  void _handleDawOnboardingMasterOpened() {
+    if (!_showDawOnboarding) return;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.masterOpen) {
+      _advanceDawOnboardingStep();
+    }
+  }
+
+  void _handleDawOnboardingChatOpened() {
+    if (!_showDawOnboarding) return;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.chatOpen) {
+      _advanceDawOnboardingStep();
+    }
+  }
+
+  void _handleDawOnboardingChatPromptSubmitted() {
+    if (!_showDawOnboarding) return;
+    if (_currentDawOnboardingStepId == _DawTutorialStepId.chatSend) {
+      setState(() {
+        _dawTutorialAwaitingChatReply = true;
+        _dawTutorialChatAdvanceInFlight = false;
+        _dawTutorialAssistantCountAtPromptSend =
+            _chatTextMessageCount(authorId: 'assistant');
+      });
+      _advanceDawOnboardingStep();
+    }
+  }
+
+  Future<void> _handleDawOnboardingChatReplyReady() async {
+    if (!_showDawOnboarding || !_dawTutorialAwaitingChatReply) return;
+    if (_currentDawOnboardingStepId != _DawTutorialStepId.chatWaiting) return;
+    if (_dawTutorialChatAdvanceInFlight) return;
+    setState(() {
+      _dawTutorialChatAdvanceInFlight = true;
+    });
+
+    final deadline = DateTime.now().add(const Duration(seconds: 6));
+    while (_chatTextMessageCount(authorId: 'assistant') <=
+            _dawTutorialAssistantCountAtPromptSend &&
+        DateTime.now().isBefore(deadline)) {
+      await Future.delayed(const Duration(milliseconds: 120));
+    }
+
+    _scrollChatToLatest();
+    await Future.delayed(const Duration(milliseconds: 900));
+
+    if (!mounted || !_showDawOnboarding) return;
+    if (_currentDawOnboardingStepId != _DawTutorialStepId.chatWaiting) return;
+    setState(() {
+      _dawTutorialAwaitingChatReply = false;
+      _dawTutorialChatAdvanceInFlight = false;
+    });
+    _advanceDawOnboardingStep();
   }
 
   Future<void> _reloadRowsFromEngine() async {
@@ -3515,6 +4541,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _chatTextController.removeListener(_handleChatTextChanged);
     _chatTextController.dispose();
     _chatFocusNode.dispose();
+    _chatHistoryScrollController.dispose();
+    _chatHistoryPersistTimer?.cancel();
+    _chatHistoryPersistTimer = null;
+    _copiedChatMessageTimer?.cancel();
+    _copiedChatMessageTimer = null;
+    _promptRateLimitRefreshTimer?.cancel();
+    _promptRateLimitRefreshTimer = null;
     _samplePreviewStateSub?.cancel();
     _samplePreviewPlayer.dispose();
     _stopAllSecurityScopedAccess();
@@ -3524,7 +4557,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _midiHeldNotesByKey.clear();
     _midiRecordingClipEngineId = null;
     if (_liveMidiEventPlaybackSupported) {
-      unawaited(JuceAudioEngine.setLiveMidiInputTargetClip(-1));
+      _lastLiveMidiInputTargetClipId = -1;
+      unawaited(
+        _setLiveMidiInputTargetClipIfNeeded(-1, clearPendingEvents: false),
+      );
     }
     for (final timer in _midiRenderDebounceTimers.values) {
       timer.cancel();
@@ -3540,8 +4576,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _meterDecayTimer?.cancel();
     _meters.dispose();
     _transportClock.dispose();
-    // JuceAudioEngine.shutdown();
-    // print("JUCE shutdown called");
+    unawaited(JuceAudioEngine.shutdown());
     super.dispose();
   }
 
@@ -3550,8 +4585,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (defaultTargetPlatform == TargetPlatform.android) {
       if (state == AppLifecycleState.resumed) {
         debugPrint("App Resumed on Android - Re-initializing.");
+        unawaited(_refreshMicrophonePermissionState());
       } else if (state == AppLifecycleState.paused ||
           state == AppLifecycleState.inactive) {
+        _scheduleChatHistoryPersist(immediate: true);
         debugPrint("App Paused or Inactive on Android - Disposing.");
         _pausePlayback();
         setState(() {
@@ -3560,10 +4597,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       if (state == AppLifecycleState.resumed) {
-        // debugPrint("App Resumed on iOS");
+        unawaited(JuceAudioEngine.refreshAudioRoute(reason: 'appResumed'));
+        unawaited(_refreshMicrophonePermissionAndInputs());
       } else if (state == AppLifecycleState.paused) {
         //} || state == AppLifecycleState.inactive) {
         // debugPrint("App Paused or Inactive on iOS");
+        _scheduleChatHistoryPersist(immediate: true);
         _pauseAudio(_safeAudioEditorStateSetter);
         setState(() {
           _isPlaying = false;
@@ -3586,8 +4625,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _reopenSampleBrowserAfterDrag = false;
       _reopenSampleBrowserExpanded = false;
       final json = await ProjectManager.readProjectJson(_projectDir);
+      await _restoreChatHistoryFromProjectJson(json);
+      _projectId = ProjectManager.ensureProjectIdInJson(json);
       final projectVersion = (json["version"] as num?)?.toInt() ?? 1;
       _projectName = (json["name"] ?? "Untitled Project") as String;
+      _requiresProjectNaming = _projectRequiresNameConfirmation(json);
       _tempo = (((json["tempoBpm"] as num?) ?? (json["bpm"] as num?) ?? _tempo)
               .toDouble())
           .clamp(20.0, 999.0);
@@ -3658,6 +4700,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         final pitchSemitones =
             ((map["pitchSemitones"] as num?) ?? 0.0).toDouble();
+        final isReversed = (map["isReversed"] as bool?) ?? false;
         final parsedSourceTempoBpm =
             ((map["sourceTempoBpm"] as num?) ?? 0.0).toDouble();
         double sourceTempoBpm = parsedSourceTempoBpm;
@@ -3719,6 +4762,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               tr.crossfade = crossfade;
               tr.gain = gain;
               tr.pitchSemitones = pitchSemitones;
+              tr.isReversed = isReversed;
               tr.sourceTempoBpm = sourceTempoBpm;
               tr.stretchToProjectTempo = stretchToProjectTempo;
               tr.tempoStretchPreservePitch = tempoStretchPreservePitch;
@@ -3776,6 +4820,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             trimEndRequested: Duration(milliseconds: trimEndMs),
             gain: gain,
             pitchSemitones: pitchSemitones,
+            isReversed: isReversed,
             sourceTempoBpm: sourceTempoBpm,
             stretchToProjectTempo: stretchToProjectTempo,
             tempoStretchPreservePitch: tempoStretchPreservePitch,
@@ -3793,6 +4838,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         tr.crossfade = crossfade;
         tr.gain = gain;
         tr.pitchSemitones = pitchSemitones;
+        tr.isReversed = isReversed;
         tr.sourceTempoBpm = sourceTempoBpm;
         tr.stretchToProjectTempo = stretchToProjectTempo;
         tr.tempoStretchPreservePitch = tempoStretchPreservePitch;
@@ -3835,6 +4881,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await JuceAudioEngine.setRowPan(r, snap.pan);
       }
 
+      await _ensureLoadedAutomationDisplayRowsExist();
+
       // Restore FX snapshots after tracks exist
       final rowFxList = (json["rowEffects"] as List?) ?? [];
       for (final rf in rowFxList) {
@@ -3867,7 +4915,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await JuceAudioEngine.setMasterPan(_masterPan);
       }
 
-      _everSaved = true;
+      await _refreshAutomationTargetsForAllRows();
+
       // Stabilize first playback after loading by forcing transport to start.
       _setGlobalAudioClock(Duration.zero);
       await JuceAudioEngine.setTransportSeconds(0.001);
@@ -3880,14 +4929,75 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _refreshRowFx(row);
         }
       });
+      unawaited(
+        AnalyticsService.instance.trackScreen(
+          AnalyticsScreenNames.projectEditor,
+          properties: <String, Object?>{
+            'project_id': _projectId,
+          },
+        ),
+      );
+      unawaited(
+        AnalyticsService.instance.track(
+          AnalyticsEvents.projectOpened(
+            projectId: _projectId,
+            trackCount: ProjectManager.extractTrackCount(json),
+          ),
+        ),
+      );
       setState(() {});
     } catch (e) {
       debugPrint("Project load failed: $e");
     }
   }
 
+  AudioTrack? _primarySelectedClipOrNull() {
+    final index = _timelinePrimarySelectedClipIndex;
+    if (index >= 0 && index < _audioTracks.length) {
+      return _audioTracks[index];
+    }
+    return null;
+  }
+
+  AudioTrack? _armedMidiClipOrNull() {
+    return resolveArmedMidiClip(
+      tracks: _audioTracks,
+      activeMidiClipEngineId: _activeMidiClipEngineId,
+      primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
+    );
+  }
+
+  Future<bool> _setLiveMidiInputTargetClipIfNeeded(
+    int clipId, {
+    bool clearPendingEvents = true,
+    bool force = false,
+  }) async {
+    if (!_liveMidiEventPlaybackSupported) return false;
+    final safeClipId = clipId < 0 ? -1 : clipId;
+    if (!force && _lastLiveMidiInputTargetClipId == safeClipId) {
+      return true;
+    }
+    final ok = await JuceAudioEngine.setLiveMidiInputTargetClip(safeClipId);
+    if (!ok && safeClipId >= 0) {
+      return false;
+    }
+    _lastLiveMidiInputTargetClipId = safeClipId;
+    if (clearPendingEvents) {
+      await JuceAudioEngine.consumeLiveMidiInputEvents();
+    }
+    return true;
+  }
+
+  Future<void> _syncLiveMidiInputTargetClip() async {
+    if (!_liveMidiEventPlaybackSupported || _isMidiClipRecording) return;
+    final targetClipId = _armedMidiClipOrNull()?.engineClipId ?? -1;
+    await _setLiveMidiInputTargetClipIfNeeded(targetClipId);
+  }
+
   Future<void> _saveProject({bool showSnackBar = true}) async {
     try {
+      _chatHistoryPersistTimer?.cancel();
+      _chatHistoryPersistTimer = null;
       final audioDir = ProjectManager.audioDir(_projectDir);
       if (!await audioDir.exists()) await audioDir.create(recursive: true);
 
@@ -3921,6 +5031,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           "crossfade": tr.crossfade,
           "gain": tr.gain,
           "pitchSemitones": tr.pitchSemitones,
+          "isReversed": tr.isReversed,
           "sourceTempoBpm": tr.sourceTempoBpm,
           "stretchToProjectTempo": tr.stretchToProjectTempo,
           "tempoStretchPreservePitch": tr.tempoStretchPreservePitch,
@@ -3978,8 +5089,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       // Load existing json if present, preserve createdAt
       final existing = await ProjectManager.readProjectJson(_projectDir);
+      final savedProjectId = ProjectManager.ensureProjectIdInJson(existing);
       final createdAt =
           existing["createdAt"] ?? DateTime.now().millisecondsSinceEpoch;
+      final assistantChat =
+          ProjectChatHistory.fromChatMessages(_chatController.messages)
+              .toJsonValue();
 
       final now = DateTime.now().millisecondsSinceEpoch;
       final rowsJson = _rows
@@ -3989,10 +5104,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               })
           .toList();
       final json = <String, dynamic>{
-        "version": 4,
+        "version": 5,
         "name": _projectName,
+        "nameConfirmed": !_requiresProjectNaming,
         "createdAt": createdAt,
         "lastOpenedAt": now,
+        "projectId": _projectId.isNotEmpty ? _projectId : savedProjectId,
         "tempoBpm": _tempo,
         "tempoStretchEnabled": _tempoStretchEnabled,
         "tempoStretchPreservePitchDefault": _tempoStretchPreservePitchDefault,
@@ -4009,10 +5126,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           "showProducerCaptureUi": _showProducerCaptureUi,
         }
       };
+      if (assistantChat != null) {
+        json["assistantChat"] = assistantChat;
+      }
 
       await ProjectManager.writeProjectJson(_projectDir, json);
-
-      _everSaved = true;
 
       if (mounted && showSnackBar) {
         ScaffoldMessenger.of(context)
@@ -4137,8 +5255,91 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return result;
   }
 
+  bool _looksLikeGeneratedUntitledProjectName(String name) {
+    return RegExp(r'^Untitled Project(?: #\d+)?$').hasMatch(name.trim());
+  }
+
+  bool _projectRequiresNameConfirmation(Map<String, dynamic> json) {
+    final confirmed = json['nameConfirmed'];
+    if (confirmed is bool) {
+      return !confirmed;
+    }
+    final currentName = (json['name'] as String?) ?? _projectName;
+    return _looksLikeGeneratedUntitledProjectName(currentName);
+  }
+
+  void _remapProjectAudioPaths({
+    required Directory oldProjectDir,
+    required Directory newProjectDir,
+  }) {
+    final oldAudioDir = ProjectManager.audioDir(oldProjectDir).path;
+    final newAudioDir = ProjectManager.audioDir(newProjectDir).path;
+
+    for (final tr in _audioTracks) {
+      final oldFilePath = tr.file.path;
+      final oldOriginalPath = tr.originalFile.path;
+      final fileName = p.basename(oldFilePath);
+      final originalName = p.basename(oldOriginalPath);
+
+      final shouldRemapFile = oldFilePath.startsWith(oldAudioDir) ||
+          !File(oldFilePath).existsSync();
+      final shouldRemapOriginal = oldOriginalPath.startsWith(oldAudioDir) ||
+          !File(oldOriginalPath).existsSync();
+
+      if (shouldRemapFile) {
+        tr.file = File(p.join(newAudioDir, fileName));
+      }
+      if (shouldRemapOriginal) {
+        tr.originalFile = File(p.join(newAudioDir, originalName));
+      }
+    }
+  }
+
+  Future<bool> _renameProjectAndSyncState(
+    String nextName, {
+    bool showSuccessSnackBar = true,
+  }) async {
+    final renamed = nextName.trim();
+    if (renamed.isEmpty) return false;
+
+    if (renamed == _projectName) {
+      _setStateAndRefreshProjectSettings(() {
+        _requiresProjectNaming = false;
+      });
+      return true;
+    }
+
+    try {
+      final oldProjectDir = _projectDir;
+      final newDir = await ProjectManager.renameProject(_projectDir, renamed);
+      _setStateAndRefreshProjectSettings(() {
+        _projectDir = newDir;
+        _projectName = p.basename(newDir.path);
+        _requiresProjectNaming = false;
+        _remapProjectAudioPaths(
+          oldProjectDir: oldProjectDir,
+          newProjectDir: newDir,
+        );
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('⚠️ Rename failed: $e')),
+        );
+      }
+      return false;
+    }
+
+    if (mounted && showSuccessSnackBar) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✅ Project renamed')),
+      );
+    }
+    return true;
+  }
+
   Future<bool> _ensureProjectNamedOnFirstExit() async {
-    if (_everSaved) return true;
+    if (!_requiresProjectNaming) return true;
     final renamed = await _showProjectNameDialog(
       title: 'Name Your Project',
       initialName: _projectName,
@@ -4147,8 +5348,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (renamed == null) return false;
     final newName = renamed.trim();
     if (newName.isEmpty) return false;
-    setState(() => _projectName = newName);
-    return true;
+    if (newName == _projectName) {
+      setState(() => _requiresProjectNaming = false);
+      return true;
+    }
+    return _renameProjectAndSyncState(
+      newName,
+      showSuccessSnackBar: false,
+    );
   }
 
   Future<void> _handleBackPressed() async {
@@ -4214,6 +5421,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   void _startMeterPolling() {
     if (_meterPolling) return;
     _meterPolling = true;
+
+    // Defensive: re-enable native metering whenever polling starts.
+    unawaited(JuceAudioEngine.setMasterMeterEnabled(true));
+    unawaited(JuceAudioEngine.setRowMetersEnabled(true));
 
     _meterTimer?.cancel();
     _meterDecayTimer?.cancel();
@@ -4440,8 +5651,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<_AudioExportSettings?> _showAudioExportSettingsSheet() async {
-    _ExportAudioFormat selectedFormat = _audioExportSettings.format;
-    int selectedSampleRate = _audioExportSettings.sampleRate;
+    final normalizedCurrentSettings =
+        _normalizeAudioExportSettings(_audioExportSettings);
+    _ExportAudioFormat selectedFormat = normalizedCurrentSettings.format;
+    int selectedSampleRate = normalizedCurrentSettings.sampleRate;
     int selectedWavBitDepth = _audioExportSettings.wavBitDepth;
     bool selectedWavDithering = _audioExportSettings.wavDithering;
     int selectedMp3Bitrate = _audioExportSettings.mp3BitrateKbps;
@@ -4460,9 +5673,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       selectedNormalize = false;
       selectedResampleQuality = _ExportResampleQuality.best;
     }
-    if (!_kExportSampleRates.contains(selectedSampleRate)) {
-      selectedSampleRate = _kExportSampleRates.first;
-    }
+    selectedSampleRate = _normalizeExportSampleRateForFormat(
+      selectedFormat,
+      selectedSampleRate,
+    );
     if (!_kExportWavBitDepths.contains(selectedWavBitDepth)) {
       selectedWavBitDepth = _kExportWavBitDepths.first;
     }
@@ -4540,6 +5754,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
+            final sampleRateOptions = _exportSampleRatesForFormat(
+              nativeWavOnly ? _ExportAudioFormat.wav : selectedFormat,
+            );
+
             Widget buildFormatOption({
               required _ExportAudioFormat format,
               required String label,
@@ -4554,7 +5772,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     right: isLeft ? Radius.zero : const Radius.circular(12),
                   ),
                   onTap: enabled
-                      ? () => setSheetState(() => selectedFormat = format)
+                      ? () => setSheetState(() {
+                            selectedFormat = format;
+                            selectedSampleRate =
+                                _normalizeExportSampleRateForFormat(
+                              format,
+                              selectedSampleRate,
+                            );
+                          })
                       : null,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 140),
@@ -4749,7 +5974,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   buildDropdownField(
                                     label: 'Sample rate',
                                     value: selectedSampleRate,
-                                    options: _kExportSampleRates,
+                                    options: sampleRateOptions,
                                     textBuilder: (value) => '$value Hz',
                                     onChanged: (value) {
                                       if (value == null) return;
@@ -4777,17 +6002,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     ),
                                     const SizedBox(height: 10),
                                     buildDropdownField(
-                                      label: 'Resample quality',
+                                      label: L10n.translate(
+                                          context, 'Resample quality'),
                                       value: selectedResampleQuality,
                                       options: _ExportResampleQuality.values,
                                       textBuilder: (value) {
                                         switch (value) {
                                           case _ExportResampleQuality.draft:
-                                            return 'Draft (fast)';
+                                            return L10n.translate(
+                                                context, 'Draft (fast)');
                                           case _ExportResampleQuality.good:
-                                            return 'Good';
+                                            return L10n.translate(
+                                                context, 'Good');
                                           case _ExportResampleQuality.best:
-                                            return 'Best';
+                                            return L10n.translate(
+                                                context, 'Best');
                                         }
                                       },
                                       onChanged: (value) {
@@ -4801,7 +6030,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     SwitchListTile(
                                       contentPadding: EdgeInsets.zero,
                                       title: Text(
-                                        'Normalize loudness',
+                                        L10n.translate(
+                                            context, 'Normalize loudness'),
                                         style: TextStyle(color: mutedText),
                                       ),
                                       value: selectedNormalize,
@@ -4816,7 +6046,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   if (!nativeWavOnly && selectedNormalize) ...[
                                     const SizedBox(height: 4),
                                     buildDropdownField(
-                                      label: 'Limiter ceiling (dBTP)',
+                                      label: L10n.translate(
+                                          context, 'Limiter ceiling (dBTP)'),
                                       value: selectedNormalizeTargetDb,
                                       options: _kExportNormalizeTargetsDb,
                                       textBuilder: (value) =>
@@ -4834,7 +6065,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           _ExportAudioFormat.wav ||
                                       nativeWavOnly) ...[
                                     buildDropdownField(
-                                      label: 'Bit depth',
+                                      label:
+                                          L10n.translate(context, 'Bit depth'),
                                       value: selectedWavBitDepth,
                                       options: _kExportWavBitDepths,
                                       textBuilder: (value) => '$value-bit',
@@ -4849,7 +6081,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     SwitchListTile(
                                       contentPadding: EdgeInsets.zero,
                                       title: Text(
-                                        'Enable dithering',
+                                        L10n.translate(
+                                            context, 'Enable dithering'),
                                         style: TextStyle(color: mutedText),
                                       ),
                                       value: selectedWavDithering,
@@ -4862,7 +6095,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     ),
                                   ] else ...[
                                     buildDropdownField(
-                                      label: 'Encoding mode',
+                                      label: L10n.translate(
+                                          context, 'Encoding mode'),
                                       value: selectedMp3Mode,
                                       options: _ExportMp3Mode.values,
                                       textBuilder: (value) =>
@@ -4879,7 +6113,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     const SizedBox(height: 10),
                                     if (selectedMp3Mode == _ExportMp3Mode.cbr)
                                       buildDropdownField(
-                                        label: 'Bit rate',
+                                        label:
+                                            L10n.translate(context, 'Bit rate'),
                                         value: selectedMp3Bitrate,
                                         options: _kExportMp3Bitrates,
                                         textBuilder: (value) => '${value} kbps',
@@ -4892,11 +6127,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       )
                                     else
                                       buildDropdownField(
-                                        label: 'VBR quality',
+                                        label: L10n.translate(
+                                            context, 'VBR quality'),
                                         value: selectedMp3VbrQuality,
                                         options: _kExportMp3VbrQualities,
                                         textBuilder: (value) =>
-                                            'V$value (${value == 0 ? "highest" : "smaller file"})',
+                                            'V$value (${L10n.translate(context, value == 0 ? "highest" : "smaller file")})',
                                         onChanged: (value) {
                                           if (value == null) return;
                                           setSheetState(() {
@@ -4919,7 +6155,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     foregroundColor:
                                         Colors.white.withOpacity(0.74),
                                   ),
-                                  child: const Text('Cancel'),
+                                  child: Text(
+                                    L10n.translate(context, 'Cancel'),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -4939,7 +6177,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         format: nativeWavOnly
                                             ? _ExportAudioFormat.wav
                                             : selectedFormat,
-                                        sampleRate: selectedSampleRate,
+                                        sampleRate:
+                                            _normalizeExportSampleRateForFormat(
+                                          nativeWavOnly
+                                              ? _ExportAudioFormat.wav
+                                              : selectedFormat,
+                                          selectedSampleRate,
+                                        ),
                                         wavBitDepth: selectedWavBitDepth,
                                         wavDithering: selectedWavDithering,
                                         mp3BitrateKbps: selectedMp3Bitrate,
@@ -4959,7 +6203,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       ),
                                     );
                                   },
-                                  child: const Text('Start export'),
+                                  child: Text(
+                                    L10n.translate(context, 'Start export'),
+                                  ),
                                 ),
                               ),
                             ],
@@ -4977,52 +6223,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  String _wavCodecForBitDepth(int bitDepth) {
-    switch (bitDepth) {
-      case 24:
-        return 'pcm_s24le';
-      case 32:
-        return 'pcm_f32le';
-      case 16:
-      default:
-        return 'pcm_s16le';
-    }
-  }
-
-  String _buildResampleFilter(_AudioExportSettings settings) {
-    final isWav = settings.format == _ExportAudioFormat.wav;
-    final ditherMethod = settings.wavDithering ? 'triangular' : 'none';
-    switch (settings.resampleQuality) {
-      case _ExportResampleQuality.draft:
-        return isWav
-            ? 'aresample=${settings.sampleRate}:resampler=swr:dither_method=$ditherMethod'
-            : 'aresample=${settings.sampleRate}:resampler=swr';
-      case _ExportResampleQuality.good:
-        return isWav
-            ? 'aresample=${settings.sampleRate}:resampler=soxr:precision=20:dither_method=$ditherMethod'
-            : 'aresample=${settings.sampleRate}:resampler=soxr:precision=20';
-      case _ExportResampleQuality.best:
-        return isWav
-            ? 'aresample=${settings.sampleRate}:resampler=soxr:precision=28:dither_method=$ditherMethod'
-            : 'aresample=${settings.sampleRate}:resampler=soxr:precision=28';
-    }
-  }
-
-  String _buildExportFilter(_AudioExportSettings settings) {
-    final List<String> filters = [_buildResampleFilter(settings)];
-    if (settings.channelMode == _ExportChannelMode.mono) {
-      filters.add('aformat=channel_layouts=mono');
-    } else {
-      filters.add('aformat=channel_layouts=stereo');
-    }
-    if (settings.normalize) {
-      filters.add(
-        'loudnorm=I=-14:LRA=11:TP=${settings.normalizeTargetDb.toStringAsFixed(1)}:linear=true',
-      );
-    }
-    return filters.join(',');
-  }
-
   Future<String> _convertMixWithExportSettings({
     required String inputPath,
     required _AudioExportSettings settings,
@@ -5031,46 +6231,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final outPath =
         '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.${settings.fileExtension}';
 
-    final filter = _buildExportFilter(settings);
-    final channelCount =
-        settings.channelMode == _ExportChannelMode.mono ? '1' : '2';
-    final List<String> ffmpegCmd;
-    if (settings.format == _ExportAudioFormat.wav) {
-      ffmpegCmd = [
-        '-i',
-        '"$inputPath"',
-        if (filter.isNotEmpty) ...['-af', filter],
-        '-c:a',
-        _wavCodecForBitDepth(settings.wavBitDepth),
-        '-ac',
-        channelCount,
-        '-ar',
-        '${settings.sampleRate}',
-        '-y',
-        '"$outPath"',
-      ];
-    } else {
-      ffmpegCmd = [
-        '-i',
-        '"$inputPath"',
-        if (filter.isNotEmpty) ...['-af', filter],
-        '-c:a',
-        'libmp3lame',
-        if (settings.mp3Mode == _ExportMp3Mode.cbr) ...[
-          '-b:a',
-          '${settings.mp3BitrateKbps}k',
-        ] else ...[
-          '-q:a',
-          '${settings.mp3VbrQuality}',
-        ],
-        '-ac',
-        channelCount,
-        '-ar',
-        '${settings.sampleRate}',
-        '-y',
-        '"$outPath"',
-      ];
-    }
+    final ffmpegCmd = AudioExportPlan.buildFfmpegArgs(
+      inputPath: inputPath,
+      outputPath: outPath,
+      format: settings.format.name,
+      sampleRate: settings.sampleRate,
+      wavBitDepth: settings.wavBitDepth,
+      wavDithering: settings.wavDithering,
+      mp3BitrateKbps: settings.mp3BitrateKbps,
+      mp3Mode: settings.mp3Mode.name,
+      mp3VbrQuality: settings.mp3VbrQuality,
+      channelMode: settings.channelMode.name,
+      normalize: settings.normalize,
+      normalizeTargetDb: settings.normalizeTargetDb,
+      resampleQuality: settings.resampleQuality.name,
+    );
 
     try {
       final Session session = await FFmpegKit.execute(ffmpegCmd.join(' '));
@@ -5135,9 +6310,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool _canUseNativeWavExport(_AudioExportSettings settings) {
-    return settings.format == _ExportAudioFormat.wav &&
-        settings.channelMode == _ExportChannelMode.stereo &&
-        !settings.normalize;
+    return AudioExportPlan.canUseNativeWavExport(
+      format: settings.format.name,
+      channelMode: settings.channelMode.name,
+      normalize: settings.normalize,
+    );
   }
 
   Future<String> _exportAudioOnly(ValueChanged<double> onProgress) async {
@@ -5151,7 +6328,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     onProgress(0.0);
-    final settings = _activeAudioExportSettings ?? _audioExportSettings;
+    final settings = _normalizeAudioExportSettings(
+      _activeAudioExportSettings ?? _audioExportSettings,
+    );
     if (_desktopNativeWavOnlyExport) {
       final tempDir = await getTemporaryDirectory();
       await _syncNativePluginAutomationForAllRows();
@@ -5543,7 +6722,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   int? _activeMidiRecordingClipIndex() {
-    final activeEngineId = _activeMidiClipEngineId;
+    final activeEngineId = _armedMidiClipOrNull()?.engineClipId;
     if (activeEngineId == null || activeEngineId < 0) return null;
     final clipIndex = _clipIndexForEngineId(activeEngineId);
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return null;
@@ -5742,16 +6921,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
     }
 
-    final targetOk =
-        await JuceAudioEngine.setLiveMidiInputTargetClip(clip.engineClipId);
+    final targetOk = await _setLiveMidiInputTargetClipIfNeeded(
+      clip.engineClipId,
+      force: true,
+    );
     if (!targetOk) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Unable to arm selected MIDI clip.')),
       );
       return;
     }
-
-    await JuceAudioEngine.consumeLiveMidiInputEvents();
     _midiHeldNotesByKey.clear();
     _nextMidiRecordNoteToken = 0;
     _lastMidiRecordTransportSec =
@@ -5807,12 +6986,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (_liveMidiEventPlaybackSupported) {
-      final previewClip =
-          (_activeMidiClipEngineId != null && _activeMidiClipEngineId! >= 0)
-              ? _activeMidiClipEngineId!
-              : -1;
-      await JuceAudioEngine.setLiveMidiInputTargetClip(previewClip);
-      await JuceAudioEngine.consumeLiveMidiInputEvents();
+      final previewClip = _armedMidiClipOrNull()?.engineClipId ?? -1;
+      await _setLiveMidiInputTargetClipIfNeeded(
+        previewClip,
+        force: true,
+      );
     }
 
     _midiHeldNotesByKey.clear();
@@ -5860,18 +7038,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // 2) Determine where in the project we start recording (UNCHANGED)
     _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
 
-    // 3) If not already playing, start playback (UNCHANGED)
-    if (!_isPlaying) {
-      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
-    }
+    // Keep record-start deterministic even if background prewarm has not
+    // finished yet.
+    await _ensureMobileRecordingRouteReady();
 
-    // 4) Prepare file path (CHANGE → WAV)
+    // 3) Prepare file path (CHANGE → WAV)
     final audioDir = ProjectManager.audioDir(_projectDir);
     if (!await audioDir.exists()) await audioDir.create(recursive: true);
     final filePath = p.join(audioDir.path,
         'mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav');
 
-    // 5) Start JUCE recording
+    // 4) Start native recording before touching playback transport again.
     final ok = await JuceAudioEngine.startRecording(
       filePath,
       _selectedChannelStart,
@@ -5882,6 +7059,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to start recording')));
       return;
+    }
+
+    // 5) Keep old behavior: if transport is stopped, start playback after the
+    // recorder is armed so route/input state is not invalidated between arm and
+    // first capture.
+    if (!_isPlaying) {
+      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
     }
 
     // 6) UI state (UNCHANGED)
@@ -5924,6 +7108,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     // 1) Stop JUCE recorder
     await JuceAudioEngine.stopRecording();
+    _lastPreparedRecordingDevice = null;
+    _lastPreparedRecordingInputOpenChannels = null;
 
     if (_recordingFilePath == null || !File(_recordingFilePath!).existsSync()) {
       setState(() {
@@ -5952,6 +7138,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     // 2) Insert recorded clip (UNCHANGED)
     try {
+      final beforeCount = _audioTracks.length;
       await _undoManager.execute(
         AddAudioTrackAction(
           addTrack: ({
@@ -6082,6 +7269,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       rowId: rowId,
       engineClipId: engineClipId,
       label: baseNameNoExt,
+      isReversed: false,
     );
 
     _startWaveformExtraction(newTrack);
@@ -6153,6 +7341,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       rowId: rowId,
       engineClipId: engineClipId,
       label: clip.label,
+      isReversed: clip.isReversed,
     );
 
     newTrack.normWaveformData = clip.normWaveformData;
@@ -6163,6 +7352,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       newTrack.trimEnd = trimEndRequested ?? dur;
       newTrack.gain = clip.gain;
       newTrack.pitchSemitones = clip.pitchSemitones;
+      newTrack.isReversed = clip.isReversed;
       newTrack.sourceTempoBpm = clip.sourceTempoBpm;
       newTrack.stretchToProjectTempo = clip.stretchToProjectTempo;
       newTrack.tempoStretchPreservePitch = clip.tempoStretchPreservePitch;
@@ -6182,6 +7372,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Duration? trimEndRequested,
     double? gain,
     double? pitchSemitones,
+    bool isReversed = false,
     double? sourceTempoBpm,
     bool? stretchToProjectTempo,
     bool? tempoStretchPreservePitch,
@@ -6227,6 +7418,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       rowId: rowId,
       engineClipId: engineClipId,
       label: label,
+      isReversed: false,
     );
 
     newTrack.offset = timeMs / 1000.0;
@@ -6235,6 +7427,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (gain != null) newTrack.gain = gain;
     if (pitchSemitones != null) newTrack.pitchSemitones = pitchSemitones;
+    newTrack.isReversed = isReversed;
     if (sourceTempoBpm != null) newTrack.sourceTempoBpm = sourceTempoBpm;
     if (stretchToProjectTempo != null) {
       newTrack.stretchToProjectTempo = stretchToProjectTempo;
@@ -7962,6 +9155,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (renderedWithSfz && outFile.existsSync()) {
         return true;
       }
+      if (Platform.isAndroid) {
+        final engineInstrumentId = _liveMidiEngineInstrumentId(instrumentId);
+        final renderedPath = await JuceAudioEngine.renderInstrumentClip(
+          outPath: outFile.path,
+          instrumentId: engineInstrumentId,
+          instrumentName: instrumentName,
+          bpm: _tempo,
+          notes: notes
+              .map((n) => {
+                    'id': n.id,
+                    'pitch': n.pitch,
+                    'startBeat': n.startBeat,
+                    'lengthBeats': n.lengthBeats,
+                    'velocity': n.velocity,
+                  })
+              .toList(),
+          params: params,
+        );
+        if (renderedPath.isNotEmpty && File(renderedPath).existsSync()) {
+          return true;
+        }
+      }
       return false;
     }
 
@@ -8209,7 +9424,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required double inFileOffsetSec,
   }) async {
     if (!_liveMidiEventPlaybackSupported) return false;
-    if (_isSampledInstrumentId(instrumentId)) return false;
     if (engineClipId < 0 || rowId < 0) return false;
     final liveInstrumentId = _liveMidiEngineInstrumentId(instrumentId);
     return JuceAudioEngine.loadMidiClip(
@@ -8229,7 +9443,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _updateMidiClipEventsLive(AudioTrack clip) async {
     if (!_liveMidiEventPlaybackSupported) return false;
     if (!clip.isMidi || clip.engineClipId < 0) return false;
-    if (_isSampledInstrumentId(clip.instrumentId)) return false;
     final liveInstrumentId = _liveMidiEngineInstrumentId(clip.instrumentId);
     return JuceAudioEngine.updateMidiClipEvents(
       clip.engineClipId,
@@ -8807,6 +10020,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final tempoRatio = _tempoPlaybackRatioForEngine(clip);
     final preservePitch = _clipPreserveTempoPitchInEngine(clip);
     await JuceAudioEngine.setClipGain(clip.engineClipId, gain);
+    await JuceAudioEngine.setClipReversed(
+      clip.engineClipId,
+      !clip.isMidi && clip.isReversed,
+    );
     await JuceAudioEngine.setClipStretchOptions(
       clip.engineClipId,
       tempoRatio: tempoRatio,
@@ -8962,7 +10179,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         debugPrint('Retry open export dialog failed: $retryError');
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open export options.')),
+          SnackBar(
+            content: Text(
+              L10n.translate(context, 'Could not open export options.'),
+            ),
+          ),
         );
         return;
       }
@@ -8970,7 +10191,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted || selectedSettings == null) {
       return;
     }
-    final effectiveSettings = selectedSettings;
+    final effectiveSettings = _normalizeAudioExportSettings(selectedSettings);
+    final exportStopwatch = Stopwatch()..start();
+    unawaited(
+      AnalyticsService.instance.track(
+        AnalyticsEvents.exportStarted(
+          projectId: _projectId,
+          exportType: 'mixdown',
+          trackCount: _audioTracks.length,
+        ),
+      ),
+    );
 
     setState(() {
       _audioExportSettings = effectiveSettings;
@@ -8998,17 +10229,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
 
     if (exportPath == null || exportPath.isEmpty) {
+      unawaited(
+        AnalyticsService.instance.track(
+          AnalyticsEvents.exportFailed(
+            projectId: _projectId,
+            errorCode: 'cancelled_or_failed',
+          ),
+        ),
+      );
       final failStr = L10n.translate(context, 'Export canceled or failed.');
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(failStr)));
       return;
     }
 
+    int exportFileSize = 0;
+    try {
+      exportFileSize = await File(exportPath).length();
+    } catch (_) {}
+    unawaited(
+      AnalyticsService.instance.track(
+        AnalyticsEvents.exportCompleted(
+          projectId: _projectId,
+          exportType: 'mixdown',
+          durationMs: exportStopwatch.elapsedMilliseconds,
+          fileSize: exportFileSize,
+        ),
+      ),
+    );
+
     final ext = p.extension(exportPath).replaceAll('.', '');
+    final suggestedFileName = ExportSaveDialog.buildSuggestedFileName(
+      baseName: _projectName,
+      extension: ext,
+    );
     final savedPath = await ExportSaveDialog.saveExportedFile(
       sourceFilePath: exportPath,
-      suggestedFileName: 'export_file.$ext',
-      desktopDialogTitle: 'Save export',
+      suggestedFileName: suggestedFileName,
+      desktopDialogTitle: L10n.translate(context, 'Save export'),
     );
 
     if (savedPath != null) {
@@ -9020,11 +10278,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         context,
         MaterialPageRoute(
           builder: (context) => ExportSuccessScreen(
-            filePath: exportPath, // savedPath,
+            filePath: exportPath,
+            savedFilePath: savedPath,
+            savedFileName: suggestedFileName,
             isVideo: false,
           ),
         ),
       );
+
+      try {
+        final tempExport = File(exportPath);
+        if (await tempExport.exists()) {
+          await tempExport.delete();
+        }
+      } catch (_) {}
 
       if (done == true) {
         //****TEMPORARY: REMOVE return LINE FOR Mixroom FULL RELEASE****
@@ -9105,6 +10372,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int? row,
     double? timeMs,
     bool enforceKnownAudioExtension = true,
+    String uploadMethod = 'import',
   }) async {
     if (enforceKnownAudioExtension && !_isSampleAudioFile(filePath)) return;
     if (!await _ensureCanAddAnotherClip(
@@ -9122,6 +10390,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     await _stopSampleAudition();
+    final beforeCount = _audioTracks.length;
     await _undoManager.execute(
       AddAudioTrackAction(
         addTrack: ({
@@ -9148,6 +10417,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
+    if (!await _ensureAndroidMediaLibraryAccess()) {
+      return;
+    }
+
     if (_isPlaying) {
       await _pausePlayback();
     }
@@ -9166,7 +10439,88 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<bool> _ensureAndroidMediaLibraryAccess() async {
+    if (!Platform.isAndroid) return true;
+
+    final status = await Permission.audio.request();
+    if (status.isGranted || status.isLimited) {
+      return true;
+    }
+
+    if (!mounted) return false;
+    final openSettingsRequested = await showDialog<bool>(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: Text(L10n.translate(ctx, 'Allow media access')),
+              content: Text(
+                L10n.translate(
+                  ctx,
+                  'Mixroom needs access to audio files to browse sample folders and import local media on Android.',
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(L10n.translate(ctx, 'Not now')),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text(L10n.translate(ctx, 'Open settings')),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+
+    if (openSettingsRequested) {
+      await _openAppPermissionsSettings();
+    }
+    return false;
+  }
+
+  Future<void> _requestMicrophoneAccessFromSettingsPanel() async {
+    final status = await Permission.microphone.request();
+    if (!mounted) return;
+    _setStateAndRefreshProjectSettings(() {
+      _microphonePermissionStatus = status;
+      _microphoneAccessBlocked = !(status.isGranted || status.isLimited);
+    });
+    if (!_microphoneAccessBlocked) {
+      await _loadInputDevicesFromJuce();
+      return;
+    }
+    if (status.isPermanentlyDenied || status.isRestricted) {
+      await _openAppPermissionsSettings();
+    }
+  }
+
+  Future<void> _refreshMicrophonePermissionState() async {
+    final status = await Permission.microphone.status;
+    if (!mounted) return;
+    _setStateAndRefreshProjectSettings(() {
+      _microphonePermissionStatus = status;
+      _microphoneAccessBlocked = !(status.isGranted || status.isLimited);
+    });
+  }
+
+  Future<void> _refreshMicrophonePermissionAndInputs() async {
+    await _refreshMicrophonePermissionState();
+    if (!mounted) return;
+    await _loadInputDevicesFromJuce();
+  }
+
+  Future<void> _openAppPermissionsSettings() async {
+    await openAppSettings();
+    if (!mounted) return;
+    unawaited(_refreshMicrophonePermissionAndInputs());
+  }
+
   Future<void> _addSampleBrowserRootFolder() async {
+    if (!await _ensureAndroidMediaLibraryAccess()) {
+      return;
+    }
     final directoryPath = await _runFilePickerRequest<String?>(
       () => FilePicker.platform.getDirectoryPath(
         dialogTitle: 'Choose Sample Folder',
@@ -9534,7 +10888,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  void _openAddActionsPanel() {
+  void _openAddActionsPanel({bool userInitiated = false}) {
     if (!mounted) return;
     setState(() {
       _showAddActionsPanel = true;
@@ -9543,6 +10897,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _chatInputActive = false;
     });
     _chatFocusNode.unfocus();
+    if (userInitiated) {
+      _handleDawOnboardingAddButtonOpened();
+    }
   }
 
   void _closeAddActionsPanel() {
@@ -9706,169 +11063,75 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Widget _buildInstrumentPickerCard({
+  Widget _buildInstrumentPickerRow({
     required Map<String, dynamic> spec,
     required VoidCallback onTap,
   }) {
     final category = _instrumentPickerCategory(spec);
     final accent = _instrumentPickerAccent(category);
-    final source = (spec['sourceProject'] as String?) ?? '';
     final name = (spec['name'] as String?) ?? 'Instrument';
-    final sampled = _isSampledInstrumentSpec(spec);
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         child: Ink(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomRight,
-              colors: [
-                const Color(0xFF263245),
-                const Color(0xFF1B2433),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: accent.withValues(alpha: 0.52)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.22),
-                blurRadius: 12,
-                offset: const Offset(0, 6),
-              ),
-            ],
+            color: Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
           ),
-          child: Stack(
+          child: Row(
             children: [
-              Positioned(
-                right: -22,
-                top: -26,
-                child: IgnorePointer(
-                  child: Container(
-                    width: 88,
-                    height: 88,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          accent.withValues(alpha: 0.26),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  _instrumentPickerIcon(category),
+                  color: accent,
+                  size: 17,
                 ),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 30,
-                        height: 30,
-                        decoration: BoxDecoration(
-                          color: accent.withValues(alpha: 0.20),
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        child: Icon(
-                          _instrumentPickerIcon(category),
-                          color: accent,
-                          size: 17,
-                        ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
                       ),
-                      const SizedBox(width: 8),
-                      Container(
-                        constraints: const BoxConstraints(minHeight: 19),
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(horizontal: 9),
-                        decoration: BoxDecoration(
-                          color: accent.withValues(alpha: 0.17),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: accent.withValues(alpha: 0.50),
-                          ),
-                        ),
-                        child: Text(
-                          category,
-                          style: TextStyle(
-                            color: accent,
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                            height: 1.0,
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                      Icon(
-                        Icons.north_east_rounded,
-                        size: 15,
-                        color: Colors.white.withValues(alpha: 0.48),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 9),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15.4,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.1,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          sampled
-                              ? (source.isEmpty
-                                  ? 'Sampled • Ready to play'
-                                  : 'Sampled • $source')
-                              : (source.isEmpty
-                                  ? 'Synth preset'
-                                  : 'Inspired by $source'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.68),
-                            fontSize: 10.9,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 7),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.28),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.13),
-                            ),
-                          ),
-                          child: Text(
-                            sampled ? 'SFZ Layered' : 'Synth Engine',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.80),
-                              fontSize: 9.8,
-                              fontWeight: FontWeight.w700,
-                              height: 1.0,
-                            ),
-                          ),
-                        ),
-                      ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 2),
+                    Text(
+                      category,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.62),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: Colors.white.withValues(alpha: 0.34),
               ),
             ],
           ),
@@ -10012,27 +11275,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                             )
-                          : LayoutBuilder(
-                              builder: (context, constraints) {
-                                final compact = constraints.maxWidth < 430;
-                                final crossAxisCount = compact ? 1 : 2;
-                                final cardHeight = compact ? 130.0 : 138.0;
-                                return GridView.builder(
-                                  itemCount: filtered.length,
-                                  gridDelegate:
-                                      SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: crossAxisCount,
-                                    mainAxisSpacing: 10,
-                                    crossAxisSpacing: 10,
-                                    mainAxisExtent: cardHeight,
-                                  ),
-                                  itemBuilder: (_, index) {
-                                    final spec = filtered[index];
-                                    return _buildInstrumentPickerCard(
-                                      spec: spec,
-                                      onTap: () => Navigator.pop(ctx, spec),
-                                    );
-                                  },
+                          : ListView.separated(
+                              itemCount: filtered.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 8),
+                              itemBuilder: (_, index) {
+                                final spec = filtered[index];
+                                return _buildInstrumentPickerRow(
+                                  spec: spec,
+                                  onTap: () => Navigator.pop(ctx, spec),
                                 );
                               },
                             ),
@@ -10123,7 +11374,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required VoidCallback onTap,
   }) {
     final selected = _activeAddActionId == id;
-    return Padding(
+    Widget tile = Padding(
       padding: EdgeInsets.fromLTRB(8, topPadding, 8, bottomPadding),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 85),
@@ -10157,6 +11408,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       ),
     );
+    if (id == 'audio' || id == 'instrument') {
+      tile = MultiHalo(
+        highlighter: _mixHighlighter,
+        haloKeys: <HaloKey>[
+          HaloKey(
+              id == 'audio' ? 'tutorial:add_audio' : 'tutorial:add_instrument'),
+        ],
+        borderRadius: BorderRadius.circular(12),
+        child: tile,
+      );
+    }
+    return tile;
   }
 
   Future<void> _snapshotFxBypassState() async {
@@ -10289,6 +11552,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   //   ),
                   // ),// === GLOBAL FX BYPASS HEADER ===
                   Container(
+                    key: _masterRackKey,
                     constraints: BoxConstraints(
                       minWidth: 320,
                       maxWidth: math.min(deviceWidth * 0.96, 980),
@@ -10371,8 +11635,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         Padding(
                           padding: const EdgeInsets.all(12),
                           child: DynamicRackContent(
+                            key: _masterRackContentKey,
                             volumePage: _buildMasterVolumePage(),
                             effectsPage: _buildMasterEffectsPage(),
+                            tutorialHighlighter: _mixHighlighter,
                           ),
                         ),
                       ],
@@ -10435,6 +11701,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<void> _showMasterMixAutomationSheet({
+    required String paramId,
+    required String label,
+    required List<String> haloKeys,
+  }) async {
+    await AppHaptics.impact(AppHapticImpact.medium);
+    _triggerMasterHalos(haloKeys);
+    await _requestMasterMixAutomationClip(paramId);
+  }
+
   Widget _buildMasterVolumePage() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -10445,64 +11721,108 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             children: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: PrettyGainSlider(
-                  value: _masterGain,
-                  onChangeStart: (v) {
-                    _masterGainDragStart = v;
-                  },
-                  onChanged: (v) {
-                    setState(() => _masterGain = v);
-                    JuceAudioEngine.setMasterGain(v);
-                  },
-                  onChangeEnd: (v) {
-                    _undoManager.execute(
-                      SetMasterGainAction(
-                        oldGain: _masterGainDragStart!,
-                        newGain: _masterGain,
-                        applyToState: (g) {
-                          setState(() {
-                            _masterGain = g;
-                          });
-                        },
+                child: Builder(
+                  builder: (context) {
+                    Widget child = PrettyGainSlider(
+                      value: _masterGain,
+                      onLongPress: () => _showMasterMixAutomationSheet(
+                        paramId: 'gain',
+                        label: 'Master Gain',
+                        haloKeys: <String>[
+                          'master:gain',
+                          'master:param:gain',
+                        ],
                       ),
+                      onChangeStart: (v) {
+                        _masterGainDragStart = v;
+                      },
+                      onChanged: (v) {
+                        setState(() => _masterGain = v);
+                        JuceAudioEngine.setMasterGain(v);
+                      },
+                      onChangeEnd: (v) {
+                        _undoManager.execute(
+                          SetMasterGainAction(
+                            oldGain: _masterGainDragStart!,
+                            newGain: _masterGain,
+                            applyToState: (g) {
+                              setState(() {
+                                _masterGain = g;
+                              });
+                            },
+                          ),
+                        );
+                        _recordProducerManualEdit('master_gain', {
+                          'old_gain': _masterGainDragStart,
+                          'new_gain': _masterGain,
+                        });
+                        _masterGainDragStart = null;
+                      },
                     );
-                    _recordProducerManualEdit('master_gain', {
-                      'old_gain': _masterGainDragStart,
-                      'new_gain': _masterGain,
-                    });
-                    _masterGainDragStart = null;
+                    child = MultiHalo(
+                      highlighter: _mixHighlighter,
+                      haloKeys: const <HaloKey>[
+                        HaloKey('master:gain'),
+                        HaloKey('master:param:gain'),
+                      ],
+                      borderRadius: BorderRadius.circular(10),
+                      child: child,
+                    );
+                    return child;
                   },
                 ),
               ),
               const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: PrettyStereoSlider(
-                  value: _masterPan,
-                  onChangeStart: (v) {
-                    _masterPanDragStart = v;
-                  },
-                  onChanged: (v) {
-                    setState(() => _masterPan = v);
-                    JuceAudioEngine.setMasterPan(v);
-                  },
-                  onChangeEnd: (v) {
-                    _undoManager.execute(
-                      SetMasterPanAction(
-                        oldPan: _masterPanDragStart!,
-                        newPan: _masterPan,
-                        applyToState: (p) {
-                          setState(() {
-                            _masterPan = p;
-                          });
-                        },
+                child: Builder(
+                  builder: (context) {
+                    Widget child = PrettyStereoSlider(
+                      value: _masterPan,
+                      onLongPress: () => _showMasterMixAutomationSheet(
+                        paramId: 'pan',
+                        label: 'Master Pan',
+                        haloKeys: <String>[
+                          'master:pan',
+                          'master:param:pan',
+                        ],
                       ),
+                      onChangeStart: (v) {
+                        _masterPanDragStart = v;
+                      },
+                      onChanged: (v) {
+                        setState(() => _masterPan = v);
+                        JuceAudioEngine.setMasterPan(v);
+                      },
+                      onChangeEnd: (v) {
+                        _undoManager.execute(
+                          SetMasterPanAction(
+                            oldPan: _masterPanDragStart!,
+                            newPan: _masterPan,
+                            applyToState: (p) {
+                              setState(() {
+                                _masterPan = p;
+                              });
+                            },
+                          ),
+                        );
+                        _recordProducerManualEdit('master_pan', {
+                          'old_pan': _masterPanDragStart,
+                          'new_pan': _masterPan,
+                        });
+                        _masterPanDragStart = null;
+                      },
                     );
-                    _recordProducerManualEdit('master_pan', {
-                      'old_pan': _masterPanDragStart,
-                      'new_pan': _masterPan,
-                    });
-                    _masterPanDragStart = null;
+                    child = MultiHalo(
+                      highlighter: _mixHighlighter,
+                      haloKeys: const <HaloKey>[
+                        HaloKey('master:pan'),
+                        HaloKey('master:param:pan'),
+                      ],
+                      borderRadius: BorderRadius.circular(10),
+                      child: child,
+                    );
+                    return child;
                   },
                 ),
               ),
@@ -10541,8 +11861,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Widget _buildMasterTrackGainStagingRow(int row) {
     final rowInfo = _rows[row];
-    final String rowName =
-        rowInfo.name.trim().isEmpty ? "Track ${row + 1}" : rowInfo.name.trim();
+    final String rowName = _rowDisplayName(row);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
@@ -10817,6 +12136,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildMasterEffectsPage() {
+    void onMasterFxGraphChanged() {
+      if (mounted) {
+        setState(() {});
+      }
+      unawaited(_refreshAutomationTargetsForAllRows());
+    }
+
     return MasterEffectsPanel(
       key: ValueKey("master_effects_panel"),
       mode: _resolvedMode,
@@ -10828,7 +12154,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       bypassMasterEffect: (i, bp) async {
         await _undoManager.execute(
           BypassMasterEffectAction(
-              effectIndex: i, oldState: !bp, newState: bp, onChange: () {}),
+            effectIndex: i,
+            oldState: !bp,
+            newState: bp,
+            onChange: onMasterFxGraphChanged,
+          ),
         );
         _recordProducerManualEdit(
             'master_fx_bypass', {'index': i, 'bypassed': bp});
@@ -10838,8 +12168,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       // insertMasterEffect: (path) => JuceAudioEngine.insertMasterEffect(path),
       insertMasterEffect: (pathOrName) async {
         final before = await JuceAudioEngine.getMasterEffects();
-        await _undoManager.execute(
-            InsertMasterEffectAction(pathOrName: pathOrName, onChange: () {}));
+        await _undoManager.execute(InsertMasterEffectAction(
+          pathOrName: pathOrName,
+          onChange: onMasterFxGraphChanged,
+        ));
         final after = await JuceAudioEngine.getMasterEffects();
         if (after.length <= before.length) {
           _showSmallNotice('Could not load this effect plugin.');
@@ -10856,23 +12188,37 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         await _undoManager.execute(
           RemoveMasterEffectAction(
-              effectIndex: effectIndex, pathOrName: name, onChange: () {}),
+            effectIndex: effectIndex,
+            pathOrName: name,
+            onChange: onMasterFxGraphChanged,
+          ),
         );
         _recordProducerManualEdit(
             'master_fx_remove', {'index': effectIndex, 'effect': name});
       },
 
       reorderMasterEffects: (from, to) async {
-        await _undoManager.execute(
-            ReorderMasterEffectAction(from: from, to: to, onChange: () {}));
+        await _undoManager.execute(ReorderMasterEffectAction(
+          from: from,
+          to: to,
+          onChange: onMasterFxGraphChanged,
+        ));
         _recordProducerManualEdit(
             'master_fx_reorder', {'from': from, 'to': to});
       },
       scanPlugins: () => JuceAudioEngine.scanPlugins(),
       getMasterPluginParameters: (i) =>
           JuceAudioEngine.getMasterPluginParameters(i),
-      setMasterEffectParam: (i, id, v) =>
-          JuceAudioEngine.setMasterEffect(i, id, v),
+      setMasterEffectParam: (i, id, v) async {
+        await JuceAudioEngine.setMasterEffect(i, id, v);
+        _updateAutomationTargetBaselineForEffectParameter(
+          effectIndex: i,
+          paramId: id,
+          value: v,
+          master: true,
+        );
+      },
+      onRequestAutomateParameter: _requestMasterEffectAutomationClip,
       onMasterPluginParamCommit: (idx, paramId, oldValue, newValue) async {
         await _undoManager.execute(
           SetMasterEffectParamAction(
@@ -10880,7 +12226,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             paramId: paramId,
             oldValue: oldValue,
             newValue: newValue,
-            onChange: () {},
+            onChange: onMasterFxGraphChanged,
           ),
         );
         _recordProducerManualEdit('master_fx_param', {
@@ -10893,7 +12239,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       onMasterPresetCommit: (before, after) async {
         await _undoManager.execute(
           MasterPresetChangeAction(
-              before: before, after: after, onChange: () => setState(() {})),
+            before: before,
+            after: after,
+            onChange: onMasterFxGraphChanged,
+          ),
         );
         _recordProducerManualEdit('master_preset_commit', {
           'before_count': before.effects.length,
@@ -10906,6 +12255,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           JuceAudioEngine.getMasterCompressorMeter(fx),
       getMasterEqWaveform: (fx, sampleCount) =>
           JuceAudioEngine.getMasterEqWaveform(fx, sampleCount: sampleCount),
+      highlighter: _mixHighlighter,
+      registerParameterRevealer: (reveal) {
+        _masterParameterRevealer = reveal;
+      },
     );
   }
 
@@ -10926,6 +12279,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               padding: EdgeInsets.zero,
               opacity: 0.10,
               child: IconButton(
+                key: _editorBackButtonKey,
                 icon: const Icon(Icons.arrow_back_ios_new_rounded,
                     color: Colors.white, size: 18),
                 onPressed: _handleBackPressed,
@@ -10942,6 +12296,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 padding: EdgeInsets.zero,
                 opacity: 0.10,
                 child: IconButton(
+                  key: _projectSettingsButtonKey,
                   icon:
                       const Icon(Icons.settings, color: Colors.white, size: 20),
                   onPressed: _openProjectSettings,
@@ -10978,15 +12333,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               fit: BoxFit.scaleDown,
               child: Row(
                 children: [
-                  Halo(
+                  MultiHalo(
                     highlighter: _mixHighlighter,
-                    haloKey: const HaloKey('tutorial:plugins'),
+                    haloKeys: const <HaloKey>[
+                      HaloKey('tutorial:plugins'),
+                      HaloKey('tutorial:master_button'),
+                    ],
                     borderRadius: BorderRadius.circular(22),
                     child: _Glass(
                       radius: 22,
                       padding: EdgeInsets.zero,
                       opacity: 0.10,
                       child: IconButton(
+                        key: _masterPluginsButtonKey,
                         icon: Icon(
                           Icons.settings_input_composite,
                           color: pluginAffordanceEnabled
@@ -10996,9 +12355,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         ),
                         onPressed: pluginAffordanceEnabled
                             ? () {
-                                _isMasterPopupOpen = !_isMasterPopupOpen;
-                                setState(
-                                    () => _showMasterRack = !_showMasterRack);
+                                final willOpen = !_showMasterRack;
+                                _isMasterPopupOpen = willOpen;
+                                setState(() => _showMasterRack = willOpen);
+                                if (willOpen) {
+                                  _handleDawOnboardingMasterOpened();
+                                }
                               }
                             : () {
                                 _showSmallNotice(
@@ -11013,6 +12375,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     haloKey: const HaloKey('tutorial:export'),
                     borderRadius: BorderRadius.circular(24),
                     child: GestureDetector(
+                      key: _exportButtonKey,
                       onTap: _exportAndNavigate,
                       child: Container(
                         width: layoutSpec.topBarActionButtonSize,
@@ -11050,10 +12413,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() => _showTempoRollDown = false);
     }
     _isDialogOpen = true;
+    unawaited(_refreshMicrophonePermissionState());
     if (_inputDevices.isEmpty && !_loadingDevices) {
-      unawaited(_loadInputDevicesFromJuce());
+      unawaited(_loadInputDevicesFromJuce(scheduleRecordingPrewarm: true));
     }
     String draftProjectName = _projectName;
+    bool reopenDawTour = false;
     Future<void> commitProjectName() async {
       final renamed = draftProjectName.trim();
       if (renamed.isEmpty) {
@@ -11061,49 +12426,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (renamed == _projectName) return;
-      try {
-        final oldProjectDir = _projectDir;
-        final newDir = await ProjectManager.renameProject(_projectDir, renamed);
-        final oldAudioDir = ProjectManager.audioDir(oldProjectDir).path;
-        final newAudioDir = ProjectManager.audioDir(newDir).path;
-        _setStateAndRefreshProjectSettings(() {
-          _projectDir = newDir;
-          _projectName = p.basename(newDir.path);
-          for (final tr in _audioTracks) {
-            final oldFilePath = tr.file.path;
-            final oldOriginalPath = tr.originalFile.path;
-            final fileName = p.basename(oldFilePath);
-            final originalName = p.basename(oldOriginalPath);
-
-            // Track audio files move with the project directory; remap in-memory
-            // absolute paths so subsequent saves do not skip missing sources.
-            final shouldRemapFile = oldFilePath.startsWith(oldAudioDir) ||
-                !File(oldFilePath).existsSync();
-            final shouldRemapOriginal =
-                oldOriginalPath.startsWith(oldAudioDir) ||
-                    !File(oldOriginalPath).existsSync();
-
-            if (shouldRemapFile) {
-              tr.file = File(p.join(newAudioDir, fileName));
-            }
-            if (shouldRemapOriginal) {
-              tr.originalFile = File(p.join(newAudioDir, originalName));
-            }
-          }
-        });
-        draftProjectName = _projectName;
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('⚠️ Rename failed: $e')),
-        );
+      final renamedOk = await _renameProjectAndSyncState(renamed);
+      if (!renamedOk) {
         draftProjectName = _projectName;
         return;
       }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Project renamed')),
-      );
+      draftProjectName = _projectName;
     }
 
     try {
@@ -11117,6 +12445,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               builder: (context, localSetState) {
                 _projectSettingsStateSetter = localSetState;
                 return Dialog(
+                  key: _projectSettingsDialogKey,
                   backgroundColor: const Color(0xFF1A1F2E),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16)),
@@ -11137,7 +12466,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           ),
                           const SizedBox(height: 16),
                           TextFormField(
-                            key: ValueKey('project_name_field_$_projectName'),
+                            key: _projectSettingsNameFieldKey,
                             initialValue: _projectName,
                             readOnly: false,
                             textInputAction: TextInputAction.done,
@@ -11193,7 +12522,64 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             ],
                           ),
                           const SizedBox(height: 20),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.035),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.08),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Replay DAW tutorial',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.72),
+                                    fontSize: 12.5,
+                                    height: 1.35,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextButton.icon(
+                                  onPressed: () async {
+                                    reopenDawTour = true;
+                                    await commitProjectName();
+                                    if (!context.mounted) return;
+                                    Navigator.pop(context);
+                                  },
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: const Color(0xFF9BD8FF),
+                                    padding: EdgeInsets.zero,
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.play_circle_outline_rounded,
+                                  ),
+                                  label: const Text(
+                                    'Show DAW Tutorial Again',
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
                           ElevatedButton(
+                            key: _projectSettingsCloseButtonKey,
                             onPressed: () async {
                               await commitProjectName();
                               if (!context.mounted) return;
@@ -11223,6 +12609,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _isDialogOpen = false;
       if (mounted) {
         setState(() {});
+        if (reopenDawTour) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _startDawOnboarding();
+          });
+        }
       }
     }
   }
@@ -11235,6 +12627,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             style: TextStyle(
                 color: Color.fromARGB(210, 255, 255, 255), fontSize: 15)),
         Switch(
+          key: _projectSettingsMetronomeSwitchKey,
           value: _metronomeEnabled,
           activeColor: Colors.blueAccent,
           onChanged: (v) {
@@ -11292,6 +12685,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
         const SizedBox(width: 12),
         Switch(
+          key: _projectSettingsProducerCaptureSwitchKey,
           value: _showProducerCaptureUi,
           activeColor: Colors.blueAccent,
           onChanged: (v) {
@@ -11378,23 +12772,257 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _selectedChannelCount = monoFallback.channelCount;
   }
 
-  Future<void> _loadInputDevicesFromJuce() async {
+  int _desiredRecordingInputOpenChannels() {
+    if (_numInputChannels <= 0) {
+      if (Platform.isAndroid || Platform.isIOS) {
+        // Unknown route state: request a single input first to wake/arm the
+        // input path, then refresh real channel metadata.
+        return 1;
+      }
+      return 0;
+    }
+    final desiredInputs = _selectedChannelStart + _selectedChannelCount;
+    return math.max(1, math.min(_numInputChannels, desiredInputs));
+  }
+
+  bool _recordingInputsPreparedFor({
+    required String selectedDevice,
+    required int desiredInputChannels,
+  }) {
+    return _lastPreparedRecordingDevice == selectedDevice &&
+        _lastPreparedRecordingInputOpenChannels == desiredInputChannels;
+  }
+
+  Future<bool> _prepareRecordingInputs({
+    required int desiredInputChannels,
+    required String selectedDevice,
+    required String reason,
+    bool rescheduleOnConfigChange = false,
+  }) {
+    _recordingInputPrewarmInFlight = true;
+
+    late final Future<bool> future;
+    future = (() async {
+      var preparedForRequestedConfig = false;
+      try {
+        final prepared = await JuceAudioEngine.prepareRecordingInputs(
+          desiredInputChannels,
+          reason: reason,
+        );
+        if (!mounted || !prepared) return false;
+        _lastPreparedRecordingDevice = selectedDevice;
+        _lastPreparedRecordingInputOpenChannels = desiredInputChannels;
+        preparedForRequestedConfig = true;
+        return true;
+      } finally {
+        _recordingInputPrewarmInFlight = false;
+        if (identical(_recordingInputPrewarmFuture, future)) {
+          _recordingInputPrewarmFuture = null;
+        }
+        // Only chain another prewarm when the current prewarm succeeded.
+        // This prevents infinite retry loops on persistent native-route errors.
+        if (rescheduleOnConfigChange && mounted && preparedForRequestedConfig) {
+          final currentDevice = (_selectedDevice ?? '').trim();
+          final currentDesiredInputChannels =
+              _desiredRecordingInputOpenChannels();
+          if (currentDesiredInputChannels <= 0) {
+            _lastPreparedRecordingDevice = null;
+            _lastPreparedRecordingInputOpenChannels = null;
+            unawaited(JuceAudioEngine.prepareRecordingInputs(
+              0,
+              reason: 'configChanged:playbackOnly',
+            ));
+          } else if (!_recordingInputsPreparedFor(
+            selectedDevice: currentDevice,
+            desiredInputChannels: currentDesiredInputChannels,
+          )) {
+            _scheduleRecordingInputPrewarm(reason: 'configChanged');
+          }
+        }
+      }
+    })();
+
+    _recordingInputPrewarmFuture = future;
+    return future;
+  }
+
+  Future<void> _ensureMobileRecordingRouteReady() async {
+    if (!mounted || _isRecording) return;
+    if (!(Platform.isAndroid || Platform.isIOS)) return;
+    if (Platform.isIOS) return;
+
+    final desiredInputChannels = _desiredRecordingInputOpenChannels();
+    if (desiredInputChannels <= 0) return;
+
+    final selectedDevice = (_selectedDevice ?? '').trim();
+    if (_recordingInputsPreparedFor(
+      selectedDevice: selectedDevice,
+      desiredInputChannels: desiredInputChannels,
+    )) {
+      return;
+    }
+
+    final inFlight = _recordingInputPrewarmFuture;
+    if (inFlight != null) {
+      final prepared = await inFlight;
+      if (prepared &&
+          _recordingInputsPreparedFor(
+            selectedDevice: selectedDevice,
+            desiredInputChannels: desiredInputChannels,
+          )) {
+        return;
+      }
+    }
+
+    await _prepareRecordingInputs(
+      desiredInputChannels: desiredInputChannels,
+      selectedDevice: selectedDevice,
+      reason: 'recordStart',
+    );
+  }
+
+  void _scheduleRecordingInputPrewarm({required String reason}) {
+    if (!mounted || _isRecording) return;
+    if (Platform.isIOS) return;
+    final desiredInputChannels = _desiredRecordingInputOpenChannels();
+    final selectedDevice = (_selectedDevice ?? '').trim();
+
+    if (Platform.isAndroid) {
+      _lastPreparedRecordingDevice = null;
+      _lastPreparedRecordingInputOpenChannels = null;
+      _recordingInputPrewarmFuture = null;
+      if (_recordingInputPrewarmInFlight) {
+        return;
+      }
+      unawaited(JuceAudioEngine.prepareRecordingInputs(
+        0,
+        reason: '$reason:playbackOnly',
+      ));
+      return;
+    }
+
+    if (desiredInputChannels <= 0) {
+      _lastPreparedRecordingDevice = null;
+      _lastPreparedRecordingInputOpenChannels = null;
+      return;
+    }
+    if (selectedDevice.isEmpty && _inputDevices.isEmpty) {
+      return;
+    }
+    if (_recordingInputPrewarmInFlight) {
+      return;
+    }
+    if (_recordingInputsPreparedFor(
+      selectedDevice: selectedDevice,
+      desiredInputChannels: desiredInputChannels,
+    )) {
+      return;
+    }
+
+    unawaited(_prepareRecordingInputs(
+      desiredInputChannels: desiredInputChannels,
+      selectedDevice: selectedDevice,
+      reason: reason,
+      rescheduleOnConfigChange: true,
+    ));
+  }
+
+  Future<void> _loadInputDevicesFromJuce({
+    bool scheduleRecordingPrewarm = false,
+  }) async {
     if (_loadingDevices) return;
     _setStateAndRefreshProjectSettings(() => _loadingDevices = true);
 
-    final devices = await JuceAudioEngine.getInputDevices();
-    final current = await JuceAudioEngine.getCurrentDeviceName();
-    final channels = await JuceAudioEngine.getNumInputChannels();
-    _setStateAndRefreshProjectSettings(() {
-      _inputDevices = devices;
-      _selectedDevice = devices.contains(current)
-          ? current
-          : (devices.isNotEmpty ? devices.first : null);
-      _numInputChannels = channels;
-      _normalizeInputChannelSelection();
+    try {
+      final micStatus = await Permission.microphone.status;
+      final micBlocked = !(micStatus.isGranted || micStatus.isLimited);
 
-      _loadingDevices = false;
-    });
+      final devices = await JuceAudioEngine.getInputDevices();
+      final current = await JuceAudioEngine.getCurrentDeviceName();
+      final channels = await JuceAudioEngine.getNumInputChannels();
+      _setStateAndRefreshProjectSettings(() {
+        _microphonePermissionStatus = micStatus;
+        _microphoneAccessBlocked = micBlocked;
+        _inputDevices = devices;
+        _selectedDevice = devices.contains(current)
+            ? current
+            : (devices.isNotEmpty ? devices.first : null);
+        _numInputChannels = channels;
+        _normalizeInputChannelSelection();
+        _loadingDevices = false;
+      });
+      if (scheduleRecordingPrewarm) {
+        _scheduleRecordingInputPrewarm(reason: 'loadInputDevices');
+      }
+    } catch (_) {
+      final micStatus = await Permission.microphone.status;
+      _setStateAndRefreshProjectSettings(() {
+        _microphonePermissionStatus = micStatus;
+        _microphoneAccessBlocked =
+            !(micStatus.isGranted || micStatus.isLimited);
+        _inputDevices = const <String>[];
+        _selectedDevice = null;
+        _numInputChannels = 0;
+        _normalizeInputChannelSelection();
+        _loadingDevices = false;
+      });
+      _lastPreparedRecordingDevice = null;
+      _lastPreparedRecordingInputOpenChannels = null;
+      if (Platform.isAndroid) {
+        unawaited(JuceAudioEngine.prepareRecordingInputs(
+          0,
+          reason: 'loadInputDevices:error',
+        ));
+      }
+    }
+  }
+
+  Widget _buildMicrophonePermissionNotice() {
+    final actionLabel = _microphonePermissionStatus.isPermanentlyDenied ||
+            _microphonePermissionStatus.isRestricted
+        ? 'Open settings'
+        : 'Allow access';
+    final helperText = _microphonePermissionStatus.isPermanentlyDenied ||
+            _microphonePermissionStatus.isRestricted
+        ? 'Built-in microphone recording needs access in Settings. External audio interfaces can still be used below when available.'
+        : 'Built-in microphone recording needs access. External audio interfaces can still be used below when available.';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.white24),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Microphone access is turned off',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            helperText,
+            style: const TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: _microphonePermissionStatus.isPermanentlyDenied ||
+                      _microphonePermissionStatus.isRestricted
+                  ? _openAppPermissionsSettings
+                  : _requestMicrophoneAccessFromSettingsPanel,
+              child: Text(actionLabel),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadAudioDevices() async {
@@ -11455,11 +13083,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (_inputDevices.isEmpty) {
-      return const Text("No input devices available",
-          style: TextStyle(color: Colors.white54));
+      if (!_microphoneAccessBlocked) {
+        return const Text(
+          "No input devices available",
+          style: TextStyle(color: Colors.white54),
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildMicrophonePermissionNotice(),
+          const SizedBox(height: 12),
+          const Text(
+            "No input devices available",
+            style: TextStyle(color: Colors.white54),
+          ),
+        ],
+      );
     }
 
-    return DropdownButtonFormField<String>(
+    final selector = DropdownButtonFormField<String>(
       value: _selectedDevice,
       isExpanded: true,
       decoration: InputDecoration(
@@ -11473,7 +13116,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           tooltip: "Refresh audio devices",
           icon: const Icon(Icons.refresh, color: Colors.white70),
           onPressed: () async {
-            _loadInputDevicesFromJuce();
+            _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
             print("audio devices reloaded from JUCE");
           },
         ),
@@ -11494,7 +13137,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _numInputChannels = channels;
           _normalizeInputChannelSelection();
         });
+        _scheduleRecordingInputPrewarm(reason: 'selectInputDevice');
       },
+    );
+
+    if (!_microphoneAccessBlocked) {
+      return selector;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildMicrophonePermissionNotice(),
+        const SizedBox(height: 12),
+        selector,
+      ],
     );
   }
 
@@ -11537,6 +13194,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 _selectedChannelStart = option.channelStart;
                 _selectedChannelCount = option.channelCount;
               });
+              _scheduleRecordingInputPrewarm(reason: 'selectInputChannels');
             },
     );
   }
@@ -12452,15 +14110,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   static const Set<String> _supportedTutorialHaloTargets = <String>{
     'tutorial:chatbar',
+    'tutorial:chat_send',
+    'tutorial:prompt_limits',
     'tutorial:toolbar',
     'tutorial:transport:play',
     'tutorial:transport:record',
     'tutorial:transport:restart',
     'tutorial:mute',
     'tutorial:solo',
+    'tutorial:add_button',
+    'tutorial:add_audio',
+    'tutorial:add_instrument',
     'tutorial:export',
     'tutorial:project_settings',
+    'tutorial:master_button',
     'tutorial:plugins',
+    'tutorial:one_button_mix',
     'tutorial:piano_roll',
     'tutorial:timeline',
   };
@@ -12483,8 +14148,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (normalized == 'tutorial:effects_tab' ||
         normalized == 'tutorial:fx_list' ||
         normalized == 'tutorial:add_effect' ||
-        normalized == 'tutorial:volume_tab' ||
-        normalized == 'tutorial:automation_tab') {
+        normalized == 'tutorial:volume_tab') {
       if (_rowCount <= 0) return 'tutorial:timeline';
       final row = _selectedRow.clamp(0, _rowCount - 1);
       switch (normalized) {
@@ -12496,9 +14160,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           return 'row:$row:add_effect';
         case 'tutorial:volume_tab':
           return 'row:$row:volume_tab';
-        case 'tutorial:automation_tab':
-          return 'row:$row:automation_tab';
       }
+    }
+    if (normalized == 'tutorial:automation_tab') {
+      return 'tutorial:timeline';
     }
     if (normalized == 'tutorial:piano_roll' &&
         (!_showPianoRoll || _activeMidiClipEngineId == null)) {
@@ -12649,6 +14314,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           case 'clip_edit':
             await _applyClipEditAction(data);
             break;
+          case 'effect_edit':
+            await _applyEffectEditAction(data);
+            break;
           case 'automation_edit':
             await _applyAutomationEditAction(data);
             break;
@@ -12682,6 +14350,288 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  String _normalizeEffectEditOperation(String raw) {
+    switch (raw.trim().toLowerCase()) {
+      case 'delete':
+      case 'remove':
+      case 'delete_effect':
+      case 'remove_effect':
+      case 'take_out':
+        return 'remove';
+      case 'add':
+      case 'insert':
+      case 'ensure':
+      case 'ensure_effect':
+      case 'add_effect':
+      case 'insert_effect':
+        return 'add';
+      case 'disable':
+      case 'bypass':
+      case 'mute':
+        return 'bypass';
+      case 'enable':
+      case 'unbypass':
+      case 'unmute':
+        return 'unbypass';
+      case 'toggle':
+      case 'toggle_bypass':
+        return 'toggle_bypass';
+      default:
+        return raw.trim().toLowerCase();
+    }
+  }
+
+  int? _resolveEffectIndexFromActionData(
+    List<String> effects,
+    Map<String, dynamic> data,
+  ) {
+    if (effects.isEmpty) return null;
+    final target = _actionTarget(data);
+    final explicitIndex = _toActionInt(
+      data['effect_index'] ??
+          target['effect_index'] ??
+          data['plugin_index'] ??
+          target['plugin_index'],
+    );
+    if (explicitIndex != null &&
+        explicitIndex >= 0 &&
+        explicitIndex < effects.length) {
+      return explicitIndex;
+    }
+
+    final effectNeedles = <String>[];
+    void addNeedle(dynamic raw) {
+      final needle = raw?.toString().trim().toLowerCase() ?? '';
+      if (needle.isEmpty || needle == 'plugin' || needle == 'effect') return;
+      effectNeedles.add(needle);
+    }
+
+    addNeedle(data['effect_name']);
+    addNeedle(target['effect_name']);
+    addNeedle(data['plugin_name']);
+    addNeedle(target['plugin_name']);
+    addNeedle(data['effect_name_contains']);
+    addNeedle(target['effect_name_contains']);
+    addNeedle(data['plugin']);
+    addNeedle(target['plugin']);
+    addNeedle(data['effect']);
+    addNeedle(target['effect']);
+
+    for (final needle in effectNeedles) {
+      final exact = <int>[];
+      final fuzzy = <int>[];
+      for (int i = 0; i < effects.length; i++) {
+        final candidate = effects[i].trim().toLowerCase();
+        if (candidate == needle) {
+          exact.add(i);
+        } else if (candidate.contains(needle) || needle.contains(candidate)) {
+          fuzzy.add(i);
+        }
+      }
+      if (exact.length == 1) return exact.first;
+      if (exact.isEmpty && fuzzy.length == 1) return fuzzy.first;
+    }
+
+    if (effects.length == 1) return 0;
+    return null;
+  }
+
+  Future<void> _applyEffectEditAction(Map<String, dynamic> data) async {
+    final target = _actionTarget(data);
+    final operation = _normalizeEffectEditOperation(
+      (data['operation'] ?? '').toString(),
+    );
+    final scope = (data['scope'] ?? target['scope'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final isMaster = scope == 'master' ||
+        scope == 'master_bus' ||
+        scope == 'master-bus' ||
+        scope == 'masterbus';
+
+    final row = isMaster ? null : _resolveRowIndexFromActionTarget(data);
+    if (!isMaster && row == null) {
+      _insertAssistantChatText(
+          "I couldn't resolve which track plugin to edit.");
+      return;
+    }
+
+    final effects = isMaster
+        ? await JuceAudioEngine.getMasterEffects()
+        : await JuceAudioEngine.getTrackEffectsForRow(row!);
+    final effectIndex = _resolveEffectIndexFromActionData(effects, data);
+
+    if (operation == 'remove') {
+      if (effectIndex == null) {
+        final rowName = row == null ? 'this track' : _rowDisplayName(row);
+        _insertAssistantChatText(
+          isMaster
+              ? "I couldn't resolve which master plugin to remove."
+              : "I couldn't resolve which plugin to remove on $rowName.",
+        );
+        return;
+      }
+      final effectName = effects[effectIndex];
+      final onTrackChange = () {
+        setState(() {});
+        if (row != null) {
+          _refreshRowFx(row);
+          unawaited(_refreshAutomationTargetsForRow(row));
+        } else {
+          unawaited(_refreshAutomationTargetsForAllRows());
+        }
+      };
+      final EditorUndoAction action = isMaster
+          ? RemoveMasterEffectAction(
+              effectIndex: effectIndex,
+              pathOrName: effectName,
+              onChange: onTrackChange,
+            )
+          : RemoveEffectAction(
+              row: row!,
+              effectIndex: effectIndex,
+              pathOrName: effectName,
+              onChange: onTrackChange,
+            );
+      await _undoManager.execute(action);
+      if (!isMaster) {
+        _mixHighlighter.trigger([
+          HaloKey('row:$row'),
+          HaloKey('row:$row:effects_tab'),
+          HaloKey('row:$row:fx_list'),
+        ]);
+      }
+      _insertSystemChatText(
+        isMaster
+            ? '• Removed $effectName from Master Bus •'
+            : '• Removed $effectName from ${_rowDisplayName(row!)} •',
+      );
+      return;
+    }
+
+    if (operation == 'add') {
+      final effectNeedle = (data['effect_name'] ??
+              target['effect_name'] ??
+              data['plugin_name'] ??
+              target['plugin_name'] ??
+              data['effect_name_contains'] ??
+              target['effect_name_contains'] ??
+              data['plugin'] ??
+              target['plugin'] ??
+              data['effect'] ??
+              target['effect'])
+          .toString()
+          .trim()
+          .toLowerCase();
+      final effectName = pickMixroomEffect(effectNeedle);
+      if (effectName == null) {
+        _insertAssistantChatText("I couldn't resolve which plugin to add.");
+        return;
+      }
+      final alreadyIndex = effects.indexWhere(
+          (e) => e.trim().toLowerCase() == effectName.toLowerCase());
+      if (alreadyIndex != -1) {
+        return;
+      }
+      final onTrackChange = () {
+        setState(() {});
+        if (row != null) {
+          _refreshRowFx(row);
+          unawaited(_refreshAutomationTargetsForRow(row));
+        } else {
+          unawaited(_refreshAutomationTargetsForAllRows());
+        }
+      };
+      final EditorUndoAction action = isMaster
+          ? InsertMasterEffectAction(
+              pathOrName: effectName,
+              onChange: onTrackChange,
+            )
+          : InsertEffectAction(
+              row: row!,
+              pathOrName: effectName,
+              onChange: onTrackChange,
+            );
+      await _undoManager.execute(action);
+      if (!isMaster) {
+        _mixHighlighter.trigger([
+          HaloKey('row:$row'),
+          HaloKey('row:$row:effects_tab'),
+          HaloKey('row:$row:fx_list'),
+        ]);
+      }
+      _insertSystemChatText(
+        isMaster
+            ? '• Added $effectName to Master Bus •'
+            : '• Added $effectName to ${_rowDisplayName(row!)} •',
+      );
+      return;
+    }
+
+    if (operation == 'bypass' ||
+        operation == 'unbypass' ||
+        operation == 'toggle_bypass') {
+      if (effectIndex == null) {
+        final rowName = row == null ? 'this track' : _rowDisplayName(row);
+        _insertAssistantChatText(
+          isMaster
+              ? "I couldn't resolve which master plugin to toggle."
+              : "I couldn't resolve which plugin to toggle on $rowName.",
+        );
+        return;
+      }
+      final effectName = effects[effectIndex];
+      final currentState = isMaster
+          ? await JuceAudioEngine.getMasterEffectBypassState(effectIndex)
+          : await JuceAudioEngine.getRowEffectBypassState(row!, effectIndex);
+      final nextState = switch (operation) {
+        'bypass' => true,
+        'unbypass' => false,
+        _ => !currentState,
+      };
+      final onTrackChange = () {
+        setState(() {});
+        if (row != null) {
+          _refreshRowFx(row);
+          unawaited(_refreshAutomationTargetsForRow(row));
+        } else {
+          unawaited(_refreshAutomationTargetsForAllRows());
+        }
+      };
+      final EditorUndoAction action = isMaster
+          ? BypassMasterEffectAction(
+              effectIndex: effectIndex,
+              oldState: currentState,
+              newState: nextState,
+              onChange: onTrackChange,
+            )
+          : BypassEffectAction(
+              row: row!,
+              effectIndex: effectIndex,
+              oldState: currentState,
+              newState: nextState,
+              onChange: onTrackChange,
+            );
+      await _undoManager.execute(action);
+      if (!isMaster) {
+        _mixHighlighter.trigger([
+          HaloKey('row:$row'),
+          HaloKey('row:$row:effects_tab'),
+          HaloKey('row:$row:fx_list'),
+        ]);
+      }
+      _insertSystemChatText(
+        isMaster
+            ? '• ${nextState ? 'Bypassed' : 'Enabled'} $effectName on Master Bus •'
+            : '• ${nextState ? 'Bypassed' : 'Enabled'} $effectName on ${_rowDisplayName(row!)} •',
+      );
+      return;
+    }
+
+    _insertAssistantChatText("I couldn't apply that plugin edit.");
+  }
+
   Future<void> _applyTutorialAction(Map<String, dynamic> data) async {
     final rawSteps = (data['steps'] as List?) ?? const [];
     final parsed = rawSteps.map(_toActionMap).toList(growable: false);
@@ -12700,11 +14650,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ? sequence
           : <String>[sequence.isEmpty ? 'tutorial:timeline' : sequence.last];
       if (targets.isEmpty) continue;
-
-      final stepText = (step['text'] ?? '').toString().trim();
-      if (stepText.isNotEmpty) {
-        _showSmallNotice('Step ${i + 1}/${steps.length}: $stepText');
-      }
 
       final baseDurationMs = (_toActionInt(step['duration_ms']) ??
               _toActionInt(data['duration_ms']) ??
@@ -14212,32 +16157,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case 'move':
         {
           final target = _actionTarget(data);
-          final clipIndices = _resolveClipIndicesFromActionTarget(data);
-          if (clipIndices.isEmpty) {
-            _insertAssistantChatText(
-                "I couldn't resolve which clip(s) to move. Select clip(s) and ask again.");
-            return;
-          }
 
           int? clampRow(int? row) {
             if (row == null || _rowCount <= 0) return null;
             return row.clamp(0, _rowCount - 1);
           }
 
-          final explicitStartMs = _toActionDouble(
-            data['new_start_ms'] ??
-                target['new_start_ms'] ??
-                data['start_ms'] ??
-                target['start_ms'],
-          );
-          final explicitDeltaMs = _toActionDouble(
-            data['delta_ms'] ??
-                target['delta_ms'] ??
-                data['offset_ms'] ??
-                target['offset_ms'] ??
-                data['shift_ms'] ??
-                target['shift_ms'],
-          );
+          final explicitStartMs =
+              AssistantActionUtils.resolveMoveMusicalStartMs(
+                    data: data,
+                    target: target,
+                    bpm: _tempo,
+                  ) ??
+                  _toActionDouble(
+                    data['new_start_ms'] ??
+                        target['new_start_ms'] ??
+                        data['start_ms'] ??
+                        target['start_ms'],
+                  );
+          final explicitDeltaMs =
+              AssistantActionUtils.resolveMoveMusicalDeltaMs(
+                    data: data,
+                    target: target,
+                    bpm: _tempo,
+                  ) ??
+                  _toActionDouble(
+                    data['delta_ms'] ??
+                        target['delta_ms'] ??
+                        data['offset_ms'] ??
+                        target['offset_ms'] ??
+                        data['shift_ms'] ??
+                        target['shift_ms'],
+                  );
           final explicitDestRow = clampRow(
             _toActionInt(
               data['new_row_index'] ??
@@ -14320,6 +16271,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               break;
             default:
               break;
+          }
+
+          List<int> clipIndices = _resolveClipIndicesFromActionTarget(data);
+          if (clipIndices.isEmpty && moveToStart) {
+            clipIndices = List<int>.generate(
+              _audioTracks.length,
+              (index) => index,
+              growable: false,
+            );
+          }
+          if (clipIndices.isEmpty) {
+            _insertAssistantChatText(
+                "I couldn't resolve which clips to move. Please ask again with a track name if you want a specific target.");
+            return;
           }
 
           final hasHorizontalInstruction = explicitStartMs != null ||
@@ -14534,8 +16499,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return math.max(1.0, _audioOnlyOverallDuration.inMilliseconds.toDouble());
   }
 
+  double _automationUpperBound(double minMs) {
+    return math.max(minMs, _maxAutomationTimelineMs()).toDouble();
+  }
+
+  double _clampAutomationLengthMs(
+    double rawLengthMs, {
+    double minMs = 50.0,
+  }) {
+    return rawLengthMs.clamp(minMs, _automationUpperBound(minMs)).toDouble();
+  }
+
   String _pluginAutomationTargetId(int effectIndex, String paramId) {
     return 'fx:$effectIndex:$paramId';
+  }
+
+  String _rowMixAutomationTargetId(String paramId) {
+    return 'mix:${_encodeAutomationIdComponent(paramId)}';
+  }
+
+  String _masterMixAutomationTargetId(String paramId) {
+    return 'master:${_encodeAutomationIdComponent(paramId)}';
   }
 
   String _pluginAutomationEffectKey(String effectId, int ordinal) {
@@ -14563,15 +16547,72 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return 'fxid:${_encodeAutomationIdComponent(effectKey)}:${_encodeAutomationIdComponent(paramId)}';
   }
 
+  String _masterAutomationTargetIdFromEffectKey(
+    String effectKey,
+    String paramId,
+  ) {
+    return 'masterfxid:${_encodeAutomationIdComponent(effectKey)}:${_encodeAutomationIdComponent(paramId)}';
+  }
+
   _ParsedAutomationTargetId _parseAutomationTargetId(String targetId) {
     final trimmed = targetId.trim();
     if (trimmed == 'volume') {
       return const _ParsedAutomationTargetId(
+        scope: 'row',
+        section: 'volume',
         isVolume: true,
         legacyEffectIndex: -1,
         effectKey: '',
         paramId: 'volume',
+        mixParamId: 'volume',
       );
+    }
+
+    if (trimmed.startsWith('mix:')) {
+      final paramId = _decodeAutomationIdComponent(
+        trimmed.substring('mix:'.length),
+      );
+      return _ParsedAutomationTargetId(
+        scope: 'row',
+        section: 'mix',
+        isVolume: false,
+        legacyEffectIndex: -1,
+        effectKey: '',
+        paramId: paramId,
+        mixParamId: paramId,
+      );
+    }
+
+    if (trimmed.startsWith('master:')) {
+      final paramId = _decodeAutomationIdComponent(
+        trimmed.substring('master:'.length),
+      );
+      return _ParsedAutomationTargetId(
+        scope: 'master',
+        section: 'mix',
+        isVolume: false,
+        legacyEffectIndex: -1,
+        effectKey: '',
+        paramId: paramId,
+        mixParamId: paramId,
+      );
+    }
+
+    if (trimmed.startsWith('masterfxid:')) {
+      final payload = trimmed.substring('masterfxid:'.length);
+      final splitAt = payload.indexOf(':');
+      if (splitAt > 0) {
+        final encodedEffectKey = payload.substring(0, splitAt);
+        final encodedParamId = payload.substring(splitAt + 1);
+        return _ParsedAutomationTargetId(
+          scope: 'master',
+          section: 'effect',
+          isVolume: false,
+          legacyEffectIndex: -1,
+          effectKey: _decodeAutomationIdComponent(encodedEffectKey),
+          paramId: _decodeAutomationIdComponent(encodedParamId),
+        );
+      }
     }
 
     if (trimmed.startsWith('fxid:')) {
@@ -14581,6 +16622,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final encodedEffectKey = payload.substring(0, splitAt);
         final encodedParamId = payload.substring(splitAt + 1);
         return _ParsedAutomationTargetId(
+          scope: 'row',
+          section: 'effect',
           isVolume: false,
           legacyEffectIndex: -1,
           effectKey: _decodeAutomationIdComponent(encodedEffectKey),
@@ -14592,6 +16635,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final parts = trimmed.split(':');
     if (parts.length >= 3 && parts.first == 'fx') {
       return _ParsedAutomationTargetId(
+        scope: 'row',
+        section: 'effect',
         isVolume: false,
         legacyEffectIndex: int.tryParse(parts[1]) ?? -1,
         effectKey: '',
@@ -14600,6 +16645,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     return _ParsedAutomationTargetId(
+      scope: 'row',
+      section: 'effect',
       isVolume: false,
       legacyEffectIndex: -1,
       effectKey: '',
@@ -14611,6 +16658,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     List<AutomationClipSnapshot> clips,
   ) {
     return clips.map((c) => c.copyWith()).toList(growable: false);
+  }
+
+  String _newAutomationPatternId(int row, String targetId) {
+    return 'apat_${row}_${targetId}_${DateTime.now().microsecondsSinceEpoch}_${const Uuid().v4()}';
   }
 
   String _automationTargetLabelFor(int row, String targetId) {
@@ -14631,18 +16682,113 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  _AutomationTargetMeta _rowGainAutomationTargetMeta({
+    double initialNormalized = _kGainUiUnity / _kGainUiMax,
+  }) {
+    return _AutomationTargetMeta(
+      targetId: _rowMixAutomationTargetId('gain'),
+      label: 'Track Gain',
+      effectIndex: -1,
+      paramId: 'gain',
+      type: 'float',
+      min: _kGainUiMin,
+      max: _kGainUiMax,
+      initialNormalized: initialNormalized.clamp(0.0, 1.0).toDouble(),
+    );
+  }
+
+  _AutomationTargetMeta _rowPanAutomationTargetMeta({
+    double initialNormalized = 0.5,
+  }) {
+    return _AutomationTargetMeta(
+      targetId: _rowMixAutomationTargetId('pan'),
+      label: 'Track Pan',
+      effectIndex: -1,
+      paramId: 'pan',
+      type: 'float',
+      min: 0.0,
+      max: 1.0,
+      initialNormalized: initialNormalized.clamp(0.0, 1.0).toDouble(),
+    );
+  }
+
+  _AutomationTargetMeta _masterGainAutomationTargetMeta({
+    double initialNormalized = _kGainUiUnity / _kGainUiMax,
+  }) {
+    return _AutomationTargetMeta(
+      targetId: _masterMixAutomationTargetId('gain'),
+      label: 'Master Gain',
+      effectIndex: -1,
+      paramId: 'gain',
+      type: 'float',
+      min: _kGainUiMin,
+      max: _kGainUiMax,
+      initialNormalized: initialNormalized.clamp(0.0, 1.0).toDouble(),
+    );
+  }
+
+  _AutomationTargetMeta _masterPanAutomationTargetMeta({
+    double initialNormalized = 0.5,
+  }) {
+    return _AutomationTargetMeta(
+      targetId: _masterMixAutomationTargetId('pan'),
+      label: 'Master Pan',
+      effectIndex: -1,
+      paramId: 'pan',
+      type: 'float',
+      min: 0.0,
+      max: 1.0,
+      initialNormalized: initialNormalized.clamp(0.0, 1.0).toDouble(),
+    );
+  }
+
   _AutomationTargetMeta _fallbackAutomationTargetMeta(String targetId) {
     if (targetId == 'volume') return _volumeAutomationTargetMeta();
     final parsed = _parseAutomationTargetId(targetId);
+    final mixParam = parsed.mixParamId.trim().toLowerCase();
+    if (parsed.section == 'mix') {
+      if (parsed.isMaster) {
+        if (mixParam == 'gain') return _masterGainAutomationTargetMeta();
+        if (mixParam == 'pan') return _masterPanAutomationTargetMeta();
+      } else {
+        if (mixParam == 'gain') return _rowGainAutomationTargetMeta();
+        if (mixParam == 'pan') return _rowPanAutomationTargetMeta();
+      }
+    }
+    final fallbackLabel = switch (mixParam) {
+      'gain' => parsed.isMaster ? 'Master Gain' : 'Track Gain',
+      'pan' => parsed.isMaster ? 'Master Pan' : 'Track Pan',
+      _ => parsed.paramId.isNotEmpty ? parsed.paramId : targetId,
+    };
     return _AutomationTargetMeta(
       targetId: targetId,
-      label: parsed.paramId.isNotEmpty ? parsed.paramId : targetId,
+      label: fallbackLabel,
       effectIndex: parsed.legacyEffectIndex,
       paramId: parsed.paramId,
       type: 'float',
       min: 0.0,
       max: 1.0,
       initialNormalized: targetId == 'volume' ? 0.75 : 0.5,
+    );
+  }
+
+  _AutomationTargetMeta _orphanAutomationTargetMeta(
+    String targetId, {
+    String? label,
+  }) {
+    final safeLabel = (label ?? '').trim();
+    final base = (_automationTargetMetaFromAnyRow(targetId) ??
+            _fallbackAutomationTargetMeta(targetId))
+        .copyWith(
+      targetId: targetId,
+      label: safeLabel.isEmpty ? null : safeLabel,
+      isOrphan: true,
+      uiVisible: false,
+    );
+    return base.copyWith(
+      label: base.label.trim().isEmpty ? targetId : base.label.trim(),
+      isOrphan: true,
+      uiVisible: false,
     );
   }
 
@@ -14674,6 +16820,68 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return target.min + span * normalized.clamp(0.0, 1.0).toDouble();
   }
 
+  double _normalizedChoiceAutomationValue(
+    Map<String, dynamic> paramMap, {
+    double fallback = 0.5,
+  }) {
+    final choiceKeys = paramMap.keys
+        .where((key) => key.startsWith('choice_'))
+        .toList(growable: false)
+      ..sort((a, b) {
+        final ai = int.tryParse(a.substring('choice_'.length)) ?? 0;
+        final bi = int.tryParse(b.substring('choice_'.length)) ?? 0;
+        return ai.compareTo(bi);
+      });
+    if (choiceKeys.isEmpty) {
+      return fallback.clamp(0.0, 1.0).toDouble();
+    }
+
+    final rawValue = (paramMap['value'] ?? '').toString().trim();
+    if (rawValue.isNotEmpty) {
+      for (int i = 0; i < choiceKeys.length; i++) {
+        final choice = (paramMap[choiceKeys[i]] ?? '').toString().trim();
+        if (choice == rawValue) {
+          if (choiceKeys.length <= 1) return 0.0;
+          return (i / (choiceKeys.length - 1)).clamp(0.0, 1.0).toDouble();
+        }
+      }
+    }
+
+    final numericValue = _toActionDouble(paramMap['value']);
+    if (numericValue != null) {
+      return numericValue.clamp(0.0, 1.0).toDouble();
+    }
+    return fallback.clamp(0.0, 1.0).toDouble();
+  }
+
+  double _initialAutomationNormalizedFromParamMap(
+    Map<String, dynamic> paramMap, {
+    required double min,
+    required double max,
+    double fallback = 0.5,
+  }) {
+    final type = (paramMap['type'] ?? '').toString().trim().toLowerCase();
+    switch (type) {
+      case 'bool':
+        final raw = paramMap['value'];
+        if (raw is bool) return raw ? 1.0 : 0.0;
+        final numeric = _toActionDouble(raw);
+        return ((numeric ?? fallback) >= 0.5 ? 1.0 : 0.0);
+      case 'choice':
+        return _normalizedChoiceAutomationValue(
+          paramMap,
+          fallback: fallback,
+        );
+      default:
+        return _normalizeAutomationValue(
+          (paramMap['value'] as num?)?.toDouble(),
+          min: min,
+          max: max,
+          fallback: fallback,
+        );
+    }
+  }
+
   List<Map<String, dynamic>> _toNormalizedAutomationMaps(
     List<AutomationPoint> points,
   ) {
@@ -14685,7 +16893,47 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toList(growable: false);
   }
 
-  Future<void> _syncNativeAutomationForRow(int row) async {
+  Set<String> _automationTargetIdsForRowSync(int row) {
+    final ids = <String>{
+      'volume',
+      _rowMixAutomationTargetId('gain'),
+      _rowMixAutomationTargetId('pan'),
+    };
+    ids.addAll(
+      _rowAutomationTargets[row]?.keys ?? const <String>{},
+    );
+    ids.addAll(
+      _rowPluginAutomation[row]?.keys ?? const <String>{},
+    );
+    ids.addAll(
+      _rowAutomationClips[row]?.keys ?? const <String>{},
+    );
+    return ids;
+  }
+
+  Set<String> _masterAutomationTargetIdsForSync() {
+    final ids = <String>{
+      _masterMixAutomationTargetId('gain'),
+      _masterMixAutomationTargetId('pan'),
+    };
+    for (int row = 0; row < _rowCount; row++) {
+      ids.addAll(
+        (_rowAutomationTargets[row]?.keys ?? const <String>{})
+            .where(_isMasterAutomationTarget),
+      );
+      ids.addAll(
+        (_rowPluginAutomation[row]?.keys ?? const <String>{})
+            .where(_isMasterAutomationTarget),
+      );
+      ids.addAll(
+        (_rowAutomationClips[row]?.keys ?? const <String>{})
+            .where(_isMasterAutomationTarget),
+      );
+    }
+    return ids;
+  }
+
+  Future<void> _syncNativeRowAutomationForRow(int row) async {
     if (row < 0 || row >= _rowCount) return;
 
     final resolvedVolume = _resolvedAutomationPointsForTarget(row, 'volume');
@@ -14694,21 +16942,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _toMaps(resolvedVolume),
     );
 
-    await JuceAudioEngine.clearTrackEffectAutomationForRow(row);
+    final rowGainTargetId = _rowMixAutomationTargetId('gain');
+    final resolvedGain = _hasExplicitAutomationForTarget(row, rowGainTargetId)
+        ? _resolvedAutomationPointsForTarget(row, rowGainTargetId)
+        : const <AutomationPoint>[];
+    await JuceAudioEngine.setRowGainAutomationPoints(
+      row,
+      _toNormalizedAutomationMaps(resolvedGain),
+    );
 
-    final rowPlugin =
-        _rowPluginAutomation[row] ?? const <String, List<AutomationPoint>>{};
-    if (rowPlugin.isEmpty) {
-      return;
-    }
+    final rowPanTargetId = _rowMixAutomationTargetId('pan');
+    final resolvedPan = _hasExplicitAutomationForTarget(row, rowPanTargetId)
+        ? _resolvedAutomationPointsForTarget(row, rowPanTargetId)
+        : const <AutomationPoint>[];
+    await JuceAudioEngine.setRowPanAutomationPoints(
+      row,
+      _toNormalizedAutomationMaps(resolvedPan),
+    );
+
+    await JuceAudioEngine.clearTrackEffectAutomationForRow(row);
 
     final targets =
         _rowAutomationTargets[row] ?? const <String, _AutomationTargetMeta>{};
-    for (final entry in rowPlugin.entries) {
-      final targetId = entry.key;
+    for (final targetId in _automationTargetIdsForRowSync(row)) {
+      if (!_hasExplicitAutomationForTarget(row, targetId)) {
+        continue;
+      }
       final target =
           targets[targetId] ?? _fallbackAutomationTargetMeta(targetId);
-      if (target.isVolume) continue;
+      if (target.isOrphan) continue;
+      final parsed = _parseAutomationTargetId(targetId);
+      if (target.isVolume || parsed.isMaster || !parsed.isEffectParameter) {
+        continue;
+      }
       if (target.effectIndex < 0) continue;
       if (target.paramId.trim().isEmpty) continue;
 
@@ -14724,18 +16990,118 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _syncNativeMasterAutomation() async {
+    final masterGainTargetId = _masterMixAutomationTargetId('gain');
+    final masterGainPoints =
+        _hasExplicitAutomationForTarget(0, masterGainTargetId)
+            ? _resolvedAutomationPointsForTarget(0, masterGainTargetId)
+            : const <AutomationPoint>[];
+    await JuceAudioEngine.setMasterGainAutomationPoints(
+      _toNormalizedAutomationMaps(masterGainPoints),
+    );
+
+    final masterPanTargetId = _masterMixAutomationTargetId('pan');
+    final masterPanPoints =
+        _hasExplicitAutomationForTarget(0, masterPanTargetId)
+            ? _resolvedAutomationPointsForTarget(0, masterPanTargetId)
+            : const <AutomationPoint>[];
+    await JuceAudioEngine.setMasterPanAutomationPoints(
+      _toNormalizedAutomationMaps(masterPanPoints),
+    );
+
+    await JuceAudioEngine.clearMasterEffectAutomation();
+
+    for (final targetId in _masterAutomationTargetIdsForSync()) {
+      if (!_hasExplicitAutomationForTarget(0, targetId)) continue;
+      final parsed = _parseAutomationTargetId(targetId);
+      if (!parsed.isMaster || !parsed.isEffectParameter) continue;
+      final target = _automationTargetMetaFromAnyRow(targetId) ??
+          _fallbackAutomationTargetMeta(targetId);
+      if (target.isOrphan) continue;
+      if (target.effectIndex < 0) continue;
+      if (target.paramId.trim().isEmpty) continue;
+
+      final safePoints = _resolvedAutomationPointsForTarget(0, targetId);
+      await JuceAudioEngine.setMasterEffectAutomationPoints(
+        target.effectIndex,
+        target.paramId,
+        target.min,
+        target.max,
+        _toNormalizedAutomationMaps(safePoints),
+      );
+    }
+  }
+
+  Future<void> _syncNativeAutomationForRow(
+    int row, {
+    bool syncMaster = true,
+  }) async {
+    await _syncNativeRowAutomationForRow(row);
+    if (syncMaster) {
+      await _syncNativeMasterAutomation();
+    }
+  }
+
   Future<void> _syncNativePluginAutomationForRow(int row) async {
     await _syncNativeAutomationForRow(row);
   }
 
   Future<void> _syncNativeAutomationForAllRows() async {
     for (int row = 0; row < _rowCount; row++) {
-      await _syncNativeAutomationForRow(row);
+      await _syncNativeRowAutomationForRow(row);
     }
+    await _syncNativeMasterAutomation();
   }
 
   Future<void> _syncNativePluginAutomationForAllRows() async {
     await _syncNativeAutomationForAllRows();
+  }
+
+  static const Map<String, Set<String>> _kAutomationVisibleParamsByEffect =
+      <String, Set<String>>{
+    'Reverb': <String>{'Room Size', 'Mix', 'Predelay'},
+    'Compressor': <String>{
+      'Threshold',
+      'Attack',
+      'Release',
+      'Ratio',
+      'Makeup',
+      'Mix',
+    },
+    'Limiter': <String>{'Threshold', 'Release', 'Ceiling'},
+    'Clipper': <String>{'Threshold', 'Ceiling'},
+    'EQ Parametric': <String>{
+      'HPF Frequency',
+      'HPF Slope',
+      'Band 1 Frequency',
+      'Band 1 Gain',
+      'Band 1 Q',
+      'Band 2 Frequency',
+      'Band 2 Gain',
+      'Band 2 Q',
+      'Band 3 Frequency',
+      'Band 3 Gain',
+      'Band 3 Q',
+      'Band 4 Frequency',
+      'Band 4 Gain',
+      'Band 4 Q',
+      'LPF Slope',
+      'LPF Frequency',
+    },
+    'EQ 3-Band': <String>{'Low Gain', 'Mid Gain', 'High Gain'},
+    'Delay': <String>{'Delay Time', 'Feedback', 'Mix'},
+    'Gain': <String>{'Volume'},
+  };
+
+  Set<String>? _visibleAutomationParamsForEffect(String effectName) {
+    return _kAutomationVisibleParamsByEffect[effectName.trim()];
+  }
+
+  bool _isAutomationTargetVisibleInMenu(_AutomationTargetMeta target) {
+    if (target.isVolume) return true;
+    if (!target.uiVisible) return false;
+    if (target.isOrphan) return false;
+    return true;
   }
 
   Future<void> _refreshAutomationTargetsForRow(
@@ -14750,10 +17116,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     final discovered = <String, _AutomationTargetMeta>{
       'volume': _volumeAutomationTargetMeta(),
+      _rowMixAutomationTargetId('gain'): _rowGainAutomationTargetMeta(
+        initialNormalized: (_rowGain[row] / _kGainUiMax).clamp(0.0, 1.0),
+      ),
+      _rowMixAutomationTargetId('pan'): _rowPanAutomationTargetMeta(
+        initialNormalized: _rowPan[row].clamp(0.0, 1.0),
+      ),
+      _masterMixAutomationTargetId('gain'): _masterGainAutomationTargetMeta(
+        initialNormalized: (_masterGain / _kGainUiMax).clamp(0.0, 1.0),
+      ),
+      _masterMixAutomationTargetId('pan'): _masterPanAutomationTargetMeta(
+        initialNormalized: _masterPan.clamp(0.0, 1.0),
+      ),
     };
     final discoveredByEffectKeyAndParam = <String, _AutomationTargetMeta>{};
     final discoveredByLegacyIndexAndParam = <String, _AutomationTargetMeta>{};
     final discoveredByParam = <String, List<_AutomationTargetMeta>>{};
+
+    void recordDiscoveredTarget(
+      _AutomationTargetMeta meta, {
+      required String scope,
+      String effectKey = '',
+    }) {
+      discovered[meta.targetId] = meta;
+      final paramLower = meta.paramId.trim().toLowerCase();
+      if (paramLower.isEmpty) return;
+      if (effectKey.trim().isNotEmpty) {
+        discoveredByEffectKeyAndParam[
+            '$scope\u0000${effectKey.trim()}\u0000$paramLower'] = meta;
+      }
+      if (meta.effectIndex >= 0) {
+        discoveredByLegacyIndexAndParam[
+            '$scope\u0000${meta.effectIndex}\u0000$paramLower'] = meta;
+      }
+      discoveredByParam
+          .putIfAbsent(
+              '$scope\u0000$paramLower', () => <_AutomationTargetMeta>[])
+          .add(meta);
+    }
 
     final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
     var effectInstanceIds =
@@ -14765,11 +17165,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (effectIds.length != effects.length) {
       effectIds = List<String>.from(effects);
     }
+    final effectDisplayLabels = buildAutomationEffectDisplayLabels(
+      effectNames: effects,
+      fallbackIds: effectIds,
+    );
     final effectOrdinalById = <String, int>{};
     for (int effectIndex = 0; effectIndex < effects.length; effectIndex++) {
       final params =
           await JuceAudioEngine.getTrackPluginParameters(row, effectIndex);
       final effectName = effects[effectIndex].trim();
+      final visibleParams = _visibleAutomationParamsForEffect(effectName);
+      final displayEffectName = effectIndex < effectDisplayLabels.length
+          ? effectDisplayLabels[effectIndex].displayName
+          : effectName;
       final rawInstanceId = (effectIndex < effectInstanceIds.length
               ? effectInstanceIds[effectIndex]
               : '')
@@ -14790,45 +17198,129 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           : _pluginAutomationEffectKey(effectIdentity, effectOrdinal);
       for (final p in params) {
         final type = (p['type'] ?? '').toString().trim().toLowerCase();
-        if (type != 'float') continue;
+        if (type != 'float' && type != 'bool' && type != 'choice') continue;
 
         final rawId = (p['id'] ?? p['name'] ?? '').toString().trim();
         final rawName = (p['name'] ?? rawId).toString().trim();
         if (rawId.isEmpty || rawName.isEmpty) continue;
+        final isVisible =
+            visibleParams == null || visibleParams.contains(rawName);
 
-        final min = (p['min'] as num?)?.toDouble() ?? 0.0;
-        final max = (p['max'] as num?)?.toDouble() ?? 1.0;
+        final min =
+            type == 'float' ? ((p['min'] as num?)?.toDouble() ?? 0.0) : 0.0;
+        final max =
+            type == 'float' ? ((p['max'] as num?)?.toDouble() ?? 1.0) : 1.0;
         final targetId =
             _pluginAutomationTargetIdFromEffectKey(effectKey, rawId);
-        final label = effectName.isEmpty ? rawName : '$effectName • $rawName';
+        final label = displayEffectName.isEmpty
+            ? rawName
+            : '$displayEffectName • $rawName';
         final previousTarget = previousTargets[targetId];
         final fallbackNormalized =
             (previousTarget?.initialNormalized ?? 0.5).clamp(0.0, 1.0);
-        final currentNormalized = _normalizeAutomationValue(
-          (p['value'] as num?)?.toDouble(),
+        final currentNormalized = _initialAutomationNormalizedFromParamMap(
+          p,
           min: min,
           max: max,
           fallback: fallbackNormalized,
         );
 
-        discovered[targetId] = _AutomationTargetMeta(
-          targetId: targetId,
-          label: label,
-          effectIndex: effectIndex,
-          paramId: rawId,
-          type: type,
+        recordDiscoveredTarget(
+          _AutomationTargetMeta(
+            targetId: targetId,
+            label: label,
+            effectIndex: effectIndex,
+            paramId: rawId,
+            type: type,
+            min: min,
+            max: max,
+            initialNormalized: currentNormalized,
+            uiVisible: isVisible,
+          ),
+          scope: 'row',
+          effectKey: effectKey,
+        );
+      }
+    }
+
+    final masterEffects = await JuceAudioEngine.getMasterEffects();
+    var masterEffectIds = await JuceAudioEngine.getMasterEffectIds();
+    if (masterEffectIds.length != masterEffects.length) {
+      masterEffectIds = List<String>.from(masterEffects);
+    }
+    final masterEffectDisplayLabels = buildAutomationEffectDisplayLabels(
+      effectNames: masterEffects,
+      fallbackIds: masterEffectIds,
+    );
+    final masterEffectOrdinalById = <String, int>{};
+    for (int effectIndex = 0;
+        effectIndex < masterEffects.length;
+        effectIndex++) {
+      final params =
+          await JuceAudioEngine.getMasterPluginParameters(effectIndex);
+      final effectName = masterEffects[effectIndex].trim();
+      final visibleParams = _visibleAutomationParamsForEffect(effectName);
+      final displayEffectName = effectIndex < masterEffectDisplayLabels.length
+          ? masterEffectDisplayLabels[effectIndex].displayName
+          : effectName;
+      final rawEffectId = (effectIndex < masterEffectIds.length
+              ? masterEffectIds[effectIndex]
+              : effectName)
+          .trim();
+      final effectIdentity = rawEffectId.isNotEmpty
+          ? rawEffectId
+          : (effectName.isNotEmpty ? effectName : 'effect');
+      final effectOrdinal = masterEffectOrdinalById.update(
+        effectIdentity,
+        (value) => value + 1,
+        ifAbsent: () => 0,
+      );
+      final effectKey =
+          _pluginAutomationEffectKey(effectIdentity, effectOrdinal);
+      for (final p in params) {
+        final type = (p['type'] ?? '').toString().trim().toLowerCase();
+        if (type != 'float' && type != 'bool' && type != 'choice') continue;
+
+        final rawId = (p['id'] ?? p['name'] ?? '').toString().trim();
+        final rawName = (p['name'] ?? rawId).toString().trim();
+        if (rawId.isEmpty || rawName.isEmpty) continue;
+        final isVisible =
+            visibleParams == null || visibleParams.contains(rawName);
+
+        final min =
+            type == 'float' ? ((p['min'] as num?)?.toDouble() ?? 0.0) : 0.0;
+        final max =
+            type == 'float' ? ((p['max'] as num?)?.toDouble() ?? 1.0) : 1.0;
+        final targetId =
+            _masterAutomationTargetIdFromEffectKey(effectKey, rawId);
+        final label = displayEffectName.isEmpty
+            ? 'Master • $rawName'
+            : 'Master • $displayEffectName • $rawName';
+        final previousTarget = previousTargets[targetId];
+        final fallbackNormalized =
+            (previousTarget?.initialNormalized ?? 0.5).clamp(0.0, 1.0);
+        final currentNormalized = _initialAutomationNormalizedFromParamMap(
+          p,
           min: min,
           max: max,
-          initialNormalized: currentNormalized,
+          fallback: fallbackNormalized,
         );
-        final paramLower = rawId.toLowerCase();
-        discoveredByEffectKeyAndParam['$effectKey\u0000$paramLower'] =
-            discovered[targetId]!;
-        discoveredByLegacyIndexAndParam['$effectIndex\u0000$paramLower'] =
-            discovered[targetId]!;
-        discoveredByParam
-            .putIfAbsent(paramLower, () => <_AutomationTargetMeta>[])
-            .add(discovered[targetId]!);
+
+        recordDiscoveredTarget(
+          _AutomationTargetMeta(
+            targetId: targetId,
+            label: label,
+            effectIndex: effectIndex,
+            paramId: rawId,
+            type: type,
+            min: min,
+            max: max,
+            initialNormalized: currentNormalized,
+            uiVisible: isVisible,
+          ),
+          scope: 'master',
+          effectKey: effectKey,
+        );
       }
     }
 
@@ -14847,19 +17339,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (normalizedParamId.isEmpty) return null;
 
       if (parsed.effectKey.isNotEmpty) {
-        final byEffectKey = discoveredByEffectKeyAndParam[
-            '${parsed.effectKey}\u0000$normalizedParamId'];
-        if (byEffectKey != null) return byEffectKey;
+        return discoveredByEffectKeyAndParam[
+            '${parsed.scope}\u0000${parsed.effectKey}\u0000$normalizedParamId'];
       }
 
       if (parsed.legacyEffectIndex >= 0) {
         final byLegacy = discoveredByLegacyIndexAndParam[
-            '${parsed.legacyEffectIndex}\u0000$normalizedParamId'];
-        if (byLegacy != null) return byLegacy;
+            '${parsed.scope}\u0000${parsed.legacyEffectIndex}\u0000$normalizedParamId'];
+        if (byLegacy != null) {
+          final previousLabelLower = previousMeta.label.trim().toLowerCase();
+          if (previousLabelLower.isNotEmpty &&
+              byLegacy.label.trim().toLowerCase() != previousLabelLower) {
+            return null;
+          }
+          return byLegacy;
+        }
       }
 
-      final candidates = discoveredByParam[normalizedParamId] ??
-          const <_AutomationTargetMeta>[];
+      final candidates =
+          discoveredByParam['${parsed.scope}\u0000$normalizedParamId'] ??
+              const <_AutomationTargetMeta>[];
       if (candidates.isEmpty) return null;
 
       final previousLabelLower = previousMeta.label.trim().toLowerCase();
@@ -14873,21 +17372,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       }
 
-      if (previousMeta.effectIndex >= 0) {
-        final byEffectIndex = candidates
-            .where((candidate) =>
-                candidate.effectIndex == previousMeta.effectIndex)
-            .toList(growable: false);
-        if (byEffectIndex.length == 1) {
-          return byEffectIndex.first;
+      return null;
+    }
+
+    _AutomationTargetMeta orphanMetaForTarget(
+      String targetId, {
+      Iterable<AutomationClipSnapshot> clipHints =
+          const <AutomationClipSnapshot>[],
+    }) {
+      String? labelHint;
+      for (final clip in clipHints) {
+        final label = clip.label.trim();
+        if (label.isNotEmpty) {
+          labelHint = label;
+          break;
         }
       }
-
-      if (candidates.length == 1) {
-        return candidates.first;
-      }
-
-      return null;
+      return _orphanAutomationTargetMeta(targetId, label: labelHint);
     }
 
     final pluginByTarget = Map<String, List<AutomationPoint>>.from(
@@ -14899,8 +17400,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (originalTargetId == 'volume') continue;
 
       final resolvedTarget = resolveRemappedTarget(originalTargetId);
-      if (resolvedTarget == null) continue;
-      final resolvedTargetId = resolvedTarget.targetId;
+      final resolvedTargetId = resolvedTarget?.targetId ?? originalTargetId;
+      final targetMeta =
+          resolvedTarget ?? orphanMetaForTarget(originalTargetId);
+      discovered[resolvedTargetId] = targetMeta;
 
       final safePoints = _sanitizeAutomationPointsForTarget(
         row,
@@ -14927,6 +17430,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     for (final entry in clipsByTarget.entries) {
       final originalTargetId = entry.key;
       if (originalTargetId == 'volume') {
+        discovered[originalTargetId] = _volumeAutomationTargetMeta();
         remappedClips[originalTargetId] = _sanitizeAutomationClipsForTarget(
           row,
           originalTargetId,
@@ -14936,8 +17440,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       final resolvedTarget = resolveRemappedTarget(originalTargetId);
-      if (resolvedTarget == null) continue;
-      final resolvedTargetId = resolvedTarget.targetId;
+      final resolvedTargetId = resolvedTarget?.targetId ?? originalTargetId;
+      final targetMeta = resolvedTarget ??
+          orphanMetaForTarget(
+            originalTargetId,
+            clipHints: entry.value,
+          );
+      discovered[resolvedTargetId] = targetMeta;
 
       final safeClips = _sanitizeAutomationClipsForTarget(
         row,
@@ -14961,10 +17470,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _rowAutomationClips[row] = remappedClips;
     _rowAutomationTargets[row] = discovered;
     final selected = _rowSelectedAutomationTarget[row];
-    if (selected == null || !discovered.containsKey(selected)) {
+    final selectedMeta = selected == null ? null : discovered[selected];
+    if (selected == null ||
+        selectedMeta == null ||
+        !_isAutomationTargetVisibleInMenu(selectedMeta)) {
       final fallback = discovered.containsKey('volume')
           ? 'volume'
-          : (discovered.keys.isNotEmpty ? discovered.keys.first : 'volume');
+          : discovered.values
+              .firstWhere(
+                _isAutomationTargetVisibleInMenu,
+                orElse: () => _volumeAutomationTargetMeta(),
+              )
+              .targetId;
       _rowSelectedAutomationTarget[row] = fallback;
     }
 
@@ -14995,21 +17512,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         <String, _AutomationTargetMeta>{
           'volume': _volumeAutomationTargetMeta()
         };
-    final values = targets.values.toList(growable: false)
-      ..sort((a, b) {
-        if (a.isVolume && !b.isVolume) return -1;
-        if (!a.isVolume && b.isVolume) return 1;
-        return a.label.toLowerCase().compareTo(b.label.toLowerCase());
-      });
+    final values =
+        targets.values.where(_isAutomationTargetVisibleInMenu).toList(
+              growable: false,
+            )..sort((a, b) {
+            if (a.isVolume && !b.isVolume) return -1;
+            if (!a.isVolume && b.isVolume) return 1;
+            if (a.isOrphan && !b.isOrphan) return 1;
+            if (!a.isOrphan && b.isOrphan) return -1;
+            return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+          });
     return values.map((e) => e.toUiMap()).toList(growable: false);
   }
 
   String _selectedAutomationTargetIdForRow(int row) {
     if (row < 0 || row >= _rowCount) return 'volume';
     final selected = _rowSelectedAutomationTarget[row];
-    if (selected != null &&
-        (_rowAutomationTargets[row]?.containsKey(selected) ?? false)) {
-      return selected;
+    final selectedMeta =
+        selected == null ? null : _rowAutomationTargets[row]?[selected];
+    if (selectedMeta != null &&
+        _isAutomationTargetVisibleInMenu(selectedMeta)) {
+      return selected!;
     }
     return 'volume';
   }
@@ -15020,7 +17543,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         <String, _AutomationTargetMeta>{
           'volume': _volumeAutomationTargetMeta()
         };
-    if (!targets.containsKey(targetId)) {
+    final selectedMeta = targets[targetId];
+    if (selectedMeta == null ||
+        !_isAutomationTargetVisibleInMenu(selectedMeta)) {
       targetId = 'volume';
     }
     _rowSelectedAutomationTarget[row] = targetId;
@@ -15032,7 +17557,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String targetId,
   ) {
     double normalized = targetId == 'volume' ? 0.75 : 0.5;
-    final target = _rowAutomationTargets[row]?[targetId];
+    final parsed = _parseAutomationTargetId(targetId);
+    if (parsed.isMixParameter) {
+      switch (parsed.mixParamId.trim().toLowerCase()) {
+        case 'gain':
+          normalized = (parsed.isMaster
+                  ? (_masterGain / _kGainUiMax)
+                  : ((row >= 0 && row < _rowCount)
+                      ? (_rowGain[row] / _kGainUiMax)
+                      : (_kGainUiUnity / _kGainUiMax)))
+              .clamp(0.0, 1.0)
+              .toDouble();
+          break;
+        case 'pan':
+          normalized = (parsed.isMaster
+                  ? _masterPan
+                  : ((row >= 0 && row < _rowCount) ? _rowPan[row] : 0.5))
+              .clamp(0.0, 1.0)
+              .toDouble();
+          break;
+        case 'volume':
+          normalized = 0.75;
+          break;
+        default:
+          break;
+      }
+    }
+    _AutomationTargetMeta? target;
+    if (row >= 0 && row < _rowCount) {
+      target = _rowAutomationTargets[row]?[targetId];
+    } else {
+      target = _automationTargetMetaFromAnyRow(targetId);
+    }
     if (target != null) {
       normalized = target.initialNormalized.clamp(0.0, 1.0).toDouble();
     }
@@ -15094,9 +17650,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final out = <AutomationClipSnapshot>[];
     for (final clip in clips) {
-      final safeLength = clip.lengthMs.clamp(50.0, maxMs).toDouble();
+      final safeLength = _clampAutomationLengthMs(clip.lengthMs);
       final maxStart = math.max(0.0, maxMs - safeLength);
       final safeStart = clip.startMs.clamp(0.0, maxStart).toDouble();
+      final safeVisualRow =
+          clip.row.clamp(0, math.max(0, _rowCount - 1)).toInt();
 
       var id = clip.id.trim();
       if (id.isEmpty || seenIds.contains(id)) {
@@ -15114,9 +17672,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       out.add(
         clip.copyWith(
           id: id,
-          row: row,
+          row: safeVisualRow,
           targetId: targetId,
-          lane: math.max(0, clip.lane),
+          lane: math.max(0, clip.lane).toInt(),
           label: clip.label.trim().isEmpty ? targetLabel : clip.label.trim(),
           startMs: safeStart,
           lengthMs: safeLength,
@@ -15133,6 +17691,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return out;
   }
 
+  int _defaultAutomationClipRowForSourceRow(int row) {
+    if (_rowCount <= 0) return 0;
+    return (row + 1).clamp(0, _rowCount - 1).toInt();
+  }
+
+  int _preferredAutomationClipRowForTarget(int row, String targetId) {
+    if (!_isMasterAutomationTarget(targetId) || _rowCount <= 0) {
+      return _defaultAutomationClipRowForSourceRow(row);
+    }
+    final occupiedRows = _audioTracks
+        .map((clip) => clip.rowIndex)
+        .where((rowIndex) => rowIndex >= 0 && rowIndex < _rowCount)
+        .toSet();
+    for (int candidate = 0; candidate < _rowCount; candidate++) {
+      if (!occupiedRows.contains(candidate)) {
+        return candidate;
+      }
+    }
+    return 0;
+  }
+
   List<AutomationPoint> _pointsForAutomationTarget(int row, String targetId) {
     if (row < 0 || row >= _rowCount) return const <AutomationPoint>[];
     if (targetId == 'volume') return _rowVolumeAutomation[row];
@@ -15140,6 +17719,113 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final existing = rowMap?[targetId];
     if (existing != null) return existing;
     return _defaultAutomationPointsForTarget(row, targetId);
+  }
+
+  List<AutomationPoint>? _storedAutomationPointsForTargetOrNull(
+    int row,
+    String targetId,
+  ) {
+    if (row < 0 || row >= _rowCount) return null;
+    if (targetId == 'volume') return _rowVolumeAutomation[row];
+    return _rowPluginAutomation[row]?[targetId];
+  }
+
+  bool _hasExplicitAutomationForTarget(int row, String targetId) {
+    if (targetId == 'volume') return true;
+    if (_isMasterAutomationTarget(targetId)) {
+      for (int sourceRow = 0; sourceRow < _rowCount; sourceRow++) {
+        final lanePoints = _rowPluginAutomation[sourceRow]?[targetId];
+        if (lanePoints != null && lanePoints.isNotEmpty) {
+          return true;
+        }
+        final clips = _rowAutomationClips[sourceRow]?[targetId];
+        if (clips != null && clips.isNotEmpty) {
+          return true;
+        }
+      }
+      return false;
+    }
+    final lanePoints = _rowPluginAutomation[row]?[targetId];
+    if (lanePoints != null && lanePoints.isNotEmpty) {
+      return true;
+    }
+    final clips = _rowAutomationClips[row]?[targetId];
+    return clips != null && clips.isNotEmpty;
+  }
+
+  bool _isMasterAutomationTarget(String targetId) {
+    return _parseAutomationTargetId(targetId).isMaster;
+  }
+
+  _AutomationTargetMeta? _automationTargetMetaFromAnyRow(String targetId) {
+    for (int row = 0; row < _rowCount; row++) {
+      final meta = _rowAutomationTargets[row]?[targetId];
+      if (meta != null) return meta;
+    }
+    return null;
+  }
+
+  List<AutomationPoint> _evaluationAutomationLanePointsForTarget(
+    int row,
+    String targetId,
+  ) {
+    if (!_isMasterAutomationTarget(targetId)) {
+      return _sanitizeAutomationPointsForTarget(
+        row,
+        targetId,
+        _pointsForAutomationTarget(row, targetId),
+      );
+    }
+
+    for (int sourceRow = 0; sourceRow < _rowCount; sourceRow++) {
+      final explicit =
+          _storedAutomationPointsForTargetOrNull(sourceRow, targetId);
+      if (explicit == null) continue;
+      return _sanitizeAutomationPointsForTarget(
+        sourceRow,
+        targetId,
+        explicit,
+      );
+    }
+
+    return _sanitizeAutomationPointsForTarget(
+      row,
+      targetId,
+      _defaultAutomationPointsForTarget(row, targetId),
+    );
+  }
+
+  List<AutomationClipSnapshot> _evaluationAutomationClipsForTarget(
+    int row,
+    String targetId,
+  ) {
+    if (!_isMasterAutomationTarget(targetId)) {
+      return _sanitizeAutomationClipsForTarget(
+        row,
+        targetId,
+        _clipsForAutomationTarget(row, targetId),
+      );
+    }
+
+    final combined = <AutomationClipSnapshot>[];
+    for (int sourceRow = 0; sourceRow < _rowCount; sourceRow++) {
+      final safe = _sanitizeAutomationClipsForTarget(
+        sourceRow,
+        targetId,
+        _clipsForAutomationTarget(sourceRow, targetId),
+      );
+      combined.addAll(safe.map((clip) => clip.copyWith()));
+    }
+    combined.sort((a, b) {
+      final timeCmp = a.startMs.compareTo(b.startMs);
+      if (timeCmp != 0) return timeCmp;
+      final laneCmp = a.lane.compareTo(b.lane);
+      if (laneCmp != 0) return laneCmp;
+      final rowCmp = a.row.compareTo(b.row);
+      if (rowCmp != 0) return rowCmp;
+      return a.id.compareTo(b.id);
+    });
+    return combined;
   }
 
   List<AutomationPoint> _sanitizeAutomationPointsForTarget(
@@ -15187,35 +17873,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     List<AutomationClipSnapshot>? clipOverride,
   }) {
     final lanePoints = lanePointsOverride ??
-        _sanitizeAutomationPointsForTarget(
-          row,
-          targetId,
-          _pointsForAutomationTarget(row, targetId),
-        );
+        _evaluationAutomationLanePointsForTarget(row, targetId);
     final baseValue = _evaluateAutomationAtMs(
       lanePoints,
       timeMs,
       fallback: targetId == 'volume' ? 0.75 : 0.5,
     );
 
-    final clips = clipOverride ??
-        _sanitizeAutomationClipsForTarget(
-          row,
-          targetId,
-          _clipsForAutomationTarget(row, targetId),
-        );
+    final clips =
+        clipOverride ?? _evaluationAutomationClipsForTarget(row, targetId);
     if (clips.isEmpty) return baseValue;
 
-    AutomationClipSnapshot? active;
-    for (final clip in clips) {
-      if (clip.muted) continue;
-      final start = clip.startMs;
-      final end = clip.startMs + clip.lengthMs;
-      if (timeMs + 1e-6 < start || timeMs - 1e-6 > end) continue;
-      if (active == null || clip.startMs >= active.startMs) {
-        active = clip;
-      }
-    }
+    final active = activeAutomationClipAtTime(clips, timeMs);
     if (active == null) return baseValue;
     final rel = timeMs - active.startMs;
     return _evaluateAutomationClipAtRelativeMs(
@@ -15230,16 +17899,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String targetId,
   ) {
     final maxMs = _maxAutomationTimelineMs();
-    final lanePoints = _sanitizeAutomationPointsForTarget(
-      row,
-      targetId,
-      _pointsForAutomationTarget(row, targetId),
-    );
-    final clips = _sanitizeAutomationClipsForTarget(
-      row,
-      targetId,
-      _clipsForAutomationTarget(row, targetId),
-    );
+    final lanePoints = _evaluationAutomationLanePointsForTarget(row, targetId);
+    final clips = _evaluationAutomationClipsForTarget(row, targetId);
     if (clips.isEmpty) {
       return lanePoints.map((p) => p.copy()).toList(growable: false);
     }
@@ -15317,8 +17978,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String targetId,
   ) async {
     if (targetId == 'volume') return;
-    final target = _rowAutomationTargets[row]?[targetId];
-    if (target == null || target.isVolume || target.effectIndex < 0) return;
+    if (!_hasExplicitAutomationForTarget(row, targetId)) return;
+    final target = _rowAutomationTargets[row]?[targetId] ??
+        _automationTargetMetaFromAnyRow(targetId) ??
+        _fallbackAutomationTargetMeta(targetId);
+    if (target.isVolume) return;
+    final parsed = _parseAutomationTargetId(targetId);
     final timeMs = _globalAudioClock.inMilliseconds.toDouble();
     final normalized = _resolvedAutomationValueAtMs(
       row,
@@ -15326,12 +17991,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       timeMs,
     ).clamp(0.0, 1.0);
     final value = _denormalizeAutomationValue(normalized, target);
-    await JuceAudioEngine.setTrackEffect(
-      row,
-      target.effectIndex,
-      target.paramId,
-      value,
-    );
+    if (parsed.isMaster) {
+      if (parsed.isMixParameter) {
+        switch (parsed.mixParamId.trim().toLowerCase()) {
+          case 'gain':
+            await JuceAudioEngine.setMasterGain(value);
+            break;
+          case 'pan':
+            await JuceAudioEngine.setMasterPan(value);
+            break;
+          default:
+            break;
+        }
+      } else if (parsed.isEffectParameter && target.effectIndex >= 0) {
+        await JuceAudioEngine.setMasterEffect(
+          target.effectIndex,
+          target.paramId,
+          value,
+        );
+      }
+    } else if (parsed.isMixParameter) {
+      switch (parsed.mixParamId.trim().toLowerCase()) {
+        case 'gain':
+          await JuceAudioEngine.setRowGain(row, value);
+          break;
+        case 'pan':
+          await JuceAudioEngine.setRowPan(row, value);
+          break;
+        default:
+          break;
+      }
+    } else if (parsed.isEffectParameter && target.effectIndex >= 0) {
+      await JuceAudioEngine.setTrackEffect(
+        row,
+        target.effectIndex,
+        target.paramId,
+        value,
+      );
+    }
     _lastAppliedAutomationNormalized['$row|$targetId'] = normalized.toDouble();
   }
 
@@ -15481,7 +18178,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final targetId = clip.targetId.trim().isEmpty ? 'volume' : clip.targetId;
       grouped.putIfAbsent(targetId, () => <AutomationClipSnapshot>[]).add(
             clip.copyWith(
-              row: row,
               targetId: targetId,
             ),
           );
@@ -15510,6 +18206,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     final safeClips =
         _sanitizeAutomationClipsForTarget(row, targetId, newClips);
+    if (safeClips.isNotEmpty) {
+      await _ensureAutomationClipDisplayRowExists(row);
+    }
 
     await _undoManager.execute(
       SetTargetAutomationClipsAction(
@@ -15529,6 +18228,282 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         },
       ),
     );
+  }
+
+  Future<void> _ensureAutomationClipDisplayRowExists(int sourceRow) async {
+    if (sourceRow < 0 || sourceRow >= _rowCount) return;
+    if (sourceRow + 1 < _rowCount) return;
+    if (_rowCount >= kMaxRows) return;
+    await _addRowImpl();
+  }
+
+  Future<void> _ensureLoadedAutomationDisplayRowsExist() async {
+    if (_rowCount <= 0 || _rowCount >= kMaxRows) return;
+    final lastRow = _rowCount - 1;
+    final rowMap = _rowAutomationClips[lastRow];
+    if (rowMap == null) return;
+    final hasAutomationClips = rowMap.values.any((clips) => clips.isNotEmpty);
+    if (!hasAutomationClips) return;
+    await _addRowImpl();
+  }
+
+  void _triggerMasterHalos(List<String> haloKeys) {
+    final mapped = haloKeys
+        .map((key) => key.trim())
+        .where((key) => key.isNotEmpty)
+        .map(HaloKey.new)
+        .toList(growable: false);
+    if (mapped.isEmpty) return;
+    _mixHighlighter.trigger(mapped,
+        duration: const Duration(milliseconds: 800));
+  }
+
+  String? _findAutomationTargetIdForEffectParameter({
+    required int effectIndex,
+    required String paramId,
+    required bool master,
+    int? row,
+  }) {
+    final normalizedParamId = paramId.trim();
+    if (normalizedParamId.isEmpty) return null;
+
+    Iterable<int> candidateRows;
+    if (master) {
+      candidateRows = List<int>.generate(_rowCount, (i) => i);
+    } else {
+      if (row == null || row < 0 || row >= _rowCount) return null;
+      candidateRows = <int>[row];
+    }
+
+    for (final candidateRow in candidateRows) {
+      final targets = _rowAutomationTargets[candidateRow];
+      if (targets == null) continue;
+      for (final entry in targets.entries) {
+        if (entry.value.isOrphan) continue;
+        final parsed = _parseAutomationTargetId(entry.key);
+        if (parsed.isMaster != master) continue;
+        if (entry.value.effectIndex != effectIndex) continue;
+        if (entry.value.paramId.trim() != normalizedParamId) continue;
+        return entry.key;
+      }
+    }
+    return null;
+  }
+
+  double _normalizeAutomationTargetValue(
+    _AutomationTargetMeta target,
+    dynamic value,
+  ) {
+    final fallback = target.initialNormalized.clamp(0.0, 1.0).toDouble();
+    switch (target.type.trim().toLowerCase()) {
+      case 'bool':
+        if (value is bool) return value ? 1.0 : 0.0;
+        final numeric = _toActionDouble(value);
+        if (numeric != null) {
+          return numeric >= 0.5 ? 1.0 : 0.0;
+        }
+        return fallback;
+      case 'choice':
+        final numeric = _toActionDouble(value);
+        if (numeric != null) {
+          return numeric.clamp(0.0, 1.0).toDouble();
+        }
+        return fallback;
+      default:
+        final numeric = _toActionDouble(value);
+        return _normalizeAutomationValue(
+          numeric,
+          min: target.min,
+          max: target.max,
+          fallback: fallback,
+        );
+    }
+  }
+
+  void _updateAutomationTargetBaselineForEffectParameter({
+    required int effectIndex,
+    required String paramId,
+    required dynamic value,
+    required bool master,
+    int? row,
+  }) {
+    final targetId = _findAutomationTargetIdForEffectParameter(
+      effectIndex: effectIndex,
+      paramId: paramId,
+      master: master,
+      row: row,
+    );
+    if (targetId == null || targetId.isEmpty) return;
+
+    final candidateRows = master
+        ? List<int>.generate(_rowCount, (index) => index)
+        : <int>[if (row != null) row];
+    for (final candidateRow in candidateRows) {
+      if (candidateRow < 0 || candidateRow >= _rowCount) continue;
+      final rowTargets = _rowAutomationTargets[candidateRow];
+      final target = rowTargets?[targetId];
+      if (target == null) continue;
+      final normalized = _normalizeAutomationTargetValue(target, value);
+      rowTargets![targetId] = target.copyWith(initialNormalized: normalized);
+    }
+  }
+
+  Future<void> _createAutomationClipForTarget({
+    required int row,
+    required String targetId,
+    String? label,
+    int lane = 0,
+    double? startMs,
+    double? lengthMs,
+    double? initialNormalized,
+  }) async {
+    if (row < 0 || row >= _rowCount) return;
+    final targetMeta = _rowAutomationTargets[row]?[targetId] ??
+        _automationTargetMetaFromAnyRow(targetId) ??
+        _fallbackAutomationTargetMeta(targetId);
+    final clipLabel = (label ?? targetMeta.label).trim();
+    final safeStartMs = (startMs ?? _globalAudioClock.inMilliseconds.toDouble())
+        .clamp(0.0, _maxAutomationTimelineMs())
+        .toDouble();
+    final safeLengthMs = _clampAutomationLengthMs(
+      lengthMs ?? _defaultAutomationClipLengthMs(),
+    );
+    final normalized = (initialNormalized ?? targetMeta.initialNormalized)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final before = _copyAutomationClipList(
+      _clipsForAutomationTarget(row, targetId),
+    );
+    final next = <AutomationClipSnapshot>[
+      ...before.map((clip) => clip.copyWith()),
+      AutomationClipSnapshot(
+        id: _newAutomationClipId(row, targetId),
+        targetId: targetId,
+        label: clipLabel.isEmpty ? targetId : clipLabel,
+        row: _preferredAutomationClipRowForTarget(row, targetId),
+        lane: math.max(0, lane),
+        startMs: safeStartMs,
+        lengthMs: safeLengthMs,
+        muted: false,
+        points: <AutomationPoint>[
+          AutomationPoint(x: 0.0, volume: normalized),
+        ],
+      ),
+    ];
+    setState(() {
+      _rowSelectedAutomationTarget[row] = targetId;
+    });
+    await _setAutomationClipsForTargetWithUndo(
+      row,
+      targetId,
+      next,
+      oldClipsOverride: before,
+    );
+    _showSmallNotice('Created automation clip.');
+  }
+
+  Future<void> _requestMasterMixAutomationClip(String paramId) async {
+    if (_rowCount <= 0) {
+      _showSmallNotice('Add a row before creating automation clips.');
+      return;
+    }
+    final row = _selectedRow.clamp(0, _rowCount - 1).toInt();
+    final targetId = _masterMixAutomationTargetId(paramId);
+    final label = switch (paramId.trim().toLowerCase()) {
+      'gain' => 'Master Gain',
+      'pan' => 'Master Pan',
+      _ => 'Master ${paramId.trim()}',
+    };
+    await _createAutomationClipForTarget(
+      row: row,
+      targetId: targetId,
+      label: label,
+    );
+  }
+
+  Future<void> _requestMasterEffectAutomationClip(
+    int effectIndex,
+    String effectName,
+    String paramId,
+    String paramName,
+  ) async {
+    if (_rowCount <= 0) {
+      _showSmallNotice('Add a row before creating automation clips.');
+      return;
+    }
+    final row = _selectedRow.clamp(0, _rowCount - 1).toInt();
+    await _refreshAutomationTargetsForRow(
+      row,
+      setStateWhenDone: false,
+      syncNativeWhenDone: false,
+    );
+    final targetId = _findAutomationTargetIdForEffectParameter(
+      effectIndex: effectIndex,
+      paramId: paramId,
+      master: true,
+    );
+    if (targetId == null || targetId.isEmpty) {
+      _showSmallNotice('Could not resolve that automation target.');
+      return;
+    }
+    final targetMeta = _automationTargetMetaFromAnyRow(targetId);
+    final resolvedLabel = (targetMeta?.label ?? '').trim();
+    final label = resolvedLabel.isNotEmpty
+        ? resolvedLabel
+        : (effectName.trim().isEmpty
+            ? paramName.trim()
+            : 'Master • ${effectName.trim()} • ${paramName.trim()}');
+    await _createAutomationClipForTarget(
+      row: row,
+      targetId: targetId,
+      label: label.trim().isEmpty ? targetId : label,
+    );
+  }
+
+  Future<void> _revealMasterAutomationTarget(String targetId) async {
+    final parsed = _parseAutomationTargetId(targetId);
+    final targetMeta = _automationTargetMetaFromAnyRow(targetId) ??
+        _fallbackAutomationTargetMeta(targetId);
+    setState(() {
+      _showMasterRack = true;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    if (!mounted) return;
+
+    if (parsed.isMixParameter) {
+      _masterRackContentKey.currentState?.showVolumeTab();
+      switch (parsed.mixParamId.trim().toLowerCase()) {
+        case 'gain':
+          _triggerMasterHalos(<String>[
+            'master:gain',
+            'master:param:gain',
+          ]);
+          break;
+        case 'pan':
+          _triggerMasterHalos(<String>[
+            'master:pan',
+            'master:param:pan',
+          ]);
+          break;
+      }
+      return;
+    }
+
+    _masterRackContentKey.currentState?.showEffectsTab();
+    if (targetMeta.isOrphan) {
+      _showSmallNotice(
+        'This automation clip is orphaned. Undo the plugin removal or re-add the plugin to relink it.',
+      );
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    if (!mounted) return;
+    final revealer = _masterParameterRevealer;
+    if (revealer != null &&
+        targetMeta.effectIndex >= 0 &&
+        targetMeta.paramId.trim().isNotEmpty) {
+      await revealer(targetMeta.effectIndex, targetMeta.paramId);
+    }
   }
 
   List<AutomationPoint> _sanitizeAutomationPoints(
@@ -15600,15 +18575,49 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return allowVolumeFallback ? 'volume' : null;
     }
 
+    final scope = (data['scope'] ?? target['scope'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final restrictToMaster = scope == 'master' ||
+        scope == 'master_bus' ||
+        scope == 'master-bus' ||
+        scope == 'masterbus';
+    final restrictToRow = scope == 'row' ||
+        scope == 'track' ||
+        scope == 'channel' ||
+        scope == 'group' ||
+        scope == 'bus';
+
+    bool scopeAllowsTarget(_AutomationTargetMeta meta) {
+      if (meta.isOrphan) return false;
+      final isMasterTarget = _parseAutomationTargetId(meta.targetId).isMaster;
+      if (restrictToMaster) return isMasterTarget;
+      if (restrictToRow) return !isMasterTarget;
+      return true;
+    }
+
     String? pickTargetId(dynamic raw) {
       final id = (raw ?? '').toString().trim();
       if (id.isEmpty) return null;
-      if (targets.containsKey(id)) return id;
+      if (targets.containsKey(id)) {
+        final exactMeta = targets[id]!;
+        if (scopeAllowsTarget(exactMeta)) return id;
+        return null;
+      }
       final parsed = _parseAutomationTargetId(id);
-      if (parsed.isVolume || id.toLowerCase() == 'volume') return 'volume';
+      if (parsed.isVolume || id.toLowerCase() == 'volume') {
+        if (restrictToMaster) return null;
+        final volumeMeta = targets['volume'];
+        return volumeMeta != null && scopeAllowsTarget(volumeMeta)
+            ? 'volume'
+            : null;
+      }
       final parsedParamLower = parsed.paramId.trim().toLowerCase();
       if (parsedParamLower.isEmpty) return null;
-      final pluginTargets = targets.values.where((meta) => !meta.isVolume);
+      final pluginTargets = targets.values.where(
+        (meta) => !meta.isVolume && scopeAllowsTarget(meta),
+      );
       if (parsed.effectKey.isNotEmpty) {
         final byEffectKey = pluginTargets.where((meta) {
           final candidateParsed = _parseAutomationTargetId(meta.targetId);
@@ -15680,16 +18689,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .trim()
         .toLowerCase();
 
-    if (effectIndex != null && paramId.isNotEmpty) {
+    if (!restrictToMaster && effectIndex != null && paramId.isNotEmpty) {
       final byDirectId = _pluginAutomationTargetId(effectIndex, paramId);
-      if (targets.containsKey(byDirectId)) return byDirectId;
+      if (targets.containsKey(byDirectId) &&
+          scopeAllowsTarget(targets[byDirectId]!)) {
+        return byDirectId;
+      }
     }
 
     int? resolvedEffectIndex = effectIndex;
     if (resolvedEffectIndex == null && effectName.isNotEmpty) {
       final matchingEffectIndices = targets.values
           .where((meta) {
-            if (meta.isVolume) return false;
+            if (meta.isVolume || !scopeAllowsTarget(meta)) return false;
             return matchesToken(meta.label, effectName) ||
                 matchesToken(meta.paramId, effectName);
           })
@@ -15705,7 +18717,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (resolvedEffectIndex != null) {
       final scoped = targets.values
           .where((meta) =>
-              !meta.isVolume && meta.effectIndex == resolvedEffectIndex)
+              !meta.isVolume &&
+              scopeAllowsTarget(meta) &&
+              meta.effectIndex == resolvedEffectIndex)
           .toList(growable: false);
       if (scoped.isNotEmpty) {
         if (paramId.isNotEmpty) {
@@ -15731,14 +18745,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (paramId.isNotEmpty) {
       final lowered = paramId.toLowerCase();
       for (final meta in targets.values) {
-        if (meta.isVolume) continue;
+        if (meta.isVolume || !scopeAllowsTarget(meta)) continue;
         if (meta.paramId.toLowerCase() == lowered) return meta.targetId;
       }
     }
 
     if (paramName.isNotEmpty) {
       for (final meta in targets.values) {
-        if (meta.isVolume) continue;
+        if (meta.isVolume || !scopeAllowsTarget(meta)) continue;
         final label = meta.label.toLowerCase();
         final pid = meta.paramId.toLowerCase();
         if (matchesToken(label, paramName) || matchesToken(pid, paramName)) {
@@ -15752,6 +18766,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         paramId.isNotEmpty ||
         paramName.isNotEmpty;
     if (pluginIntent && !allowVolumeFallback) {
+      return null;
+    }
+
+    if (restrictToMaster) {
       return null;
     }
 
@@ -15863,6 +18881,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case 'create_clip':
         return 'create_clip';
       case 'duplicate':
+      case 'clone':
+      case 'clone_clip':
       case 'duplicate_clip':
         return 'duplicate_clip';
       case 'move':
@@ -15906,6 +18926,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final y = b[i];
       if (x.id != y.id ||
           x.targetId != y.targetId ||
+          x.label != y.label ||
+          x.patternId != y.patternId ||
           x.row != y.row ||
           x.lane != y.lane ||
           x.muted != y.muted ||
@@ -15964,6 +18986,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .trim();
     if (explicitId.isNotEmpty) {
       final idx = clips.indexWhere((clip) => clip.id == explicitId);
+      if (idx >= 0) return idx;
+    }
+
+    final explicitPatternId = (data['pattern_id'] ??
+            target['pattern_id'] ??
+            data['automation_pattern_id'] ??
+            target['automation_pattern_id'] ??
+            '')
+        .toString()
+        .trim();
+    if (explicitPatternId.isNotEmpty) {
+      final idx = clips
+          .indexWhere((clip) => clip.patternId.trim() == explicitPatternId);
       if (idx >= 0) return idx;
     }
 
@@ -16081,15 +19116,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final pluginIntent = _isPluginAutomationIntent(data);
+    final requestedScope = (data['scope'] ?? target['scope'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final wantsMasterScope = requestedScope == 'master' ||
+        requestedScope == 'master_bus' ||
+        requestedScope == 'master-bus' ||
+        requestedScope == 'masterbus';
     final targetId = _resolveAutomationTargetIdFromAction(
       row,
       data,
-      allowVolumeFallback: !pluginIntent,
+      allowVolumeFallback: !pluginIntent && !wantsMasterScope,
     );
     if (targetId == null || targetId.isEmpty) {
       final hasPluginTargets = (_rowAutomationTargets[row] ?? const {})
           .values
-          .any((meta) => !meta.isVolume);
+          .any((meta) => !meta.isVolume && !meta.isOrphan);
       if (pluginIntent) {
         if (!hasPluginTargets) {
           _insertAssistantChatText(
@@ -16098,9 +19141,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _insertAssistantChatText(
               "I couldn't resolve which plugin parameter to automate. Specify plugin + parameter (for example: effect_name + param_name).");
         }
+      } else if (wantsMasterScope) {
+        _insertAssistantChatText(
+            "I couldn't resolve which master parameter to automate. Specify master gain, master pan, or the master effect + parameter.");
       } else {
         _insertAssistantChatText(
-            "I couldn't resolve which automation lane to edit.");
+            "I couldn't resolve which automation target to edit.");
       }
       return;
     }
@@ -16121,7 +19167,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .trim()
         .toLowerCase();
     final defaultSpanMs = (60000.0 / _tempo.clamp(1.0, 400.0) * 4.0)
-        .clamp(120.0, _maxAutomationTimelineMs())
+        .clamp(120.0, _automationUpperBound(120.0))
         .toDouble();
 
     Future<void> applyClipList(
@@ -16142,6 +19188,46 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         safeClips,
         oldClipsOverride: oldClips,
       );
+    }
+
+    bool wantsSharedCopy(Map<String, dynamic> source) {
+      final mode = (source['copy_mode'] ??
+              source['duplicate_mode'] ??
+              source['clone_mode'] ??
+              source['copy_style'] ??
+              '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (mode.isEmpty) return true;
+      return mode == 'shared' ||
+          mode == 'linked' ||
+          mode == 'shallow' ||
+          mode == 'clone' ||
+          source['shared'] == true ||
+          source['linked'] == true;
+    }
+
+    List<AutomationClipSnapshot> applySharedPatternPoints(
+      List<AutomationClipSnapshot> clips,
+      int clipIndex,
+      List<AutomationPoint> points,
+    ) {
+      if (clipIndex < 0 || clipIndex >= clips.length) return clips;
+      final source = clips[clipIndex];
+      final patternId = source.patternId.trim();
+      if (patternId.isEmpty) {
+        final updated = List<AutomationClipSnapshot>.from(clips);
+        updated[clipIndex] = source.copyWith(points: points);
+        return updated;
+      }
+      return clips
+          .map(
+            (clip) => clip.patternId.trim() == patternId
+                ? clip.copyWith(points: points)
+                : clip.copyWith(),
+          )
+          .toList(growable: false);
     }
 
     if (operation == 'clear_clips') {
@@ -16179,7 +19265,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     target['duration_ms'],
               ) ??
               (60000.0 / _tempo.clamp(1.0, 400.0)))
-          .clamp(80.0, _maxAutomationTimelineMs())
+          .clamp(80.0, _automationUpperBound(80.0))
           .toDouble();
       final minSpacingMs = (_toActionDouble(
                 data['min_spacing_ms'] ??
@@ -16345,7 +19431,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             label: label.isEmpty
                 ? _automationTargetLabelFor(row, targetId)
                 : label,
-            row: row,
+            row: _preferredAutomationClipRowForTarget(row, targetId),
             lane: requestedLane,
             startMs: startMs.toDouble(),
             lengthMs: clippedLength.toDouble(),
@@ -16384,7 +19470,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     target['duration_ms'],
               ) ??
               _defaultAutomationClipLengthMs())
-          .clamp(80.0, _maxAutomationTimelineMs());
+          .clamp(80.0, _automationUpperBound(80.0));
       final startValue = _normalizedActionValueForTarget(
         data['start_value'] ?? data['from_value'],
         targetMeta,
@@ -16458,7 +19544,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         id: _newAutomationClipId(row, targetId),
         targetId: targetId,
         label: label.isEmpty ? _automationTargetLabelFor(row, targetId) : label,
-        row: row,
+        patternId: (data['pattern_id'] ?? target['pattern_id'] ?? '')
+            .toString()
+            .trim(),
+        row: _preferredAutomationClipRowForTarget(row, targetId),
         lane: requestedLane,
         startMs: startMs.toDouble(),
         lengthMs: lengthMs.toDouble(),
@@ -16484,7 +19573,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             "I couldn't find an automation clip to duplicate.");
         return;
       }
-      final source = before[sourceIndex];
+      final sharedCopy = wantsSharedCopy(data) || wantsSharedCopy(target);
+      final working = List<AutomationClipSnapshot>.from(before);
+      final source = working[sourceIndex];
+      final patternId = sharedCopy
+          ? (source.patternId.trim().isNotEmpty
+              ? source.patternId.trim()
+              : _newAutomationPatternId(row, targetId))
+          : '';
+      if (sharedCopy && source.patternId.trim().isEmpty) {
+        working[sourceIndex] = source.copyWith(patternId: patternId);
+      }
       final nextStart = (_toActionDouble(
                 data['start_ms'] ??
                     target['start_ms'] ??
@@ -16493,12 +19592,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ) ??
               (source.startMs + source.lengthMs))
           .toDouble();
-      final duplicated = source.copyWith(
+      final duplicated = working[sourceIndex].copyWith(
         id: _newAutomationClipId(row, targetId),
+        patternId: patternId,
         startMs: nextStart,
       );
-      await applyClipList([...before, duplicated], beforeOverride: before);
-      _showSmallNotice('Duplicated automation clip.');
+      await applyClipList([...working, duplicated], beforeOverride: before);
+      _showSmallNotice(
+        sharedCopy
+            ? 'Created shared automation clip.'
+            : 'Duplicated automation clip.',
+      );
       return;
     }
 
@@ -16507,7 +19611,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         operation == 'mute_clip' ||
         operation == 'unmute_clip' ||
         operation == 'toggle_clip_mute' ||
-        operation == 'set_clip_points') {
+        operation == 'set_clip_points' ||
+        operation == 'make_unique_clip' ||
+        operation == 'make_unique') {
       final before = _copyAutomationClipList(_clipsForAutomationTarget(
         row,
         targetId,
@@ -16557,7 +19663,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 ) ??
                 (defaultSpanMs / 4.0))
             .abs()
-            .clamp(20.0, _maxAutomationTimelineMs());
+            .clamp(20.0, _automationUpperBound(20.0));
         final directionDelta = switch (direction) {
           'left' || 'earlier' || 'back' || 'backward' => -stepMs,
           'right' || 'later' || 'forward' => stepMs,
@@ -16612,6 +19718,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
 
+      if (operation == 'make_unique_clip' || operation == 'make_unique') {
+        if (current.patternId.trim().isEmpty) {
+          _showSmallNotice('Automation clip is already unique.');
+          return;
+        }
+        working[clipIdx] = current.copyWith(patternId: '');
+        await applyClipList(working, beforeOverride: before);
+        _showSmallNotice('Made automation clip unique.');
+        return;
+      }
+
       if (operation == 'set_clip_points') {
         final rawPoints = (data['points'] as List?) ?? const [];
         final points = <AutomationPoint>[];
@@ -16638,8 +19755,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _insertAssistantChatText("I need clip automation points to apply.");
           return;
         }
-        working[clipIdx] = current.copyWith(points: points);
-        await applyClipList(working, beforeOverride: before);
+        final next = applySharedPatternPoints(working, clipIdx, points);
+        await applyClipList(next, beforeOverride: before);
         _showSmallNotice('Updated automation clip points.');
         return;
       }
@@ -16660,7 +19777,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _defaultAutomationPointsForTarget(row, targetId),
         );
       }
-      _showSmallNotice('Cleared automation lane.');
+      _showSmallNotice('Cleared automation.');
       return;
     }
 
@@ -17355,9 +20472,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         operation == 'delete') {
       final cleared = _chatPipeline.clearRoleOverride(row);
       if (cleared) {
-        _showSmallNotice('Cleared role override for Track ${row + 1}.');
+        _showSmallNotice(
+          'Cleared role override for ${_rowDisplayName(row)}.',
+        );
       } else {
-        _showSmallNotice('Track ${row + 1} had no role override set.');
+        _showSmallNotice(
+          '${_rowDisplayName(row)} had no role override set.',
+        );
       }
       return;
     }
@@ -17378,7 +20499,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final roleText = role.toLowerCase().trim();
-    _showSmallNotice('Track ${row + 1} role override set to $roleText.');
+    _showSmallNotice(
+      '${_rowDisplayName(row)} role override set to $roleText.',
+    );
   }
 
   Future<void> _handleStemSeparationForClip(int clipIndex) async {
@@ -17519,10 +20642,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return true;
   }
 
-  Future<void> applyMixingResult(MixingResult mix) async {
-    if (mix.isNoOp || mix.actions.isEmpty) return;
+  Future<int> applyMixingResult(
+    MixingResult mix, {
+    bool emitActionSummaries = true,
+  }) async {
+    if (mix.isNoOp || mix.actions.isEmpty) return 0;
 
     final List<EditorUndoAction> groupedActions = [];
+    void emitActionSummary(String text) {
+      if (!emitActionSummaries) return;
+      _insertSystemChatText(text);
+    }
 
     for (final a in mix.actions) {
       switch (a.type) {
@@ -17573,8 +20703,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .trigger([HaloKey('row:$row'), HaloKey('row:$row:mixer')]);
 
           final summary =
-              '• Adjusted Gain from ${_gainToDb(oldGain)} to ${_gainToDb(newGain)} on Track ${row + 1} •';
-          _chatController.insertMessage(ActionSummaryMessage(text: summary));
+              '• Adjusted Gain from ${_gainToDb(oldGain)} to ${_gainToDb(newGain)} on ${_rowDisplayName(row)} •';
+          emitActionSummary(summary);
 
           continue;
 
@@ -17627,8 +20757,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           groupedActions.add(finalAct);
 
           final summary =
-              '• Adjusted pan from ${panToText(oldPan01)} to ${panToText(newPan01)} on Track ${row + 1} •';
-          _chatController.insertMessage(ActionSummaryMessage(text: summary));
+              '• Adjusted pan from ${panToText(oldPan01)} to ${panToText(newPan01)} on ${_rowDisplayName(row)} •';
+          emitActionSummary(summary);
           continue;
 
         case 'set_master_gain':
@@ -17657,11 +20787,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             await _undoManager.executeWithoutAdd(finalAct);
             groupedActions.add(finalAct);
 
-            _chatController.insertMessage(
-              ActionSummaryMessage(
-                text:
-                    '• Adjusted Master Gain from ${_gainToDb(oldGain)} to ${_gainToDb(newGain)} •',
-              ),
+            emitActionSummary(
+              '• Adjusted Master Gain from ${_gainToDb(oldGain)} to ${_gainToDb(newGain)} •',
             );
             continue;
           }
@@ -17694,11 +20821,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             await _undoManager.executeWithoutAdd(finalAct);
             groupedActions.add(finalAct);
 
-            _chatController.insertMessage(
-              ActionSummaryMessage(
-                text:
-                    '• Adjusted Master Pan from ${panToText(oldPan01)} to ${panToText(newPan01)} •',
-              ),
+            emitActionSummary(
+              '• Adjusted Master Pan from ${panToText(oldPan01)} to ${panToText(newPan01)} •',
             );
             continue;
           }
@@ -17735,6 +20859,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               onChange: () {
                 setState(() {});
                 _refreshRowFx(row);
+                unawaited(_refreshAutomationTargetsForRow(row));
               },
             );
 
@@ -17750,9 +20875,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               HaloKey('row:$row:fx_contains:$contains'),
             ]);
 
-            _chatController.insertMessage(
-              ActionSummaryMessage(
-                  text: '• Removed ${effects[idx]} from Track ${row + 1} •'),
+            emitActionSummary(
+              '• Removed ${effects[idx]} from ${_rowDisplayName(row)} •',
             );
             continue;
           }
@@ -17769,16 +20893,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final finalAct = RemoveMasterEffectAction(
               effectIndex: idx,
               pathOrName: effects[idx],
-              onChange: () => setState(() {}),
+              onChange: () {
+                setState(() {});
+                unawaited(_refreshAutomationTargetsForAllRows());
+              },
             );
 
             await _undoManager.executeWithoutAdd(finalAct);
             groupedActions.add(finalAct);
 
-            _chatController.insertMessage(
-              ActionSummaryMessage(
-                  text: '• Removed ${effects[idx]} from Master Bus •'),
-            );
+            emitActionSummary('• Removed ${effects[idx]} from Master Bus •');
             continue;
           }
 
@@ -17813,6 +20937,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             onChange: () {
               setState(() {});
               _refreshRowFx(row);
+              unawaited(_refreshAutomationTargetsForRow(row));
             },
           );
 
@@ -17828,8 +20953,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             HaloKey('row:$row:fx_contains:$contains'),
           ]);
 
-          final summary = '• Added $effectName to Track ${row + 1} •';
-          _chatController.insertMessage(ActionSummaryMessage(text: summary));
+          final summary = '• Added $effectName to ${_rowDisplayName(row)} •';
+          emitActionSummary(summary);
           continue;
 
         case 'ensure_master_effect':
@@ -17846,15 +20971,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
             final finalAct = InsertMasterEffectAction(
               pathOrName: effectName,
-              onChange: () => setState(() {}),
+              onChange: () {
+                setState(() {});
+                unawaited(_refreshAutomationTargetsForAllRows());
+              },
             );
 
             await _undoManager.executeWithoutAdd(finalAct);
             groupedActions.add(finalAct);
 
-            _chatController.insertMessage(
-              ActionSummaryMessage(text: '• Added $effectName to Master Bus •'),
-            );
+            emitActionSummary('• Added $effectName to Master Bus •');
             continue;
           }
 
@@ -17999,11 +21125,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   'row:$row:fx_index:$fxIndex:param:$paramId'), // TODO: put paramName instead of paramId maybe
             ]);
 
-            _chatController.insertMessage(
-              ActionSummaryMessage(
-                text:
-                    '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${effects[fxIndex]} (Track ${row + 1}) •',
-              ),
+            emitActionSummary(
+              '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${effects[fxIndex]} (${_rowDisplayName(row)}) •',
             );
             continue;
           }
@@ -18100,17 +21223,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               paramId: paramName,
               oldValue: current,
               newValue: next,
-              onChange: () => setState(() {}),
+              onChange: () {
+                setState(() {});
+                unawaited(_refreshAutomationTargetsForAllRows());
+              },
             );
 
             await _undoManager.executeWithoutAdd(finalAct);
             groupedActions.add(finalAct);
 
-            _chatController.insertMessage(
-              ActionSummaryMessage(
-                text:
-                    '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${effects[fxIndex]} (Master Bus) •',
-              ),
+            emitActionSummary(
+              '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${effects[fxIndex]} (Master Bus) •',
             );
             continue;
           }
@@ -18135,6 +21258,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 onChange: () {
                   setState(() {});
                   _refreshRowFx(row);
+                  unawaited(_refreshAutomationTargetsForRow(row));
                 },
               );
 
@@ -18142,8 +21266,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               groupedActions.add(act);
             }
 
-            _chatController.insertMessage(ActionSummaryMessage(
-                text: '• Removed all effects on Track ${row + 1} •'));
+            emitActionSummary(
+              '• Removed all effects on ${_rowDisplayName(row)} •',
+            );
 
             continue;
           }
@@ -18158,17 +21283,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               final act = RemoveMasterEffectAction(
                 effectIndex: fxIndex,
                 pathOrName: fxName,
-                onChange: () => setState(() {}),
+                onChange: () {
+                  setState(() {});
+                  unawaited(_refreshAutomationTargetsForAllRows());
+                },
               );
 
               await _undoManager.executeWithoutAdd(act);
               groupedActions.add(act);
             }
 
-            _chatController.insertMessage(
-              ActionSummaryMessage(
-                  text: '• Removed all effects on Master Bus •'),
-            );
+            emitActionSummary('• Removed all effects on Master Bus •');
             continue;
           }
 
@@ -18177,10 +21302,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           continue;
       }
     }
-    if (groupedActions.isEmpty) return;
+    if (groupedActions.isEmpty) return 0;
 
     await _undoManager.addWithoutExecute(
         CompoundUndoAction('AI mixing adjustments', groupedActions));
+    return groupedActions.length;
+  }
+
+  static const String _kAiRequestFailureMessage =
+      "I couldn't complete that request just now. Please try again.";
+  static const String _kAiApplyFailureMessage =
+      "I understood the request, but I couldn't apply that change, so nothing changed.";
+
+  void _reportAiChatFailure(
+    Object error,
+    StackTrace stackTrace, {
+    required String stage,
+  }) {
+    aiDebugLog('audio-editor', 'ai chat failure stage=$stage error=$error');
+    unawaited(
+      CrashReportingService.instance.captureException(
+        StateError('AI chat failure at $stage: $error'),
+        stackTrace: stackTrace,
+      ),
+    );
   }
 
   Map<String, dynamic>? _pickParam(List<Map<String, dynamic>> params,
@@ -18269,19 +21414,464 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ...payload,
           'at': DateTime.now().toUtc().toIso8601String(),
         },
+        projectId: _projectId,
+        projectName: _projectName,
+        projectDir: _projectDir,
       ),
     );
   }
 
+  void _insertUserChatText(String text) {
+    _insertChatTextMessage(authorId: 'user', text: text);
+  }
+
   void _insertAssistantChatText(String text) {
+    _insertChatTextMessage(authorId: 'assistant', text: text);
+  }
+
+  void _insertSystemChatText(
+    String text, {
+    Map<String, dynamic>? metadata,
+    bool persist = true,
+  }) {
+    _insertChatTextMessage(
+      authorId: 'system',
+      text: text,
+      metadata: metadata,
+      persist: persist,
+    );
+  }
+
+  void _insertChatTextMessage({
+    required String authorId,
+    required String text,
+    DateTime? createdAt,
+    Map<String, dynamic>? metadata,
+    bool persist = true,
+  }) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+
+    final existingMessages = _chatController.messages;
+    if (existingMessages.isNotEmpty) {
+      final lastMessage = existingMessages.last;
+      if (lastMessage is TextMessage &&
+          lastMessage.authorId == authorId &&
+          lastMessage.text.trim() == trimmed) {
+        return;
+      }
+    }
+
     _chatController.insertMessage(
       TextMessage(
         id: const Uuid().v4(),
-        authorId: 'assistant',
-        createdAt: DateTime.now().toUtc(),
-        text: text,
+        authorId: authorId,
+        createdAt: (createdAt ?? DateTime.now()).toUtc(),
+        text: trimmed,
+        metadata: metadata,
       ),
     );
+
+    if (!persist) return;
+    unawaited(_enforcePersistedChatHistoryLimit());
+    _scheduleChatHistoryPersist();
+    if (authorId == 'user' || authorId == 'assistant') {
+      _scrollChatToLatest();
+    }
+  }
+
+  int _chatTextMessageCount({String? authorId}) {
+    int count = 0;
+    for (final message in _chatController.messages) {
+      if (message is! TextMessage) continue;
+      if (authorId != null && message.authorId != authorId) continue;
+      count++;
+    }
+    return count;
+  }
+
+  bool _assistantActionsContainDirectProjectEdit(
+    List<AssistantAction> actions,
+  ) {
+    for (final action in actions) {
+      switch (action.type.trim().toLowerCase()) {
+        case 'clip_edit':
+        case 'effect_edit':
+        case 'automation_edit':
+        case 'midi_compose':
+        case 'stem_separate':
+        case 'role_override':
+          return true;
+      }
+    }
+    return false;
+  }
+
+  Future<void> _presentPipelineReply(ChatPipelineResult reply) async {
+    // Ordering note for source-coverage tests:
+    // _insertAssistantChatText(reply.message);
+    // await _applyAssistantActions(reply.assistantActions);
+    final assistantMessagesBefore =
+        _chatTextMessageCount(authorId: 'assistant');
+
+    if (reply.hasAssistantActions) {
+      await _applyAssistantActions(reply.assistantActions);
+    }
+
+    final assistantMessagesAfter = _chatTextMessageCount(authorId: 'assistant');
+    final directEditActionApplied = _assistantActionsContainDirectProjectEdit(
+      reply.assistantActions,
+    );
+    final shouldInsertPrimaryReply = reply.message.trim().isNotEmpty &&
+        !directEditActionApplied &&
+        (!reply.hasAssistantActions ||
+            assistantMessagesAfter == assistantMessagesBefore);
+    if (shouldInsertPrimaryReply) {
+      _insertAssistantChatText(reply.message);
+    }
+  }
+
+  void _scrollChatToLatest({bool jump = false}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || !_chatHistoryScrollController.hasClients) return;
+      final position = _chatHistoryScrollController.position;
+      final target = position.maxScrollExtent;
+      if (jump) {
+        _chatHistoryScrollController.jumpTo(target);
+        return;
+      }
+      await _chatHistoryScrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  void _showCopiedChatMessageFeedback(String messageId) {
+    _copiedChatMessageTimer?.cancel();
+    _copiedChatMessageTimer = null;
+    if (mounted) {
+      setState(() {
+        _copiedChatMessageId = messageId;
+      });
+    } else {
+      _copiedChatMessageId = messageId;
+    }
+    _copiedChatMessageTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (!mounted) {
+        _copiedChatMessageId = null;
+        return;
+      }
+      setState(() {
+        _copiedChatMessageId = null;
+      });
+    });
+  }
+
+  Future<void> _enforcePersistedChatHistoryLimit() async {
+    final normalized =
+        ProjectChatHistory.fromChatMessages(_chatController.messages)
+            .toChatMessages();
+    if (_chatMessagesMatchCurrentState(normalized)) return;
+    await _chatController.setMessages(normalized.cast<Message>());
+    if (mounted) setState(() {});
+  }
+
+  bool _chatMessagesMatchCurrentState(List<TextMessage> nextMessages) {
+    final currentMessages = _chatController.messages;
+    if (currentMessages.length != nextMessages.length) return false;
+
+    for (int i = 0; i < currentMessages.length; i++) {
+      final current = currentMessages[i];
+      final next = nextMessages[i];
+      if (current is! TextMessage) return false;
+      if (current.id != next.id ||
+          current.authorId != next.authorId ||
+          current.text != next.text ||
+          current.createdAt?.millisecondsSinceEpoch !=
+              next.createdAt?.millisecondsSinceEpoch) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  Future<void> _restoreChatHistoryFromProjectJson(
+    Map<String, dynamic> json,
+  ) async {
+    final history = ProjectChatHistory.fromJson(
+        json['assistantChat'] ?? json['chatHistory']);
+    await _chatController.setMessages(history.toChatMessages().cast<Message>());
+    _chatPipeline.replaceConversation(history.toConversation());
+  }
+
+  void _scheduleChatHistoryPersist({bool immediate = false}) {
+    _chatHistoryPersistTimer?.cancel();
+    _chatHistoryPersistTimer = null;
+    if (immediate) {
+      unawaited(_persistChatHistoryOnly());
+      return;
+    }
+
+    _chatHistoryPersistTimer = Timer(const Duration(milliseconds: 700), () {
+      _chatHistoryPersistTimer = null;
+      unawaited(_persistChatHistoryOnly());
+    });
+  }
+
+  Future<void> _persistChatHistoryOnly() async {
+    if (!_loadedOnce) return;
+
+    try {
+      final json = await ProjectManager.readProjectJson(_projectDir);
+      final projectId = ProjectManager.ensureProjectIdInJson(json);
+      if (_projectId.isEmpty) {
+        _projectId = projectId;
+      }
+
+      final history =
+          ProjectChatHistory.fromChatMessages(_chatController.messages)
+              .toJsonValue();
+      if (history == null) {
+        json.remove('assistantChat');
+      } else {
+        json['assistantChat'] = history;
+      }
+
+      await ProjectManager.writeProjectJson(_projectDir, json);
+    } catch (e) {
+      debugPrint('Chat history persist failed: $e');
+    }
+  }
+
+  Future<void> _clearChatHistory() async {
+    _chatHistoryPersistTimer?.cancel();
+    _chatHistoryPersistTimer = null;
+    await _chatController.setMessages(const <Message>[]);
+    _chatPipeline.clearConversation();
+    await _persistChatHistoryOnly();
+    if (mounted) setState(() {});
+  }
+
+  void _applyPromptRateLimitStatus(
+    AiPromptRateLimitStatus? status, {
+    bool markLoadingComplete = true,
+  }) {
+    _promptRateLimitRefreshTimer?.cancel();
+    _promptRateLimitRefreshTimer = null;
+    if (!mounted) {
+      _promptRateLimitStatus = status;
+      if (markLoadingComplete) {
+        _promptRateLimitLoading = false;
+      }
+      return;
+    }
+
+    setState(() {
+      _promptRateLimitStatus = status;
+      if (markLoadingComplete) {
+        _promptRateLimitLoading = false;
+      }
+    });
+
+    if (status == null || status.canSubmit) return;
+    final resetAt = status.blockedResetAt?.toLocal();
+    if (resetAt == null) return;
+    final wait = resetAt.difference(DateTime.now()).inMilliseconds + 1200;
+    final delay = Duration(milliseconds: wait.clamp(1000, 2147483647));
+    _promptRateLimitRefreshTimer = Timer(delay, () {
+      unawaited(_refreshPromptRateLimitStatus(silent: true));
+    });
+  }
+
+  void _updatePromptRateLimitStatusFromMeta(Map<String, dynamic>? meta) {
+    final raw = meta?['prompt_rate_limit'];
+    if (raw is! Map) return;
+    _applyPromptRateLimitStatus(
+      AiPromptRateLimitStatus.fromJson(raw.cast<String, dynamic>()),
+    );
+  }
+
+  Future<void> _refreshPromptRateLimitStatus({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() => _promptRateLimitLoading = true);
+    } else if (!silent) {
+      _promptRateLimitLoading = true;
+    }
+
+    final status = await _chatPipeline.llm.fetchPromptRateLimitStatus();
+    _applyPromptRateLimitStatus(status);
+  }
+
+  String _formatPromptWaitDuration(DateTime? resetsAt) {
+    if (resetsAt == null) return 'unknown';
+    final remaining = resetsAt.toLocal().difference(DateTime.now());
+    if (remaining.inSeconds <= 0) return 'less than a minute';
+    if (remaining.inDays >= 1) {
+      final hours = remaining.inHours.remainder(24);
+      return hours > 0
+          ? '${remaining.inDays}d ${hours}h'
+          : '${remaining.inDays}d';
+    }
+    if (remaining.inHours >= 1) {
+      final minutes = remaining.inMinutes.remainder(60);
+      return minutes > 0
+          ? '${remaining.inHours}h ${minutes}m'
+          : '${remaining.inHours}h';
+    }
+    return '${remaining.inMinutes.clamp(1, 59)}m';
+  }
+
+  String _formatPromptResetAt(DateTime? resetsAt) {
+    if (resetsAt == null) return 'Unknown';
+    final local = resetsAt.toLocal();
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '${local.year}-$month-$day $hour:$minute';
+  }
+
+  Future<void> _showPromptRateLimitDialog() async {
+    final status = _promptRateLimitStatus;
+    if (status == null) {
+      unawaited(_refreshPromptRateLimitStatus());
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final blockedWait = _formatPromptWaitDuration(status.blockedResetAt);
+        return AlertDialog(
+          backgroundColor: const Color(0xFF17191F),
+          title: const Text(
+            'Prompt limits',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                status.canSubmit
+                    ? 'All AI prompts count toward the same limit.'
+                    : 'Prompt sending is paused until the current limit resets.',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Daily: ${status.daily.remaining} remaining of ${status.daily.limit}',
+                style: const TextStyle(color: Colors.white),
+              ),
+              Text(
+                'Resets: ${_formatPromptResetAt(status.daily.resetsAt)}',
+                style: const TextStyle(color: Colors.white54, fontSize: 12.5),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Weekly: ${status.weekly.remaining} remaining of ${status.weekly.limit}',
+                style: const TextStyle(color: Colors.white),
+              ),
+              Text(
+                'Resets: ${_formatPromptResetAt(status.weekly.resetsAt)}',
+                style: const TextStyle(color: Colors.white54, fontSize: 12.5),
+              ),
+              if (!status.canSubmit) ...[
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF5A2020),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Text(
+                    'You can send prompts again in $blockedWait.',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                unawaited(_refreshPromptRateLimitStatus());
+              },
+              child: const Text('Refresh'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmClearChatHistory() async {
+    if (_isThinking || _chatController.messages.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF17191F),
+          title: const Text(
+            'Clear chat history?',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: const Text(
+            'This removes the saved project chat context and cannot be undone.',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Clear'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    await _clearChatHistory();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chat history cleared')),
+      );
+    }
+  }
+
+  String _tutorialStepsChatText(List<Map<String, dynamic>> steps) {
+    final lines = <String>[];
+    for (final step in steps) {
+      final text = (step['text'] ?? '').toString().trim();
+      if (text.isNotEmpty) {
+        lines.add(text);
+      }
+    }
+    if (lines.isEmpty) return '';
+    if (lines.length == 1) return lines.first;
+    return lines
+        .asMap()
+        .entries
+        .map((entry) => '${entry.key + 1}. ${entry.value}')
+        .join('\n');
   }
 
   Future<void> _setProducerDataMode(bool enabled,
@@ -18294,8 +21884,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _producerDataMode = true;
         await _producerCollector.setEnabled(true);
         _insertAssistantChatText(
-            'Producer data mode enabled. AI steps and manual edits are now being captured.');
+            'Producer data mode enabled. Each prompt will capture before, AI-after, and final producer-after snapshots.');
       } else {
+        if (_producerCollector.hasPendingPromptCycle) {
+          await _finalizeProducerPromptCycle(
+            disposition: 'mode_disabled',
+            insertMessage: false,
+          );
+        }
         if (_producerCollector.hasActiveSession) {
           await _producerCollector.closeSession(reason: closeReason);
         }
@@ -18310,44 +21906,67 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Future<void> _exportProducerSession() async {
-    final file = await _producerCollector.exportActiveSession();
-    if (file == null) {
-      _insertAssistantChatText('No active producer session to export yet.');
+  Future<void> _finalizeProducerPromptCycle({
+    required String disposition,
+    bool insertMessage = true,
+    Map<String, dynamic>? finalSnapshot,
+  }) async {
+    if (!_producerDataMode || !_producerCollector.hasPendingPromptCycle) {
+      if (insertMessage) {
+        _insertAssistantChatText(
+            'No producer prompt is awaiting final capture.');
+        _showSmallNotice('No producer prompt is awaiting final capture.');
+      }
       return;
     }
-    _insertAssistantChatText('Exported producer session: ${file.path}');
+
+    final snapshot = finalSnapshot ?? await _buildProducerSnapshot();
+    await _producerCollector.recordPromptCycleStop(
+      finalSnapshot: snapshot,
+      disposition: disposition,
+      projectId: _projectId,
+      projectName: _projectName,
+      projectDir: _projectDir,
+    );
+    if (mounted) {
+      setState(() {});
+    }
+    if (insertMessage) {
+      _insertAssistantChatText(
+        'Captured the producer final after-state for the current prompt.',
+      );
+      _showSmallNotice('Captured final producer after-state.');
+    }
   }
 
-  Future<bool> _handleProducerCommand(String text) async {
-    final raw = text.trim();
-    if (!raw.toLowerCase().startsWith('/producer')) return false;
-
-    final parts = raw.split(RegExp(r'\s+'));
-    final cmd = parts.length >= 2 ? parts[1].toLowerCase() : 'help';
-
-    switch (cmd) {
-      case 'on':
-        await _setProducerDataMode(true, closeReason: 'command_on');
-        return true;
-
-      case 'off':
-        await _setProducerDataMode(false, closeReason: 'command_off');
-        return true;
-
-      case 'export':
-        await _exportProducerSession();
-        return true;
-
-      default:
-        _insertAssistantChatText(
-          'Producer commands:\\n'
-          '/producer on\\n'
-          '/producer off\\n'
-          '/producer export',
-        );
-        return true;
+  Future<void> _exportProducerSession() async {
+    if (_producerCollector.hasPendingPromptCycle) {
+      await _finalizeProducerPromptCycle(
+        disposition: 'export',
+        insertMessage: false,
+      );
     }
+    final file = await _producerCollector.exportActiveSession(
+      projectDir: _projectDir,
+    );
+    if (file == null) {
+      _insertAssistantChatText('No active producer session to export yet.');
+      _showSmallNotice('No active producer session to export yet.');
+      return;
+    }
+    _insertAssistantChatText('Saved producer session to ${file.path}');
+    _showSmallNotice('Producer session exported.');
+  }
+
+  String _producerCaptureStatusLabel() {
+    if (!_producerDataMode) return 'Producer Capture: OFF';
+    if (!_producerCollector.hasActiveSession) {
+      return 'Producer Capture: ON (waiting for first AI step)';
+    }
+    if (_producerCollector.hasPendingPromptCycle) {
+      return 'Producer Capture: ON (capture final after-state when done)';
+    }
+    return 'Producer Capture: ON';
   }
 
   Future<void> _ensureAiModelsLoaded() {
@@ -18355,21 +21974,326 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return _aiModelsWarmupFuture!;
   }
 
+  Widget _buildOneButtonMixDetail({
+    required IconData icon,
+    required String text,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: Colors.white70, size: 16),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool> _confirmOneButtonMix() async {
+    final shouldRun = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: const Color(0xFF1A1F2E),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xFF5C7AFF), Color(0xFF3050FF)],
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.auto_awesome_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'One-Button Mix',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Mixroom AI will make a fast finishing pass across the current project.',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF22283A),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.08)),
+                    ),
+                    child: Column(
+                      children: [
+                        _buildOneButtonMixDetail(
+                          icon: Icons.tune_rounded,
+                          text: 'Balance levels across the mix.',
+                        ),
+                        Divider(
+                          height: 1,
+                          color: Colors.white.withOpacity(0.06),
+                        ),
+                        _buildOneButtonMixDetail(
+                          icon: Icons.graphic_eq_rounded,
+                          text: 'Reduce masking and clean up harsh areas.',
+                        ),
+                        Divider(
+                          height: 1,
+                          color: Colors.white.withOpacity(0.06),
+                        ),
+                        _buildOneButtonMixDetail(
+                          icon: Icons.waves_rounded,
+                          text: 'Improve clarity and add tasteful space.',
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'You can undo everything after it runs.',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2E6EEB),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 12,
+                          ),
+                        ),
+                        child: const Text('Run Mix'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    return shouldRun ?? false;
+  }
+
   Future<void> _loadAiModels() async {
     await _classifier.load();
     await _magnitudePredictor.load();
   }
 
+  String _aiAutomationClipSnapshot() {
+    const int maxTargetsPerScope = 4;
+    const int maxEntriesForFocusedTarget = 10;
+    const int maxEntriesPerOtherTarget = 4;
+
+    String summarizeLane(
+        int row, String targetId, List<AutomationClipSnapshot> clips,
+        {required bool focused}) {
+      final label = _automationTargetLabelFor(row, targetId);
+      final sorted = _copyAutomationClipList(clips)
+        ..sort((a, b) {
+          final byStart = a.startMs.compareTo(b.startMs);
+          if (byStart != 0) return byStart;
+          return a.id.compareTo(b.id);
+        });
+      final linkedGroups = <String, List<AutomationClipSnapshot>>{};
+      final uniqueClips = <AutomationClipSnapshot>[];
+      for (final clip in sorted) {
+        final patternId = clip.patternId.trim();
+        if (patternId.isEmpty) {
+          uniqueClips.add(clip);
+        } else {
+          linkedGroups
+              .putIfAbsent(patternId, () => <AutomationClipSnapshot>[])
+              .add(clip);
+        }
+      }
+
+      final entries = <({double startMs, String text})>[];
+      for (final entry in linkedGroups.entries) {
+        final group = entry.value;
+        group.sort((a, b) => a.startMs.compareTo(b.startMs));
+        final first = group.first;
+        final last = group.last;
+        final clipIds = group.take(3).map((clip) => clip.id).join(',');
+        final hiddenIds = group.length - math.min(group.length, 3);
+        final idSuffix = hiddenIds > 0 ? ',+$hiddenIds more' : '';
+        final laneSet = group.map((clip) => clip.lane).toSet().toList()..sort();
+        final laneSummary = laneSet.length == 1
+            ? '${laneSet.first}'
+            : '${laneSet.first}-${laneSet.last}';
+        entries.add((
+          startMs: first.startMs,
+          text:
+              'linked{pattern_id=${entry.key},count=${group.length},start_ms=${first.startMs.round()},'
+              'end_ms=${(last.startMs + last.lengthMs).round()},lanes=$laneSummary,clip_ids=$clipIds$idSuffix}',
+        ));
+      }
+      for (final clip in uniqueClips) {
+        final mutedToken = clip.muted ? ',muted=true' : '';
+        entries.add((
+          startMs: clip.startMs,
+          text:
+              'unique{clip_id=${clip.id},start_ms=${clip.startMs.round()},length_ms=${clip.lengthMs.round()},'
+              'lane=${clip.lane}$mutedToken}',
+        ));
+      }
+      entries.sort((a, b) => a.startMs.compareTo(b.startMs));
+
+      final maxEntries =
+          focused ? maxEntriesForFocusedTarget : maxEntriesPerOtherTarget;
+      final visible =
+          entries.take(maxEntries).map((entry) => entry.text).toList();
+      final hidden = entries.length - visible.length;
+      if (hidden > 0) {
+        visible.add('(+$hidden more entries)');
+      }
+
+      return '$label[$targetId]{clips=${clips.length},linked_groups=${linkedGroups.length},'
+          'unique_clips=${uniqueClips.length}}=${visible.join(';')}';
+    }
+
+    List<String> summarizeRowTargets(
+      int row, {
+      required bool includeMasterTargets,
+      String prioritizedTargetId = '',
+    }) {
+      final rowMap = _rowAutomationClips[row] ??
+          const <String, List<AutomationClipSnapshot>>{};
+      final targetIds = rowMap.keys.where((targetId) {
+        final isMasterTarget = _parseAutomationTargetId(targetId).isMaster;
+        if (includeMasterTargets != isMasterTarget) return false;
+        final clips = rowMap[targetId] ?? const <AutomationClipSnapshot>[];
+        return clips.isNotEmpty;
+      }).toList()
+        ..sort((a, b) {
+          if (a == prioritizedTargetId && b != prioritizedTargetId) return -1;
+          if (b == prioritizedTargetId && a != prioritizedTargetId) return 1;
+          final aCount = (rowMap[a] ?? const <AutomationClipSnapshot>[]).length;
+          final bCount = (rowMap[b] ?? const <AutomationClipSnapshot>[]).length;
+          final byCount = bCount.compareTo(aCount);
+          if (byCount != 0) return byCount;
+          return a.compareTo(b);
+        });
+      final out = <String>[];
+      final visibleTargets =
+          targetIds.take(maxTargetsPerScope).toList(growable: false);
+      for (final targetId in visibleTargets) {
+        final clips = _copyAutomationClipList(
+          rowMap[targetId] ?? const <AutomationClipSnapshot>[],
+        );
+        out.add(
+          summarizeLane(
+            row,
+            targetId,
+            clips,
+            focused: targetId == prioritizedTargetId,
+          ),
+        );
+      }
+      final hiddenTargets = targetIds.length - visibleTargets.length;
+      if (hiddenTargets > 0) {
+        out.add('(+$hiddenTargets more automation targets)');
+      }
+      return out;
+    }
+
+    final lines = <String>[];
+    final selectedRow = _selectedRow;
+    if (selectedRow >= 0 && selectedRow < _rowCount) {
+      final selectedTargetId = _selectedAutomationTargetIdForRow(selectedRow);
+      final selected = summarizeRowTargets(
+        selectedRow,
+        includeMasterTargets: false,
+        prioritizedTargetId: selectedTargetId,
+      );
+      if (selected.isNotEmpty) {
+        lines.add('selected_row_automation_clips=${selected.join(' | ')}');
+      }
+    }
+
+    final master = summarizeRowTargets(0, includeMasterTargets: true);
+    if (master.isNotEmpty) {
+      lines.add('master_automation_clips=${master.join(' | ')}');
+    }
+
+    return lines.join('\n');
+  }
+
   Future<void> runOneButtonMix() async {
     // optional: show system “Mixing…” message
-    _chatController.insertMessage(
-      TextMessage(
-        id: const Uuid().v4(),
-        authorId: 'system',
-        createdAt: DateTime.now().toUtc(),
-        text: 'Mixing…',
-        metadata: {'typing': true},
-      ),
+    _insertSystemChatText(
+      'Mixing…',
+      metadata: {'typing': true},
+      persist: false,
     );
 
     final prompt = "Make this mix sound like a finished, professional release. "
@@ -18380,23 +22304,54 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Map<String, dynamic>? producerPreSnapshot;
     if (_producerDataMode) {
       producerPreSnapshot = await _buildProducerSnapshot();
+      if (_producerCollector.hasPendingPromptCycle) {
+        await _finalizeProducerPromptCycle(
+          disposition: 'next_ai_step',
+          insertMessage: false,
+          finalSnapshot: producerPreSnapshot,
+        );
+      }
     }
 
-    await _ensureAiModelsLoaded();
-    final reply = await _chatPipeline.handleUserText(
-      text: prompt,
-      audioTracks: _audioTracks,
-      bpmFallback: _tempo,
-      rowGain: _rowGain,
-      rowPan: _rowPan,
-      rowAutomation: _rowVolumeAutomation,
-      masterGain0to3: _masterGain,
-      masterPan0to1: _masterPan,
-      selectedClipIndices: _timelineSelectedClipIndices,
-      primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
-      selectedRowIndex: _selectedRow,
-      autoApplyProposals: true, // <-- key
-    );
+    late final ChatPipelineResult reply;
+    try {
+      await _ensureAiModelsLoaded();
+      reply = await _chatPipeline.handleUserText(
+        text: prompt,
+        audioTracks: _audioTracks,
+        bpmFallback: _tempo,
+        rowGain: _rowGain,
+        rowPan: _rowPan,
+        rowAutomation: _rowVolumeAutomation,
+        masterGain0to3: _masterGain,
+        masterPan0to1: _masterPan,
+        selectedClipIndices: _timelineSelectedClipIndices,
+        primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
+        selectedRowIndex: _selectedRow,
+        automationClipSnapshot: _aiAutomationClipSnapshot(),
+        projectId: _projectId,
+        aiFeature: 'ai_chat',
+        autoApplyProposals: true, // <-- key
+      );
+    } catch (error, stackTrace) {
+      _reportAiChatFailure(error, stackTrace, stage: 'one_button_pipeline');
+      _insertAssistantChatText(_kAiRequestFailureMessage);
+      return;
+    }
+
+    final toolName = reply.meta?['tool']?.toString().trim() ?? '';
+    if (toolName.isEmpty) {
+      // Server-side analytics are authoritative for AI request outcomes.
+    } else {
+      unawaited(
+        AnalyticsService.instance.track(
+          AnalyticsEvents.aiToolCalled(
+            toolName: toolName,
+            projectId: _projectId,
+          ),
+        ),
+      );
+    }
 
     if (kAiDebugLogs) {
       aiDebugLog('audio-editor', 'one-button-mix reply:\n${reply.toString()}');
@@ -18408,34 +22363,47 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
 
-    if (reply.hasMix) {
-      await applyMixingResult(reply.mixing!);
-      _chatPipeline.recordAppliedMix(reply.mixing!);
+    _updatePromptRateLimitStatusFromMeta(reply.meta);
 
-      if (_producerDataMode && producerPreSnapshot != null) {
-        final producerPostSnapshot = await _buildProducerSnapshot();
-        await _producerCollector.recordAiStep(
-          prompt: prompt,
-          preSnapshot: producerPreSnapshot,
-          postSnapshot: producerPostSnapshot,
-          resolvedActions:
-              reply.mixing!.actions.map((a) => a.toJson()).toList(),
-          llmPayload: reply.meta,
+    try {
+      if (reply.hasMix) {
+        final appliedCount = await applyMixingResult(
+          reply.mixing!,
+          emitActionSummaries: true,
         );
+        if (appliedCount <= 0) {
+          _insertAssistantChatText(_kAiApplyFailureMessage);
+          return;
+        }
+        _chatPipeline.recordAppliedMix(
+          reply.mixing!,
+          visibleAssistantText: reply.message,
+        );
+
+        if (_producerDataMode && producerPreSnapshot != null) {
+          final producerPostSnapshot = await _buildProducerSnapshot();
+          await _producerCollector.recordAiStep(
+            prompt: prompt,
+            preSnapshot: producerPreSnapshot,
+            postSnapshot: producerPostSnapshot,
+            resolvedActions:
+                reply.mixing!.actions.map((a) => a.toJson()).toList(),
+            llmPayload: reply.meta,
+            projectId: _projectId,
+            projectName: _projectName,
+            projectDir: _projectDir,
+          );
+        }
       }
-    }
 
-    if (reply.hasAssistantActions) {
-      await _applyAssistantActions(reply.assistantActions);
+      await _presentPipelineReply(reply);
+    } catch (error, stackTrace) {
+      _reportAiChatFailure(error, stackTrace, stage: 'one_button_apply');
+      _insertAssistantChatText(
+        reply.hasMix ? _kAiApplyFailureMessage : _kAiRequestFailureMessage,
+      );
+      return;
     }
-
-    _chatController.insertMessage(
-      TextMessage(
-          id: const Uuid().v4(),
-          authorId: 'assistant',
-          createdAt: DateTime.now().toUtc(),
-          text: reply.message),
-    );
 
     // show a snackbar/modal if you want:
     // ScaffoldMessenger.of(context).showSnackBar(...)
@@ -18483,16 +22451,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            _producerDataMode
-                                ? (_producerCollector.hasActiveSession
-                                    ? 'Producer Capture: ON'
-                                    : 'Producer Capture: ON (waiting for first AI step)')
-                                : 'Producer Capture: OFF',
+                            _producerCaptureStatusLabel(),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                             ),
+                          ),
+                        ),
+                        IconButton(
+                          constraints:
+                              const BoxConstraints(minWidth: 32, minHeight: 32),
+                          padding: EdgeInsets.zero,
+                          tooltip: 'Capture current producer final after-state',
+                          onPressed: _producerDataMode &&
+                                  _producerCollector.hasPendingPromptCycle
+                              ? () async {
+                                  await _finalizeProducerPromptCycle(
+                                    disposition: 'manual_mark',
+                                  );
+                                  if (mounted) setState(() {});
+                                }
+                              : null,
+                          icon: Icon(
+                            Icons.check_circle_outline,
+                            size: 17,
+                            color: _producerDataMode &&
+                                    _producerCollector.hasPendingPromptCycle
+                                ? Colors.white
+                                : Colors.white.withOpacity(0.35),
                           ),
                         ),
                         IconButton(
@@ -18568,165 +22555,249 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                    child: Halo(
-                      highlighter: _mixHighlighter,
-                      haloKey: const HaloKey('tutorial:chatbar'),
-                      borderRadius: BorderRadius.circular(18),
-                      child: _ChatBar(
-                        expanded: _chatInputActive,
-                        hasText: _chatHasText,
-                        controller: _chatTextController,
-                        focusNode: _chatFocusNode,
-                        onTapBar: () {
-                          if (_sampleBrowserVisible) {
-                            unawaited(_stopSampleAudition());
-                          }
-                          if (!_chatExpanded) {
-                            setState(() {
-                              _showAddActionsPanel = false;
-                              _sampleBrowserVisible = false;
-                              _sampleBrowserExpanded = false;
-                              _sampleDragActive = false;
-                              _reopenSampleBrowserAfterDrag = false;
-                              _reopenSampleBrowserExpanded = false;
-                              _chatExpanded = true;
-                              _chatInputActive = false;
-                            });
-                            return;
-                          }
-                          if (!_chatInputActive) {
-                            setState(() {
-                              _showAddActionsPanel = false;
-                              _sampleBrowserVisible = false;
-                              _sampleBrowserExpanded = false;
-                              _sampleDragActive = false;
-                              _reopenSampleBrowserAfterDrag = false;
-                              _reopenSampleBrowserExpanded = false;
-                              _chatInputActive = true;
-                            });
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (!mounted) return;
-                              _chatFocusNode.requestFocus();
-                            });
-                            return;
-                          }
-                          if (!_chatFocusNode.hasFocus) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (!mounted) return;
-                              _chatFocusNode.requestFocus();
-                            });
-                          }
-                        },
-                        onSubmit: () async {
-                          final text = _chatTextController.text.trim();
-                          if (text.isEmpty) return;
-
-                          _chatTextController.clear();
-                          _chatFocusNode.unfocus();
-
-                          final userText = text;
-                          // 1. Push user message
-                          _chatController.insertMessage(
-                            TextMessage(
-                              id: const Uuid().v4(),
-                              authorId: 'user',
-                              createdAt: DateTime.now().toUtc(),
-                              text: userText,
-                            ),
-                          );
-
-                          if (await _handleProducerCommand(userText)) {
-                            setState(() {});
-                            return;
-                          }
-
-                          Map<String, dynamic>? producerPreSnapshot;
-                          if (_producerDataMode) {
-                            producerPreSnapshot =
-                                await _buildProducerSnapshot();
-                          }
-
-                          // 2. Run pipeline
-                          await _ensureAiModelsLoaded();
-                          ChatPipelineResult reply =
-                              await _chatPipeline.handleUserText(
-                            text: userText,
-                            audioTracks: _audioTracks,
-                            bpmFallback: _tempo,
-                            rowGain: _rowGain,
-                            rowPan: _rowPan,
-                            rowAutomation: _rowVolumeAutomation,
-                            masterGain0to3: _masterGain,
-                            masterPan0to1: _masterPan,
-                            selectedClipIndices: _timelineSelectedClipIndices,
-                            primarySelectedClipIndex:
-                                _timelinePrimarySelectedClipIndex,
-                            selectedRowIndex: _selectedRow,
-                            // autoApplyProposals: true, // does not ask for approval, just execute
-                          );
-
-                          if (kAiDebugLogs) {
-                            aiDebugLog('audio-editor', reply.toString());
-                            if (reply.meta != null) {
-                              aiDebugLog(
-                                'audio-editor',
-                                'reply.meta=${aiDebugShortMap(reply.meta!)}',
-                              );
+                    child: Builder(
+                      builder: (context) {
+                        Widget chatBar = _ChatBar(
+                          expanded: _chatInputActive,
+                          hasText: _chatHasText,
+                          controller: _chatTextController,
+                          focusNode: _chatFocusNode,
+                          readOnly: _dawTutorialChatPromptLocked,
+                          tutorialHighlighter: _mixHighlighter,
+                          promptRateLimitStatus: _promptRateLimitStatus,
+                          promptRateLimitLoading: _promptRateLimitLoading,
+                          onShowPromptRateLimits: () {
+                            unawaited(_showPromptRateLimitDialog());
+                          },
+                          onTapBar: () {
+                            unawaited(
+                                _refreshPromptRateLimitStatus(silent: true));
+                            if (_sampleBrowserVisible) {
+                              unawaited(_stopSampleAudition());
                             }
-                          }
+                            if (!_chatExpanded) {
+                              setState(() {
+                                _showAddActionsPanel = false;
+                                _sampleBrowserVisible = false;
+                                _sampleBrowserExpanded = false;
+                                _sampleDragActive = false;
+                                _reopenSampleBrowserAfterDrag = false;
+                                _reopenSampleBrowserExpanded = false;
+                                _chatExpanded = true;
+                                _chatInputActive = false;
+                              });
+                              _handleDawOnboardingChatOpened();
+                              if (!_hasTrackedAiAssistantScreen) {
+                                _hasTrackedAiAssistantScreen = true;
+                                unawaited(
+                                  AnalyticsService.instance.trackScreen(
+                                    AnalyticsScreenNames.aiAssistant,
+                                    properties: <String, Object?>{
+                                      'project_id': _projectId,
+                                    },
+                                  ),
+                                );
+                                unawaited(
+                                  AnalyticsService.instance.track(
+                                    AnalyticsEvents.aiFeatureViewed(
+                                      featureName: 'assistant_chat',
+                                    ),
+                                  ),
+                                );
+                              }
+                              return;
+                            }
+                            if (!_chatInputActive) {
+                              setState(() {
+                                _showAddActionsPanel = false;
+                                _sampleBrowserVisible = false;
+                                _sampleBrowserExpanded = false;
+                                _sampleDragActive = false;
+                                _reopenSampleBrowserAfterDrag = false;
+                                _reopenSampleBrowserExpanded = false;
+                                _chatInputActive = true;
+                              });
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (!mounted) return;
+                                _chatFocusNode.requestFocus();
+                              });
+                              return;
+                            }
+                            if (!_chatFocusNode.hasFocus) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (!mounted) return;
+                                _chatFocusNode.requestFocus();
+                              });
+                            }
+                          },
+                          onSubmit: () async {
+                            final text = _chatTextController.text.trim();
+                            if (text.isEmpty) return;
+                            if (_promptRateLimitStatus?.canSubmit == false) {
+                              await _showPromptRateLimitDialog();
+                              return;
+                            }
 
-                          // await applyMixingResult(reply);
-                          if (reply.hasMix) {
-                            await applyMixingResult(reply.mixing!);
+                            _handleDawOnboardingChatPromptSubmitted();
+                            _chatTextController.clear();
+                            _chatFocusNode.unfocus();
 
-                            // IMPORTANT: teach the assistant what actually changed
-                            _chatPipeline.recordAppliedMix(reply.mixing!);
+                            final userText = text;
+                            _insertUserChatText(userText);
 
-                            if (_producerDataMode &&
-                                producerPreSnapshot != null) {
-                              final producerPostSnapshot =
+                            Map<String, dynamic>? producerPreSnapshot;
+                            if (_producerDataMode) {
+                              producerPreSnapshot =
                                   await _buildProducerSnapshot();
-                              await _producerCollector.recordAiStep(
-                                prompt: userText,
-                                preSnapshot: producerPreSnapshot,
-                                postSnapshot: producerPostSnapshot,
-                                resolvedActions: reply.mixing!.actions
-                                    .map((a) => a.toJson())
-                                    .toList(),
-                                llmPayload: reply.meta,
+                              if (_producerCollector.hasPendingPromptCycle) {
+                                await _finalizeProducerPromptCycle(
+                                  disposition: 'next_ai_step',
+                                  insertMessage: false,
+                                  finalSnapshot: producerPreSnapshot,
+                                );
+                              }
+                            }
+
+                            late final ChatPipelineResult reply;
+                            try {
+                              await _ensureAiModelsLoaded();
+                              reply = await _chatPipeline.handleUserText(
+                                text: userText,
+                                audioTracks: _audioTracks,
+                                bpmFallback: _tempo,
+                                rowGain: _rowGain,
+                                rowPan: _rowPan,
+                                rowAutomation: _rowVolumeAutomation,
+                                masterGain0to3: _masterGain,
+                                masterPan0to1: _masterPan,
+                                selectedClipIndices:
+                                    _timelineSelectedClipIndices,
+                                primarySelectedClipIndex:
+                                    _timelinePrimarySelectedClipIndex,
+                                selectedRowIndex: _selectedRow,
+                                automationClipSnapshot:
+                                    _aiAutomationClipSnapshot(),
+                                projectId: _projectId,
+                                aiFeature: 'ai_chat',
+                              );
+                            } catch (error, stackTrace) {
+                              _reportAiChatFailure(
+                                error,
+                                stackTrace,
+                                stage: 'chat_pipeline',
+                              );
+                              _insertAssistantChatText(
+                                  _kAiRequestFailureMessage);
+                              setState(() {});
+                              unawaited(_handleDawOnboardingChatReplyReady());
+                              return;
+                            }
+
+                            final toolName =
+                                reply.meta?['tool']?.toString().trim() ?? '';
+                            if (toolName.isNotEmpty) {
+                              unawaited(
+                                AnalyticsService.instance.track(
+                                  AnalyticsEvents.aiToolCalled(
+                                    toolName: toolName,
+                                    projectId: _projectId,
+                                  ),
+                                ),
                               );
                             }
-                          }
 
-                          if (reply.hasAssistantActions) {
-                            await _applyAssistantActions(
-                                reply.assistantActions);
-                          }
+                            if (kAiDebugLogs) {
+                              aiDebugLog('audio-editor', reply.toString());
+                              if (reply.meta != null) {
+                                aiDebugLog(
+                                  'audio-editor',
+                                  'reply.meta=${aiDebugShortMap(reply.meta!)}',
+                                );
+                              }
+                            }
 
-                          // 3. Push assistant reply
-                          _chatController.insertMessage(
-                            TextMessage(
-                              id: const Uuid().v4(),
-                              authorId: 'assistant',
-                              createdAt: DateTime.now().toUtc(),
-                              text: reply.message!,
-                            ),
+                            _updatePromptRateLimitStatusFromMeta(reply.meta);
+
+                            try {
+                              if (reply.hasMix) {
+                                final appliedCount = await applyMixingResult(
+                                  reply.mixing!,
+                                  emitActionSummaries: true,
+                                );
+                                if (appliedCount <= 0) {
+                                  _insertAssistantChatText(
+                                    _kAiApplyFailureMessage,
+                                  );
+                                  setState(() {});
+                                  unawaited(
+                                      _handleDawOnboardingChatReplyReady());
+                                  return;
+                                }
+
+                                _chatPipeline.recordAppliedMix(
+                                  reply.mixing!,
+                                  visibleAssistantText: reply.message,
+                                );
+
+                                if (_producerDataMode &&
+                                    producerPreSnapshot != null) {
+                                  final producerPostSnapshot =
+                                      await _buildProducerSnapshot();
+                                  await _producerCollector.recordAiStep(
+                                    prompt: userText,
+                                    preSnapshot: producerPreSnapshot,
+                                    postSnapshot: producerPostSnapshot,
+                                    resolvedActions: reply.mixing!.actions
+                                        .map((a) => a.toJson())
+                                        .toList(),
+                                    llmPayload: reply.meta,
+                                    projectId: _projectId,
+                                    projectName: _projectName,
+                                    projectDir: _projectDir,
+                                  );
+                                }
+                              }
+
+                              await _presentPipelineReply(reply);
+                            } catch (error, stackTrace) {
+                              _reportAiChatFailure(
+                                error,
+                                stackTrace,
+                                stage: 'chat_apply',
+                              );
+                              _insertAssistantChatText(
+                                reply.hasMix
+                                    ? _kAiApplyFailureMessage
+                                    : _kAiRequestFailureMessage,
+                              );
+                              setState(() {});
+                              unawaited(_handleDawOnboardingChatReplyReady());
+                              return;
+                            }
+
+                            if (!_chatExpanded) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(reply.message),
+                                  duration: const Duration(seconds: 4),
+                                ),
+                              );
+                            }
+
+                            setState(() {});
+                            unawaited(_handleDawOnboardingChatReplyReady());
+                          },
+                        );
+                        if (_showDawOnboarding) {
+                          chatBar = Halo(
+                            highlighter: _mixHighlighter,
+                            haloKey: const HaloKey('tutorial:chatbar'),
+                            borderRadius: BorderRadius.circular(18),
+                            child: chatBar,
                           );
-
-                          if (!_chatExpanded) {
-                            ScaffoldMessenger.of(
-                              context,
-                            ).showSnackBar(SnackBar(
-                                content: Text(reply.message),
-                                duration: const Duration(seconds: 4)));
-                          }
-
-                          setState(() {});
-                          //TODO: refetch effects and stuff like that
-
-                          // debugPrint('AI: $reply');
-                        },
-                      ),
+                        }
+                        return chatBar;
+                      },
                     ),
                   ),
                 ),
@@ -18734,61 +22805,66 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 if (!_chatInputActive)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(0, 10, 16, 10),
-                    child: ClipOval(
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                        child: AnimatedScale(
-                          duration: const Duration(milliseconds: 120),
-                          curve: Curves.easeOutCubic,
-                          scale: _addButtonPressed ? 0.94 : 1.0,
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 140),
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              color: _showAddActionsPanel
-                                  ? const Color(0x33558DFF)
-                                  : Colors.white
-                                      .withOpacity(_kChatChromeOpacity),
-                              shape: BoxShape.circle,
-                              border: Border.all(
+                    child: Halo(
+                      highlighter: _mixHighlighter,
+                      haloKey: const HaloKey('tutorial:add_button'),
+                      borderRadius: BorderRadius.circular(999),
+                      child: ClipOval(
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                          child: AnimatedScale(
+                            duration: const Duration(milliseconds: 120),
+                            curve: Curves.easeOutCubic,
+                            scale: _addButtonPressed ? 0.94 : 1.0,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 140),
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
                                 color: _showAddActionsPanel
-                                    ? const Color(0xAA8BB6FF)
-                                    : Colors.white.withOpacity(0.14),
+                                    ? const Color(0x33558DFF)
+                                    : Colors.white
+                                        .withOpacity(_kChatChromeOpacity),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: _showAddActionsPanel
+                                      ? const Color(0xAA8BB6FF)
+                                      : Colors.white.withOpacity(0.14),
+                                ),
+                                boxShadow: _showAddActionsPanel
+                                    ? [
+                                        BoxShadow(
+                                          color: const Color(0x662E6EEB)
+                                              .withOpacity(0.45),
+                                          blurRadius: 14,
+                                          spreadRadius: 1.5,
+                                        ),
+                                      ]
+                                    : const [],
                               ),
-                              boxShadow: _showAddActionsPanel
-                                  ? [
-                                      BoxShadow(
-                                        color: const Color(0x662E6EEB)
-                                            .withOpacity(0.45),
-                                        blurRadius: 14,
-                                        spreadRadius: 1.5,
-                                      ),
-                                    ]
-                                  : const [],
-                            ),
-                            child: InkWell(
-                              customBorder: const CircleBorder(),
-                              onHighlightChanged: (pressed) {
-                                if (!mounted) return;
-                                setState(() {
-                                  _addButtonPressed = pressed;
-                                });
-                              },
-                              onTap: () {
-                                if (_sampleBrowserVisible) {
-                                  _closeAddActionsPanel();
-                                  unawaited(_closeSampleBrowser());
-                                  return;
-                                }
-                                if (_showAddActionsPanel) {
-                                  _closeAddActionsPanel();
-                                } else {
-                                  _openAddActionsPanel();
-                                }
-                              },
-                              child: const Icon(Icons.add,
-                                  color: Colors.white, size: 26),
+                              child: InkWell(
+                                customBorder: const CircleBorder(),
+                                onHighlightChanged: (pressed) {
+                                  if (!mounted) return;
+                                  setState(() {
+                                    _addButtonPressed = pressed;
+                                  });
+                                },
+                                onTap: () {
+                                  if (_sampleBrowserVisible) {
+                                    _closeAddActionsPanel();
+                                    unawaited(_closeSampleBrowser());
+                                    return;
+                                  }
+                                  if (_showAddActionsPanel) {
+                                    _closeAddActionsPanel();
+                                  } else {
+                                    _openAddActionsPanel(userInitiated: true);
+                                  }
+                                },
+                                child: const Icon(Icons.add,
+                                    color: Colors.white, size: 26),
+                              ),
                             ),
                           ),
                         ),
@@ -19113,154 +23189,133 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           // --- Blue glossy pill with logo only ---
                                           // --- Blue glossy pill with logo only ---
                                           // Wrap with Material + InkWell for proper tap + ripple on rounded pill
-                                          Material(
-                                            color: Colors.transparent,
-                                            child: InkWell(
-                                              borderRadius:
-                                                  BorderRadius.circular(
-                                                      pillHeight / 2),
-                                              onTap: () async {
-                                                // optional: haptic
-                                                // HapticFeedback.lightImpact();
-                                                final run =
-                                                    await showDialog<bool>(
-                                                  context: context,
-                                                  builder: (_) => AlertDialog(
-                                                    title: const Text(
-                                                        'One-Button Mix'),
-                                                    content: const Text(
-                                                      'This will:\n'
-                                                      '• Balance levels\n'
-                                                      '• Reduce masking\n'
-                                                      '• Improve clarity\n\n'
-                                                      'You can undo everything.',
+                                          Halo(
+                                            highlighter: _mixHighlighter,
+                                            haloKey: const HaloKey(
+                                                'tutorial:one_button_mix'),
+                                            borderRadius: BorderRadius.circular(
+                                                pillHeight / 2),
+                                            child: Material(
+                                              color: Colors.transparent,
+                                              child: InkWell(
+                                                borderRadius:
+                                                    BorderRadius.circular(
+                                                        pillHeight / 2),
+                                                onTap: () async {
+                                                  final run =
+                                                      await _confirmOneButtonMix();
+                                                  if (!run) return;
+
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(const SnackBar(
+                                                      content:
+                                                          Text('Mixing…')));
+
+                                                  await runOneButtonMix();
+
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text(
+                                                          'One-Button Mix executed. Open chat for details.'),
+                                                      duration:
+                                                          Duration(seconds: 3),
                                                     ),
-                                                    actions: [
-                                                      TextButton(
-                                                        onPressed: () =>
-                                                            Navigator.pop(
-                                                                context, false),
-                                                        child: const Text(
-                                                            'Cancel'),
+                                                  );
+                                                },
+                                                child: SizedBox(
+                                                  height: pillHeight,
+                                                  width: double.infinity,
+                                                  child: Ink(
+                                                    // height: pillHeight,
+                                                    // width: pillHeight * 1.7,
+                                                    decoration: BoxDecoration(
+                                                      gradient:
+                                                          const LinearGradient(
+                                                        begin:
+                                                            Alignment.topLeft,
+                                                        end: Alignment
+                                                            .bottomRight,
+                                                        colors: [
+                                                          Color(0xFF5C7AFF),
+                                                          Color(0xFF3050FF)
+                                                        ],
                                                       ),
-                                                      ElevatedButton(
-                                                        onPressed: () =>
-                                                            Navigator.pop(
-                                                                context, true),
-                                                        child:
-                                                            const Text('Run'),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                );
-
-                                                if (run != true) return;
-
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(const SnackBar(
-                                                    content: Text('Mixing…')));
-
-                                                await runOneButtonMix();
-
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                        'One-Button Mix executed. Open chat for details.'),
-                                                    duration:
-                                                        Duration(seconds: 3),
-                                                  ),
-                                                );
-                                              },
-                                              child: SizedBox(
-                                                height: pillHeight,
-                                                width: double.infinity,
-                                                child: Ink(
-                                                  // height: pillHeight,
-                                                  // width: pillHeight * 1.7,
-                                                  decoration: BoxDecoration(
-                                                    gradient:
-                                                        const LinearGradient(
-                                                      begin: Alignment.topLeft,
-                                                      end:
-                                                          Alignment.bottomRight,
-                                                      colors: [
-                                                        Color(0xFF5C7AFF),
-                                                        Color(0xFF3050FF)
-                                                      ],
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              pillHeight / 2),
+                                                      border: Border.all(
+                                                          color: Colors.white
+                                                              .withOpacity(
+                                                                  0.18)),
+                                                      // boxShadow: [
+                                                      //   BoxShadow(
+                                                      //     color: const Color(0xFF4A6BFF).withOpacity(0.55),
+                                                      //     blurRadius: 20,
+                                                      //     offset: const Offset(0, 6),
+                                                      //   ),
+                                                      //   const BoxShadow(
+                                                      //     color: Color(0x22FFFFFF),
+                                                      //     blurRadius: 0,
+                                                      //     spreadRadius: 1,
+                                                      //     offset: Offset(0, -1),
+                                                      //   ),
+                                                      // ],
                                                     ),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            pillHeight / 2),
-                                                    border: Border.all(
-                                                        color: Colors.white
-                                                            .withOpacity(0.18)),
-                                                    // boxShadow: [
-                                                    //   BoxShadow(
-                                                    //     color: const Color(0xFF4A6BFF).withOpacity(0.55),
-                                                    //     blurRadius: 20,
-                                                    //     offset: const Offset(0, 6),
-                                                    //   ),
-                                                    //   const BoxShadow(
-                                                    //     color: Color(0x22FFFFFF),
-                                                    //     blurRadius: 0,
-                                                    //     spreadRadius: 1,
-                                                    //     offset: Offset(0, -1),
-                                                    //   ),
-                                                    // ],
-                                                  ),
-                                                  child: Stack(
-                                                    children: [
-                                                      Positioned.fill(
-                                                        child: DecoratedBox(
-                                                          decoration:
-                                                              BoxDecoration(
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        pillHeight /
-                                                                            2),
-                                                            gradient:
-                                                                LinearGradient(
-                                                              begin: Alignment
-                                                                  .topCenter,
-                                                              end: Alignment
-                                                                  .bottomCenter,
-                                                              colors: [
-                                                                Colors.white
-                                                                    .withOpacity(
-                                                                        0.18),
-                                                                Colors
-                                                                    .transparent,
-                                                                Colors
-                                                                    .transparent,
-                                                                Colors.white
-                                                                    .withOpacity(
-                                                                        0.12),
-                                                              ],
-                                                              stops: const [
-                                                                0.0,
-                                                                0.35,
-                                                                0.65,
-                                                                1.0
-                                                              ],
+                                                    child: Stack(
+                                                      children: [
+                                                        Positioned.fill(
+                                                          child: DecoratedBox(
+                                                            decoration:
+                                                                BoxDecoration(
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                          pillHeight /
+                                                                              2),
+                                                              gradient:
+                                                                  LinearGradient(
+                                                                begin: Alignment
+                                                                    .topCenter,
+                                                                end: Alignment
+                                                                    .bottomCenter,
+                                                                colors: [
+                                                                  Colors.white
+                                                                      .withOpacity(
+                                                                          0.18),
+                                                                  Colors
+                                                                      .transparent,
+                                                                  Colors
+                                                                      .transparent,
+                                                                  Colors.white
+                                                                      .withOpacity(
+                                                                          0.12),
+                                                                ],
+                                                                stops: const [
+                                                                  0.0,
+                                                                  0.35,
+                                                                  0.65,
+                                                                  1.0
+                                                                ],
+                                                              ),
                                                             ),
                                                           ),
                                                         ),
-                                                      ),
-                                                      Center(
-                                                        child: Image.asset(
-                                                          // 'assets/mixroom_logo_202.png',
-                                                          'assets/fading_w_logo_crop.png',
-                                                          // width: logoSize,
-                                                          height:
-                                                              pillHeight * 0.6,
-                                                          color: Colors.white,
-                                                          fit: BoxFit.fitWidth,
+                                                        Center(
+                                                          child: Image.asset(
+                                                            // 'assets/mixroom_logo_202.png',
+                                                            'assets/fading_w_logo_crop.png',
+                                                            // width: logoSize,
+                                                            height: pillHeight *
+                                                                0.6,
+                                                            color: Colors.white,
+                                                            fit:
+                                                                BoxFit.fitWidth,
+                                                          ),
                                                         ),
-                                                      ),
-                                                    ],
+                                                      ],
+                                                    ),
                                                   ),
                                                 ),
                                               ),
@@ -20025,10 +24080,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (validDescending.isEmpty) return;
 
     final actions = <EditorUndoAction>[];
+    final deletedClips = <AudioTrack>[];
     bool deletedActiveMidi = false;
     for (final index in validDescending) {
       if (index < 0 || index >= _audioTracks.length) continue;
       final clip = _audioTracks[index];
+      deletedClips.add(clip);
       if (_activeMidiClipEngineId != null &&
           clip.engineClipId == _activeMidiClipEngineId) {
         deletedActiveMidi = true;
@@ -20171,10 +24228,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _showPianoRoll = true;
     });
     if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-      unawaited(() async {
-        await JuceAudioEngine.setLiveMidiInputTargetClip(clip.engineClipId);
-        await JuceAudioEngine.consumeLiveMidiInputEvents();
-      }());
+      unawaited(_syncLiveMidiInputTargetClip());
     }
   }
 
@@ -20185,10 +24239,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _activeMidiClipEngineId = null;
     });
     if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
-      unawaited(() async {
-        await JuceAudioEngine.setLiveMidiInputTargetClip(-1);
-        await JuceAudioEngine.consumeLiveMidiInputEvents();
-      }());
+      unawaited(_syncLiveMidiInputTargetClip());
     }
   }
 
@@ -20795,1369 +24846,1572 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (context, localeProvider, child) {
         final editorLayoutSpec =
             _EditorLayoutSpec.fromSize(MediaQuery.of(context).size);
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            // Main app UI (Scaffold)
-            Scaffold(
-              extendBody: false,
-              resizeToAvoidBottomInset: false,
-              body: SafeArea(
-                bottom: false,
-                child: StatefulBuilder(
-                  builder: (BuildContext context, StateSetter setLocalState) {
-                    _audioEditorStateSetter = setLocalState;
-                    return Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Column(
+        return WillPopScope(
+          onWillPop: () async {
+            await _handleBackPressed();
+            return false;
+          },
+          child: RepaintBoundary(
+            key: _feedbackScreenshotBoundaryKey,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Main app UI (Scaffold)
+                Scaffold(
+                  key: _editorScaffoldKey,
+                  extendBody: false,
+                  resizeToAvoidBottomInset: false,
+                  body: SafeArea(
+                    bottom: false,
+                    child: StatefulBuilder(
+                      builder:
+                          (BuildContext context, StateSetter setLocalState) {
+                        _audioEditorStateSetter = setLocalState;
+                        return Stack(
+                          clipBehavior: Clip.none,
                           children: [
-                            // TOP ROW OF BUTTONS
-                            Padding(
-                                padding: EdgeInsets.only(
-                                    bottom: editorLayoutSpec.topBarBottomGap),
-                                child: ValueListenableBuilder<Duration>(
-                                  valueListenable: _transportClock,
-                                  builder: (_, clock, __) =>
-                                      _buildTopBar(clock, editorLayoutSpec),
-                                )),
-
-                            Flexible(
-                              fit: FlexFit.loose,
-                              child: ValueListenableBuilder<Duration>(
-                                valueListenable: _transportClock,
-                                builder: (_, clock, __) => Halo(
-                                  highlighter: _mixHighlighter,
-                                  haloKey: const HaloKey('tutorial:timeline'),
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: AudioCanvasTimeline(
-                                    rows: _rows,
-                                    clips: _audioTracks, // your list
-                                    rowGain: _rowGain,
-                                    rowPan: _rowPan,
-                                    rowVolumeAutomation: _rowVolumeAutomation,
-                                    getAutomationTargetsForRow:
-                                        _automationTargetsForRowUi,
-                                    getSelectedAutomationTargetId:
-                                        _selectedAutomationTargetIdForRow,
-                                    setSelectedAutomationTargetId:
-                                        (row, targetId) {
-                                      _setSelectedAutomationTargetIdForRow(
-                                        row,
-                                        targetId,
-                                      );
-                                      unawaited(
-                                          _syncAutomationTargetToCurrentTime(
-                                        row,
-                                        targetId,
-                                      ));
-                                    },
-                                    getAutomationPointsForTarget:
-                                        (row, targetId) =>
-                                            _pointsForAutomationTarget(
-                                      row,
-                                      targetId,
-                                    )
-                                                .map((p) => p.copy())
-                                                .toList(growable: false),
-                                    setAutomationPointsForTarget:
-                                        (row, targetId, points) {
-                                      if (row < 0 || row >= _rowCount) return;
-                                      final safePoints =
-                                          _sanitizeAutomationPointsForTarget(
-                                        row,
-                                        targetId,
-                                        points,
-                                      );
-                                      if (targetId == 'volume') {
-                                        setState(() {
-                                          _rowVolumeAutomation[row] = safePoints
-                                              .map((p) => p.copy())
-                                              .toList(growable: false);
-                                        });
-                                        unawaited(
-                                            _syncNativeAutomationForRow(row));
-                                        return;
-                                      }
-                                      setState(() {
-                                        final rowMap =
-                                            _rowPluginAutomation.putIfAbsent(
-                                          row,
-                                          () =>
-                                              <String, List<AutomationPoint>>{},
-                                        );
-                                        rowMap[targetId] = safePoints
-                                            .map((p) => p.copy())
-                                            .toList(growable: false);
-                                      });
-                                      unawaited(
-                                          _syncNativePluginAutomationForRow(
-                                              row));
-                                    },
-                                    getAutomationClipsForTarget:
-                                        (row, targetId) =>
-                                            _copyAutomationClipList(
-                                      _clipsForAutomationTarget(row, targetId),
-                                    ),
-                                    setAutomationClipsForTarget:
-                                        (row, targetId, clips) {
-                                      if (row < 0 || row >= _rowCount) return;
-                                      final safeClips =
-                                          _sanitizeAutomationClipsForTarget(
-                                        row,
-                                        targetId,
-                                        clips,
-                                      );
-                                      setState(() {
-                                        final rowMap =
-                                            _rowAutomationClips.putIfAbsent(
-                                          row,
-                                          () => <String,
-                                              List<AutomationClipSnapshot>>{},
-                                        );
-                                        rowMap[targetId] =
-                                            _copyAutomationClipList(safeClips);
-                                      });
-                                      unawaited(_syncNativeAutomationForRow(
-                                        row,
-                                      ));
-                                    },
-                                    onAutomationClipsCommit:
-                                        (row, targetId, oldClips, newClips) {
-                                      unawaited(
-                                          _setAutomationClipsForTargetWithUndo(
-                                        row,
-                                        targetId,
-                                        newClips,
-                                        oldClipsOverride: oldClips,
-                                      ));
-                                      _recordProducerManualEdit(
-                                          'row_automation_clips', {
-                                        'row': row,
-                                        'target_id': targetId,
-                                        'old_count': oldClips.length,
-                                        'new_count': newClips.length,
-                                      });
-                                    },
-                                    onAutomationTargetCommit:
-                                        (row, targetId, oldPoints, newPoints) {
-                                      unawaited(
-                                          _setAutomationTargetPointsWithUndo(
-                                        row,
-                                        targetId,
-                                        newPoints,
-                                        oldPointsOverride: oldPoints,
-                                      ));
-                                      _recordProducerManualEdit(
-                                          'row_automation_target', {
-                                        'row': row,
-                                        'target_id': targetId,
-                                        'old_count': oldPoints.length,
-                                        'new_count': newPoints.length,
-                                      });
-                                    },
-                                    // extractors
-                                    getStartMs: (t) =>
-                                        t.offset *
-                                        1000.0, // adjust to your model
-                                    getDurationMs: (t) =>
-                                        _clipTimelineDurationMs(t),
-                                    getTimelineDurationMs: (t) =>
-                                        _clipTimelineDurationMs(t),
-                                    getTrimStartMs: (t) =>
-                                        t.trimStart.inMilliseconds.toDouble(),
-                                    getTrimEndMs: (t) =>
-                                        t.trimEnd.inMilliseconds.toDouble(),
-                                    // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
-                                    getPeaks: (c) {
-                                      return c.normWaveformData;
-                                    },
-                                    getY: (c) =>
-                                        c.y, // store a visual Y in your model
-                                    // commit (persist in your model, then setState)
-                                    onMoveClipCommit:
-                                        (i, newStartMs, newRowIndex) async {
-                                      if (newRowIndex < 0 ||
-                                          newRowIndex >= _rowCount) return;
-                                      final clip = _audioTracks[i];
-                                      // clip.offset = newStartMs / 1000.0;
-                                      // clip.rowIndex = newRowIndex; // <-- move across rows
-                                      // setState(() {});
-                                      // JuceAudioEngine.moveClipToRow(i, newRowIndex);
-                                      // _updateOverallDurationIfNeeded();
-                                      await _undoManager.execute(
-                                        MoveClipAction(
-                                          tracks: _audioTracks,
-                                          // clip: clip,
-                                          originalIndex: i,
-                                          oldOffset: clip.offset,
-                                          oldRow: clip.rowIndex,
-                                          newOffset: newStartMs / 1000.0,
-                                          newRow: newRowIndex,
-                                          onChange: () {
-                                            clip.rowId =
-                                                _rowIdAt(clip.rowIndex);
-                                            _syncClipTimingToEngine(i);
-                                            _updateOverallDurationIfNeeded();
-                                          },
-                                        ),
-                                      );
-                                      setState(() {});
-                                    },
-                                    onTrimClip: (i, s, e,
-                                        {double? newStartMs}) async {
-                                      final clip = _audioTracks[i];
-
-                                      // 1. Update the internal trim values (where in the source file we start/end)
-                                      clip.trimStart =
-                                          Duration(milliseconds: s.round());
-                                      clip.trimEnd =
-                                          Duration(milliseconds: e.round());
-
-                                      // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
-                                      // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
-                                      if (newStartMs != null) {
-                                        // newStartMs is the intended start time in milliseconds.
-                                        // Convert to seconds (assuming clip.offset is in seconds).
-                                        clip.offset = newStartMs / 1000.0;
-                                      }
-                                      // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
-                                      // await _undoManager.execute(
-                                      //   TrimClipAction(
-                                      //     clip: clip,
-                                      //     oldTrimStart: clip.trimStart,
-                                      //     oldTrimEnd: clip.trimEnd,
-                                      //     oldOffset: clip.offset,
-                                      //     newTrimStart: Duration(milliseconds: s.round()),
-                                      //     newTrimEnd: Duration(milliseconds: e.round()),
-                                      //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
-                                      //     onChange: _updateOverallDurationIfNeeded,
-                                      //   ),
-                                      // );
-                                      setState(() {});
-                                      _updateOverallDurationIfNeeded();
-                                      // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
-                                    },
-
-                                    // for the undo history
-                                    onTrimClipCommit: (i, s, e, os, oe, oo,
-                                        {double? newStartMs}) async {
-                                      // final clip = _audioTracks[i];
-                                      await _undoManager.execute(
-                                        TrimClipAction(
-                                          // clip: clip,
-                                          tracks: _audioTracks,
-                                          originalIndex: i,
-                                          oldTrimStart: Duration(
-                                              milliseconds: os.round()),
-                                          oldTrimEnd: Duration(
-                                              milliseconds: oe.round()),
-                                          oldOffset: oo / 1000.0,
-                                          newTrimStart:
-                                              Duration(milliseconds: s.round()),
-                                          newTrimEnd:
-                                              Duration(milliseconds: e.round()),
-                                          newOffset: newStartMs != null
-                                              ? newStartMs / 1000.0
-                                              : null,
-                                          onChange: () {
-                                            _syncClipTimingToEngine(i);
-                                            _updateOverallDurationIfNeeded();
-                                          },
-                                        ),
-                                      );
-                                    },
-
-                                    // selection + headers
-                                    // numRows: kNumRows,
-                                    // selectedRowIndex: _selectedRow,
-                                    onSelectRow: (row) =>
-                                        setState(() => _selectedRow = row),
-                                    // rowMuted: _rowMuted,
-                                    // rowExpanded: _rowExpanded,
-                                    recordingInProgress: _isRecording,
-                                    onToggleExpanded: (row) => setState(() =>
-                                        _rowExpanded[row] = !_rowExpanded[row]),
-                                    onAddRow: _addRow,
-                                    onInsertRowAbove: _insertRowAbove,
-                                    onInsertRowBelow: _insertRowBelow,
-                                    onDeleteRow: _deleteRow,
-                                    onMoveRow: _moveRow,
-                                    onRenameRow: _renameRow,
-                                    onSetRowIcon: _setRowIcon,
-
-                                    // transport
-                                    playheadMs: clock.inMilliseconds
-                                        .toDouble(), // your existing clock
-                                    // isPlaying: _isPlaying,
-                                    onScrubRequested: (ms) {
-                                      if (_isRecording) {
-                                        return; // do nothing while recording (hopefully no bug where you can still physically scrub but does nothing here)
-                                      }
-
-                                      final newPosition =
-                                          Duration(milliseconds: ms.toInt());
-                                      _syncTransportClock(
-                                        newPosition,
-                                        playing: _isPlaying,
-                                      );
-                                      // for (int i = 0; i < _audioTracks.length; i++) {
-                                      //   final track = _audioTracks[i];
-                                      //   final effectivePos = _calculateEffectiveAudioPositionForTrack(track, newPosition);
-                                      //   JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
-                                      //   setState(() {
-                                      //     track.currentPosition = effectivePos;
-                                      //   });
-                                      // }
-                                      JuceAudioEngine.setAutomationTransport(
-                                          ms / 1000.0);
-                                      JuceAudioEngine.setMetronomeTransportMs(
-                                          ms);
-                                    },
-                                    maxDuration: _audioOnlyOverallDuration,
-                                    getFullDurationMs: (t) =>
-                                        _clipFullDurationMsForTrim(t),
-                                    isPlaying: _isPlaying,
-
-                                    // ruler/grid
-                                    bpm: _tempo,
-                                    beatsPerBar: 4,
-
-                                    // layout
-                                    // numRows: kNumRows,
-                                    height:
-                                        520, // THIS VALUE is effectively unused, the height is just natural now
-                                    // ============================
-                                    // NEW: Row FX callbacks
-                                    // ============================
-                                    getRowEffects: (row) =>
-                                        JuceAudioEngine.getTrackEffectsForRow(
-                                            row),
-                                    getRowEffectIds: (row) =>
-                                        JuceAudioEngine.getTrackEffectIdsForRow(
-                                            row),
-
-                                    getRowEffectBypassState: (row,
-                                            effectIndex) =>
-                                        JuceAudioEngine.getRowEffectBypassState(
-                                            row, effectIndex),
-
-                                    insertRowEffect: (row, pathOrName) async {
-                                      final before = await JuceAudioEngine
-                                          .getTrackEffectsForRow(row);
-                                      await _undoManager.execute(
-                                        InsertEffectAction(
-                                          row: row,
-                                          pathOrName: pathOrName,
-                                          onChange: () {
-                                            setState(() {});
-                                            _refreshRowFx(row);
-                                          },
-                                        ),
-                                      );
-                                      final after = await JuceAudioEngine
-                                          .getTrackEffectsForRow(row);
-                                      if (after.length <= before.length) {
-                                        _showSmallNotice(
-                                            'Could not load this effect plugin.');
-                                        return;
-                                      }
-                                      _recordProducerManualEdit('row_fx_insert',
-                                          {'row': row, 'effect': pathOrName});
-                                      await _refreshAutomationTargetsForRow(
-                                        row,
-                                      );
-                                    }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
-                                    // need name of effects so undo action can add it back later
-                                    removeRowEffect: (row, effectIndex, name,
-                                        applyingPreset) async {
-                                      if (applyingPreset) {
-                                        await JuceAudioEngine.removeTrackEffect(
-                                            row, effectIndex);
-                                        return;
-                                      }
-                                      await _undoManager.execute(
-                                        RemoveEffectAction(
-                                          row: row,
-                                          effectIndex: effectIndex,
-                                          pathOrName: name,
-                                          onChange: () {
-                                            setState(() {});
-                                            _refreshRowFx(row);
-                                          },
-                                        ),
-                                      );
-                                      _recordProducerManualEdit(
-                                          'row_fx_remove', {
-                                        'row': row,
-                                        'index': effectIndex,
-                                        'effect': name,
-                                      });
-                                      await _refreshAutomationTargetsForRow(
-                                        row,
-                                      );
-                                    }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
-
-                                    reorderRowEffects: (row, from, to) async {
-                                      await _undoManager.execute(
-                                        ReorderEffectAction(
-                                          row: row,
-                                          from: from,
-                                          to: to,
-                                          onChange: () {
-                                            setState(() {});
-                                            _refreshRowFx(row);
-                                          },
-                                        ),
-                                      );
-                                      _recordProducerManualEdit(
-                                          'row_fx_reorder',
-                                          {'row': row, 'from': from, 'to': to});
-                                      await _refreshAutomationTargetsForRow(
-                                        row,
-                                      );
-                                    }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
-
-                                    setRowEffectBypassed:
-                                        (row, effectIndex, bypass) async {
-                                      await _undoManager.execute(
-                                        BypassEffectAction(
-                                          row: row,
-                                          effectIndex: effectIndex,
-                                          oldState: !bypass,
-                                          newState: bypass,
-                                          onChange: () {
-                                            setState(() {});
-                                            _refreshRowFx(row);
-                                          },
-                                        ),
-                                      );
-                                      _recordProducerManualEdit(
-                                          'row_fx_bypass', {
-                                        'row': row,
-                                        'index': effectIndex,
-                                        'bypassed': bypass,
-                                      });
-                                    }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
-
-                                    getRowPluginParameters:
-                                        (row, effectIndex) => JuceAudioEngine
-                                            .getTrackPluginParameters(
-                                                row, effectIndex),
-
-                                    setRowEffectParam: (row, effectIndex,
-                                            paramId, value) =>
-                                        JuceAudioEngine.setTrackEffect(
-                                            row, effectIndex, paramId, value),
-
-                                    // for commiting to undo history
-                                    onPluginParamCommit: (row, idx, paramId,
-                                        oldValue, newValue) async {
-                                      await _undoManager.execute(
-                                        SetEffectParamAction(
-                                          row: row,
-                                          effectIndex: idx,
-                                          paramId: paramId,
-                                          oldValue: oldValue,
-                                          newValue: newValue,
-                                          onChange: () {
-                                            setState(() {});
-                                            _refreshRowFx(row);
-                                          },
-                                        ),
-                                      );
-                                      _recordProducerManualEdit(
-                                          'row_fx_param', {
-                                        'row': row,
-                                        'index': idx,
-                                        'param_id': paramId,
-                                        'old_value': oldValue,
-                                        'new_value': newValue,
-                                      });
-                                    },
-
-                                    onPresetCommit: (before, after) async {
-                                      await _undoManager.execute(
-                                        TrackPresetChangeAction(
-                                          before: before,
-                                          after: after,
-                                          onChange: () => setState(() {}),
-                                        ),
-                                      );
-                                      _recordProducerManualEdit(
-                                          'row_preset_commit', {
-                                        'row': before.row,
-                                        'before_count': before.effects.length,
-                                        'after_count': after.effects.length,
-                                      });
-                                      await _refreshAutomationTargetsForRow(
-                                        before.row,
-                                      );
-                                    },
-
-                                    scanPlugins: () =>
-                                        JuceAudioEngine.scanPlugins(),
-
-                                    setTrackAutomationPoints: (row, points) =>
-                                        _syncNativeAutomationForRow(row),
-
-                                    onAutomationCommit:
-                                        (row, oldPoints, newPoints) {
-                                      _undoManager.execute(
-                                        SetAutomationPointsAction(
-                                          row: row,
-                                          oldPoints: oldPoints,
-                                          newPoints: newPoints,
-                                          applyToState: (r, points) {
-                                            setState(() {
-                                              _rowVolumeAutomation[r] = points
-                                                  .map((p) => AutomationPoint(
-                                                      x: p.x, volume: p.volume))
-                                                  .toList();
-                                            });
-                                          },
-                                          onApplied: (r, _) async {
-                                            await _syncNativeAutomationForRow(
-                                                r);
-                                          },
-                                        ),
-                                      );
-                                      _recordProducerManualEdit(
-                                          'row_automation', {
-                                        'row': row,
-                                        'old_count': oldPoints.length,
-                                        'new_count': newPoints.length,
-                                      });
-                                    },
-
-                                    setRowGain: (row, gain0to3) =>
-                                        JuceAudioEngine.setRowGain(
-                                            row, gain0to3),
-                                    onRowGainCommit: (row, oldGain, newGain) {
-                                      _undoManager.execute(
-                                        SetRowGainAction(
-                                          row: row,
-                                          oldGain: oldGain,
-                                          newGain: newGain,
-                                          applyToState: (r, g) {
-                                            setState(() {
-                                              _rowGain[r] = g;
-                                            });
-                                          },
-                                        ),
-                                      );
-                                      _recordProducerManualEdit('row_gain', {
-                                        'row': row,
-                                        'old_gain': oldGain,
-                                        'new_gain': newGain,
-                                      });
-                                    },
-
-                                    muteRow: (row, mute) async {
-                                      // await JuceAudioEngine.muteRow(row, mute);
-                                      setState(() => _rowMuted[row] = mute);
-                                      await _recomputeAudibleState(); // this handles all mute/solo logic
-
-                                      // mute not counted in the undo history
-                                      // await _undoManager.execute(
-                                      //   MuteRowAction(row, !mute, mute, () => setState(() => _rowMuted[row] = mute)),
-                                      // );
-                                    },
-
-                                    // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
-                                    rowMuted: _rowMuted,
-
-                                    soloRow: (row, solo) async {
-                                      // await JuceAudioEngine.muteRow(row, mute);
-                                      setState(() => _rowSoloed[row] = solo);
-                                      await _recomputeAudibleState(); // this handles all mute/solo logic
-                                    },
-
-                                    // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
-                                    rowSoloed: _rowSoloed,
-
-                                    setRowPan: (row, newPan) =>
-                                        JuceAudioEngine.setRowPan(row, newPan),
-                                    onRowPanCommit: (row, oldPan, newPan) {
-                                      _undoManager.execute(
-                                        SetRowPanAction(
-                                          row: row,
-                                          oldPan: oldPan,
-                                          newPan: newPan,
-                                          applyToState: (r, p) {
-                                            setState(() {
-                                              _rowPan[r] = p;
-                                            });
-                                          },
-                                        ),
-                                      );
-                                      _recordProducerManualEdit('row_pan', {
-                                        'row': row,
-                                        'old_pan': oldPan,
-                                        'new_pan': newPan,
-                                      });
-                                    },
-
-                                    setClipGain: _setClipGainLive,
-                                    onClipGainCommit:
-                                        (clipIndex, oldGain, newGain) {
-                                      _undoManager.execute(
-                                        SetClipGainAction(
-                                          tracks: _audioTracks,
-                                          originalIndex: clipIndex,
-                                          oldGain: oldGain,
-                                          newGain: newGain,
-                                          applyToState: (clip, gain) {
-                                            clip.gain = gain;
-                                            setState(() {});
-                                          },
-                                        ),
-                                      );
-                                      _recordProducerManualEdit('clip_gain', {
-                                        'clip': clipIndex,
-                                        'old_gain': oldGain,
-                                        'new_gain': newGain,
-                                      });
-                                    },
-                                    setClipPitch: _setClipPitchLive,
-                                    onClipPitchCommit:
-                                        (clipIndex, oldPitch, newPitch) {
-                                      _undoManager.execute(
-                                        SetClipPitchAction(
-                                          tracks: _audioTracks,
-                                          originalIndex: clipIndex,
-                                          oldPitch: oldPitch,
-                                          newPitch: newPitch,
-                                          applyToState: (clip, pitch) {
-                                            clip.pitchSemitones = pitch;
-                                            setState(() {});
-                                          },
-                                        ),
-                                      );
-                                      _recordProducerManualEdit('clip_pitch', {
-                                        'clip': clipIndex,
-                                        'old_pitch': oldPitch,
-                                        'new_pitch': newPitch,
-                                      });
-                                    },
-                                    onAdjustClipToTempo:
-                                        _handleAdjustClipToTempo,
-                                    onStretchClipToTempoPreservePitch:
-                                        _handleStretchClipToTempoPreservePitch,
-                                    onDisableClipTempoFollow:
-                                        _handleDisableClipTempoFollow,
-                                    onDetectClipTempoAndSetProjectTempo:
-                                        _handleDetectClipTempoAndSetProjectTempo,
-                                    onStretchClip: _handleStretchClipResize,
-                                    onStretchClipCommit:
-                                        _handleStretchClipResizeCommit,
-                                    onRenameClip: (clipIndex, newLabel) async {
-                                      if (clipIndex < 0 ||
-                                          clipIndex >= _audioTracks.length) {
-                                        return;
-                                      }
-                                      final oldLabel =
-                                          _audioTracks[clipIndex].label;
-                                      final nextLabel = newLabel.trim();
-                                      if (nextLabel.isEmpty ||
-                                          oldLabel == nextLabel) {
-                                        return;
-                                      }
-
-                                      await _undoManager.execute(
-                                        SetClipLabelAction(
-                                          tracks: _audioTracks,
-                                          originalIndex: clipIndex,
-                                          oldLabel: oldLabel,
-                                          newLabel: nextLabel,
-                                          applyToState: (clip, label) {
-                                            clip.label = label;
-                                            setState(() {});
-                                          },
-                                        ),
-                                      );
-
-                                      _recordProducerManualEdit('clip_rename', {
-                                        'clip': clipIndex,
-                                        'old_label': oldLabel,
-                                        'new_label': nextLabel,
-                                      });
-                                    },
-
-                                    onCopyClip: _handleCopyClip,
-                                    onDeleteClip: _handleDeleteClip,
-                                    onCopyClips: _handleCopyClips,
-                                    onDeleteClips: _handleDeleteClips,
-                                    onCutClipAt: _handleCutClipAt,
-                                    hasCopiedClip: _copiedClip != null ||
-                                        (_copiedClipGroup?.isNotEmpty ?? false),
-                                    onPasteClipAt: _handlePasteClipAt,
-                                    onClearCopiedClip: _clearCopiedClip,
-                                    onOpenMidiClip: _openMidiClipEditor,
-                                    onStemSeparation:
-                                        _handleStemSeparationForClip,
-                                    onSelectionChanged: (selectedClipIndices,
-                                        primaryClipIndex) {
-                                      _timelineSelectedClipIndices =
-                                          List<int>.from(selectedClipIndices);
-                                      _timelinePrimarySelectedClipIndex =
-                                          primaryClipIndex;
-                                    },
-                                    onSnapSettingsChanged: (magnetEnabled,
-                                        quantizeDivisionsPerBar) {
-                                      if (_timelineMagnetEnabled ==
-                                              magnetEnabled &&
-                                          _timelineQuantizeDivisionsPerBar ==
-                                              quantizeDivisionsPerBar) {
-                                        return;
-                                      }
-                                      setState(() {
-                                        _timelineMagnetEnabled = magnetEnabled;
-                                        _timelineQuantizeDivisionsPerBar =
-                                            quantizeDivisionsPerBar;
-                                      });
-                                    },
-                                    onLoopToggle: (enabled) {
-                                      setState(() => _loopEnabled = enabled);
-                                    },
-
-                                    onLoopRegionChanged: (start, end) {
-                                      setState(() {
-                                        _loopStartMs = start;
-                                        _loopEndMs = end;
-                                      });
-                                    },
-                                    isRecording: _isRecording,
-                                    recordingRowIndex: _selectedRow,
-                                    recordingStartMs: _recordingStartMs,
-                                    recordingPeaks:
-                                        _recordingPeaks, // TODO: FIX TO USE WITH JUCE
-                                    registerRowFxRefresher: (fn) {
-                                      _refreshRowFx = fn;
-                                      WidgetsBinding.instance
-                                          .addPostFrameCallback((_) {
-                                        if (!mounted) return;
-                                        for (int row = 0;
-                                            row < _rowCount;
-                                            row++) {
-                                          _refreshRowFx(row);
-                                        }
-                                      });
-                                    },
-                                    registerRowFxPlaybackRefresher: (fn) {
-                                      _refreshRowFxPlayback = fn;
-                                    },
-                                    meters: _meters,
-                                    getRowCompressorMeter: (row, fx) =>
-                                        JuceAudioEngine.getRowCompressorMeter(
-                                            row, fx),
-                                    getRowEqWaveform: (row, fx, sampleCount) =>
-                                        JuceAudioEngine.getRowEqWaveform(
-                                            row, fx,
-                                            sampleCount: sampleCount),
-                                    onExternalSampleDrop:
-                                        (data, row, timeMs) async {
-                                      await _insertAudioFileAtTimeline(
-                                        data.filePath,
-                                        row: row,
-                                        timeMs: timeMs,
-                                      );
-                                    },
-                                    onExternalSampleDragEntered: () {
-                                      _handleSampleDragExitedBrowserPanel();
-                                    },
-                                    externalSampleDragActive: _sampleDragActive,
-                                    tutorialHighlighter: _mixHighlighter,
-
-                                    mode: _resolvedMode,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        Builder(
-                          builder: (overlayContext) {
-                            final keyboardInset =
-                                MediaQuery.viewInsetsOf(overlayContext).bottom;
-                            final chatTypingActive = _chatFocusNode.hasFocus;
-                            final chatLift = math.max(
-                              0.0,
-                              chatTypingActive
-                                  ? keyboardInset - _kTransportBarHeight
-                                  : 0.0,
-                            );
-                            final mediaSize = MediaQuery.sizeOf(overlayContext);
-                            final samplePanelBottom = chatLift +
-                                _kChatBarStackHeight +
-                                (_showProducerCaptureUi
-                                    ? _kProducerBannerHeightEstimate
-                                    : 0.0) +
-                                _kSamplePanelBottomGap;
-                            final collapsedTop = math.max(
-                              _kSamplePanelExpandedTop + 24.0,
-                              mediaSize.height *
-                                  _kSamplePanelCollapsedTopFactor,
-                            );
-                            final maxPanelTop = math.max(
-                              _kSamplePanelExpandedTop,
-                              mediaSize.height - samplePanelBottom - 120.0,
-                            );
-                            final desiredPanelTop = _sampleBrowserExpanded
-                                ? _kSamplePanelExpandedTop
-                                : collapsedTop;
-                            final samplePanelTop = desiredPanelTop
-                                .clamp(_kSamplePanelExpandedTop, maxPanelTop)
-                                .toDouble();
-                            final addActionsBottom = chatLift + 54.0;
-                            final addActionsRight = 10.0;
-                            final addActionsWidth = math.min(
-                                _kAddActionsPanelWidth, mediaSize.width - 20.0);
-                            return Stack(
-                              clipBehavior: Clip.none,
+                            Column(
                               children: [
-                                if (_showAddActionsPanel)
-                                  Positioned.fill(
-                                    child: GestureDetector(
-                                      behavior: HitTestBehavior.opaque,
-                                      onTap: _closeAddActionsPanel,
-                                      child: const SizedBox.shrink(),
+                                // TOP ROW OF BUTTONS
+                                Padding(
+                                    padding: EdgeInsets.only(
+                                        bottom:
+                                            editorLayoutSpec.topBarBottomGap),
+                                    child: ValueListenableBuilder<Duration>(
+                                      valueListenable: _transportClock,
+                                      builder: (_, clock, __) =>
+                                          _buildTopBar(clock, editorLayoutSpec),
+                                    )),
+
+                                Flexible(
+                                  fit: FlexFit.loose,
+                                  child: ValueListenableBuilder<Duration>(
+                                    valueListenable: _transportClock,
+                                    builder: (_, clock, __) => Halo(
+                                      highlighter: _mixHighlighter,
+                                      haloKey:
+                                          const HaloKey('tutorial:timeline'),
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: AudioCanvasTimeline(
+                                        controller: _timelineController,
+                                        rows: _rows,
+                                        clips: _audioTracks, // your list
+                                        rowGain: _rowGain,
+                                        rowPan: _rowPan,
+                                        rowVolumeAutomation:
+                                            _rowVolumeAutomation,
+                                        getAutomationTargetsForRow:
+                                            _automationTargetsForRowUi,
+                                        getSelectedAutomationTargetId:
+                                            _selectedAutomationTargetIdForRow,
+                                        setSelectedAutomationTargetId:
+                                            (row, targetId) {
+                                          _setSelectedAutomationTargetIdForRow(
+                                            row,
+                                            targetId,
+                                          );
+                                          unawaited(
+                                              _syncAutomationTargetToCurrentTime(
+                                            row,
+                                            targetId,
+                                          ));
+                                        },
+                                        getAutomationPointsForTarget:
+                                            (row, targetId) =>
+                                                _pointsForAutomationTarget(
+                                          row,
+                                          targetId,
+                                        )
+                                                    .map((p) => p.copy())
+                                                    .toList(growable: false),
+                                        setAutomationPointsForTarget:
+                                            (row, targetId, points) {
+                                          if (row < 0 || row >= _rowCount)
+                                            return;
+                                          final safePoints =
+                                              _sanitizeAutomationPointsForTarget(
+                                            row,
+                                            targetId,
+                                            points,
+                                          );
+                                          if (targetId == 'volume') {
+                                            setState(() {
+                                              _rowVolumeAutomation[row] =
+                                                  safePoints
+                                                      .map((p) => p.copy())
+                                                      .toList(growable: false);
+                                            });
+                                            unawaited(
+                                                _syncNativeAutomationForRow(
+                                                    row));
+                                            return;
+                                          }
+                                          setState(() {
+                                            final rowMap = _rowPluginAutomation
+                                                .putIfAbsent(
+                                              row,
+                                              () => <String,
+                                                  List<AutomationPoint>>{},
+                                            );
+                                            rowMap[targetId] = safePoints
+                                                .map((p) => p.copy())
+                                                .toList(growable: false);
+                                          });
+                                          unawaited(
+                                              _syncNativePluginAutomationForRow(
+                                                  row));
+                                        },
+                                        getAutomationClipsForTarget:
+                                            (row, targetId) =>
+                                                _copyAutomationClipList(
+                                          _clipsForAutomationTarget(
+                                              row, targetId),
+                                        ),
+                                        setAutomationClipsForTarget:
+                                            (row, targetId, clips) {
+                                          if (row < 0 || row >= _rowCount)
+                                            return;
+                                          final safeClips =
+                                              _sanitizeAutomationClipsForTarget(
+                                            row,
+                                            targetId,
+                                            clips,
+                                          );
+                                          setState(() {
+                                            final rowMap =
+                                                _rowAutomationClips.putIfAbsent(
+                                              row,
+                                              () => <String,
+                                                  List<
+                                                      AutomationClipSnapshot>>{},
+                                            );
+                                            rowMap[targetId] =
+                                                _copyAutomationClipList(
+                                                    safeClips);
+                                          });
+                                          unawaited(_syncNativeAutomationForRow(
+                                            row,
+                                          ));
+                                        },
+                                        onAutomationClipsCommit: (row, targetId,
+                                            oldClips, newClips) {
+                                          unawaited(
+                                              _setAutomationClipsForTargetWithUndo(
+                                            row,
+                                            targetId,
+                                            newClips,
+                                            oldClipsOverride: oldClips,
+                                          ));
+                                          _recordProducerManualEdit(
+                                              'row_automation_clips', {
+                                            'row': row,
+                                            'target_id': targetId,
+                                            'old_count': oldClips.length,
+                                            'new_count': newClips.length,
+                                          });
+                                        },
+                                        onAutomationTargetCommit: (row,
+                                            targetId, oldPoints, newPoints) {
+                                          unawaited(
+                                              _setAutomationTargetPointsWithUndo(
+                                            row,
+                                            targetId,
+                                            newPoints,
+                                            oldPointsOverride: oldPoints,
+                                          ));
+                                          _recordProducerManualEdit(
+                                              'row_automation_target', {
+                                            'row': row,
+                                            'target_id': targetId,
+                                            'old_count': oldPoints.length,
+                                            'new_count': newPoints.length,
+                                          });
+                                        },
+                                        onRevealAutomationTarget:
+                                            (row, targetId) async {
+                                          if (_parseAutomationTargetId(targetId)
+                                              .isMaster) {
+                                            await _revealMasterAutomationTarget(
+                                              targetId,
+                                            );
+                                          }
+                                        },
+                                        // extractors
+                                        getStartMs: (t) =>
+                                            t.offset *
+                                            1000.0, // adjust to your model
+                                        getDurationMs: (t) =>
+                                            _clipTimelineDurationMs(t),
+                                        getTimelineDurationMs: (t) =>
+                                            _clipTimelineDurationMs(t),
+                                        getTrimStartMs: (t) => t
+                                            .trimStart.inMilliseconds
+                                            .toDouble(),
+                                        getTrimEndMs: (t) =>
+                                            t.trimEnd.inMilliseconds.toDouble(),
+                                        // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
+                                        getPeaks: (c) {
+                                          return c.displayWaveformData;
+                                        },
+                                        getY: (c) => c
+                                            .y, // store a visual Y in your model
+                                        // commit (persist in your model, then setState)
+                                        onMoveClipCommit:
+                                            (i, newStartMs, newRowIndex) async {
+                                          if (newRowIndex < 0 ||
+                                              newRowIndex >= _rowCount) return;
+                                          final clip = _audioTracks[i];
+                                          // clip.offset = newStartMs / 1000.0;
+                                          // clip.rowIndex = newRowIndex; // <-- move across rows
+                                          // setState(() {});
+                                          // JuceAudioEngine.moveClipToRow(i, newRowIndex);
+                                          // _updateOverallDurationIfNeeded();
+                                          await _undoManager.execute(
+                                            MoveClipAction(
+                                              tracks: _audioTracks,
+                                              // clip: clip,
+                                              originalIndex: i,
+                                              oldOffset: clip.offset,
+                                              oldRow: clip.rowIndex,
+                                              newOffset: newStartMs / 1000.0,
+                                              newRow: newRowIndex,
+                                              onChange: () {
+                                                clip.rowId =
+                                                    _rowIdAt(clip.rowIndex);
+                                                _syncClipTimingToEngine(i);
+                                                _updateOverallDurationIfNeeded();
+                                              },
+                                            ),
+                                          );
+                                          setState(() {});
+                                        },
+                                        onTrimClip: (i, s, e,
+                                            {double? newStartMs}) async {
+                                          final clip = _audioTracks[i];
+
+                                          // 1. Update the internal trim values (where in the source file we start/end)
+                                          clip.trimStart =
+                                              Duration(milliseconds: s.round());
+                                          clip.trimEnd =
+                                              Duration(milliseconds: e.round());
+
+                                          // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
+                                          // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
+                                          if (newStartMs != null) {
+                                            // newStartMs is the intended start time in milliseconds.
+                                            // Convert to seconds (assuming clip.offset is in seconds).
+                                            clip.offset = newStartMs / 1000.0;
+                                          }
+                                          // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
+                                          // await _undoManager.execute(
+                                          //   TrimClipAction(
+                                          //     clip: clip,
+                                          //     oldTrimStart: clip.trimStart,
+                                          //     oldTrimEnd: clip.trimEnd,
+                                          //     oldOffset: clip.offset,
+                                          //     newTrimStart: Duration(milliseconds: s.round()),
+                                          //     newTrimEnd: Duration(milliseconds: e.round()),
+                                          //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
+                                          //     onChange: _updateOverallDurationIfNeeded,
+                                          //   ),
+                                          // );
+                                          setState(() {});
+                                          _updateOverallDurationIfNeeded();
+                                          // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
+                                        },
+
+                                        // for the undo history
+                                        onTrimClipCommit: (i, s, e, os, oe, oo,
+                                            {double? newStartMs}) async {
+                                          // final clip = _audioTracks[i];
+                                          await _undoManager.execute(
+                                            TrimClipAction(
+                                              // clip: clip,
+                                              tracks: _audioTracks,
+                                              originalIndex: i,
+                                              oldTrimStart: Duration(
+                                                  milliseconds: os.round()),
+                                              oldTrimEnd: Duration(
+                                                  milliseconds: oe.round()),
+                                              oldOffset: oo / 1000.0,
+                                              newTrimStart: Duration(
+                                                  milliseconds: s.round()),
+                                              newTrimEnd: Duration(
+                                                  milliseconds: e.round()),
+                                              newOffset: newStartMs != null
+                                                  ? newStartMs / 1000.0
+                                                  : null,
+                                              onChange: () {
+                                                _syncClipTimingToEngine(i);
+                                                _updateOverallDurationIfNeeded();
+                                              },
+                                            ),
+                                          );
+                                        },
+
+                                        // selection + headers
+                                        // numRows: kNumRows,
+                                        // selectedRowIndex: _selectedRow,
+                                        onSelectRow: (row) =>
+                                            setState(() => _selectedRow = row),
+                                        // rowMuted: _rowMuted,
+                                        // rowExpanded: _rowExpanded,
+                                        recordingInProgress: _isRecording,
+                                        onToggleExpanded: (row) => setState(
+                                            () => _rowExpanded[row] =
+                                                !_rowExpanded[row]),
+                                        onAddRow: _addRow,
+                                        onInsertRowAbove: _insertRowAbove,
+                                        onInsertRowBelow: _insertRowBelow,
+                                        onDeleteRow: _deleteRow,
+                                        onMoveRow: _moveRow,
+                                        onRenameRow: _renameRow,
+                                        onSetRowIcon: _setRowIcon,
+
+                                        // transport
+                                        playheadMs: clock.inMilliseconds
+                                            .toDouble(), // your existing clock
+                                        // isPlaying: _isPlaying,
+                                        onScrubRequested: (ms) {
+                                          if (_isRecording) {
+                                            return; // do nothing while recording (hopefully no bug where you can still physically scrub but does nothing here)
+                                          }
+
+                                          final newPosition = Duration(
+                                              milliseconds: ms.toInt());
+                                          _syncTransportClock(
+                                            newPosition,
+                                            playing: _isPlaying,
+                                          );
+                                          // for (int i = 0; i < _audioTracks.length; i++) {
+                                          //   final track = _audioTracks[i];
+                                          //   final effectivePos = _calculateEffectiveAudioPositionForTrack(track, newPosition);
+                                          //   JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
+                                          //   setState(() {
+                                          //     track.currentPosition = effectivePos;
+                                          //   });
+                                          // }
+                                          JuceAudioEngine
+                                              .setAutomationTransport(
+                                            ms / 1000.0,
+                                          );
+                                          JuceAudioEngine
+                                              .setMetronomeTransportMs(ms);
+                                        },
+                                        maxDuration: _audioOnlyOverallDuration,
+                                        getFullDurationMs: (t) =>
+                                            _clipFullDurationMsForTrim(t),
+                                        isPlaying: _isPlaying,
+
+                                        // ruler/grid
+                                        bpm: _tempo,
+                                        beatsPerBar: 4,
+
+                                        // layout
+                                        // numRows: kNumRows,
+                                        height:
+                                            520, // THIS VALUE is effectively unused, the height is just natural now
+                                        // ============================
+                                        // NEW: Row FX callbacks
+                                        // ============================
+                                        getRowEffects: (row) => JuceAudioEngine
+                                            .getTrackEffectsForRow(row),
+                                        getRowEffectIds: (row) =>
+                                            JuceAudioEngine
+                                                .getTrackEffectIdsForRow(row),
+
+                                        getRowEffectBypassState:
+                                            (row, effectIndex) =>
+                                                JuceAudioEngine
+                                                    .getRowEffectBypassState(
+                                                        row, effectIndex),
+
+                                        insertRowEffect:
+                                            (row, pathOrName) async {
+                                          final before = await JuceAudioEngine
+                                              .getTrackEffectsForRow(row);
+                                          await _undoManager.execute(
+                                            InsertEffectAction(
+                                              row: row,
+                                              pathOrName: pathOrName,
+                                              onChange: () {
+                                                setState(() {});
+                                                _refreshRowFx(row);
+                                                unawaited(
+                                                    _refreshAutomationTargetsForRow(
+                                                        row));
+                                              },
+                                            ),
+                                          );
+                                          final after = await JuceAudioEngine
+                                              .getTrackEffectsForRow(row);
+                                          if (after.length <= before.length) {
+                                            _showSmallNotice(
+                                                'Could not load this effect plugin.');
+                                            return;
+                                          }
+                                          _recordProducerManualEdit(
+                                              'row_fx_insert', {
+                                            'row': row,
+                                            'effect': pathOrName
+                                          });
+                                          await _refreshAutomationTargetsForRow(
+                                            row,
+                                          );
+                                        }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
+                                        // need name of effects so undo action can add it back later
+                                        removeRowEffect: (row, effectIndex,
+                                            name, applyingPreset) async {
+                                          if (applyingPreset) {
+                                            await JuceAudioEngine
+                                                .removeTrackEffect(
+                                                    row, effectIndex);
+                                            return;
+                                          }
+                                          await _undoManager.execute(
+                                            RemoveEffectAction(
+                                              row: row,
+                                              effectIndex: effectIndex,
+                                              pathOrName: name,
+                                              onChange: () {
+                                                setState(() {});
+                                                _refreshRowFx(row);
+                                                unawaited(
+                                                    _refreshAutomationTargetsForRow(
+                                                        row));
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_fx_remove', {
+                                            'row': row,
+                                            'index': effectIndex,
+                                            'effect': name,
+                                          });
+                                          await _refreshAutomationTargetsForRow(
+                                            row,
+                                          );
+                                        }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
+
+                                        reorderRowEffects:
+                                            (row, from, to) async {
+                                          await _undoManager.execute(
+                                            ReorderEffectAction(
+                                              row: row,
+                                              from: from,
+                                              to: to,
+                                              onChange: () {
+                                                setState(() {});
+                                                _refreshRowFx(row);
+                                                unawaited(
+                                                    _refreshAutomationTargetsForRow(
+                                                        row));
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_fx_reorder', {
+                                            'row': row,
+                                            'from': from,
+                                            'to': to
+                                          });
+                                          await _refreshAutomationTargetsForRow(
+                                            row,
+                                          );
+                                        }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
+
+                                        setRowEffectBypassed:
+                                            (row, effectIndex, bypass) async {
+                                          await _undoManager.execute(
+                                            BypassEffectAction(
+                                              row: row,
+                                              effectIndex: effectIndex,
+                                              oldState: !bypass,
+                                              newState: bypass,
+                                              onChange: () {
+                                                setState(() {});
+                                                _refreshRowFx(row);
+                                                unawaited(
+                                                    _refreshAutomationTargetsForRow(
+                                                        row));
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_fx_bypass', {
+                                            'row': row,
+                                            'index': effectIndex,
+                                            'bypassed': bypass,
+                                          });
+                                        }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
+
+                                        getRowPluginParameters:
+                                            (row, effectIndex) =>
+                                                JuceAudioEngine
+                                                    .getTrackPluginParameters(
+                                                        row, effectIndex),
+
+                                        setRowEffectParam: (row, effectIndex,
+                                            paramId, value) async {
+                                          await JuceAudioEngine.setTrackEffect(
+                                            row,
+                                            effectIndex,
+                                            paramId,
+                                            value,
+                                          );
+                                          _updateAutomationTargetBaselineForEffectParameter(
+                                            row: row,
+                                            effectIndex: effectIndex,
+                                            paramId: paramId,
+                                            value: value,
+                                            master: false,
+                                          );
+                                        },
+
+                                        // for commiting to undo history
+                                        onPluginParamCommit: (row, idx, paramId,
+                                            oldValue, newValue) async {
+                                          await _undoManager.execute(
+                                            SetEffectParamAction(
+                                              row: row,
+                                              effectIndex: idx,
+                                              paramId: paramId,
+                                              oldValue: oldValue,
+                                              newValue: newValue,
+                                              onChange: () {
+                                                setState(() {});
+                                                _refreshRowFx(row);
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_fx_param', {
+                                            'row': row,
+                                            'index': idx,
+                                            'param_id': paramId,
+                                            'old_value': oldValue,
+                                            'new_value': newValue,
+                                          });
+                                        },
+
+                                        onPresetCommit: (before, after) async {
+                                          await _undoManager.execute(
+                                            TrackPresetChangeAction(
+                                              before: before,
+                                              after: after,
+                                              onChange: () {
+                                                setState(() {});
+                                                unawaited(
+                                                    _refreshAutomationTargetsForRow(
+                                                        before.row));
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_preset_commit', {
+                                            'row': before.row,
+                                            'before_count':
+                                                before.effects.length,
+                                            'after_count': after.effects.length,
+                                          });
+                                          await _refreshAutomationTargetsForRow(
+                                            before.row,
+                                          );
+                                        },
+
+                                        scanPlugins: () =>
+                                            JuceAudioEngine.scanPlugins(),
+
+                                        setTrackAutomationPoints: (row,
+                                                points) =>
+                                            _syncNativeAutomationForRow(row),
+
+                                        onAutomationCommit:
+                                            (row, oldPoints, newPoints) {
+                                          _undoManager.execute(
+                                            SetAutomationPointsAction(
+                                              row: row,
+                                              oldPoints: oldPoints,
+                                              newPoints: newPoints,
+                                              applyToState: (r, points) {
+                                                setState(() {
+                                                  _rowVolumeAutomation[r] =
+                                                      points
+                                                          .map((p) =>
+                                                              AutomationPoint(
+                                                                  x: p.x,
+                                                                  volume:
+                                                                      p.volume))
+                                                          .toList();
+                                                });
+                                              },
+                                              onApplied: (r, _) async {
+                                                await _syncNativeAutomationForRow(
+                                                    r);
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_automation', {
+                                            'row': row,
+                                            'old_count': oldPoints.length,
+                                            'new_count': newPoints.length,
+                                          });
+                                        },
+
+                                        setRowGain: (row, gain0to3) =>
+                                            JuceAudioEngine.setRowGain(
+                                                row, gain0to3),
+                                        onRowGainCommit:
+                                            (row, oldGain, newGain) {
+                                          _undoManager.execute(
+                                            SetRowGainAction(
+                                              row: row,
+                                              oldGain: oldGain,
+                                              newGain: newGain,
+                                              applyToState: (r, g) {
+                                                setState(() {
+                                                  _rowGain[r] = g;
+                                                });
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_gain', {
+                                            'row': row,
+                                            'old_gain': oldGain,
+                                            'new_gain': newGain,
+                                          });
+                                        },
+
+                                        muteRow: (row, mute) async {
+                                          // await JuceAudioEngine.muteRow(row, mute);
+                                          setState(() => _rowMuted[row] = mute);
+                                          await _recomputeAudibleState(); // this handles all mute/solo logic
+
+                                          // mute not counted in the undo history
+                                          // await _undoManager.execute(
+                                          //   MuteRowAction(row, !mute, mute, () => setState(() => _rowMuted[row] = mute)),
+                                          // );
+                                        },
+
+                                        // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
+                                        rowMuted: _rowMuted,
+
+                                        soloRow: (row, solo) async {
+                                          // await JuceAudioEngine.muteRow(row, mute);
+                                          setState(
+                                              () => _rowSoloed[row] = solo);
+                                          await _recomputeAudibleState(); // this handles all mute/solo logic
+                                        },
+
+                                        // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
+                                        rowSoloed: _rowSoloed,
+
+                                        setRowPan: (row, newPan) =>
+                                            JuceAudioEngine.setRowPan(
+                                                row, newPan),
+                                        onRowPanCommit: (row, oldPan, newPan) {
+                                          _undoManager.execute(
+                                            SetRowPanAction(
+                                              row: row,
+                                              oldPan: oldPan,
+                                              newPan: newPan,
+                                              applyToState: (r, p) {
+                                                setState(() {
+                                                  _rowPan[r] = p;
+                                                });
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit('row_pan', {
+                                            'row': row,
+                                            'old_pan': oldPan,
+                                            'new_pan': newPan,
+                                          });
+                                        },
+
+                                        setClipGain: _setClipGainLive,
+                                        onClipGainCommit:
+                                            (clipIndex, oldGain, newGain) {
+                                          _undoManager.execute(
+                                            SetClipGainAction(
+                                              tracks: _audioTracks,
+                                              originalIndex: clipIndex,
+                                              oldGain: oldGain,
+                                              newGain: newGain,
+                                              applyToState: (clip, gain) {
+                                                clip.gain = gain;
+                                                setState(() {});
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'clip_gain', {
+                                            'clip': clipIndex,
+                                            'old_gain': oldGain,
+                                            'new_gain': newGain,
+                                          });
+                                        },
+                                        setClipPitch: _setClipPitchLive,
+                                        onClipPitchCommit:
+                                            (clipIndex, oldPitch, newPitch) {
+                                          _undoManager.execute(
+                                            SetClipPitchAction(
+                                              tracks: _audioTracks,
+                                              originalIndex: clipIndex,
+                                              oldPitch: oldPitch,
+                                              newPitch: newPitch,
+                                              applyToState: (clip, pitch) {
+                                                clip.pitchSemitones = pitch;
+                                                setState(() {});
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'clip_pitch', {
+                                            'clip': clipIndex,
+                                            'old_pitch': oldPitch,
+                                            'new_pitch': newPitch,
+                                          });
+                                        },
+                                        onSetClipReversed:
+                                            (clipIndex, reversed) async {
+                                          if (clipIndex < 0 ||
+                                              clipIndex >=
+                                                  _audioTracks.length) {
+                                            return;
+                                          }
+                                          final clip = _audioTracks[clipIndex];
+                                          if (clip.isMidi ||
+                                              clip.isReversed == reversed) {
+                                            return;
+                                          }
+                                          await _undoManager.execute(
+                                            SetClipReverseAction(
+                                              tracks: _audioTracks,
+                                              originalIndex: clipIndex,
+                                              oldReversed: clip.isReversed,
+                                              newReversed: reversed,
+                                              applyToState: (target, value) {
+                                                target.isReversed = value;
+                                                setState(() {});
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'clip_reverse', {
+                                            'clip': clipIndex,
+                                            'reversed': reversed,
+                                          });
+                                        },
+                                        onAdjustClipToTempo:
+                                            _handleAdjustClipToTempo,
+                                        onStretchClipToTempoPreservePitch:
+                                            _handleStretchClipToTempoPreservePitch,
+                                        onDisableClipTempoFollow:
+                                            _handleDisableClipTempoFollow,
+                                        onDetectClipTempoAndSetProjectTempo:
+                                            _handleDetectClipTempoAndSetProjectTempo,
+                                        onStretchClip: _handleStretchClipResize,
+                                        onStretchClipCommit:
+                                            _handleStretchClipResizeCommit,
+                                        onRenameClip:
+                                            (clipIndex, newLabel) async {
+                                          if (clipIndex < 0 ||
+                                              clipIndex >=
+                                                  _audioTracks.length) {
+                                            return;
+                                          }
+                                          final oldLabel =
+                                              _audioTracks[clipIndex].label;
+                                          final nextLabel = newLabel.trim();
+                                          if (nextLabel.isEmpty ||
+                                              oldLabel == nextLabel) {
+                                            return;
+                                          }
+
+                                          await _undoManager.execute(
+                                            SetClipLabelAction(
+                                              tracks: _audioTracks,
+                                              originalIndex: clipIndex,
+                                              oldLabel: oldLabel,
+                                              newLabel: nextLabel,
+                                              applyToState: (clip, label) {
+                                                clip.label = label;
+                                                setState(() {});
+                                              },
+                                            ),
+                                          );
+
+                                          _recordProducerManualEdit(
+                                              'clip_rename', {
+                                            'clip': clipIndex,
+                                            'old_label': oldLabel,
+                                            'new_label': nextLabel,
+                                          });
+                                        },
+
+                                        onCopyClip: _handleCopyClip,
+                                        onDeleteClip: _handleDeleteClip,
+                                        onCopyClips: _handleCopyClips,
+                                        onDeleteClips: _handleDeleteClips,
+                                        onCutClipAt: _handleCutClipAt,
+                                        hasCopiedClip: _copiedClip != null ||
+                                            (_copiedClipGroup?.isNotEmpty ??
+                                                false),
+                                        onPasteClipAt: _handlePasteClipAt,
+                                        onClearCopiedClip: _clearCopiedClip,
+                                        onOpenMidiClip: _openMidiClipEditor,
+                                        onStemSeparation:
+                                            _handleStemSeparationForClip,
+                                        onSelectionChanged:
+                                            (selectedClipIndices,
+                                                primaryClipIndex) {
+                                          _timelineSelectedClipIndices =
+                                              List<int>.from(
+                                                  selectedClipIndices);
+                                          _timelinePrimarySelectedClipIndex =
+                                              primaryClipIndex;
+                                          unawaited(
+                                            _syncLiveMidiInputTargetClip(),
+                                          );
+                                        },
+                                        onSnapSettingsChanged: (magnetEnabled,
+                                            quantizeDivisionsPerBar) {
+                                          if (_timelineMagnetEnabled ==
+                                                  magnetEnabled &&
+                                              _timelineQuantizeDivisionsPerBar ==
+                                                  quantizeDivisionsPerBar) {
+                                            return;
+                                          }
+                                          setState(() {
+                                            _timelineMagnetEnabled =
+                                                magnetEnabled;
+                                            _timelineQuantizeDivisionsPerBar =
+                                                quantizeDivisionsPerBar;
+                                          });
+                                        },
+                                        onLoopToggle: (enabled) {
+                                          setState(
+                                              () => _loopEnabled = enabled);
+                                        },
+
+                                        onLoopRegionChanged: (start, end) {
+                                          setState(() {
+                                            _loopStartMs = start;
+                                            _loopEndMs = end;
+                                          });
+                                        },
+                                        isRecording: _isRecording,
+                                        recordingRowIndex: _selectedRow,
+                                        recordingStartMs: _recordingStartMs,
+                                        recordingPeaks:
+                                            _recordingPeaks, // TODO: FIX TO USE WITH JUCE
+                                        registerRowFxRefresher: (fn) {
+                                          _refreshRowFx = fn;
+                                          WidgetsBinding.instance
+                                              .addPostFrameCallback((_) {
+                                            if (!mounted) return;
+                                            for (int row = 0;
+                                                row < _rowCount;
+                                                row++) {
+                                              _refreshRowFx(row);
+                                            }
+                                          });
+                                        },
+                                        registerRowFxPlaybackRefresher: (fn) {
+                                          _refreshRowFxPlayback = fn;
+                                        },
+                                        meters: _meters,
+                                        getRowCompressorMeter: (row, fx) =>
+                                            JuceAudioEngine
+                                                .getRowCompressorMeter(row, fx),
+                                        getRowEqWaveform: (row, fx,
+                                                sampleCount) =>
+                                            JuceAudioEngine.getRowEqWaveform(
+                                                row, fx,
+                                                sampleCount: sampleCount),
+                                        onExternalSampleDrop:
+                                            (data, row, timeMs) async {
+                                          await _insertAudioFileAtTimeline(
+                                            data.filePath,
+                                            row: row,
+                                            timeMs: timeMs,
+                                            uploadMethod: 'dragdrop',
+                                          );
+                                        },
+                                        onExternalSampleDragEntered: () {
+                                          _handleSampleDragExitedBrowserPanel();
+                                        },
+                                        externalSampleDragActive:
+                                            _sampleDragActive,
+                                        onTutorialTimelineScrolled:
+                                            _handleDawOnboardingTimelineScrolled,
+                                        onTutorialTimelineZoomed:
+                                            _handleDawOnboardingTimelineZoomed,
+                                        onTutorialRowExpansionChanged:
+                                            _handleDawOnboardingRowExpansionChanged,
+                                        onTutorialRowTabSelected:
+                                            _handleDawOnboardingRowTabSelected,
+                                        onTutorialRowEffectAdded:
+                                            _handleDawOnboardingEffectAdded,
+                                        onTutorialRowEffectOpened:
+                                            _handleDawOnboardingEffectOpened,
+                                        tutorialHighlighter: _mixHighlighter,
+                                        bottomDockInset: _kChatBarStackHeight +
+                                            (_showProducerCaptureUi
+                                                ? _kProducerBannerHeightEstimate
+                                                : 0.0),
+
+                                        mode: _resolvedMode,
+                                      ),
                                     ),
                                   ),
-                                Positioned(
-                                  left: 0,
-                                  right: 0,
-                                  bottom: chatLift,
-                                  child: _buildBottomChatAndTransport(
-                                    includeChatBar: true,
-                                    includeProducerCapture:
-                                        _showProducerCaptureUi,
-                                    includeTransport: false,
-                                  ),
                                 ),
-                                Positioned(
-                                  right: addActionsRight,
-                                  bottom: addActionsBottom,
-                                  child: IgnorePointer(
-                                    ignoring: !_showAddActionsPanel,
-                                    child: TweenAnimationBuilder<double>(
-                                      duration:
-                                          const Duration(milliseconds: 120),
-                                      curve: _showAddActionsPanel
-                                          ? Curves.easeOutCubic
-                                          : Curves.easeInCubic,
-                                      tween: Tween<double>(
-                                        begin: 0.0,
-                                        end: _showAddActionsPanel ? 1.0 : 0.0,
+                              ],
+                            ),
+                            Builder(
+                              builder: (overlayContext) {
+                                final keyboardInset =
+                                    MediaQuery.viewInsetsOf(overlayContext)
+                                        .bottom;
+                                final chatTypingActive =
+                                    _chatFocusNode.hasFocus;
+                                final chatLift = math.max(
+                                  0.0,
+                                  chatTypingActive
+                                      ? keyboardInset - _kTransportBarHeight
+                                      : 0.0,
+                                );
+                                final mediaSize =
+                                    MediaQuery.sizeOf(overlayContext);
+                                final samplePanelBottom = chatLift +
+                                    _kChatBarStackHeight +
+                                    (_showProducerCaptureUi
+                                        ? _kProducerBannerHeightEstimate
+                                        : 0.0) +
+                                    _kSamplePanelBottomGap;
+                                final collapsedTop = math.max(
+                                  _kSamplePanelExpandedTop + 24.0,
+                                  mediaSize.height *
+                                      _kSamplePanelCollapsedTopFactor,
+                                );
+                                final maxPanelTop = math.max(
+                                  _kSamplePanelExpandedTop,
+                                  mediaSize.height - samplePanelBottom - 120.0,
+                                );
+                                final desiredPanelTop = _sampleBrowserExpanded
+                                    ? _kSamplePanelExpandedTop
+                                    : collapsedTop;
+                                final samplePanelTop = desiredPanelTop
+                                    .clamp(
+                                        _kSamplePanelExpandedTop, maxPanelTop)
+                                    .toDouble();
+                                final addActionsBottom = chatLift + 54.0;
+                                final addActionsRight = 10.0;
+                                final addActionsWidth = math.min(
+                                    _kAddActionsPanelWidth,
+                                    mediaSize.width - 20.0);
+                                return Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    if (_showAddActionsPanel)
+                                      Positioned.fill(
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: _closeAddActionsPanel,
+                                          child: const SizedBox.shrink(),
+                                        ),
                                       ),
-                                      builder: (context, t, child) {
-                                        final clampedT = t.clamp(0.0, 1.0);
-                                        return Transform.translate(
-                                          offset:
-                                              Offset(0, (1 - clampedT) * 22),
-                                          child: Opacity(
-                                            opacity: clampedT,
-                                            child: ClipRect(
-                                              child: Align(
-                                                alignment:
-                                                    Alignment.bottomRight,
-                                                heightFactor:
-                                                    math.max(0.0001, clampedT),
-                                                child: child,
+                                    Positioned(
+                                      left: 0,
+                                      right: 0,
+                                      bottom: chatLift,
+                                      child: _buildBottomChatAndTransport(
+                                        includeChatBar: true,
+                                        includeProducerCapture:
+                                            _showProducerCaptureUi,
+                                        includeTransport: false,
+                                      ),
+                                    ),
+                                    Positioned(
+                                      right: addActionsRight,
+                                      bottom: addActionsBottom,
+                                      child: IgnorePointer(
+                                        ignoring: !_showAddActionsPanel,
+                                        child: TweenAnimationBuilder<double>(
+                                          duration:
+                                              const Duration(milliseconds: 120),
+                                          curve: _showAddActionsPanel
+                                              ? Curves.easeOutCubic
+                                              : Curves.easeInCubic,
+                                          tween: Tween<double>(
+                                            begin: 0.0,
+                                            end: _showAddActionsPanel
+                                                ? 1.0
+                                                : 0.0,
+                                          ),
+                                          builder: (context, t, child) {
+                                            final clampedT = t.clamp(0.0, 1.0);
+                                            return Transform.translate(
+                                              offset: Offset(
+                                                  0, (1 - clampedT) * 22),
+                                              child: Opacity(
+                                                opacity: clampedT,
+                                                child: ClipRect(
+                                                  child: Align(
+                                                    alignment:
+                                                        Alignment.bottomRight,
+                                                    heightFactor: math.max(
+                                                        0.0001, clampedT),
+                                                    child: child,
+                                                  ),
+                                                ),
                                               ),
+                                            );
+                                          },
+                                          child: Container(
+                                            width: addActionsWidth,
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF1D2435),
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              border: Border.all(
+                                                  color: Colors.white12),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withOpacity(0.28),
+                                                  blurRadius: 24,
+                                                  offset: const Offset(0, -8),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                _buildAddActionTile(
+                                                  id: 'audio',
+                                                  icon: Icons.audiotrack,
+                                                  title: L10n.translate(context,
+                                                      'Add Audio Clip'),
+                                                  onTap: () {
+                                                    unawaited(
+                                                        _handleAddActionSelection(
+                                                            'audio'));
+                                                  },
+                                                ),
+                                                _buildAddActionTile(
+                                                  id: 'instrument',
+                                                  icon: Icons.piano,
+                                                  title: L10n.translate(context,
+                                                      'Add Instrument Clip'),
+                                                  onTap: () {
+                                                    unawaited(
+                                                        _handleAddActionSelection(
+                                                            'instrument'));
+                                                  },
+                                                ),
+                                                _buildAddActionTile(
+                                                  id: 'sample_browser',
+                                                  icon: Icons.folder_open,
+                                                  title: 'Open File Browser',
+                                                  topPadding: 0,
+                                                  bottomPadding: 4,
+                                                  subtitle:
+                                                      'Audition folders and drag files to timeline',
+                                                  onTap: () {
+                                                    unawaited(
+                                                        _handleAddActionSelection(
+                                                            'sample_browser'));
+                                                  },
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                        );
-                                      },
-                                      child: Container(
-                                        width: addActionsWidth,
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFF1D2435),
-                                          borderRadius:
-                                              BorderRadius.circular(20),
-                                          border:
-                                              Border.all(color: Colors.white12),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black
-                                                  .withOpacity(0.28),
-                                              blurRadius: 24,
-                                              offset: const Offset(0, -8),
-                                            ),
-                                          ],
-                                        ),
-                                        child: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            _buildAddActionTile(
-                                              id: 'audio',
-                                              icon: Icons.audiotrack,
-                                              title: L10n.translate(
-                                                  context, 'Add Audio Clip'),
-                                              onTap: () {
-                                                unawaited(
-                                                    _handleAddActionSelection(
-                                                        'audio'));
-                                              },
-                                            ),
-                                            _buildAddActionTile(
-                                              id: 'instrument',
-                                              icon: Icons.piano,
-                                              title: L10n.translate(context,
-                                                  'Add Instrument Clip'),
-                                              onTap: () {
-                                                unawaited(
-                                                    _handleAddActionSelection(
-                                                        'instrument'));
-                                              },
-                                            ),
-                                            _buildAddActionTile(
-                                              id: 'sample_browser',
-                                              icon: Icons.folder_open,
-                                              title: 'Open File Browser',
-                                              topPadding: 0,
-                                              bottomPadding: 4,
-                                              subtitle:
-                                                  'Audition folders and drag files to timeline',
-                                              onTap: () {
-                                                unawaited(
-                                                    _handleAddActionSelection(
-                                                        'sample_browser'));
-                                              },
-                                            ),
-                                          ],
                                         ),
                                       ),
                                     ),
-                                  ),
-                                ),
-                                if (_sampleBrowserVisible)
-                                  AnimatedPositioned(
-                                    duration: const Duration(milliseconds: 190),
-                                    curve: Curves.easeOutCubic,
-                                    left: 0,
-                                    right: 0,
-                                    top: samplePanelTop,
-                                    bottom: samplePanelBottom,
-                                    child: SampleBrowserPanel(
-                                      rootFolders: _sampleBrowserRoots,
-                                      auditioningPath: _auditioningSamplePath,
-                                      onAuditionTap: _auditionSampleFile,
-                                      onInsertSample: (filePath) =>
-                                          _insertAudioFileAtTimeline(filePath),
-                                      onAddFolder: _addSampleBrowserRootFolder,
-                                      onRemoveFolder: _removeSampleBrowserRoot,
-                                      resolveDuration: _resolveSampleDuration,
-                                      previewPositionStream:
-                                          _samplePreviewPlayer.positionStream,
-                                      previewDurationStream:
-                                          _samplePreviewPlayer.durationStream,
-                                      previewPlaying: _samplePreviewPlaying,
-                                      onPreviewSeek: (pos) =>
-                                          _samplePreviewPlayer.seek(pos),
-                                      onDragActivityChanged:
-                                          _setSampleDragActive,
-                                      onClose: () {
-                                        unawaited(_closeSampleBrowser());
-                                      },
-                                      expanded: _sampleBrowserExpanded,
-                                      onExpandedChanged: (expanded) {
-                                        setState(() {
-                                          _sampleBrowserExpanded = expanded;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                Positioned(
-                                  left: 0,
-                                  right: 0,
-                                  bottom: _kChatBarStackHeight + chatLift,
-                                  child: AnimatedSlide(
-                                    offset: _chatExpanded
-                                        ? Offset.zero
-                                        : const Offset(0, 0.3),
-                                    duration: const Duration(milliseconds: 160),
-                                    curve: Curves.easeOutCubic,
-                                    child: SizedBox(
-                                      height: _kChatHistoryHeight,
-                                      child: _chatWarm
-                                          ? Container(
-                                              margin:
-                                                  const EdgeInsets.symmetric(
+                                    if (_sampleBrowserVisible)
+                                      AnimatedPositioned(
+                                        duration:
+                                            const Duration(milliseconds: 190),
+                                        curve: Curves.easeOutCubic,
+                                        left: 0,
+                                        right: 0,
+                                        top: samplePanelTop,
+                                        bottom: samplePanelBottom,
+                                        child: SampleBrowserPanel(
+                                          rootFolders: _sampleBrowserRoots,
+                                          auditioningPath:
+                                              _auditioningSamplePath,
+                                          onAuditionTap: _auditionSampleFile,
+                                          onInsertSample: (filePath) =>
+                                              _insertAudioFileAtTimeline(
+                                                  filePath),
+                                          onAddFolder:
+                                              _addSampleBrowserRootFolder,
+                                          onRemoveFolder:
+                                              _removeSampleBrowserRoot,
+                                          resolveDuration:
+                                              _resolveSampleDuration,
+                                          previewPositionStream:
+                                              _samplePreviewPlayer
+                                                  .positionStream,
+                                          previewDurationStream:
+                                              _samplePreviewPlayer
+                                                  .durationStream,
+                                          previewPlaying: _samplePreviewPlaying,
+                                          onPreviewSeek: (pos) =>
+                                              _samplePreviewPlayer.seek(pos),
+                                          onOpenSystemSettings:
+                                              _openAppPermissionsSettings,
+                                          onDragActivityChanged:
+                                              _setSampleDragActive,
+                                          onClose: () {
+                                            unawaited(_closeSampleBrowser());
+                                          },
+                                          expanded: _sampleBrowserExpanded,
+                                          onExpandedChanged: (expanded) {
+                                            setState(() {
+                                              _sampleBrowserExpanded = expanded;
+                                            });
+                                          },
+                                        ),
+                                      ),
+                                    Positioned(
+                                      left: 0,
+                                      right: 0,
+                                      bottom: _kChatBarStackHeight + chatLift,
+                                      child: AnimatedSlide(
+                                        offset: _chatExpanded
+                                            ? Offset.zero
+                                            : const Offset(0, 0.3),
+                                        duration:
+                                            const Duration(milliseconds: 160),
+                                        curve: Curves.easeOutCubic,
+                                        child: SizedBox(
+                                          height: _kChatHistoryHeight,
+                                          child: _chatWarm
+                                              ? Container(
+                                                  margin: const EdgeInsets
+                                                      .symmetric(
                                                       horizontal: 12),
-                                              child: IgnorePointer(
-                                                ignoring: !_chatExpanded,
-                                                child: AnimatedOpacity(
-                                                  duration: const Duration(
-                                                      milliseconds: 140),
-                                                  curve: Curves.easeOutCubic,
-                                                  opacity:
-                                                      _chatExpanded ? 1 : 0,
-                                                  child: ClipRRect(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            22),
-                                                    child: BackdropFilter(
-                                                      filter: ImageFilter.blur(
-                                                          sigmaX: 18,
-                                                          sigmaY: 18),
-                                                      child: Container(
-                                                        decoration:
-                                                            BoxDecoration(
-                                                          color: Colors.white
-                                                              .withOpacity(
-                                                                  _kChatChromeOpacity),
-                                                          borderRadius:
-                                                              BorderRadius
-                                                                  .circular(22),
-                                                          border: Border.all(
+                                                  child: IgnorePointer(
+                                                    ignoring: !_chatExpanded,
+                                                    child: AnimatedOpacity(
+                                                      duration: const Duration(
+                                                          milliseconds: 140),
+                                                      curve:
+                                                          Curves.easeOutCubic,
+                                                      opacity:
+                                                          _chatExpanded ? 1 : 0,
+                                                      child: ClipRRect(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(22),
+                                                        child: BackdropFilter(
+                                                          filter:
+                                                              ImageFilter.blur(
+                                                                  sigmaX: 18,
+                                                                  sigmaY: 18),
+                                                          child: Container(
+                                                            decoration:
+                                                                BoxDecoration(
                                                               color: Colors
                                                                   .white
                                                                   .withOpacity(
-                                                                      0.14)),
-                                                        ),
-                                                        child: MediaQuery
-                                                            .removePadding(
-                                                          context:
-                                                              overlayContext,
-                                                          removeBottom: true,
-                                                          child: MediaQuery
-                                                              .removeViewInsets(
-                                                            context:
-                                                                overlayContext,
-                                                            removeBottom: true,
-                                                            child: Chat(
-                                                              chatController:
-                                                                  _chatController,
-                                                              currentUserId:
-                                                                  'user',
-                                                              onMessageSend:
-                                                                  null, // message sending is handled by a component outside. this is simply showing the chat history
-                                                              timeFormat: null,
-                                                              onMessageLongPress:
-                                                                  (
-                                                                BuildContext
-                                                                    context,
-                                                                Message
-                                                                    message, {
-                                                                required LongPressStartDetails
-                                                                    details,
-                                                                required int
-                                                                    index,
-                                                              }) async {
-                                                                // Only copy text messages
-                                                                if (message
-                                                                    is TextMessage) {
-                                                                  await Clipboard
-                                                                      .setData(
-                                                                    ClipboardData(
-                                                                        text: message
-                                                                            .text),
-                                                                  );
-
-                                                                  await AppHaptics.impact(
-                                                                      AppHapticImpact
-                                                                          .light);
-
-                                                                  ScaffoldMessenger.of(
-                                                                          context)
-                                                                      .showSnackBar(
-                                                                    const SnackBar(
-                                                                      content: Text(
-                                                                          'Message copied to clipboard'),
-                                                                      duration: Duration(
-                                                                          milliseconds:
-                                                                              1500),
-                                                                      behavior:
-                                                                          SnackBarBehavior
-                                                                              .floating,
+                                                                      _kChatChromeOpacity),
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                          22),
+                                                              border: Border.all(
+                                                                  color: Colors
+                                                                      .white
+                                                                      .withOpacity(
+                                                                          0.14)),
+                                                            ),
+                                                            child: Builder(
+                                                              builder:
+                                                                  (context) {
+                                                                final canClearChatHistory =
+                                                                    !_isThinking &&
+                                                                        _chatController
+                                                                            .messages
+                                                                            .isNotEmpty;
+                                                                return Column(
+                                                                  children: [
+                                                                    Padding(
+                                                                      padding: const EdgeInsets
+                                                                          .fromLTRB(
+                                                                          16,
+                                                                          12,
+                                                                          12,
+                                                                          6),
+                                                                      child:
+                                                                          Row(
+                                                                        children: [
+                                                                          const Expanded(
+                                                                            child:
+                                                                                Text(
+                                                                              'Project Chat',
+                                                                              style: TextStyle(
+                                                                                fontFamily: 'Pretendard',
+                                                                                fontSize: 13,
+                                                                                fontWeight: FontWeight.w700,
+                                                                                letterSpacing: 0.3,
+                                                                                color: Colors.white70,
+                                                                              ),
+                                                                            ),
+                                                                          ),
+                                                                          TextButton
+                                                                              .icon(
+                                                                            onPressed: canClearChatHistory
+                                                                                ? _confirmClearChatHistory
+                                                                                : null,
+                                                                            style:
+                                                                                TextButton.styleFrom(
+                                                                              minimumSize: const Size(0, 32),
+                                                                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                                                                              foregroundColor: Colors.white70,
+                                                                              backgroundColor: Colors.white.withOpacity(0.05),
+                                                                              shape: RoundedRectangleBorder(
+                                                                                borderRadius: BorderRadius.circular(999),
+                                                                              ),
+                                                                            ),
+                                                                            icon:
+                                                                                const Icon(
+                                                                              Icons.delete_outline_rounded,
+                                                                              size: 16,
+                                                                            ),
+                                                                            label:
+                                                                                const Text(
+                                                                              'Clear',
+                                                                              style: TextStyle(
+                                                                                fontSize: 12,
+                                                                                fontWeight: FontWeight.w600,
+                                                                              ),
+                                                                            ),
+                                                                          ),
+                                                                        ],
+                                                                      ),
                                                                     ),
-                                                                  );
-                                                                }
-                                                              },
-                                                              builders:
-                                                                  Builders(
-                                                                composerBuilder: (_) =>
-                                                                    const SizedBox
-                                                                        .shrink(),
-                                                                // chatAnimatedListBuilder: (context, itemBuilder) {
-                                                                //   return MediaQuery.removePadding(
-                                                                //     context: context,
-                                                                //     removeBottom: true,
-                                                                //     child: ChatAnimatedList(
-                                                                //       itemBuilder: itemBuilder,
-                                                                //     ),
-                                                                //   );
-                                                                // },
-                                                                // emptyChatListBuilder: (_) => const SizedBox.shrink(),
-                                                                chatAnimatedListBuilder:
-                                                                    (context,
-                                                                        itemBuilder) {
-                                                                  return Column(
-                                                                    children: [
-                                                                      Expanded(
+                                                                    Expanded(
+                                                                      child: MediaQuery
+                                                                          .removePadding(
+                                                                        context:
+                                                                            overlayContext,
+                                                                        removeBottom:
+                                                                            true,
                                                                         child: MediaQuery
-                                                                            .removePadding(
+                                                                            .removeViewInsets(
                                                                           context:
-                                                                              context,
+                                                                              overlayContext,
                                                                           removeBottom:
                                                                               true,
                                                                           child:
-                                                                              ChatAnimatedList(itemBuilder: itemBuilder),
-                                                                        ),
-                                                                      ),
-                                                                      if (_isThinking)
-                                                                        Padding(
-                                                                          padding:
-                                                                              const EdgeInsets.only(
-                                                                            left:
-                                                                                14,
-                                                                            right:
-                                                                                14,
-                                                                            bottom:
-                                                                                10,
-                                                                            top:
-                                                                                4,
-                                                                          ),
-                                                                          child:
-                                                                              Align(
-                                                                            alignment:
-                                                                                Alignment.centerLeft,
-                                                                            child:
-                                                                                _AssistantThinkingBubble(),
-                                                                          ),
-                                                                        ),
-                                                                    ],
-                                                                  );
-                                                                },
-                                                                textMessageBuilder:
-                                                                    (
-                                                                  BuildContext
-                                                                      context,
-                                                                  TextMessage
-                                                                      message,
-                                                                  int index, {
-                                                                  required bool
-                                                                      isSentByMe,
-                                                                  MessageGroupStatus?
-                                                                      groupStatus,
-                                                                }) {
-                                                                  // SYSTEM / ACTION MESSAGE
-                                                                  if (message
-                                                                          .authorId ==
-                                                                      'system') {
-                                                                    return Padding(
-                                                                      padding: const EdgeInsets
-                                                                          .symmetric(
-                                                                          vertical:
-                                                                              10),
-                                                                      child:
-                                                                          Center(
-                                                                        child:
-                                                                            Text(
-                                                                          message
-                                                                              .text,
-                                                                          textAlign:
-                                                                              TextAlign.center,
-                                                                          style:
-                                                                              const TextStyle(
-                                                                            fontFamily:
-                                                                                'Pretendard',
-                                                                            fontSize:
-                                                                                13,
-                                                                            fontWeight:
-                                                                                FontWeight.w600,
-                                                                            letterSpacing:
-                                                                                0.4,
-                                                                            color:
-                                                                                Colors.white70,
-                                                                          ),
-                                                                        ),
-                                                                      ),
-                                                                    );
-                                                                  }
-                                                                  return Align(
-                                                                    alignment: isSentByMe
-                                                                        ? Alignment
-                                                                            .centerRight
-                                                                        : Alignment
-                                                                            .centerLeft,
-                                                                    child:
-                                                                        Container(
-                                                                      margin: const EdgeInsets
-                                                                          .symmetric(
-                                                                        horizontal:
-                                                                            12,
-                                                                        vertical:
-                                                                            4,
-                                                                      ),
-                                                                      padding:
-                                                                          const EdgeInsets
-                                                                              .symmetric(
-                                                                        horizontal:
-                                                                            14,
-                                                                        vertical:
-                                                                            10,
-                                                                      ),
-                                                                      decoration:
-                                                                          BoxDecoration(
-                                                                        color: isSentByMe
-                                                                            ? const Color.fromARGB(
-                                                                                180,
-                                                                                56,
-                                                                                98,
-                                                                                161,
-                                                                              ) // user bubble
-                                                                            : Color.fromARGB(
-                                                                                100,
-                                                                                170,
-                                                                                170,
-                                                                                170,
-                                                                              ), // assistant bubble
-                                                                        borderRadius:
-                                                                            BorderRadius.circular(14),
-                                                                      ),
-                                                                      child: isSentByMe
-                                                                          ? Text(
-                                                                              message.text,
-                                                                              style: const TextStyle(
-                                                                                fontFamily: 'Pretendard',
-                                                                                fontSize: 15,
-                                                                                height: 1.2,
-                                                                                color: Colors.white,
-                                                                              ),
-                                                                            )
-                                                                          : RollingText(
-                                                                              text: message.text,
-                                                                              style: const TextStyle(
-                                                                                fontFamily: 'Pretendard',
-                                                                                fontSize: 15,
-                                                                                height: 1.2,
-                                                                                color: Colors.white,
-                                                                              ),
-                                                                            ),
-                                                                    ),
-                                                                  );
-                                                                },
-                                                              ),
-                                                              theme:
-                                                                  const ChatTheme(
-                                                                colors:
-                                                                    ChatColors(
-                                                                  // User message bubble (you)
-                                                                  primary: Color
-                                                                      .fromARGB(
-                                                                          180,
-                                                                          56,
-                                                                          98,
-                                                                          161),
-                                                                  onPrimary:
-                                                                      Colors
-                                                                          .white,
-                                                                  // Message list surface layers (kill them)
-                                                                  surface: Colors
-                                                                      .transparent,
-                                                                  onSurface:
-                                                                      Colors
-                                                                          .white,
-                                                                  surfaceContainer:
-                                                                      Colors
-                                                                          .transparent, //Color.fromARGB(100, 170, 170, 170),
-                                                                  surfaceContainerLow:
-                                                                      Colors
-                                                                          .transparent,
-                                                                  surfaceContainerHigh:
-                                                                      Colors
-                                                                          .transparent,
-                                                                ),
-                                                                typography:
-                                                                    ChatTypography(
-                                                                  bodyLarge:
-                                                                      TextStyle(
-                                                                    fontFamily:
-                                                                        'Pretendard',
-                                                                    fontSize:
-                                                                        15,
-                                                                    height:
-                                                                        1.35,
-                                                                    color: Colors
-                                                                        .white,
-                                                                  ),
-                                                                  bodyMedium:
-                                                                      TextStyle(
-                                                                    fontFamily:
-                                                                        'Pretendard',
-                                                                    fontSize:
-                                                                        14,
-                                                                    height:
-                                                                        1.35,
-                                                                    color: Colors
-                                                                        .white70,
-                                                                  ),
-                                                                  bodySmall:
-                                                                      TextStyle(
-                                                                    fontFamily:
-                                                                        'Pretendard',
-                                                                    fontSize:
-                                                                        13,
-                                                                    height: 1.3,
-                                                                    color: Colors
-                                                                        .white60,
-                                                                  ),
-                                                                  labelLarge:
-                                                                      TextStyle(
-                                                                    fontFamily:
-                                                                        'Pretendard',
-                                                                    fontSize:
-                                                                        13,
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .w500,
-                                                                    color: Colors
-                                                                        .white70,
-                                                                  ),
-                                                                  labelMedium:
-                                                                      TextStyle(
-                                                                    fontFamily:
-                                                                        'Pretendard',
-                                                                    fontSize:
-                                                                        12,
-                                                                    color: Colors
-                                                                        .white60,
-                                                                  ),
-                                                                  labelSmall:
-                                                                      TextStyle(
-                                                                    fontFamily:
-                                                                        'Pretendard',
-                                                                    fontSize:
-                                                                        11,
-                                                                    color: Colors
-                                                                        .white54,
-                                                                  ),
-                                                                ),
+                                                                              Chat(
+                                                                            chatController:
+                                                                                _chatController,
+                                                                            currentUserId:
+                                                                                'user',
+                                                                            onMessageSend:
+                                                                                null,
+                                                                            timeFormat:
+                                                                                null,
+                                                                            onMessageLongPress:
+                                                                                (
+                                                                              BuildContext context,
+                                                                              Message message, {
+                                                                              required LongPressStartDetails details,
+                                                                              required int index,
+                                                                            }) async {
+                                                                              if (message is TextMessage) {
+                                                                                await Clipboard.setData(
+                                                                                  ClipboardData(text: message.text),
+                                                                                );
 
-                                                                // Message bubble shape — keep subtle, not “chat app rounded”
-                                                                shape: BorderRadius
-                                                                    .all(Radius
-                                                                        .circular(
-                                                                            14)),
-                                                              ),
-                                                              resolveUser:
-                                                                  (UserID
-                                                                      id) async {
-                                                                if (id ==
-                                                                    'user') {
-                                                                  return const User(
-                                                                      id:
-                                                                          'user',
-                                                                      name:
-                                                                          'You');
-                                                                }
-                                                                return const User(
-                                                                    id:
-                                                                        'assistant',
-                                                                    name:
-                                                                        'MixAssistant');
+                                                                                await AppHaptics.impact(
+                                                                                  AppHapticImpact.light,
+                                                                                );
+
+                                                                                _showCopiedChatMessageFeedback(
+                                                                                  message.id,
+                                                                                );
+                                                                              }
+                                                                            },
+                                                                            builders:
+                                                                                Builders(
+                                                                              composerBuilder: (_) => const SizedBox.shrink(),
+                                                                              emptyChatListBuilder: (_) => Center(
+                                                                                child: Padding(
+                                                                                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                                                                                  child: Text(
+                                                                                    'Chat context now stays with this project.\nStart a conversation and it will still be here when you reopen it.',
+                                                                                    textAlign: TextAlign.center,
+                                                                                    style: const TextStyle(
+                                                                                      fontFamily: 'Pretendard',
+                                                                                      fontSize: 14,
+                                                                                      height: 1.45,
+                                                                                      color: Colors.white60,
+                                                                                    ),
+                                                                                  ),
+                                                                                ),
+                                                                              ),
+                                                                              chatAnimatedListBuilder: (context, itemBuilder) {
+                                                                                return Column(
+                                                                                  children: [
+                                                                                    Expanded(
+                                                                                      child: MediaQuery.removePadding(
+                                                                                        context: context,
+                                                                                        removeBottom: true,
+                                                                                        child: ChatAnimatedList(
+                                                                                          itemBuilder: itemBuilder,
+                                                                                          scrollController: _chatHistoryScrollController,
+                                                                                          shouldScrollToEndWhenSendingMessage: false,
+                                                                                          shouldScrollToEndWhenAtBottom: false,
+                                                                                        ),
+                                                                                      ),
+                                                                                    ),
+                                                                                    if (_isThinking)
+                                                                                      Padding(
+                                                                                        padding: const EdgeInsets.only(
+                                                                                          left: 14,
+                                                                                          right: 14,
+                                                                                          bottom: 10,
+                                                                                          top: 4,
+                                                                                        ),
+                                                                                        child: Align(
+                                                                                          alignment: Alignment.centerLeft,
+                                                                                          child: _AssistantThinkingBubble(),
+                                                                                        ),
+                                                                                      ),
+                                                                                  ],
+                                                                                );
+                                                                              },
+                                                                              scrollToBottomBuilder: (
+                                                                                BuildContext context,
+                                                                                Animation<double> animation,
+                                                                                VoidCallback onPressed,
+                                                                              ) {
+                                                                                return Positioned(
+                                                                                  left: 0,
+                                                                                  right: 0,
+                                                                                  bottom: 16,
+                                                                                  child: IgnorePointer(
+                                                                                    ignoring: animation.value <= 0.01,
+                                                                                    child: Center(
+                                                                                      child: ScaleTransition(
+                                                                                        scale: animation,
+                                                                                        child: FloatingActionButton(
+                                                                                          heroTag: null,
+                                                                                          mini: true,
+                                                                                          backgroundColor: const Color.fromARGB(210, 34, 38, 48),
+                                                                                          foregroundColor: Colors.white,
+                                                                                          onPressed: onPressed,
+                                                                                          child: const Icon(Icons.keyboard_arrow_down_rounded),
+                                                                                        ),
+                                                                                      ),
+                                                                                    ),
+                                                                                  ),
+                                                                                );
+                                                                              },
+                                                                              textMessageBuilder: (
+                                                                                BuildContext context,
+                                                                                TextMessage message,
+                                                                                int index, {
+                                                                                required bool isSentByMe,
+                                                                                MessageGroupStatus? groupStatus,
+                                                                              }) {
+                                                                                if (message.authorId == 'system') {
+                                                                                  return Padding(
+                                                                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                                                                    child: Center(
+                                                                                      child: Text(
+                                                                                        message.text,
+                                                                                        textAlign: TextAlign.center,
+                                                                                        style: const TextStyle(
+                                                                                          fontFamily: 'Pretendard',
+                                                                                          fontSize: 13,
+                                                                                          fontWeight: FontWeight.w600,
+                                                                                          letterSpacing: 0.4,
+                                                                                          color: Colors.white70,
+                                                                                        ),
+                                                                                      ),
+                                                                                    ),
+                                                                                  );
+                                                                                }
+                                                                                final isCopied = _copiedChatMessageId == message.id;
+                                                                                final bubbleColor = isSentByMe
+                                                                                    ? const Color.fromARGB(
+                                                                                        180,
+                                                                                        56,
+                                                                                        98,
+                                                                                        161,
+                                                                                      )
+                                                                                    : const Color.fromARGB(
+                                                                                        100,
+                                                                                        170,
+                                                                                        170,
+                                                                                        170,
+                                                                                      );
+                                                                                return Align(
+                                                                                  alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
+                                                                                  child: Column(
+                                                                                    crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                                                                    children: [
+                                                                                      AnimatedSwitcher(
+                                                                                        duration: const Duration(milliseconds: 120),
+                                                                                        child: isCopied
+                                                                                            ? Padding(
+                                                                                                key: const ValueKey('copied_badge'),
+                                                                                                padding: const EdgeInsets.symmetric(
+                                                                                                  horizontal: 14,
+                                                                                                  vertical: 2,
+                                                                                                ),
+                                                                                                child: Container(
+                                                                                                  padding: const EdgeInsets.symmetric(
+                                                                                                    horizontal: 8,
+                                                                                                    vertical: 4,
+                                                                                                  ),
+                                                                                                  decoration: BoxDecoration(
+                                                                                                    color: const Color(0xFF1F8F63),
+                                                                                                    borderRadius: BorderRadius.circular(999),
+                                                                                                  ),
+                                                                                                  child: const Row(
+                                                                                                    mainAxisSize: MainAxisSize.min,
+                                                                                                    children: [
+                                                                                                      Icon(
+                                                                                                        Icons.check_rounded,
+                                                                                                        size: 13,
+                                                                                                        color: Colors.white,
+                                                                                                      ),
+                                                                                                      SizedBox(width: 4),
+                                                                                                      Text(
+                                                                                                        'Copied',
+                                                                                                        style: TextStyle(
+                                                                                                          fontFamily: 'Pretendard',
+                                                                                                          fontSize: 11,
+                                                                                                          fontWeight: FontWeight.w700,
+                                                                                                          color: Colors.white,
+                                                                                                        ),
+                                                                                                      ),
+                                                                                                    ],
+                                                                                                  ),
+                                                                                                ),
+                                                                                              )
+                                                                                            : const SizedBox.shrink(),
+                                                                                      ),
+                                                                                      AnimatedContainer(
+                                                                                        duration: const Duration(milliseconds: 140),
+                                                                                        margin: const EdgeInsets.symmetric(
+                                                                                          horizontal: 12,
+                                                                                          vertical: 4,
+                                                                                        ),
+                                                                                        padding: const EdgeInsets.symmetric(
+                                                                                          horizontal: 14,
+                                                                                          vertical: 10,
+                                                                                        ),
+                                                                                        decoration: BoxDecoration(
+                                                                                          color: bubbleColor,
+                                                                                          borderRadius: BorderRadius.circular(14),
+                                                                                          border: Border.all(
+                                                                                            color: isCopied ? const Color(0xFF6FE1AA) : Colors.transparent,
+                                                                                            width: 1.2,
+                                                                                          ),
+                                                                                          boxShadow: isCopied
+                                                                                              ? const [
+                                                                                                  BoxShadow(
+                                                                                                    color: Color(0x336FE1AA),
+                                                                                                    blurRadius: 12,
+                                                                                                    offset: Offset(0, 2),
+                                                                                                  ),
+                                                                                                ]
+                                                                                              : null,
+                                                                                        ),
+                                                                                        child: Text(
+                                                                                          message.text,
+                                                                                          style: const TextStyle(
+                                                                                            fontFamily: 'Pretendard',
+                                                                                            fontSize: 15,
+                                                                                            height: 1.2,
+                                                                                            color: Colors.white,
+                                                                                          ),
+                                                                                        ),
+                                                                                      ),
+                                                                                    ],
+                                                                                  ),
+                                                                                );
+                                                                              },
+                                                                            ),
+                                                                            theme:
+                                                                                const ChatTheme(
+                                                                              colors: ChatColors(
+                                                                                // User message bubble (you)
+                                                                                primary: Color.fromARGB(180, 56, 98, 161),
+                                                                                onPrimary: Colors.white,
+                                                                                // Message list surface layers (kill them)
+                                                                                surface: Colors.transparent,
+                                                                                onSurface: Colors.white,
+                                                                                surfaceContainer: Colors.transparent, //Color.fromARGB(100, 170, 170, 170),
+                                                                                surfaceContainerLow: Colors.transparent,
+                                                                                surfaceContainerHigh: Colors.transparent,
+                                                                              ),
+                                                                              typography: ChatTypography(
+                                                                                bodyLarge: TextStyle(
+                                                                                  fontFamily: 'Pretendard',
+                                                                                  fontSize: 15,
+                                                                                  height: 1.35,
+                                                                                  color: Colors.white,
+                                                                                ),
+                                                                                bodyMedium: TextStyle(
+                                                                                  fontFamily: 'Pretendard',
+                                                                                  fontSize: 14,
+                                                                                  height: 1.35,
+                                                                                  color: Colors.white70,
+                                                                                ),
+                                                                                bodySmall: TextStyle(
+                                                                                  fontFamily: 'Pretendard',
+                                                                                  fontSize: 13,
+                                                                                  height: 1.3,
+                                                                                  color: Colors.white60,
+                                                                                ),
+                                                                                labelLarge: TextStyle(
+                                                                                  fontFamily: 'Pretendard',
+                                                                                  fontSize: 13,
+                                                                                  fontWeight: FontWeight.w500,
+                                                                                  color: Colors.white70,
+                                                                                ),
+                                                                                labelMedium: TextStyle(
+                                                                                  fontFamily: 'Pretendard',
+                                                                                  fontSize: 12,
+                                                                                  color: Colors.white60,
+                                                                                ),
+                                                                                labelSmall: TextStyle(
+                                                                                  fontFamily: 'Pretendard',
+                                                                                  fontSize: 11,
+                                                                                  color: Colors.white54,
+                                                                                ),
+                                                                              ),
+
+                                                                              // Message bubble shape — keep subtle, not “chat app rounded”
+                                                                              shape: BorderRadius.all(Radius.circular(14)),
+                                                                            ),
+                                                                            resolveUser:
+                                                                                (UserID id) async {
+                                                                              if (id == 'user') {
+                                                                                return const User(id: 'user', name: 'You');
+                                                                              }
+                                                                              return const User(id: 'assistant', name: 'MixAssistant');
+                                                                            },
+                                                                          ),
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                );
                                                               },
                                                             ),
                                                           ),
@@ -22165,194 +26419,550 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       ),
                                                     ),
                                                   ),
-                                                ),
+                                                )
+                                              : const SizedBox(),
+                                        ),
+                                      ),
+                                    ),
+                                    if (_chatExpanded &&
+                                        !_feedbackSubmissionInFlight)
+                                      Positioned(
+                                        right: 24,
+                                        bottom: _kChatBarStackHeight +
+                                            chatLift +
+                                            _kChatHistoryHeight -
+                                            20,
+                                        child: DecoratedBox(
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: const Color(0xFF152744)
+                                                .withValues(alpha: 0.96),
+                                            border: Border.all(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.12),
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black
+                                                    .withValues(alpha: 0.28),
+                                                blurRadius: 16,
+                                                offset: const Offset(0, 8),
                                               ),
-                                            )
-                                          : const SizedBox(),
-                                    ),
-                                  ),
+                                            ],
+                                          ),
+                                          child: IconButton(
+                                            tooltip:
+                                                'Send feedback or bug report',
+                                            onPressed: _openDawFeedbackComposer,
+                                            icon: const Icon(
+                                              Icons.forum_outlined,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              },
+                            ),
+                            if (_showPianoRoll &&
+                                _activeMidiClipEngineId != null)
+                              ValueListenableBuilder<Duration>(
+                                valueListenable: _transportClock,
+                                builder: (_, clock, __) => Builder(
+                                  builder: (panelContext) {
+                                    final idx = _clipIndexForEngineId(
+                                        _activeMidiClipEngineId!);
+                                    if (idx < 0 || idx >= _audioTracks.length) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    final clip = _audioTracks[idx];
+                                    if (!clip.isMidi) {
+                                      return const SizedBox.shrink();
+                                    }
+
+                                    final media = MediaQuery.of(panelContext);
+                                    final screenH = media.size.height;
+                                    final safeTopInset = media.padding.top;
+                                    final fullscreenTopGap = math.max(
+                                      152.0,
+                                      safeTopInset +
+                                          _kTransportBarHeight +
+                                          44.0,
+                                    );
+                                    final maxFullscreenHeight = math.max(
+                                      280.0,
+                                      screenH -
+                                          _kChatBarStackHeight -
+                                          fullscreenTopGap,
+                                    );
+                                    final targetHeight = _pianoRollFullscreen
+                                        ? maxFullscreenHeight
+                                        : (screenH * 0.42);
+                                    final panelHeight =
+                                        math.max(260.0, targetHeight);
+
+                                    return AnimatedPositioned(
+                                      duration:
+                                          const Duration(milliseconds: 190),
+                                      curve: Curves.easeOutCubic,
+                                      left: 0,
+                                      right: 0,
+                                      bottom: _kChatBarStackHeight,
+                                      height: panelHeight,
+                                      child: Halo(
+                                        highlighter: _mixHighlighter,
+                                        haloKey: const HaloKey(
+                                            'tutorial:piano_roll'),
+                                        borderRadius: BorderRadius.circular(18),
+                                        child: PianoRollEditor(
+                                          clip: clip,
+                                          availableInstruments:
+                                              _activeInstrumentCatalog(),
+                                          bpm: _tempo,
+                                          projectPlayheadMs:
+                                              clock.inMilliseconds.toDouble(),
+                                          isPlaying: _isPlaying,
+                                          beatsPerBar: 4,
+                                          magnetEnabled: _timelineMagnetEnabled,
+                                          quantizeDivisionsPerBar:
+                                              _timelineQuantizeDivisionsPerBar,
+                                          fullscreen: _pianoRollFullscreen,
+                                          onFullscreenChanged: (v) {
+                                            setState(
+                                                () => _pianoRollFullscreen = v);
+                                          },
+                                          onClose: _closeMidiClipEditor,
+                                          onCommit:
+                                              _commitMidiClipFromPianoRoll,
+                                          onPreviewNote: _previewPianoRollNote,
+                                        ),
+                                      ),
+                                    );
+                                  },
                                 ),
-                              ],
-                            );
-                          },
-                        ),
-                        if (_showPianoRoll && _activeMidiClipEngineId != null)
-                          ValueListenableBuilder<Duration>(
-                            valueListenable: _transportClock,
-                            builder: (_, clock, __) => Builder(
-                              builder: (panelContext) {
-                                final idx = _clipIndexForEngineId(
-                                    _activeMidiClipEngineId!);
-                                if (idx < 0 || idx >= _audioTracks.length) {
-                                  return const SizedBox.shrink();
-                                }
-                                final clip = _audioTracks[idx];
-                                if (!clip.isMidi) {
-                                  return const SizedBox.shrink();
-                                }
-
-                                final media = MediaQuery.of(panelContext);
-                                final screenH = media.size.height;
-                                final safeTopInset = media.padding.top;
-                                final fullscreenTopGap = math.max(
-                                  152.0,
-                                  safeTopInset + _kTransportBarHeight + 44.0,
-                                );
-                                final maxFullscreenHeight = math.max(
-                                  280.0,
-                                  screenH -
-                                      _kChatBarStackHeight -
-                                      fullscreenTopGap,
-                                );
-                                final targetHeight = _pianoRollFullscreen
-                                    ? maxFullscreenHeight
-                                    : (screenH * 0.42);
-                                final panelHeight =
-                                    math.max(260.0, targetHeight);
-
-                                return AnimatedPositioned(
-                                  duration: const Duration(milliseconds: 190),
-                                  curve: Curves.easeOutCubic,
-                                  left: 0,
-                                  right: 0,
-                                  bottom: _kChatBarStackHeight,
-                                  height: panelHeight,
-                                  child: Halo(
-                                    highlighter: _mixHighlighter,
-                                    haloKey:
-                                        const HaloKey('tutorial:piano_roll'),
-                                    borderRadius: BorderRadius.circular(18),
-                                    child: PianoRollEditor(
-                                      clip: clip,
-                                      availableInstruments:
-                                          _activeInstrumentCatalog(),
-                                      bpm: _tempo,
-                                      projectPlayheadMs:
-                                          clock.inMilliseconds.toDouble(),
-                                      isPlaying: _isPlaying,
-                                      beatsPerBar: 4,
-                                      magnetEnabled: _timelineMagnetEnabled,
-                                      quantizeDivisionsPerBar:
-                                          _timelineQuantizeDivisionsPerBar,
-                                      fullscreen: _pianoRollFullscreen,
-                                      onFullscreenChanged: (v) {
-                                        setState(
-                                            () => _pianoRollFullscreen = v);
-                                      },
-                                      onClose: _closeMidiClipEditor,
-                                      onCommit: _commitMidiClipFromPianoRoll,
-                                      onPreviewNote: _previewPianoRollNote,
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        if (_showTempoRollDown)
-                          Positioned.fill(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () =>
-                                  setState(() => _showTempoRollDown = false),
-                              child: Container(color: Colors.transparent),
-                            ),
-                          ),
-                        _buildTempoRollDownPanel(),
-                        // tap-away closing
-                        if (_showMasterRack)
-                          Positioned.fill(
-                            child: GestureDetector(
-                              onTap: () {
-                                if (!_isMasterPopupOpen) return;
-                                setState(() {
-                                  _isMasterPopupOpen = false;
-                                  _showMasterRack = false;
-                                });
-                              },
-                              child: Container(color: Colors.transparent),
-                            ),
-                          ),
-                        _buildMasterPopup(),
-                      ],
-                    );
-                  },
-                ),
-              ),
-              bottomNavigationBar: _buildBottomChatAndTransport(
-                includeChatBar: false,
-                includeProducerCapture: false,
-                includeTransport: true,
-              ),
-              // floatingActionButton: Padding(
-              //   padding: const EdgeInsets.only(bottom: 0.0, right: 0.0), // above bottom nav
-              //   child: FloatingActionButton(
-              //     onPressed: () => _showAddMediaOptions(),
-              //     backgroundColor: const Color.fromARGB(255, 212, 212, 212),
-              //     child: const Icon(Icons.add, color: Colors.black),
-              //     shape: const CircleBorder(),
-              //     elevation: 4,
-              //   ),
-              // ),
-            ),
-            if (_isSyncing)
-              Positioned.fill(
-                child: Container(
-                  color: Colors.black.withOpacity(0.75),
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const DotsLoader(),
-                        const SizedBox(height: 16),
-                        SizedBox(
-                          width: 250,
-                          child: LinearProgressIndicator(
-                            value: _syncProgress,
-                            backgroundColor: Colors.white30,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.lightBlueAccent),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${(_syncProgress * 100).toStringAsFixed(1)}%',
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                      ],
+                              ),
+                            if (_showTempoRollDown)
+                              Positioned.fill(
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () => setState(
+                                      () => _showTempoRollDown = false),
+                                  child: Container(color: Colors.transparent),
+                                ),
+                              ),
+                            _buildTempoRollDownPanel(),
+                            // tap-away closing
+                            if (_showMasterRack)
+                              Positioned.fill(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    if (!_isMasterPopupOpen) return;
+                                    setState(() {
+                                      _isMasterPopupOpen = false;
+                                      _showMasterRack = false;
+                                    });
+                                  },
+                                  child: Container(color: Colors.transparent),
+                                ),
+                              ),
+                            _buildMasterPopup(),
+                          ],
+                        );
+                      },
                     ),
                   ),
+                  bottomNavigationBar: _buildBottomChatAndTransport(
+                    includeChatBar: false,
+                    includeProducerCapture: false,
+                    includeTransport: true,
+                  ),
+                  // floatingActionButton: Padding(
+                  //   padding: const EdgeInsets.only(bottom: 0.0, right: 0.0), // above bottom nav
+                  //   child: FloatingActionButton(
+                  //     onPressed: () => _showAddMediaOptions(),
+                  //     backgroundColor: const Color.fromARGB(255, 212, 212, 212),
+                  //     child: const Icon(Icons.add, color: Colors.black),
+                  //     shape: const CircleBorder(),
+                  //     elevation: 4,
+                  //   ),
+                  // ),
                 ),
-              ),
-            if (_isLoadingAudio || _isLoadingNextScreen)
-              Positioned.fill(
-                child: Container(
-                  color: Colors.black.withOpacity(0.5),
-                  child: const Center(child: CircularProgressIndicator()),
-                ),
-              ),
-            _buildProgressIndicator(),
-            if (_chatExpanded)
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 0,
-                bottom: _kChatHistoryHeight +
-                    _kChatBarStackHeight +
-                    _kTransportBarHeight,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: () {
-                    setState(() {
-                      _chatExpanded = false;
-                      _chatInputActive = false;
-                      _chatFocusNode.unfocus();
-                    });
-                  },
-                ),
-              ),
-          ],
+                if (_isSyncing)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black.withOpacity(0.75),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const DotsLoader(),
+                            const SizedBox(height: 16),
+                            SizedBox(
+                              width: 250,
+                              child: LinearProgressIndicator(
+                                value: _syncProgress,
+                                backgroundColor: Colors.white30,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.lightBlueAccent),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '${(_syncProgress * 100).toStringAsFixed(1)}%',
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                if (_isLoadingAudio || _isLoadingNextScreen)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black.withOpacity(0.5),
+                      child: const Center(child: CircularProgressIndicator()),
+                    ),
+                  ),
+                _buildProgressIndicator(),
+                if (_chatExpanded)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    bottom: _kChatHistoryHeight +
+                        _kChatBarStackHeight +
+                        _kTransportBarHeight,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: () {
+                        setState(() {
+                          _chatExpanded = false;
+                          _chatInputActive = false;
+                          _chatFocusNode.unfocus();
+                        });
+                      },
+                    ),
+                  ),
+                if (_showDawOnboarding) _buildDawOnboardingOverlay(),
+              ],
+            ),
+          ),
         );
       },
+    );
+  }
+
+  Alignment _dawOnboardingCardAlignment(_DawTutorialCardPlacement placement) {
+    switch (placement) {
+      case _DawTutorialCardPlacement.topLeft:
+        return Alignment.topLeft;
+      case _DawTutorialCardPlacement.topCenter:
+        return Alignment.topCenter;
+      case _DawTutorialCardPlacement.topRight:
+        return Alignment.topRight;
+      case _DawTutorialCardPlacement.centerLeft:
+        return Alignment.centerLeft;
+      case _DawTutorialCardPlacement.centerRight:
+        return Alignment.centerRight;
+      case _DawTutorialCardPlacement.bottomLeft:
+        return Alignment.bottomLeft;
+      case _DawTutorialCardPlacement.bottomCenter:
+        return Alignment.bottomCenter;
+      case _DawTutorialCardPlacement.bottomRight:
+        return Alignment.bottomRight;
+    }
+  }
+
+  EdgeInsets _dawOnboardingCardPadding(_DawTutorialCardPlacement placement) {
+    switch (placement) {
+      case _DawTutorialCardPlacement.topLeft:
+      case _DawTutorialCardPlacement.topCenter:
+      case _DawTutorialCardPlacement.topRight:
+        return const EdgeInsets.fromLTRB(16, 76, 16, 16);
+      case _DawTutorialCardPlacement.centerLeft:
+      case _DawTutorialCardPlacement.centerRight:
+        return const EdgeInsets.fromLTRB(16, 110, 16, 150);
+      case _DawTutorialCardPlacement.bottomLeft:
+      case _DawTutorialCardPlacement.bottomCenter:
+      case _DawTutorialCardPlacement.bottomRight:
+        return const EdgeInsets.fromLTRB(16, 90, 16, 156);
+    }
+  }
+
+  Widget _buildDawOnboardingOverlay() {
+    final theme = Theme.of(context);
+    final step = _currentDawOnboardingStep;
+    final stepNumber = _safeDawOnboardingStepIndex + 1;
+    final stepCount = _kDawTutorialSequence.length;
+    final showPrimaryButton = step.mode != _DawTutorialAdvanceMode.interaction;
+    final cardAlignment = _dawOnboardingCardAlignment(step.placement);
+    final cardPadding =
+        step.cardPadding ?? _dawOnboardingCardPadding(step.placement);
+    final skipButton = TextButton.icon(
+      onPressed: () {
+        unawaited(_finishDawOnboarding());
+      },
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.white,
+        backgroundColor: Colors.white.withValues(alpha: 0.06),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 6,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(999),
+          side: BorderSide(
+            color: Colors.white.withValues(alpha: 0.08),
+          ),
+        ),
+      ),
+      icon: const Icon(Icons.close_rounded, size: 16),
+      label: const Text(
+        'Skip',
+        style: TextStyle(fontWeight: FontWeight.w700),
+      ),
+    );
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          IgnorePointer(
+            child: Container(color: Colors.black.withValues(alpha: 0.18)),
+          ),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final maxWidth = math.min(
+                  step.cardMaxWidth ?? 360.0,
+                  constraints.maxWidth,
+                );
+                return AnimatedAlign(
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.easeOutCubic,
+                  alignment: cardAlignment,
+                  child: AnimatedPadding(
+                    duration: const Duration(milliseconds: 150),
+                    curve: Curves.easeOutCubic,
+                    padding: cardPadding,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      curve: Curves.easeOutCubic,
+                      constraints: BoxConstraints(maxWidth: maxWidth),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: <Color>[
+                                  const Color(0xFF10203A)
+                                      .withValues(alpha: 0.96),
+                                  const Color(0xFF0B1527)
+                                      .withValues(alpha: 0.96),
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.08),
+                              ),
+                              boxShadow: <BoxShadow>[
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.22),
+                                  blurRadius: 22,
+                                  offset: const Offset(0, 12),
+                                ),
+                              ],
+                            ),
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                            child: AnimatedSize(
+                              duration: const Duration(milliseconds: 150),
+                              curve: Curves.easeOutCubic,
+                              alignment: Alignment.topCenter,
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 120),
+                                switchInCurve: Curves.easeOut,
+                                switchOutCurve: Curves.easeIn,
+                                transitionBuilder: (child, animation) {
+                                  final fade = CurvedAnimation(
+                                    parent: animation,
+                                    curve: Curves.easeOut,
+                                  );
+                                  final slide = Tween<Offset>(
+                                    begin: const Offset(0, 0.02),
+                                    end: Offset.zero,
+                                  ).animate(fade);
+                                  return FadeTransition(
+                                    opacity: fade,
+                                    child: SlideTransition(
+                                      position: slide,
+                                      child: child,
+                                    ),
+                                  );
+                                },
+                                child: Column(
+                                  key: ValueKey<_DawTutorialStepId>(step.id),
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 6,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: step.accent
+                                                .withValues(alpha: 0.18),
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                          ),
+                                          child: Text(
+                                            'Step $stepNumber of $stepCount',
+                                            style: theme.textTheme.labelMedium
+                                                ?.copyWith(
+                                              color: step.accent,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        skipButton,
+                                      ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      step.title,
+                                      style:
+                                          theme.textTheme.titleLarge?.copyWith(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        height: 1.1,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      step.body,
+                                      style:
+                                          theme.textTheme.bodyMedium?.copyWith(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.82),
+                                        height: 1.38,
+                                      ),
+                                    ),
+                                    if (step.helperText != null) ...[
+                                      const SizedBox(height: 12),
+                                      Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 10,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white
+                                              .withValues(alpha: 0.06),
+                                          borderRadius:
+                                              BorderRadius.circular(14),
+                                          border: Border.all(
+                                            color: Colors.white
+                                                .withValues(alpha: 0.08),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            if (step.id ==
+                                                _DawTutorialStepId.chatWaiting)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                    right: 10),
+                                                child: SizedBox(
+                                                  width: 14,
+                                                  height: 14,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                    valueColor:
+                                                        AlwaysStoppedAnimation<
+                                                            Color>(
+                                                      step.accent,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            Expanded(
+                                              child: Text(
+                                                step.helperText!,
+                                                style: theme.textTheme.bodySmall
+                                                    ?.copyWith(
+                                                  color: Colors.white
+                                                      .withValues(alpha: 0.78),
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                    if (showPrimaryButton) ...[
+                                      const SizedBox(height: 16),
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: FilledButton(
+                                          onPressed: () {
+                                            if (step.mode ==
+                                                _DawTutorialAdvanceMode.done) {
+                                              unawaited(_finishDawOnboarding());
+                                              return;
+                                            }
+                                            _advanceDawOnboardingStep();
+                                          },
+                                          style: FilledButton.styleFrom(
+                                            backgroundColor: step.accent,
+                                            foregroundColor:
+                                                const Color(0xFF081220),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 18,
+                                              vertical: 11,
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            step.ctaLabel ??
+                                                (step.mode ==
+                                                        _DawTutorialAdvanceMode
+                                                            .done
+                                                    ? 'Done'
+                                                    : 'Next'),
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -22926,6 +27536,9 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
     super.initState();
     _cancelSignal = Completer();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      unawaited(
+        AnalyticsService.instance.trackScreen(AnalyticsScreenNames.export),
+      );
       await Future.delayed(const Duration(milliseconds: 400));
       _startExport();
     });
@@ -23026,20 +27639,125 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
 
 class ExportSuccessScreen extends StatelessWidget {
   final String filePath;
+  final String? savedFilePath;
+  final String? savedFileName;
   final bool isVideo;
 
   const ExportSuccessScreen(
-      {super.key, required this.filePath, required this.isVideo});
+      {super.key,
+      required this.filePath,
+      required this.isVideo,
+      this.savedFilePath,
+      this.savedFileName});
+
+  String _resolvedFileName() {
+    final explicit = savedFileName?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
+    }
+
+    final saved = savedFilePath?.trim();
+    if (saved != null && saved.isNotEmpty) {
+      return p.basename(saved);
+    }
+
+    return p.basename(filePath);
+  }
+
+  String _openSavedLabel(BuildContext context) {
+    if (!kIsWeb && (Platform.isIOS || Platform.isAndroid)) {
+      return L10n.translate(context, 'Open in Files');
+    }
+    return L10n.translate(context, 'Open saved file');
+  }
+
+  bool _isUriLikePath(String path) {
+    final trimmed = path.trim();
+    if (trimmed.isEmpty) return false;
+    return trimmed.contains('://');
+  }
+
+  String _normalizedCandidatePath(String path) {
+    final trimmed = path.trim();
+    if (trimmed.isEmpty) return trimmed;
+    if (!_isUriLikePath(trimmed)) return trimmed;
+
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null) return trimmed;
+    if (uri.scheme == 'file') {
+      return uri.toFilePath();
+    }
+    return trimmed;
+  }
+
+  String _resolvedActionPath() {
+    final saved = savedFilePath?.trim();
+    if (saved != null && saved.isNotEmpty) {
+      return _normalizedCandidatePath(saved);
+    }
+    return _normalizedCandidatePath(filePath);
+  }
+
+  String _resolvedPreviewPath() {
+    final saved = savedFilePath?.trim();
+    if (saved == null || saved.isEmpty) {
+      return filePath;
+    }
+    final normalizedSaved = _normalizedCandidatePath(saved);
+    if (!_isUriLikePath(normalizedSaved) &&
+        File(normalizedSaved).existsSync()) {
+      return normalizedSaved;
+    }
+    return filePath;
+  }
 
   Future<void> _shareFile(BuildContext context) async {
     try {
-      await Share.shareXFiles(
-          [XFile(filePath)]); // doesn't work on android (only iOS)
+      await Share.shareXFiles([
+        XFile(
+          _resolvedActionPath(),
+          name: _resolvedFileName(),
+        )
+      ]);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to share.')), // ${e.toString()}')),
       );
     }
+  }
+
+  Future<void> _openSavedFile(BuildContext context) async {
+    final candidates = <String>[
+      if ((savedFilePath ?? '').trim().isNotEmpty)
+        _normalizedCandidatePath(savedFilePath!),
+      _normalizedCandidatePath(filePath),
+    ];
+
+    for (final candidate in candidates) {
+      try {
+        if (_isUriLikePath(candidate)) {
+          final launched = await launchUrl(Uri.parse(candidate));
+          if (launched) {
+            return;
+          }
+        }
+        final result = await OpenFile.open(candidate);
+        if (result.type == ResultType.done) {
+          return;
+        }
+      } catch (_) {
+        // Try the next candidate before surfacing a failure.
+      }
+    }
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          L10n.translate(context, 'Could not open the saved export.'),
+        ),
+      ),
+    );
   }
 
   Future<void> _openSocialMedia(String deepLink, String fallbackUrl) async {
@@ -23056,7 +27774,11 @@ class ExportSuccessScreen extends StatelessWidget {
 
   void _showUploadComingSoon(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Platform upload coming soon')),
+      SnackBar(
+        content: Text(
+          L10n.translate(context, 'Platform upload coming soon'),
+        ),
+      ),
     );
   }
 
@@ -23069,24 +27791,29 @@ class ExportSuccessScreen extends StatelessWidget {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Upload to YouTube'),
+          title: Text(L10n.translate(context, 'Upload to YouTube')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: titleController,
-                decoration: InputDecoration(labelText: 'Title'),
+                decoration: InputDecoration(
+                  labelText: L10n.translate(context, 'Title'),
+                ),
               ),
               TextField(
                 controller: descController,
-                decoration: InputDecoration(labelText: 'Description'),
+                decoration: InputDecoration(
+                  labelText: L10n.translate(context, 'Description'),
+                ),
                 maxLines: 2,
               ),
             ],
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(context), child: Text('Cancel')),
+                onPressed: () => Navigator.pop(context),
+                child: Text(L10n.translate(context, 'Cancel'))),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.primary,
@@ -23099,7 +27826,7 @@ class ExportSuccessScreen extends StatelessWidget {
                   'description': descController.text
                 });
               },
-              child: Text('Upload'),
+              child: Text(L10n.translate(context, 'Upload')),
             ),
           ],
         );
@@ -23167,12 +27894,12 @@ class ExportSuccessScreen extends StatelessWidget {
       context: context,
       builder: (_) {
         return AlertDialog(
-          title: Text('🎉 Video Uploaded'),
+          title: Text(L10n.translate(context, 'Video Uploaded')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Your video is live!'),
-              SizedBox(height: 12),
+              Text(L10n.translate(context, 'Your video is live!')),
+              const SizedBox(height: 12),
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Image.file(qrImage,
@@ -23180,16 +27907,16 @@ class ExportSuccessScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               ElevatedButton.icon(
-                icon: Icon(Icons.download),
-                label: Text("Save Image"),
+                icon: const Icon(Icons.download),
+                label: Text(L10n.translate(context, 'Save Image')),
                 onPressed: () async {
                   final result = await ImageGallerySaver.saveFile(qrImage.path);
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                         content: Text(result['isSuccess'] == true
-                            ? '✅ Saved to gallery!'
-                            : '❌ Failed to save')),
+                            ? L10n.translate(context, 'Saved to gallery!')
+                            : L10n.translate(context, 'Failed to save'))),
                   );
                 },
               ),
@@ -23301,7 +28028,10 @@ class ExportSuccessScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 40),
                       ExportSuccessPreviewPlayer(
-                          filePath: filePath, isVideo: isVideo),
+                        filePath: _resolvedPreviewPath(),
+                        displayName: _resolvedFileName(),
+                        isVideo: isVideo,
+                      ),
                       const SizedBox(height: 16),
                       Row(
                         children: [
@@ -23326,10 +28056,10 @@ class ExportSuccessScreen extends StatelessWidget {
                           const SizedBox(width: 12),
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: () => _showUploadComingSoon(context),
-                              icon: const Icon(Icons.cloud_upload_rounded,
+                              onPressed: () => _openSavedFile(context),
+                              icon: const Icon(Icons.folder_open_rounded,
                                   size: 20),
-                              label: const Text('Upload to platform'),
+                              label: Text(_openSavedLabel(context)),
                               style: OutlinedButton.styleFrom(
                                 minimumSize: const Size.fromHeight(48),
                                 foregroundColor: Colors.white70,
@@ -23345,6 +28075,30 @@ class ExportSuccessScreen extends StatelessWidget {
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _showUploadComingSoon(context),
+                          icon:
+                              const Icon(Icons.cloud_upload_rounded, size: 20),
+                          label: Text(
+                            L10n.translate(context, 'Upload to platform'),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(46),
+                            foregroundColor: Colors.white70,
+                            side: const BorderSide(
+                              color: Color(0xFF4F5A73),
+                            ),
+                            textStyle:
+                                const TextStyle(fontWeight: FontWeight.w600),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 24),
                       // const SizedBox(height: 40),
@@ -23395,25 +28149,31 @@ class QRThumbnailScreen extends StatelessWidget {
     final file = File('${tempDir.path}/youtube_qr_thumb.png');
     await file.writeAsBytes(byteData!.buffer.asUint8List());
 
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Thumbnail saved to ${file.path}')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content:
+          Text('${L10n.translate(context, 'Thumbnail saved to ')}${file.path}'),
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('YouTube QR Thumbnail')),
+      appBar: AppBar(
+        title: Text(L10n.translate(context, 'YouTube QR Thumbnail')),
+      ),
       body: Center(
         child: Column(
           children: [
             const SizedBox(height: 20),
-            Text('Your video has been uploaded!'),
+            Text(L10n.translate(context, 'Your video has been uploaded!')),
             const SizedBox(height: 20),
             QrImageView(data: videoUrl, size: 200),
             const SizedBox(height: 20),
             ElevatedButton(
                 onPressed: () => _saveThumbnailWithQR(context),
-                child: const Text('Download QR Thumbnail')),
+                child: Text(
+                  L10n.translate(context, 'Download QR Thumbnail'),
+                )),
           ],
         ),
       ),
@@ -23468,9 +28228,13 @@ class DynamicRackContent extends StatefulWidget {
   // Pass the needed page builders/widgets here.
   final Widget volumePage;
   final Widget effectsPage;
+  final MixChangeHighlighter? tutorialHighlighter;
 
   const DynamicRackContent(
-      {required this.volumePage, required this.effectsPage, super.key});
+      {required this.volumePage,
+      required this.effectsPage,
+      this.tutorialHighlighter,
+      super.key});
 
   @override
   State<DynamicRackContent> createState() => _DynamicRackContentState();
@@ -23501,6 +28265,22 @@ class _DynamicRackContentState extends State<DynamicRackContent>
         _currentTabIndex = _tabController.index;
       });
     }
+  }
+
+  void showVolumeTab() {
+    if (_tabController.index == 0) return;
+    _tabController.animateTo(0, duration: Duration.zero, curve: Curves.linear);
+    setState(() {
+      _currentTabIndex = 0;
+    });
+  }
+
+  void showEffectsTab() {
+    if (_tabController.index == 1) return;
+    _tabController.animateTo(1, duration: Duration.zero, curve: Curves.linear);
+    setState(() {
+      _currentTabIndex = 1;
+    });
   }
 
   @override
@@ -23572,9 +28352,29 @@ class _DynamicRackContentState extends State<DynamicRackContent>
                   _currentTabIndex = newIndex;
                 });
               },
-              tabs: const [
-                Tab(text: "Master Volume"),
-                Tab(text: "Master Effects"),
+              tabs: [
+                Tab(
+                  key: const ValueKey('master_tab_volume'),
+                  child: widget.tutorialHighlighter == null
+                      ? const Text('Master Volume')
+                      : Halo(
+                          highlighter: widget.tutorialHighlighter!,
+                          haloKey: const HaloKey('master:tab:volume'),
+                          borderRadius: BorderRadius.circular(8),
+                          child: const Text('Master Volume'),
+                        ),
+                ),
+                Tab(
+                  key: const ValueKey('master_tab_effects'),
+                  child: widget.tutorialHighlighter == null
+                      ? const Text('Master Effects')
+                      : Halo(
+                          highlighter: widget.tutorialHighlighter!,
+                          haloKey: const HaloKey('master:tab:effects'),
+                          borderRadius: BorderRadius.circular(8),
+                          child: const Text('Master Effects'),
+                        ),
+                ),
               ],
             ),
           ),
@@ -24335,6 +29135,41 @@ class SetClipPitchAction extends EditorUndoAction {
   }
 }
 
+class SetClipReverseAction extends EditorUndoAction {
+  final List<AudioTrack> tracks;
+  final int originalIndex;
+  final bool oldReversed;
+  final bool newReversed;
+  final void Function(AudioTrack clip, bool reversed) applyToState;
+
+  SetClipReverseAction({
+    required this.tracks,
+    required this.originalIndex,
+    required this.oldReversed,
+    required this.newReversed,
+    required this.applyToState,
+  });
+
+  @override
+  String get description => 'Reverse clip';
+
+  @override
+  Future<void> redo() async {
+    final clip = _resolveClip(tracks, originalIndex);
+    if (clip == null || clip.engineClipId < 0 || clip.isMidi) return;
+    await JuceAudioEngine.setClipReversed(clip.engineClipId, newReversed);
+    applyToState(clip, newReversed);
+  }
+
+  @override
+  Future<void> undo() async {
+    final clip = _resolveClip(tracks, originalIndex);
+    if (clip == null || clip.engineClipId < 0 || clip.isMidi) return;
+    await JuceAudioEngine.setClipReversed(clip.engineClipId, oldReversed);
+    applyToState(clip, oldReversed);
+  }
+}
+
 class SetClipLabelAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
@@ -24542,7 +29377,7 @@ class SetTargetAutomationPointsAction extends EditorUndoAction {
             .toList(growable: false);
 
   @override
-  String get description => 'Edit automation lane';
+  String get description => 'Edit automation';
 
   @override
   Future<void> redo() async {
@@ -25170,6 +30005,11 @@ class _ChatBar extends StatelessWidget {
   final bool hasText;
   final TextEditingController controller;
   final FocusNode focusNode;
+  final bool readOnly;
+  final MixChangeHighlighter? tutorialHighlighter;
+  final AiPromptRateLimitStatus? promptRateLimitStatus;
+  final bool promptRateLimitLoading;
+  final VoidCallback onShowPromptRateLimits;
   final VoidCallback onTapBar;
   final VoidCallback onSubmit;
 
@@ -25179,13 +30019,137 @@ class _ChatBar extends StatelessWidget {
     required this.hasText,
     required this.controller,
     required this.focusNode,
+    this.readOnly = false,
+    this.tutorialHighlighter,
+    required this.promptRateLimitStatus,
+    required this.promptRateLimitLoading,
+    required this.onShowPromptRateLimits,
     required this.onTapBar,
     required this.onSubmit,
   });
 
+  String _badgeLabel() {
+    if (promptRateLimitStatus == null) return 'Limits';
+    if (promptRateLimitStatus!.canSubmit) {
+      return '${promptRateLimitStatus!.daily.remaining} left';
+    }
+    final resetsAt = promptRateLimitStatus!.blockedResetAt?.toLocal();
+    if (resetsAt == null) return 'Wait';
+    final remaining = resetsAt.difference(DateTime.now());
+    if (remaining.inHours >= 1) return '${remaining.inHours}h wait';
+    if (remaining.inMinutes >= 1) return '${remaining.inMinutes}m wait';
+    return 'Wait';
+  }
+
+  String _badgeTooltip() {
+    if (promptRateLimitStatus == null) {
+      return 'Show prompt limits';
+    }
+    final daily = promptRateLimitStatus!.daily;
+    final weekly = promptRateLimitStatus!.weekly;
+    if (promptRateLimitStatus!.canSubmit) {
+      return 'Daily ${daily.remaining}/${daily.limit} left, weekly ${weekly.remaining}/${weekly.limit} left';
+    }
+    return 'Prompt limit reached. Tap to see reset time.';
+  }
+
+  Widget _buildPromptLimitBadge() {
+    Widget badge;
+    if (promptRateLimitLoading && promptRateLimitStatus == null) {
+      badge = Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: Colors.white10),
+        ),
+        alignment: Alignment.center,
+        child: const SizedBox(
+          width: 13,
+          height: 13,
+          child: CircularProgressIndicator(
+            strokeWidth: 1.8,
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+          ),
+        ),
+      );
+    } else {
+      final status = promptRateLimitStatus;
+      final backgroundColor = status == null
+          ? Colors.white.withOpacity(0.08)
+          : status.canSubmit
+              ? const Color(0xFF11305A)
+              : const Color(0xFF5A2020);
+
+      badge = Tooltip(
+        message: _badgeTooltip(),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onShowPromptRateLimits,
+          child: Container(
+            height: 28,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: Colors.white10),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              _badgeLabel(),
+              style: const TextStyle(
+                fontFamily: 'Pretendard',
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+                letterSpacing: -0.1,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (tutorialHighlighter != null) {
+      badge = Halo(
+        highlighter: tutorialHighlighter!,
+        haloKey: const HaloKey('tutorial:prompt_limits'),
+        borderRadius: BorderRadius.circular(999),
+        child: badge,
+      );
+    }
+    return badge;
+  }
+
   @override
   Widget build(BuildContext context) {
     final barHeight = _AudioEditorScreenState2._kChatBarFixedHeight;
+    final isSubmitBlocked = promptRateLimitStatus?.canSubmit == false;
+    const collapsedTextStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 15.5,
+      fontWeight: FontWeight.w500,
+      height: 1.16,
+      letterSpacing: -0.15,
+      color: Colors.white70,
+    );
+    const inputTextStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 15,
+      fontWeight: FontWeight.w500,
+      height: 1.16,
+      letterSpacing: -0.15,
+      color: Colors.white,
+    );
+    const hintTextStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 15,
+      fontWeight: FontWeight.w500,
+      height: 1.16,
+      letterSpacing: -0.15,
+      color: Colors.white70,
+    );
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTapBar,
@@ -25210,21 +30174,17 @@ class _ChatBar extends StatelessWidget {
                           children: [
                             _chatIcon(),
                             const SizedBox(width: 10),
-                            const Text(
-                              'Type...',
-                              style: TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 15.5,
-                                height: 1.0,
-                                color: Colors.white70,
-                              ),
-                              strutStyle: StrutStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 15,
-                                height: 1.0,
-                                forceStrutHeight: true,
+                            Expanded(
+                              child: Text(
+                                isSubmitBlocked
+                                    ? 'Prompt limit reached'
+                                    : 'Ask Mixroom AI...',
+                                style: collapsedTextStyle,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            const SizedBox(width: 10),
+                            _buildPromptLimitBadge(),
                           ],
                         )
                       : Material(
@@ -25235,25 +30195,16 @@ class _ChatBar extends StatelessWidget {
                                 child: TextField(
                                   controller: controller,
                                   focusNode: focusNode,
-                                  style: const TextStyle(
-                                      fontFamily: 'Pretendard',
-                                      fontSize: 15,
-                                      height: 1.0),
-                                  strutStyle: const StrutStyle(
-                                    fontFamily: 'Pretendard',
-                                    fontSize: 15,
-                                    height: 1.0,
-                                    forceStrutHeight: true,
-                                  ),
+                                  readOnly: readOnly,
+                                  style: inputTextStyle,
+                                  cursorColor: Colors.white,
                                   decoration: const InputDecoration(
-                                    hintText: 'Type...',
-                                    hintStyle: TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 15,
-                                        height: 1.0),
+                                    hintText: 'Ask Mixroom AI...',
+                                    hintStyle: hintTextStyle,
                                     border: InputBorder.none,
-                                    isCollapsed: true,
-                                    contentPadding: EdgeInsets.zero,
+                                    isDense: true,
+                                    contentPadding:
+                                        EdgeInsets.symmetric(vertical: 7),
                                   ),
                                   textAlignVertical: TextAlignVertical.center,
                                   textInputAction: TextInputAction.send,
@@ -25261,33 +30212,52 @@ class _ChatBar extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(width: 10),
+                              _buildPromptLimitBadge(),
+                              const SizedBox(width: 10),
                               SizedBox(
                                 width: 30,
                                 height: 30,
-                                child: IgnorePointer(
-                                  ignoring: !hasText,
-                                  child: Opacity(
-                                    opacity: hasText ? 1 : 0,
-                                    child: GestureDetector(
-                                      behavior: HitTestBehavior.opaque,
-                                      onTap: onSubmit,
-                                      child: Container(
-                                        width: 30,
-                                        height: 30,
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFF2E6EEB),
-                                          shape: BoxShape.circle,
-                                          border:
-                                              Border.all(color: Colors.white24),
-                                        ),
-                                        child: const Icon(
-                                          Icons.arrow_upward_rounded,
-                                          color: Colors.white,
-                                          size: 18,
+                                child: Builder(
+                                  builder: (context) {
+                                    Widget sendButton = IgnorePointer(
+                                      ignoring: !hasText || isSubmitBlocked,
+                                      child: Opacity(
+                                        opacity: (hasText && !isSubmitBlocked)
+                                            ? 1
+                                            : 0.32,
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: onSubmit,
+                                          child: Container(
+                                            width: 30,
+                                            height: 30,
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF2E6EEB),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                  color: Colors.white24),
+                                            ),
+                                            child: const Icon(
+                                              Icons.arrow_upward_rounded,
+                                              color: Colors.white,
+                                              size: 18,
+                                            ),
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ),
+                                    );
+                                    if (tutorialHighlighter != null) {
+                                      sendButton = Halo(
+                                        highlighter: tutorialHighlighter!,
+                                        haloKey:
+                                            const HaloKey('tutorial:chat_send'),
+                                        borderRadius:
+                                            BorderRadius.circular(999),
+                                        child: sendButton,
+                                      );
+                                    }
+                                    return sendButton;
+                                  },
                                 ),
                               ),
                             ],
@@ -25301,15 +30271,6 @@ class _ChatBar extends StatelessWidget {
       ),
     );
   }
-}
-
-class ActionSummaryMessage extends TextMessage {
-  ActionSummaryMessage({required String text})
-      : super(
-            id: const Uuid().v4(),
-            authorId: 'system',
-            createdAt: DateTime.now().toUtc(),
-            text: text);
 }
 
 // NOTE: this is copied over from audio_timeline_pro.dart PrettyGainSlider. make sure no diffs

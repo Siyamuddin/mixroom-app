@@ -31,6 +31,7 @@ extern "C"
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_muteClipJNI(JNIEnv *, jclass, jint, jboolean);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipPanJNI(JNIEnv *, jclass, jint, jfloat);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipPitchJNI(JNIEnv *, jclass, jint, jfloat);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipReversedJNI(JNIEnv *, jclass, jint, jboolean);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipStretchOptionsJNI(JNIEnv *, jclass, jint, jdouble, jboolean);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_moveClipToRowJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipTimeJNI(JNIEnv *, jclass, jint, jdouble, jdouble, jdouble);
@@ -84,9 +85,11 @@ extern "C"
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTrackAutomationPointsJNI(JNIEnv *, jclass, jint, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTrackEffectAutomationPointsJNI(JNIEnv *, jclass, jint, jint, jstring, jdouble, jdouble, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_clearTrackEffectAutomationForRowJNI(JNIEnv *, jclass, jint);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowGainAutomationPointsJNI(JNIEnv *, jclass, jint, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowGainJNI(JNIEnv *, jclass, jint, jfloat);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_muteRowJNI(JNIEnv *, jclass, jint, jboolean);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_isRowMutedJNI(JNIEnv *, jclass, jint);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowPanAutomationPointsJNI(JNIEnv *, jclass, jint, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowPanJNI(JNIEnv *, jclass, jint, jfloat);
 
     // Master FX and controls
@@ -99,8 +102,12 @@ extern "C"
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterEffectJNI(JNIEnv *, jclass, jint, jstring, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_bypassMasterEffectJNI(JNIEnv *, jclass, jint, jboolean);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectBypassStateJNI(JNIEnv *, jclass, jint);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterEffectAutomationPointsJNI(JNIEnv *, jclass, jint, jstring, jdouble, jdouble, jobject);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_clearMasterEffectAutomationJNI(JNIEnv *, jclass);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterGainAutomationPointsJNI(JNIEnv *, jclass, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterGainJNI(JNIEnv *, jclass, jfloat);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_muteMasterJNI(JNIEnv *, jclass, jboolean);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterPanAutomationPointsJNI(JNIEnv *, jclass, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterPanJNI(JNIEnv *, jclass, jfloat);
 
     // Debug graph
@@ -121,6 +128,8 @@ extern "C"
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getInputDevicesJNI(JNIEnv *, jclass);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_selectInputDeviceJNI(JNIEnv *, jclass, jstring);
     JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getNumInputChannelsJNI(JNIEnv *, jclass);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingInputsJNI(JNIEnv *, jclass, jint, jstring);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_refreshAudioRouteJNI(JNIEnv *, jclass, jstring);
     JNIEXPORT jdouble JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRecordingPeakJNI(JNIEnv *, jclass);
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getCurrentDeviceNameJNI(JNIEnv *, jclass);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_startRecordingJNI(JNIEnv *, jclass, jstring, jint, jint);

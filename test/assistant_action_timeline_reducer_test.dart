@@ -424,6 +424,322 @@ void main() {
       expect(sweepLane.first.points.first.volume, closeTo(0.0, 0.001));
       expect(sweepLane.first.points.last.volume, closeTo(1.0, 0.001));
     });
+
+    test('shared duplicate propagates point edits across linked clips only',
+        () {
+      final initial = TimelineActionState.empty();
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'start_ms': 0,
+            'length_ms': 300,
+            'points': <Map<String, dynamic>>[
+              <String, dynamic>{'x_ms': 0, 'value': 0.2},
+              <String, dynamic>{'x_ms': 300, 'value': 0.8},
+            ],
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'duplicate_clip',
+            'copy_mode': 'shared',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'clip_index': 0,
+            'start_ms': 500,
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'duplicate_clip',
+            'copy_mode': 'deep',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'clip_index': 0,
+            'start_ms': 900,
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'set_clip_points',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'clip_index': 1,
+            'points': <Map<String, dynamic>>[
+              <String, dynamic>{'x_ms': 0, 'value': 1.0},
+              <String, dynamic>{'x_ms': 300, 'value': 0.1},
+            ],
+          }),
+        ],
+      );
+
+      final lane = next.automationClips['0::volume'];
+      expect(lane, isNotNull);
+      expect(lane!, hasLength(3));
+      expect(lane[0].patternId, isNotEmpty);
+      expect(lane[1].patternId, lane[0].patternId);
+      expect(lane[2].patternId, isEmpty);
+      expect(lane[0].points.last.volume, closeTo(0.1, 0.001));
+      expect(lane[1].points.last.volume, closeTo(0.1, 0.001));
+      expect(lane[2].points.last.volume, closeTo(0.8, 0.001));
+    });
+
+    test('clone_clip defaults to linked clone semantics and pattern targeting',
+        () {
+      final initial = TimelineActionState.empty();
+
+      final cloned = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'start_ms': 0,
+            'length_ms': 300,
+            'points': <Map<String, dynamic>>[
+              <String, dynamic>{'x_ms': 0, 'value': 0.2},
+              <String, dynamic>{'x_ms': 300, 'value': 0.8},
+            ],
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'clone_clip',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'clip_index': 0,
+            'start_ms': 500,
+          }),
+        ],
+      );
+
+      final clonedLane = cloned.automationClips['0::volume'];
+      expect(clonedLane, isNotNull);
+      expect(clonedLane!, hasLength(2));
+      expect(clonedLane[0].patternId, isNotEmpty);
+      expect(clonedLane[1].patternId, clonedLane[0].patternId);
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        cloned,
+        <AssistantAction>[
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'set_clip_points',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'pattern_id': clonedLane[0].patternId,
+            'points': <Map<String, dynamic>>[
+              <String, dynamic>{'x_ms': 0, 'value': 1.0},
+              <String, dynamic>{'x_ms': 300, 'value': 0.05},
+            ],
+          }),
+        ],
+      );
+
+      final updatedLane = next.automationClips['0::volume'];
+      expect(updatedLane, isNotNull);
+      expect(updatedLane!, hasLength(2));
+      expect(updatedLane[0].points.last.volume, closeTo(0.05, 0.001));
+      expect(updatedLane[1].points.last.volume, closeTo(0.05, 0.001));
+    });
+
+    test('make_unique detaches a shared automation clip from future edits', () {
+      final initial = TimelineActionState.empty();
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'start_ms': 0,
+            'length_ms': 300,
+            'points': <Map<String, dynamic>>[
+              <String, dynamic>{'x_ms': 0, 'value': 0.2},
+              <String, dynamic>{'x_ms': 300, 'value': 0.8},
+            ],
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'duplicate_clip',
+            'copy_mode': 'shared',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'clip_index': 0,
+            'start_ms': 500,
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'make_unique_clip',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'clip_index': 1,
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'set_clip_points',
+            'target': <String, dynamic>{'row_index': 0, 'target_id': 'volume'},
+            'clip_index': 1,
+            'points': <Map<String, dynamic>>[
+              <String, dynamic>{'x_ms': 0, 'value': 1.0},
+              <String, dynamic>{'x_ms': 300, 'value': 0.1},
+            ],
+          }),
+        ],
+      );
+
+      final lane = next.automationClips['0::volume'];
+      expect(lane, isNotNull);
+      expect(lane!, hasLength(2));
+      expect(lane[0].patternId, isNotEmpty);
+      expect(lane[1].patternId, isEmpty);
+      expect(lane[0].points.last.volume, closeTo(0.8, 0.001));
+      expect(lane[1].points.last.volume, closeTo(0.1, 0.001));
+    });
+
+    test('clip lifecycle supports master and encoded plugin target ids', () {
+      final masterFxTarget =
+          'masterfxid:${Uri.encodeComponent('Master Comp#0')}:${Uri.encodeComponent('threshold')}';
+      final rowFxTarget =
+          'fxid:${Uri.encodeComponent('Group Bus Comp#1')}:${Uri.encodeComponent('mix')}';
+      final initial = TimelineActionState.empty(selectedRowIndex: 0);
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{
+              'row_index': 0,
+              'target_id': 'master:gain',
+            },
+            'start_ms': 40,
+            'length_ms': 240,
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'duplicate_clip',
+            'target': <String, dynamic>{
+              'row_index': 0,
+              'target_id': 'master:gain',
+            },
+            'clip_index': 0,
+            'start_ms': 500,
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'move_clip',
+            'target': <String, dynamic>{
+              'row_index': 0,
+              'target_id': 'master:gain',
+            },
+            'clip_index': 1,
+            'delta_ms': 80,
+            'length_ms': 360,
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'set_clip_points',
+            'target': <String, dynamic>{
+              'row_index': 0,
+              'target_id': 'master:gain',
+            },
+            'clip_index': 1,
+            'points': <Map<String, dynamic>>[
+              <String, dynamic>{'x_ms': 360, 'value': 0.1},
+              <String, dynamic>{'x_ms': -50, 'value': 1.2},
+            ],
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{
+              'row_index': 0,
+              'target_id': masterFxTarget,
+            },
+            'start_ms': 120,
+            'length_ms': 480,
+            'template': 'filter_sweep',
+          }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{
+              'row_index': 1,
+              'target_id': rowFxTarget,
+            },
+            'start_ms': 200,
+            'length_ms': 500,
+            'template': 'reverb_tail',
+          }),
+        ],
+      );
+
+      final masterMixLane = next.automationClips['0::master:gain'];
+      expect(masterMixLane, isNotNull);
+      expect(masterMixLane!, hasLength(2));
+      expect(masterMixLane[0].targetId, 'master:gain');
+      expect(masterMixLane[1].startMs, closeTo(580.0, 0.001));
+      expect(masterMixLane[1].lengthMs, closeTo(360.0, 0.001));
+      expect(masterMixLane[1].points, hasLength(2));
+      expect(masterMixLane[1].points.first.x, closeTo(0.0, 0.001));
+      expect(masterMixLane[1].points.first.volume, closeTo(1.0, 0.001));
+      expect(masterMixLane[1].points.last.x, closeTo(360.0, 0.001));
+      expect(masterMixLane[1].points.last.volume, closeTo(0.1, 0.001));
+
+      final masterFxLane = next.automationClips['0::$masterFxTarget'];
+      expect(masterFxLane, isNotNull);
+      expect(masterFxLane!, hasLength(1));
+      expect(masterFxLane.single.targetId, masterFxTarget);
+      expect(masterFxLane.single.points, hasLength(2));
+      expect(masterFxLane.single.points.first.volume, closeTo(0.0, 0.001));
+      expect(masterFxLane.single.points.last.volume, closeTo(1.0, 0.001));
+
+      final rowFxLane = next.automationClips['1::$rowFxTarget'];
+      expect(rowFxLane, isNotNull);
+      expect(rowFxLane!, hasLength(1));
+      expect(rowFxLane.single.rowIndex, 1);
+      expect(rowFxLane.single.targetId, rowFxTarget);
+
+      expect(next.automationClips.containsKey('0::volume'), isFalse);
+    });
+
+    test('clear_clips only clears the targeted automation lane', () {
+      final masterTarget = 'master:gain';
+      final pluginTarget =
+          'fxid:${Uri.encodeComponent('Bus FX#0')}:${Uri.encodeComponent('feedback')}';
+      final initial = TimelineActionState.empty().copyWith(
+        automationClips: <String, List<TimelineAutomationClip>>{
+          '0::$masterTarget': <TimelineAutomationClip>[
+            TimelineAutomationClip(
+              id: 'master_clip',
+              rowIndex: 0,
+              targetId: masterTarget,
+              startMs: 0.0,
+              lengthMs: 400.0,
+              muted: false,
+              points: <AutomationPoint>[
+                AutomationPoint(x: 0.0, volume: 0.5),
+              ],
+            ),
+          ],
+          '0::$pluginTarget': <TimelineAutomationClip>[
+            TimelineAutomationClip(
+              id: 'plugin_clip',
+              rowIndex: 0,
+              targetId: pluginTarget,
+              startMs: 250.0,
+              lengthMs: 300.0,
+              muted: false,
+              points: <AutomationPoint>[
+                AutomationPoint(x: 0.0, volume: 0.25),
+                AutomationPoint(x: 300.0, volume: 0.9),
+              ],
+            ),
+          ],
+        },
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'clear_clips',
+            'target': <String, dynamic>{
+              'row_index': 0,
+              'target_id': masterTarget,
+            },
+          }),
+        ],
+      );
+
+      expect(next.automationClips['0::$masterTarget'], isEmpty);
+      final pluginLane = next.automationClips['0::$pluginTarget'];
+      expect(pluginLane, isNotNull);
+      expect(pluginLane!, hasLength(1));
+      expect(pluginLane.single.id, 'plugin_clip');
+      expect(pluginLane.single.points, hasLength(2));
+    });
   });
 
   group('AssistantActionTimelineReducer midi_compose', () {

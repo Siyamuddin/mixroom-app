@@ -19,9 +19,6 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
     repositories {
-        // ✅ Put the local Maven repo FIRST; use an absolute path from settingsDir
-        maven { url = uri("$rootDir/local-maven") }
-
         google()
         mavenCentral()
         // If your project had jitpack or others, keep them here as well.

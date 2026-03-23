@@ -133,11 +133,11 @@ public:
 
         const int numCh = buffer.getNumChannels();
         const int numSamples = buffer.getNumSamples();
-        if (numCh < 2 || numSamples <= 0)
+        if (numCh <= 0 || numSamples <= 0)
             return;
 
         const float *L = buffer.getReadPointer(0);
-        const float *R = buffer.getReadPointer(1);
+        const float *R = numCh > 1 ? buffer.getReadPointer(1) : L;
 
         float pkL = 0.0f, pkR = 0.0f;
         double ssL = 0.0, ssR = 0.0;
@@ -195,7 +195,9 @@ public:
     {
         const auto in = layouts.getMainInputChannelSet();
         const auto out = layouts.getMainOutputChannelSet();
-        return in == out && (in == juce::AudioChannelSet::stereo());
+        return in == out &&
+               (in == juce::AudioChannelSet::mono() ||
+                in == juce::AudioChannelSet::stereo());
     }
 
     bool acceptsMidi() const override { return false; }
@@ -592,6 +594,7 @@ public:
     virtual void setTimeline(double startSec, double lengthSec, double inFileOffsetSec = 0.0) = 0;
     virtual void setMuted(bool m) = 0;
     virtual void setPitchSemitones(float semitones) = 0;
+    virtual void setReversed(bool shouldReverse) = 0;
     virtual void setStretchOptions(double tempoRatio, bool preservePitch) = 0;
 };
 
@@ -639,6 +642,10 @@ public:
     {
         pitchSemitones.store(juce::jlimit(-24.0f, 24.0f, semitones),
                              std::memory_order_relaxed);
+    }
+    void setReversed(bool shouldReverse) override
+    {
+        reversed.store(shouldReverse, std::memory_order_relaxed);
     }
     void setStretchOptions(double tempoRatio, bool preservePitch) override
     {
@@ -748,6 +755,26 @@ public:
             !sourcePrimed ||
             (std::abs(inFile - lastFileOffsetSec) > (0.5 / fileSampleRate));
         const bool needsReposition = timelineDiscontinuity || fileOffsetChanged;
+        const bool shouldReverse = reversed.load(std::memory_order_relaxed);
+
+        if (shouldReverse)
+        {
+            if (needsReposition && pitchCompensator)
+                pitchCompensator->reset();
+
+            if (!renderReversedBlock(framesToRead, sr, readTimelineStart, ce, inFile))
+                return;
+
+            applyRequestedPitchShift(temp);
+
+            for (int ch = 0; ch < juce::jmin(2, buffer.getNumChannels()); ++ch)
+                buffer.copyFrom(ch, writeStart, temp, ch, 0, framesToRead);
+
+            sourcePrimed = true;
+            lastReadTimelineEndSec = readTimelineStart + ((double)framesToRead / sr);
+            lastFileOffsetSec = inFile;
+            return;
+        }
 
         // Only force seek + flush on real discontinuities (scrub/jump/start),
         // otherwise keep resampler history to avoid block-boundary artifacts.
@@ -853,6 +880,77 @@ private:
             buffer, juce::jlimit(-96.0, 96.0, requestedSemitones));
     }
 
+    bool renderReversedBlock(int framesToRead,
+                             double deviceSampleRate,
+                             double readTimelineStart,
+                             double clipEndSec,
+                             double inFileOffsetSec)
+    {
+        auto *reader = readerSource != nullptr ? readerSource->getAudioFormatReader() : nullptr;
+        if (reader == nullptr || deviceSampleRate <= 0.0 || framesToRead <= 0)
+            return false;
+
+        const double timelineBlockSec = (double)framesToRead / deviceSampleRate;
+        const double speedRatio = getTempoPlaybackRatio();
+        const double blockTimelineEnd = readTimelineStart + timelineBlockSec;
+        const double rawStartSec =
+            inFileOffsetSec + juce::jmax(0.0, (clipEndSec - blockTimelineEnd) * speedRatio);
+        const double rawEndSec =
+            inFileOffsetSec + juce::jmax(0.0, (clipEndSec - readTimelineStart) * speedRatio);
+
+        auto sourceStartSample =
+            (juce::int64)std::floor(rawStartSec * fileSampleRate);
+        auto sourceEndSample =
+            (juce::int64)std::ceil(rawEndSec * fileSampleRate);
+
+        sourceStartSample = juce::jlimit<juce::int64>(0, totalLength, sourceStartSample);
+        sourceEndSample = juce::jlimit<juce::int64>(0, totalLength, sourceEndSample);
+
+        const auto sourceSampleSpan =
+            std::max<juce::int64>(juce::int64{0}, sourceEndSample - sourceStartSample);
+        const auto maxBufferedSourceSamples =
+            static_cast<juce::int64>(std::numeric_limits<int>::max()) - juce::int64{8};
+        const auto bufferedSourceSampleSpan =
+            std::min<juce::int64>(sourceSampleSpan, maxBufferedSourceSamples);
+        const int sourceSamplesNeeded = std::max(
+            8,
+            static_cast<int>(bufferedSourceSampleSpan + juce::int64{8}));
+
+        reverseSourceTemp.setSize(2, sourceSamplesNeeded, false, false, true);
+        reverseSourceTemp.clear();
+
+        const int readSamples = static_cast<int>(bufferedSourceSampleSpan);
+        if (readSamples <= 0)
+            return false;
+
+        reader->read(&reverseSourceTemp,
+                     0,
+                     readSamples,
+                     sourceStartSample,
+                     true,
+                     true);
+        reverseSourceTemp.reverse(0, readSamples);
+
+        temp.setSize(2, framesToRead, false, false, true);
+        temp.clear();
+
+        const double samplesPerOutputSample =
+            (fileSampleRate / deviceSampleRate) * speedRatio;
+
+        for (int ch = 0; ch < juce::jmin(2, temp.getNumChannels()); ++ch)
+        {
+            juce::LagrangeInterpolator interpolator;
+            interpolator.reset();
+            interpolator.process(
+                samplesPerOutputSample,
+                reverseSourceTemp.getReadPointer(ch),
+                temp.getWritePointer(ch),
+                framesToRead);
+        }
+
+        return true;
+    }
+
     juce::AudioFormatReaderSource *readerSource = nullptr; // non-owning
     std::unique_ptr<juce::ResamplingAudioSource> resampler;
     std::unique_ptr<PitchShiftAudioProcessor> pitchCompensator{
@@ -860,6 +958,7 @@ private:
     juce::MidiBuffer pitchMidiScratch;
 
     juce::AudioBuffer<float> temp;
+    juce::AudioBuffer<float> reverseSourceTemp;
 
     juce::File sourceFile;
     juce::int64 totalLength = 0;
@@ -873,6 +972,7 @@ private:
     std::atomic<double> clipLengthSec{0.0};
     std::atomic<double> fileOffsetSec{0.0};
     std::atomic<float> pitchSemitones{0.0f};
+    std::atomic<bool> reversed{false};
     std::atomic<double> tempoPlaybackRatio{1.0};
     std::atomic<bool> preserveTempoPitch{false};
     std::atomic<bool> muted{false};
@@ -909,6 +1009,11 @@ public:
     {
         pitchSemitones.store(juce::jlimit(-24.0f, 24.0f, semitones),
                              std::memory_order_relaxed);
+    }
+
+    void setReversed(bool shouldReverse) override
+    {
+        juce::ignoreUnused(shouldReverse);
     }
 
     void setStretchOptions(double tempoRatio, bool preservePitch) override
@@ -1500,6 +1605,12 @@ private:
 
     using SfzOpcodeMap = std::unordered_map<std::string, juce::String>;
 
+    struct SfzParsedLine
+    {
+        juce::String blockTag;
+        SfzOpcodeMap opcodes;
+    };
+
     struct SampledAssetCache
     {
         juce::CriticalSection lock;
@@ -1605,6 +1716,31 @@ private:
             out[key.toStdString()] = value;
         }
 
+        return out;
+    }
+
+    static SfzParsedLine parseSfzLine(const juce::String &lineRaw)
+    {
+        SfzParsedLine out;
+        const juce::String line =
+            lineRaw.upToFirstOccurrenceOf("//", false, false).trim();
+        if (line.isEmpty())
+            return out;
+
+        juce::String remainder = line;
+        if (line.startsWithChar('<'))
+        {
+            const int close = line.indexOfChar('>');
+            if (close > 1)
+            {
+                out.blockTag =
+                    line.substring(1, close).trim().toLowerCase();
+                remainder = line.substring(close + 1).trim();
+            }
+        }
+
+        if (remainder.isNotEmpty())
+            out.opcodes = parseSfzOpcodes(remainder);
         return out;
     }
 
@@ -1780,16 +1916,13 @@ private:
         lines.addLines(sfzText);
         for (const auto &rawLine : lines)
         {
-            const juce::String line =
-                rawLine.upToFirstOccurrenceOf("//", false, false).trim();
-            if (line.isEmpty())
+            const auto parsed = parseSfzLine(rawLine);
+            if (parsed.blockTag.isEmpty() && parsed.opcodes.empty())
                 continue;
 
-            if (line.startsWithChar('<') && line.endsWithChar('>') &&
-                line.length() >= 3)
+            if (parsed.blockTag.isNotEmpty())
             {
-                const juce::String tag =
-                    line.substring(1, line.length() - 1).trim().toLowerCase();
+                const juce::String tag = parsed.blockTag;
                 currentBlock = tag;
                 if (tag == "group")
                 {
@@ -1803,10 +1936,9 @@ private:
                     mergeOpcodeMap(*region, global);
                     mergeOpcodeMap(*region, group);
                 }
-                continue;
             }
 
-            const auto opcodes = parseSfzOpcodes(line);
+            const auto &opcodes = parsed.opcodes;
             if (opcodes.empty())
                 continue;
 
@@ -2518,7 +2650,8 @@ private:
 // ---------------------------
 // JuceEngine
 // ---------------------------
-class JuceEngine : public juce::MidiInputCallback
+class JuceEngine : public juce::MidiInputCallback,
+                   public juce::ChangeListener
 {
 public:
     struct ExportOptions
@@ -2648,6 +2781,7 @@ public:
     void muteClip(int clipIndex, bool shouldMute);
     void setClipPan(int clipIndex, float pan); // -1..1 where 0 = center
     void setClipPitch(int clipIndex, float semitones); // pitch ∈ -24..24
+    void setClipReversed(int clipIndex, bool shouldReverse);
     void setClipStretchOptions(int clipIndex, double tempoRatio, bool preservePitch);
 
     // ROW (track bus) FX
@@ -2673,9 +2807,13 @@ public:
                                         float maxValue,
                                         const std::vector<AutomationPoint> &points);
     void clearTrackEffectAutomationForRow(int trackRow);
+    void setRowGainAutomationPoints(int row,
+                                    const std::vector<AutomationPoint> &points);
     void setRowGain(int row, float gain);
     void muteRow(int rowIndex, bool shouldMute);
     bool isRowMuted(int rowIndex);
+    void setRowPanAutomationPoints(int row,
+                                   const std::vector<AutomationPoint> &points);
     void setRowPan(int row, float pan);
 
     // MASTER bus FX
@@ -2690,8 +2828,16 @@ public:
     juce::Array<juce::NamedValueSet> getMasterPluginParameterInfo(int effectIndex);
     void bypassMasterEffect(int effectIndex, bool shouldBypass);
     bool getMasterEffectBypassState(int effectIndex);
+    void setMasterEffectAutomationPoints(int effectIndex,
+                                         const juce::String &paramId,
+                                         float minValue,
+                                         float maxValue,
+                                         const std::vector<AutomationPoint> &points);
+    void clearMasterEffectAutomation();
+    void setMasterGainAutomationPoints(const std::vector<AutomationPoint> &points);
     void setMasterGain(float gain);
     void muteMaster(bool shouldMute);
+    void setMasterPanAutomationPoints(const std::vector<AutomationPoint> &points);
     void setMasterPan(float pan);
 
     // Transport for automation
@@ -2712,6 +2858,11 @@ public:
     juce::String getCurrentInputDeviceName() const;
     int getNumInputChannels() const;
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
+    bool prepareRecordingInputs(int desiredInputChannels,
+                                const juce::String &reason);
+    void prepareRecordingInputsAsync(int desiredInputChannels,
+                                     const juce::String &reason);
+    void refreshAudioRouteAsync(const juce::String &reason);
     void requestAudioDeviceRefreshAsync(const juce::String &reason);
 
     // Recording
@@ -2729,6 +2880,10 @@ public:
     double getRecordingPeak() const;
 
     // Metering/Visualization
+    void applyOutputSafetyGuard(float *const *output,
+                                int numOutputChannels,
+                                int numSamples) noexcept;
+    void armOutputSafetyFadeIn(double sampleRate) noexcept;
     void setMasterMeterEnabled(bool enabled);
     const std::array<float, 4> getMasterMeterValues();
     void updateMasterMeterFromOutput(const float *const *out,
@@ -2752,6 +2907,7 @@ public:
     std::vector<float> getMasterEqWaveform(int effectIndex, int sampleCount);
     void handleIncomingMidiMessage(juce::MidiInput *source,
                                    const juce::MidiMessage &message) override;
+    void changeListenerCallback(juce::ChangeBroadcaster *source) override;
 
 private:
     JuceEngine();
@@ -2760,6 +2916,7 @@ private:
     void rewireTrackChain(int trackIdx,
                           juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync); // clip-level FX+gain+pan → row
     void rewireMasterFxChain();                  // master FX chain
+    void armOutputSafetyForCurrentRoute() noexcept;
     void ensureBusGraphInitialised();            // rows + master
     void rewireTrackBusFxChain(int trackRow);    // row-level FX between input and automation
     int getTrackIndexForClip(int clipIdx) const; // clip → row mapping
@@ -2845,6 +3002,7 @@ private:
         bool alive = false;
         bool wired = false;
         bool isMidi = false;
+        bool muted = false;
 
         int clipId = -1; // stable
         int rowId = 0;   // stable row id
@@ -2854,6 +3012,7 @@ private:
         double lengthSec = 0.0;
         double inFileOffsetSec = 0.0; // == trimStart. optional later for trimming
         float pitchSemitones = 0.0f;
+        bool reversed = false;
         double tempoRatio = 1.0;
         bool preservePitch = false;
 
@@ -2925,6 +3084,10 @@ private:
     StereoMeterState masterMeter;
     std::atomic<bool> masterMeterEnabled{true};
     std::atomic<bool> masterClipLatched{false};
+    std::array<float, 2> outputSafetyLastSample{0.0f, 0.0f};
+    int outputSafetyMuteSamplesRemaining = 0;
+    int outputSafetyFadeSamplesRemaining = 0;
+    int outputSafetyFadeSamplesTotal = 0;
 
     // Row meters (post row-pan)
     std::atomic<bool> rowMetersEnabled{true};
@@ -2950,6 +3113,8 @@ private:
         float panUi = 0.5f;  // 0..1 UI domain
         bool muted = false;
         std::vector<AutomationPoint> automationPoints;
+        std::vector<AutomationPoint> gainAutomationPoints;
+        std::vector<AutomationPoint> panAutomationPoints;
         std::vector<TrackEffectAutomationLane> effectAutomationLanes;
 
         // processors
@@ -2981,6 +3146,9 @@ private:
     // MASTER bus: [FX...] → gain → pan → output
     juce::Array<juce::AudioProcessorGraph::NodeID> *masterEffectChain = nullptr;
     juce::StringArray masterEffectIds;
+    std::vector<RowState::TrackEffectAutomationLane> masterEffectAutomationLanes;
+    std::vector<AutomationPoint> masterGainAutomationPoints;
+    std::vector<AutomationPoint> masterPanAutomationPoints;
 
     SimpleGainProcessor *masterGainProcessor = nullptr;
     juce::AudioProcessorGraph::Node::Ptr masterGainNode;
@@ -3000,11 +3168,14 @@ private:
     int recordChannelStart = 0;
     int recordChannelCount = 1;
     int recordChannelOffset = 0;
+    std::atomic<int> recordingRestoreDesiredInputs{0};
     std::atomic<int> desiredInputOpenChannels{0};
     std::atomic<bool> audioRouteRefreshPending{false};
+    std::atomic<int> ignoredDeviceChangeCallbacks{0};
 
     juce::LinearSmoothedValue<float> recPeak; // optional amplitude meter
-    std::mutex graphRenderMutex;
+    // Recursive because public graph mutation entrypoints can call one another.
+    std::recursive_mutex graphRenderMutex;
 
     void rebuildBusesAndRewireClips();
     void attachRowBusNodes(RowState &r);
@@ -3057,6 +3228,7 @@ public:
         sampleRate = device->getCurrentSampleRate();
         msPerBeat = 60000.0 / bpm;
         clickPhaseInc = juce::MathConstants<double>::twoPi * clickFrequency / sampleRate;
+        engine.armOutputSafetyFadeIn(sampleRate);
         player.audioDeviceAboutToStart(device);
         alignToTransport();
     }
@@ -3108,14 +3280,12 @@ public:
 
         engine.advanceTransportBySamples(numSamples);
 
-        // ===============================
-        // MASTER METER TAP (POST-FX/GAIN/PAN)
-        // ===============================
-        // capture output (for metering purposes) before processing metronome
-        engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
-
         if (!enabled || !isPlaying)
+        {
+            engine.applyOutputSafetyGuard(outputChannelData, numOutputChannels, numSamples);
+            engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
             return;
+        }
 
         const double msPerSample = 1000.0 / sampleRate;
 
@@ -3178,6 +3348,9 @@ public:
             for (int ch = 0; ch < numOutputChannels; ++ch)
                 outputChannelData[ch][i] += out;
         }
+
+        engine.applyOutputSafetyGuard(outputChannelData, numOutputChannels, numSamples);
+        engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
     }
 
     void setupClickFilter(bool accent)

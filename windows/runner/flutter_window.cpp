@@ -5,7 +5,12 @@
 #include "flutter/generated_plugin_registrant.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
-    : project_(project) {}
+    : FlutterWindow(project, {}) {}
+
+FlutterWindow::FlutterWindow(const flutter::DartProject& project,
+                             std::string initial_mixroom_path)
+    : project_(project),
+      initial_mixroom_path_(std::move(initial_mixroom_path)) {}
 
 FlutterWindow::~FlutterWindow() {}
 
@@ -27,6 +32,24 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  open_file_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "mixroom/open_file",
+          &flutter::StandardMethodCodec::GetInstance());
+  open_file_channel_->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        if (call.method_name() == "getInitialMixroomPath") {
+          if (initial_mixroom_path_.empty()) {
+            result->Success();
+          } else {
+            result->Success(flutter::EncodableValue(initial_mixroom_path_));
+            initial_mixroom_path_.clear();
+          }
+          return;
+        }
+        result->NotImplemented();
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -40,6 +63,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  open_file_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

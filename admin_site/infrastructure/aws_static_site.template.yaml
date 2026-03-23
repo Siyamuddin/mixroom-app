@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Mixroom admin site static hosting (S3 + CloudFront)
+
+Parameters:
+  SiteBucketName:
+    Type: String
+    Default: ''
+  SiteDomainName:
+    Type: String
+    Default: ''
+  AcmCertificateArn:
+    Type: String
+    Default: ''
+  HostedZoneId:
+    Type: String
+    Default: ''
+  PriceClass:
+    Type: String
+    Default: PriceClass_100
+    AllowedValues:
+      - PriceClass_100
+      - PriceClass_200
+      - PriceClass_All
+
+Conditions:
+  HasCustomBucketName: !Not [!Equals [!Ref SiteBucketName, '']]
+  HasSiteDomainName: !Not [!Equals [!Ref SiteDomainName, '']]
+  HasAcmCertificateArn: !Not [!Equals [!Ref AcmCertificateArn, '']]
+  UseCustomDomain: !And
+    - !Condition HasSiteDomainName
+    - !Condition HasAcmCertificateArn
+  HasHostedZoneId: !Not [!Equals [!Ref HostedZoneId, '']]
+  CreateDnsRecord: !And
+    - !Condition UseCustomDomain
+    - !Condition HasHostedZoneId
+
+Resources:
+  AdminSiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - HasCustomBucketName
+        - !Ref SiteBucketName
+        - !Ref AWS::NoValue
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AdminSiteOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-admin-site-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  AdminSiteResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub ${AWS::StackName}-admin-site-security
+        SecurityHeadersConfig:
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: same-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Preload: true
+            Override: true
+          XSSProtection:
+            Protection: true
+            ModeBlock: true
+            Override: true
+
+  AdminSiteDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: !Ref PriceClass
+        Aliases: !If
+          - UseCustomDomain
+          - [!Ref SiteDomainName]
+          - !Ref AWS::NoValue
+        Origins:
+          - Id: AdminSiteS3Origin
+            DomainName: !GetAtt AdminSiteBucket.RegionalDomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !GetAtt AdminSiteOriginAccessControl.Id
+        DefaultCacheBehavior:
+          TargetOriginId: AdminSiteS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: !Ref AdminSiteResponseHeadersPolicy
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        ViewerCertificate: !If
+          - UseCustomDomain
+          - AcmCertificateArn: !Ref AcmCertificateArn
+            MinimumProtocolVersion: TLSv1.2_2021
+            SslSupportMethod: sni-only
+          - CloudFrontDefaultCertificate: true
+
+  AdminSiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AdminSiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource: !Sub ${AdminSiteBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${AdminSiteDistribution}
+
+  AdminSiteAliasRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateDnsRecord
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref SiteDomainName
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt AdminSiteDistribution.DomainName
+
+  AdminSiteIpv6AliasRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateDnsRecord
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref SiteDomainName
+      Type: AAAA
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt AdminSiteDistribution.DomainName
+
+Outputs:
+  SiteBucketName:
+    Value: !Ref AdminSiteBucket
+  DistributionId:
+    Value: !Ref AdminSiteDistribution
+  DistributionDomainName:
+    Value: !GetAtt AdminSiteDistribution.DomainName
+  SiteUrl:
+    Value: !If
+      - UseCustomDomain
+      - !Sub https://${SiteDomainName}
+      - !Sub https://${AdminSiteDistribution.DomainName}

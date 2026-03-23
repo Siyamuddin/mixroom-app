@@ -22,7 +22,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive_io.dart';
-import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_kit.dart';
+import 'package:mixroom/ffmpeg/ffmpeg.dart';
 
 class ProjectMeta {
   final Directory dir;
@@ -40,6 +40,9 @@ class ProjectMeta {
 
 class ProjectManager {
   static const int maxProjects = 10000;
+
+  static String _nextProjectId() =>
+      DateTime.now().microsecondsSinceEpoch.toString();
 
   static Future<Directory> _rootDir() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -132,7 +135,7 @@ class ProjectManager {
       "tracks": [],
       "rowEffects": [],
       "masterEffects": {"effects": []},
-      "projectId": now.toString(),
+      "projectId": _nextProjectId(),
     };
 
     await _projectJsonFile(dir).writeAsString(jsonEncode(json));
@@ -212,6 +215,32 @@ class ProjectManager {
       throw Exception("project.json missing in ${dir.path}");
     }
     return (jsonDecode(await f.readAsString()) as Map<String, dynamic>);
+  }
+
+  static String ensureProjectIdInJson(Map<String, dynamic> json) {
+    final existing =
+        (json['projectId'] ?? json['project_id'] ?? '').toString().trim();
+    if (existing.isNotEmpty) return existing;
+    final next = _nextProjectId();
+    json['projectId'] = next;
+    return next;
+  }
+
+  static Future<String> ensureProjectId(Directory dir) async {
+    final json = await readProjectJson(dir);
+    final before =
+        (json['projectId'] ?? json['project_id'] ?? '').toString().trim();
+    final projectId = ensureProjectIdInJson(json);
+    if (before != projectId) {
+      await writeProjectJson(dir, json);
+    }
+    return projectId;
+  }
+
+  static int extractTrackCount(Map<String, dynamic> json) {
+    final tracks = json['tracks'];
+    if (tracks is List) return tracks.length;
+    return 0;
   }
 
   static Future<void> writeProjectJson(
@@ -363,7 +392,7 @@ class ProjectBundle {
       {required String inPath, required String outPath}) async {
     // FLAC is lossless. This preserves audio quality; it just compresses storage.
     // You can add -ar 48000 if you WANT to standardize, but it’s not required.
-    final cmd = '-y -i "${inPath}" -c:a flac "${outPath}"';
+    final cmd = '-y -i "$inPath" -c:a flac "$outPath"';
     await FFmpegKit.execute(cmd);
   }
 
@@ -379,6 +408,14 @@ enum ImportAudioStrategy {
 }
 
 class ProjectBundleImport {
+  static const int _maxBundleCompressedBytes = 512 * 1024 * 1024;
+  static const int _maxBundleUncompressedBytes = 1024 * 1024 * 1024;
+  static const int _maxArchiveEntries = 512;
+  static const Set<String> _allowedRootFiles = <String>{
+    'project.json',
+    'meta.json',
+  };
+
   static Future<Directory> importMixroomBundle({
     required File bundleFile,
     required ImportAudioStrategy audioStrategy,
@@ -390,88 +427,219 @@ class ProjectBundleImport {
         "mixroom_unpacked_${DateTime.now().millisecondsSinceEpoch}"));
     await unpackDir.create(recursive: true);
 
-    // unzip into unpackDir
-    final bytes = bundleFile.readAsBytesSync();
-    final archive = ZipDecoder().decodeBytes(bytes);
+    Directory? destProjectDir;
+    var importCompleted = false;
 
-    for (final item in archive) {
-      final outPath = p.join(unpackDir.path, item.name);
-      if (item.isFile) {
+    try {
+      final archive = _decodeValidatedArchive(bundleFile);
+      for (final item in archive) {
+        final outPath = _resolveExtractPath(unpackDir, item.name);
+        if (item.isDirectory) {
+          await Directory(outPath).create(recursive: true);
+          continue;
+        }
+
         final outFile = File(outPath);
         await outFile.parent.create(recursive: true);
-        await outFile.writeAsBytes(item.content as List<int>);
-      } else {
-        await Directory(outPath).create(recursive: true);
+        final output = OutputFileStream(outFile.path);
+        try {
+          item.writeContent(output);
+        } finally {
+          await output.close();
+          item.clear();
+        }
+      }
+
+      final incomingJsonFile = File(p.join(unpackDir.path, "project.json"));
+      if (!incomingJsonFile.existsSync()) {
+        throw Exception("Bundle missing project.json");
+      }
+
+      final decoded = jsonDecode(incomingJsonFile.readAsStringSync());
+      if (decoded is! Map) {
+        throw Exception("Bundle project.json is invalid");
+      }
+      final jsonMap = Map<String, dynamic>.from(decoded);
+      final incomingName = (jsonMap["name"] as String?) ?? "Imported Project";
+
+      destProjectDir =
+          await ProjectManager.createNewProjectDir(name: incomingName);
+
+      final resolvedName = p.basename(destProjectDir.path);
+      jsonMap["name"] = resolvedName;
+      jsonMap["lastOpenedAt"] = DateTime.now().millisecondsSinceEpoch;
+
+      final srcAudioDir = Directory(p.join(unpackDir.path, "audio"));
+      final dstAudioDir = Directory(p.join(destProjectDir.path, "audio"));
+      await dstAudioDir.create(recursive: true);
+      final fileNameRemap = <String, String>{};
+
+      if (await srcAudioDir.exists()) {
+        final files =
+            srcAudioDir.listSync(followLinks: false).whereType<File>();
+        for (final f in files) {
+          final ext = p.extension(f.path).toLowerCase();
+          final base = p.basenameWithoutExtension(f.path);
+
+          if (audioStrategy == ImportAudioStrategy.convertFlacToWav48k &&
+              ext == ".flac") {
+            final outName = "$base.wav";
+            final outWav = File(p.join(dstAudioDir.path, outName));
+            final cmd =
+                '-y -i "${f.path}" -c:a pcm_s16le -ar 48000 "${outWav.path}"';
+            await FFmpegKit.execute(cmd);
+            fileNameRemap[p.basename(f.path)] = outName;
+          } else {
+            final outName = p.basename(f.path);
+            await f.copy(p.join(dstAudioDir.path, outName));
+            fileNameRemap[p.basename(f.path)] = outName;
+          }
+        }
+      }
+
+      final tracks = (jsonMap["tracks"] as List?) ?? const [];
+      for (final t in tracks) {
+        final track = (t as Map).cast<String, dynamic>();
+        final original = track["fileName"] as String?;
+        if (original == null) continue;
+        final remapped = fileNameRemap[original];
+        if (remapped != null) {
+          track["fileName"] = remapped;
+        }
+      }
+
+      await File(p.join(destProjectDir.path, "project.json"))
+          .writeAsString(jsonEncode(jsonMap));
+
+      importCompleted = true;
+      return destProjectDir;
+    } finally {
+      try {
+        await unpackDir.delete(recursive: true);
+      } catch (_) {}
+      if (!importCompleted && destProjectDir != null) {
+        try {
+          await destProjectDir.delete(recursive: true);
+        } catch (_) {}
       }
     }
+  }
 
-    // read incoming project.json
-    final incomingJsonFile = File(p.join(unpackDir.path, "project.json"));
-    if (!incomingJsonFile.existsSync())
-      throw Exception("Bundle missing project.json");
+  static Archive _decodeValidatedArchive(File bundleFile) {
+    final bundleLength = bundleFile.lengthSync();
+    if (bundleLength <= 0) {
+      throw Exception("Bundle is empty");
+    }
+    if (bundleLength > _maxBundleCompressedBytes) {
+      throw Exception("Bundle is too large to import safely");
+    }
 
-    final jsonMap =
-        jsonDecode(incomingJsonFile.readAsStringSync()) as Map<String, dynamic>;
-    final incomingName = (jsonMap["name"] as String?) ?? "Imported Project";
+    final input = InputFileStream(bundleFile.path);
+    late final Archive archive;
+    try {
+      archive = ZipDecoder().decodeStream(input);
+    } finally {
+      input.closeSync();
+    }
 
-    // create a new local project dir (handles name collision via #1)
-    final destProjectDir =
-        await ProjectManager.createNewProjectDir(name: incomingName);
+    if (archive.isEmpty) {
+      throw Exception("Bundle archive is empty");
+    }
 
-    // final project name MUST match the resolved folder name
-    final resolvedName = p.basename(destProjectDir.path);
+    var totalUncompressedBytes = 0;
+    var entryCount = 0;
+    var hasProjectJson = false;
+    final seenPaths = <String>{};
 
-    // update json BEFORE writing
-    jsonMap["name"] = resolvedName;
-    jsonMap["lastOpenedAt"] = DateTime.now().millisecondsSinceEpoch;
+    for (final item in archive) {
+      entryCount += 1;
+      if (entryCount > _maxArchiveEntries) {
+        throw Exception("Bundle contains too many files");
+      }
 
-    // import audio
-    final srcAudioDir = Directory(p.join(unpackDir.path, "audio"));
-    final dstAudioDir = Directory(p.join(destProjectDir.path, "audio"));
-    await dstAudioDir.create(recursive: true);
-    final fileNameRemap = <String, String>{};
+      final normalizedName = _normalizeArchiveEntryName(item.name);
+      if (!seenPaths.add(normalizedName)) {
+        throw Exception("Bundle contains duplicate files");
+      }
+      if (item.isSymbolicLink) {
+        throw Exception("Bundle contains unsupported symbolic links");
+      }
+      if (!_isAllowedArchivePath(normalizedName,
+          isDirectory: item.isDirectory)) {
+        throw Exception("Bundle contains unsupported files");
+      }
 
-    if (await srcAudioDir.exists()) {
-      final files = srcAudioDir.listSync().whereType<File>().toList();
-      for (final f in files) {
-        final ext = p.extension(f.path).toLowerCase();
-        final base = p.basenameWithoutExtension(f.path);
-
-        if (audioStrategy == ImportAudioStrategy.convertFlacToWav48k &&
-            ext == ".flac") {
-          final outName = "$base.wav";
-          final outWav = File(p.join(dstAudioDir.path, outName));
-          final cmd =
-              '-y -i "${f.path}" -c:a pcm_s16le -ar 48000 "${outWav.path}"';
-          await FFmpegKit.execute(cmd);
-          fileNameRemap[p.basename(f.path)] = outName;
-        } else {
-          final outName = p.basename(f.path);
-          await f.copy(p.join(dstAudioDir.path, outName));
-          fileNameRemap[p.basename(f.path)] = outName;
+      item.name = normalizedName;
+      if (item.isFile) {
+        if (item.size < 0) {
+          throw Exception("Bundle contains an invalid file entry");
+        }
+        totalUncompressedBytes += item.size;
+        if (totalUncompressedBytes > _maxBundleUncompressedBytes) {
+          throw Exception("Bundle expands beyond the safe import limit");
+        }
+        if (normalizedName == "project.json") {
+          hasProjectJson = true;
         }
       }
     }
 
-    final tracks = (jsonMap["tracks"] as List?) ?? const [];
-    for (final t in tracks) {
-      final track = (t as Map).cast<String, dynamic>();
-      final original = track["fileName"] as String?;
-      if (original == null) continue;
-      final remapped = fileNameRemap[original];
-      if (remapped != null) {
-        track["fileName"] = remapped;
-      }
+    if (!hasProjectJson) {
+      throw Exception("Bundle missing project.json");
+    }
+    return archive;
+  }
+
+  static String _normalizeArchiveEntryName(String rawName) {
+    final normalized = p.posix.normalize(rawName.replaceAll('\\', '/').trim());
+    final withoutLeadingSlash =
+        normalized.startsWith('/') ? normalized.substring(1) : normalized;
+    if (withoutLeadingSlash.isEmpty ||
+        withoutLeadingSlash == '.' ||
+        withoutLeadingSlash == '..' ||
+        p.posix.isAbsolute(withoutLeadingSlash) ||
+        withoutLeadingSlash.startsWith('../') ||
+        withoutLeadingSlash.contains('/../')) {
+      throw Exception("Bundle contains an invalid path");
+    }
+    return withoutLeadingSlash;
+  }
+
+  static bool _isAllowedArchivePath(
+    String normalizedPath, {
+    required bool isDirectory,
+  }) {
+    if (_allowedRootFiles.contains(normalizedPath)) {
+      return !isDirectory;
+    }
+    if (normalizedPath == 'audio') {
+      return isDirectory;
+    }
+    if (!normalizedPath.startsWith('audio/')) {
+      return false;
     }
 
-    await File(p.join(destProjectDir.path, "project.json"))
-        .writeAsString(jsonEncode(jsonMap));
+    final relative = normalizedPath.substring('audio/'.length);
+    if (relative.isEmpty) {
+      return isDirectory;
+    }
+    return !isDirectory &&
+        !relative.contains('/') &&
+        !relative.contains('\\') &&
+        p.basename(relative) == relative;
+  }
 
-    // cleanup unpack dir
-    try {
-      await unpackDir.delete(recursive: true);
-    } catch (_) {}
-
-    return destProjectDir;
+  static String _resolveExtractPath(Directory unpackDir, String archivePath) {
+    final resolved = p.normalize(
+      p.joinAll(<String>[
+        unpackDir.path,
+        ...p.posix.split(archivePath),
+      ]),
+    );
+    final root = p.normalize(unpackDir.path);
+    if (resolved != root && !p.isWithin(root, resolved)) {
+      throw Exception("Bundle attempted to write outside the import directory");
+    }
+    return resolved;
   }
 }

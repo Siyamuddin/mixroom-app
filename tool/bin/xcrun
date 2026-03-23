@@ -1,0 +1,24 @@
+#!/bin/zsh
+set -euo pipefail
+
+REAL_XCRUN="/usr/bin/xcrun"
+CLAMP_TIMEOUT="${MIXROOM_XCDEVICE_TIMEOUT:-}"
+
+if [[ "$#" -ge 1 && "$1" == "xcdevice" && "$CLAMP_TIMEOUT" != "" ]]; then
+  args=("$@")
+  for ((i = 1; i <= $#; i++)); do
+    if [[ "${args[$i]}" == "--timeout" ]]; then
+      next_index=$((i + 1))
+      if [[ $next_index -le $# ]]; then
+        current_timeout="${args[$next_index]}"
+        if [[ "$current_timeout" =~ '^[0-9]+$' && "$current_timeout" -gt "$CLAMP_TIMEOUT" ]]; then
+          args[$next_index]="$CLAMP_TIMEOUT"
+        fi
+      fi
+      break
+    fi
+  done
+  exec "$REAL_XCRUN" "${args[@]}"
+fi
+
+exec "$REAL_XCRUN" "$@"

@@ -18,7 +18,7 @@ class MixChangeHighlighter {
   final Map<HaloKey, Timer> _timers = {};
 
   void trigger(List<HaloKey> keys,
-      {Duration duration = const Duration(seconds: 5)}) {
+      {Duration duration = const Duration(milliseconds: 800)}) {
     if (keys.isEmpty) {
       clear();
       return;

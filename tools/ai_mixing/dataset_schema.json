@@ -3,6 +3,7 @@
   "row_unit": "single_action",
   "columns": {
     "session_id": "string",
+    "cycle_id": "string",
     "event_index": "int",
     "action_type": "string",
     "action_row_index": "int",
@@ -26,6 +27,7 @@
     "kind_eq": "int",
     "kind_compressor": "int",
     "kind_limiter": "int",
+    "kind_clipper": "int",
     "kind_reverb": "int",
     "kind_delay": "int",
     "kind_deesser": "int",

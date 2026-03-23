@@ -9,8 +9,17 @@
 #import <FlutterMacOS/FlutterMacOS.h>
 #endif
 
+@class JuceAudioEnginePlugin;
+
+@interface JucePluginEventStreamHandler : NSObject <FlutterStreamHandler>
+- (instancetype)initWithPlugin:(JuceAudioEnginePlugin *)plugin;
+@end
+
 @interface JuceAudioEnginePlugin ()
 @property (nonatomic, copy) FlutterEventSink eventSink;
+@property (nonatomic, copy) FlutterEventSink logSink;
+- (void)bindEventSink:(FlutterEventSink)events;
+- (void)clearEventSink;
 @end
 
 @implementation JuceAudioEnginePlugin
@@ -24,15 +33,33 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 }
 
 - (BOOL)hasActiveLogListener {
-    return self.eventSink != nil;
+    return self.logSink != nil;
 }
 
 - (void)sendFlutterLog:(NSString*)message {
-    if (self.eventSink) {
-        self.eventSink(@{ @"message": message });
+    if (self.logSink) {
+        self.logSink(@{ @"message": message });
     }
 }
 
+- (void)bindEventSink:(FlutterEventSink)events {
+    self.eventSink = events;
+}
+
+- (void)clearEventSink {
+    self.eventSink = nil;
+}
+
+- (void)handlePluginLoadedNotification:(NSNotification *)notification {
+    if (!self.eventSink) {
+        return;
+    }
+    NSDictionary *payload = notification.userInfo;
+    if (![payload isKindOfClass:[NSDictionary class]]) {
+        return;
+    }
+    self.eventSink(payload);
+}
 
 // end for printing logs
 
@@ -55,20 +82,27 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 
 
     _sharedInstance = [JuceAudioEnginePlugin new];
+    JucePluginEventStreamHandler *eventHandler =
+        [[JucePluginEventStreamHandler alloc] initWithPlugin:_sharedInstance];
 
     [registrar addMethodCallDelegate:_sharedInstance channel:channel];
+    [eventChannel setStreamHandler:eventHandler];
     [logChannel setStreamHandler:_sharedInstance];
+    [[NSNotificationCenter defaultCenter] addObserver:_sharedInstance
+                                             selector:@selector(handlePluginLoadedNotification:)
+                                                 name:@"JUCEPluginLoaded"
+                                               object:nil];
 
     // [JuceBridge initialiseEngineObjC];
 }
 
 - (FlutterError* _Nullable)onListenWithArguments:(id _Nullable)arguments eventSink:(FlutterEventSink)events {
-    self.eventSink = events;
+    self.logSink = events;
     return nil;
 }
 
 - (FlutterError* _Nullable)onCancelWithArguments:(id _Nullable)arguments {
-    self.eventSink = nil;
+    self.logSink = nil;
     return nil;
 }
 
@@ -320,6 +354,11 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         float semitones = [args[@"semitones"] floatValue];
         [JuceBridge setClipPitchObjC:clip semitones:semitones];
         result(nil);
+    } else if ([call.method isEqualToString:@"setClipReversed"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        BOOL reversed = [args[@"reversed"] boolValue];
+        [JuceBridge setClipReversedObjC:clip reversed:reversed];
+        result(nil);
     } else if ([call.method isEqualToString:@"setClipStretchOptions"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         double tempoRatio = [args[@"tempoRatio"] doubleValue];
@@ -473,6 +512,11 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSInteger row = [args[@"row"] integerValue];
         [JuceBridge clearTrackEffectAutomationForRowObjC:row];
         result(nil);
+    } else if ([call.method isEqualToString:@"setRowGainAutomationPoints"]) {
+        NSInteger row = [args[@"row"] integerValue];
+        NSArray *points = args[@"points"];
+        [JuceBridge setRowGainAutomationPointsObjC:row points:points];
+        result(nil);
     } else if ([call.method isEqualToString:@"setRowGain"]) {
         NSInteger row = [args[@"row"] integerValue];
         float gain    = [args[@"gain"] floatValue];
@@ -491,6 +535,11 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSInteger row = [args[@"row"] integerValue];
         float pan     = [args[@"pan"] floatValue];
         [JuceBridge setRowPanObjC:row pan:pan];
+        result(nil);
+    } else if ([call.method isEqualToString:@"setRowPanAutomationPoints"]) {
+        NSInteger row = [args[@"row"] integerValue];
+        NSArray *points = args[@"points"];
+        [JuceBridge setRowPanAutomationPointsObjC:row points:points];
         result(nil);
 
     // ----------------------------------------
@@ -534,6 +583,25 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSInteger effect = [args[@"effect"] integerValue];
         BOOL state       = [JuceBridge getMasterEffectBypassStateObjC:effect];
         result(@(state));
+    } else if ([call.method isEqualToString:@"setMasterEffectAutomationPoints"]) {
+        NSInteger effect = [args[@"effect"] integerValue];
+        NSString *param = args[@"paramId"];
+        double minValue = [args[@"min"] doubleValue];
+        double maxValue = [args[@"max"] doubleValue];
+        NSArray *points = args[@"points"];
+        [JuceBridge setMasterEffectAutomationPointsObjC:effect
+                                              paramId:param
+                                             minValue:minValue
+                                             maxValue:maxValue
+                                               points:points];
+        result(nil);
+    } else if ([call.method isEqualToString:@"clearMasterEffectAutomation"]) {
+        [JuceBridge clearMasterEffectAutomationObjC];
+        result(nil);
+    } else if ([call.method isEqualToString:@"setMasterGainAutomationPoints"]) {
+        NSArray *points = args[@"points"];
+        [JuceBridge setMasterGainAutomationPointsObjC:points];
+        result(nil);
     } else if ([call.method isEqualToString:@"setMasterGain"]) {
         float gain = [args[@"gain"] floatValue];
         [JuceBridge setMasterGainObjC:gain];
@@ -541,6 +609,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"muteMaster"]) {
         BOOL mute = [args[@"mute"] boolValue];
         [JuceBridge muteMasterObjC:mute];
+        result(nil);
+    } else if ([call.method isEqualToString:@"setMasterPanAutomationPoints"]) {
+        NSArray *points = args[@"points"];
+        [JuceBridge setMasterPanAutomationPointsObjC:points];
         result(nil);
     } else if ([call.method isEqualToString:@"setMasterPan"]) {
         float pan = [args[@"pan"] floatValue];
@@ -675,6 +747,16 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     else if ([call.method isEqualToString:@"getNumInputChannels"]) {
         result([JuceBridge getNumInputChannelsObjC]);
     }
+    else if ([call.method isEqualToString:@"prepareRecordingInputs"]) {
+        NSInteger desiredInputChannels = [args[@"desiredInputChannels"] integerValue];
+        NSString *reason = args[@"reason"] ?: @"dart";
+        result(@([JuceBridge prepareRecordingInputsObjC:desiredInputChannels reason:reason]));
+    }
+    else if ([call.method isEqualToString:@"refreshAudioRoute"]) {
+        NSString *reason = args[@"reason"] ?: @"dart";
+        [JuceBridge refreshAudioRouteObjC:reason];
+        result(nil);
+    }
     else if ([call.method isEqualToString:@"getRecordingPeak"]) {
         result([JuceBridge getRecordingPeakObjC]);
     }
@@ -697,5 +779,32 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     }
 }
 
+
+@end
+
+@interface JucePluginEventStreamHandler ()
+@property (nonatomic, assign) JuceAudioEnginePlugin *plugin;
+@end
+
+@implementation JucePluginEventStreamHandler
+
+- (instancetype)initWithPlugin:(JuceAudioEnginePlugin *)plugin {
+    self = [super init];
+    if (self) {
+        _plugin = plugin;
+    }
+    return self;
+}
+
+- (FlutterError * _Nullable)onListenWithArguments:(id _Nullable)arguments
+                                        eventSink:(FlutterEventSink)events {
+    [self.plugin bindEventSink:events];
+    return nil;
+}
+
+- (FlutterError * _Nullable)onCancelWithArguments:(id _Nullable)arguments {
+    [self.plugin clearEventSink];
+    return nil;
+}
 
 @end

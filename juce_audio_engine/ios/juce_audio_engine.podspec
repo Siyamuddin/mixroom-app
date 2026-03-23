@@ -30,8 +30,11 @@ Pod::Spec.new do |s|
 
   # Link against prebuilt .a libs from the xcframework
   s.ios.vendored_libraries = [
+    # Release on a real device: uncomment this and comment out the other two entries.
     # 'JuceModules.xcframework/ios-arm64/libJuceModules.a',
+    # Debug on a real device: uncomment this and comment out the other two entries.
     'JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a',
+    # Simulator builds: keep this uncommented and comment out the two iphoneos entries above.
     # 'JuceModules.xcframework/ios-arm64_x86_64-simulator/libJuceModules_sim.a'
   ]
 

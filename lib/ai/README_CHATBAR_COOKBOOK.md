@@ -36,6 +36,7 @@ This is a practical prompt cookbook for the single chatbar UI, with one-sentence
 - `deesser`: "Tame sibilance on the vocal."
 - `compressor`: "Compress the drums a little more."
 - `limiter`: "Put a limiter on the master and keep peaks controlled."
+- `clipper`: "Add a clipper on the master for a little more loudness and edge."
 - `balance`: "Rebalance the track levels so vocals stay in front."
 
 ### 2.3 EQ descriptor-style requests
@@ -109,7 +110,7 @@ This is a practical prompt cookbook for the single chatbar UI, with one-sentence
 - `add_ramp`: "Add a fade-down ramp over the next 2 bars."
 - `clear`: "Clear automation on this lane."
 - `create_clip`: "Create an automation clip for this section."
-- `duplicate_clip`: "Duplicate that automation clip to the next phrase."
+- `duplicate_clip`: "Clone that automation clip to the next phrase."
 - `move_clip`: "Move that automation clip 1 bar right."
 - `delete_clip`: "Delete that automation clip."
 - `clear_clips`: "Clear all automation clips on this lane."
@@ -117,6 +118,7 @@ This is a practical prompt cookbook for the single chatbar UI, with one-sentence
 - `unmute_clip`: "Unmute that automation clip."
 - `toggle_clip_mute`: "Toggle mute for the selected automation clip."
 - `set_clip_points`: "Replace points inside that automation clip with a new curve."
+- `make_unique_clip`: "Make just this automation clone unique so I can change it separately."
 - `apply_template`: "Apply a sidechain pump automation template here."
 
 ### 3.6 Automation templates
@@ -151,4 +153,3 @@ This is a practical prompt cookbook for the single chatbar UI, with one-sentence
 - "Write a bassline for C-D-G-C and then chop it into 16th-note stutters."
 - "Remove coughs from this spoken clip and tighten long pauses."
 - "Detect tempo from this loop, set project BPM, and align the selected clips."
-

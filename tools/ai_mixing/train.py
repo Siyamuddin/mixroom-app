@@ -32,6 +32,7 @@ FEATURE_COLUMNS = [
     "kind_eq",
     "kind_compressor",
     "kind_limiter",
+    "kind_clipper",
     "kind_reverb",
     "kind_delay",
     "kind_deesser",
@@ -91,7 +92,7 @@ FEATURE_COLUMNS = [
     "action_hard_reset_master_fx",
     "action_other",
 ]
-EXPECTED_FEATURE_COUNT = 76
+EXPECTED_FEATURE_COUNT = 77
 
 
 def parse_args():
@@ -184,6 +185,7 @@ def main():
                     random_state=args.seed,
                     max_iter=1000,
                     class_weight="balanced",
+                    solver="liblinear",
                 ),
             ),
         ]

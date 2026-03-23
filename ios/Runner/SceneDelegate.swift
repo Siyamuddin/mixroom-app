@@ -19,7 +19,7 @@ class SceneDelegate: FlutterSceneDelegate {
   private func forwardIncomingURLs(_ contexts: Set<UIOpenURLContext>) {
     guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
     for context in contexts {
-      appDelegate.handleIncomingURL(context.url)
+      _ = appDelegate.handleIncomingURL(context.url)
     }
   }
 }

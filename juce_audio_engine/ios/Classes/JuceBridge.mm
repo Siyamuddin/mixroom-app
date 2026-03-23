@@ -1116,6 +1116,12 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
                                     { JuceEngine::get().setClipPitch((int)clipIndex, semitones); });
 }
 
++ (void)setClipReversedObjC:(NSInteger)clipIndex reversed:(BOOL)reversed
+{
+    juce::MessageManager::callAsync([clipIndex, reversed]
+                                    { JuceEngine::get().setClipReversed((int)clipIndex, (bool)reversed); });
+}
+
 + (void)setClipStretchOptionsObjC:(NSInteger)clipIndex
                        tempoRatio:(double)tempoRatio
                     preservePitch:(BOOL)preservePitch
@@ -1282,6 +1288,204 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
                                     { JuceEngine::get().clearTrackEffectAutomationForRow((int)trackRow); });
 }
 
++ (void)setRowGainAutomationPointsObjC:(NSInteger)row
+                               points:(NSArray<NSDictionary *> *)points
+{
+    std::vector<AutomationPoint> cppPoints;
+    cppPoints.reserve(points.count);
+
+    for (NSDictionary *dict in points)
+    {
+        AutomationPoint p;
+        id xVal = dict[@"x"];
+        id timeMsVal = dict[@"timeMs"];
+        id timeSecondsVal = dict[@"timeSeconds"];
+        id valueVal = dict[@"value"];
+        id volumeVal = dict[@"volume"];
+
+        if ([xVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [xVal doubleValue];
+        else if ([timeMsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeMsVal doubleValue];
+        else if ([timeSecondsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeSecondsVal doubleValue] * 1000.0;
+        else
+            p.timeMs = 0.0;
+
+        if ([valueVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[valueVal doubleValue];
+        else if ([volumeVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[volumeVal doubleValue];
+        else
+            p.value = 0.0f;
+
+        cppPoints.push_back(p);
+    }
+
+    juce::MessageManager::callAsync([row, cppPoints]() mutable
+                                    { JuceEngine::get().setRowGainAutomationPoints((int)row, cppPoints); });
+}
+
++ (void)setRowPanAutomationPointsObjC:(NSInteger)row
+                              points:(NSArray<NSDictionary *> *)points
+{
+    std::vector<AutomationPoint> cppPoints;
+    cppPoints.reserve(points.count);
+
+    for (NSDictionary *dict in points)
+    {
+        AutomationPoint p;
+        id xVal = dict[@"x"];
+        id timeMsVal = dict[@"timeMs"];
+        id timeSecondsVal = dict[@"timeSeconds"];
+        id valueVal = dict[@"value"];
+        id volumeVal = dict[@"volume"];
+
+        if ([xVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [xVal doubleValue];
+        else if ([timeMsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeMsVal doubleValue];
+        else if ([timeSecondsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeSecondsVal doubleValue] * 1000.0;
+        else
+            p.timeMs = 0.0;
+
+        if ([valueVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[valueVal doubleValue];
+        else if ([volumeVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[volumeVal doubleValue];
+        else
+            p.value = 0.0f;
+
+        cppPoints.push_back(p);
+    }
+
+    juce::MessageManager::callAsync([row, cppPoints]() mutable
+                                    { JuceEngine::get().setRowPanAutomationPoints((int)row, cppPoints); });
+}
+
++ (void)setMasterEffectAutomationPointsObjC:(NSInteger)effectIndex
+                                  paramId:(NSString *)paramId
+                                 minValue:(double)minValue
+                                 maxValue:(double)maxValue
+                                   points:(NSArray<NSDictionary *> *)points
+{
+    std::vector<AutomationPoint> cppPoints;
+    cppPoints.reserve(points.count);
+
+    for (NSDictionary *dict in points)
+    {
+        AutomationPoint p;
+        id xVal = dict[@"x"];
+        id timeMsVal = dict[@"timeMs"];
+        id timeSecondsVal = dict[@"timeSeconds"];
+        id valueVal = dict[@"value"];
+        id volumeVal = dict[@"volume"];
+
+        if ([xVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [xVal doubleValue];
+        else if ([timeMsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeMsVal doubleValue];
+        else if ([timeSecondsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeSecondsVal doubleValue] * 1000.0;
+        else
+            p.timeMs = 0.0;
+
+        if ([valueVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[valueVal doubleValue];
+        else if ([volumeVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[volumeVal doubleValue];
+        else
+            p.value = 0.0f;
+
+        cppPoints.push_back(p);
+    }
+
+    juce::String juceParam = juceStringFromNSString(paramId ?: @"");
+    juce::MessageManager::callAsync([effectIndex, juceParam, minValue, maxValue, cppPoints]() mutable
+                                    { JuceEngine::get().setMasterEffectAutomationPoints((int)effectIndex, juceParam, (float)minValue, (float)maxValue, cppPoints); });
+}
+
++ (void)clearMasterEffectAutomationObjC
+{
+    juce::MessageManager::callAsync([]
+                                    { JuceEngine::get().clearMasterEffectAutomation(); });
+}
+
++ (void)setMasterGainAutomationPointsObjC:(NSArray<NSDictionary *> *)points
+{
+    std::vector<AutomationPoint> cppPoints;
+    cppPoints.reserve(points.count);
+
+    for (NSDictionary *dict in points)
+    {
+        AutomationPoint p;
+        id xVal = dict[@"x"];
+        id timeMsVal = dict[@"timeMs"];
+        id timeSecondsVal = dict[@"timeSeconds"];
+        id valueVal = dict[@"value"];
+        id volumeVal = dict[@"volume"];
+
+        if ([xVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [xVal doubleValue];
+        else if ([timeMsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeMsVal doubleValue];
+        else if ([timeSecondsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeSecondsVal doubleValue] * 1000.0;
+        else
+            p.timeMs = 0.0;
+
+        if ([valueVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[valueVal doubleValue];
+        else if ([volumeVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[volumeVal doubleValue];
+        else
+            p.value = 0.0f;
+
+        cppPoints.push_back(p);
+    }
+
+    juce::MessageManager::callAsync([cppPoints]() mutable
+                                    { JuceEngine::get().setMasterGainAutomationPoints(cppPoints); });
+}
+
++ (void)setMasterPanAutomationPointsObjC:(NSArray<NSDictionary *> *)points
+{
+    std::vector<AutomationPoint> cppPoints;
+    cppPoints.reserve(points.count);
+
+    for (NSDictionary *dict in points)
+    {
+        AutomationPoint p;
+        id xVal = dict[@"x"];
+        id timeMsVal = dict[@"timeMs"];
+        id timeSecondsVal = dict[@"timeSeconds"];
+        id valueVal = dict[@"value"];
+        id volumeVal = dict[@"volume"];
+
+        if ([xVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [xVal doubleValue];
+        else if ([timeMsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeMsVal doubleValue];
+        else if ([timeSecondsVal respondsToSelector:@selector(doubleValue)])
+            p.timeMs = [timeSecondsVal doubleValue] * 1000.0;
+        else
+            p.timeMs = 0.0;
+
+        if ([valueVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[valueVal doubleValue];
+        else if ([volumeVal respondsToSelector:@selector(doubleValue)])
+            p.value = (float)[volumeVal doubleValue];
+        else
+            p.value = 0.0f;
+
+        cppPoints.push_back(p);
+    }
+
+    juce::MessageManager::callAsync([cppPoints]() mutable
+                                    { JuceEngine::get().setMasterPanAutomationPoints(cppPoints); });
+}
+
 + (void)setAutomationTransportObjC:(double)timeSeconds
 {
     juce::MessageManager::callAsync([timeSeconds]
@@ -1364,6 +1568,19 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 {
     auto s = JuceEngine::get().getCurrentInputDeviceName();
     return [NSString stringWithUTF8String:s.toRawUTF8()];
+}
+
++ (BOOL)prepareRecordingInputsObjC:(NSInteger)desiredInputChannels
+                            reason:(NSString *)reason
+{
+    const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);
+    return JuceEngine::get().prepareRecordingInputs((int)desiredInputChannels, why);
+}
+
++ (void)refreshAudioRouteObjC:(NSString *)reason
+{
+    const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);
+    JuceEngine::get().refreshAudioRouteAsync(why);
 }
 
 + (BOOL)startRecordingObjC:(NSString *)path

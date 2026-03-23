@@ -4,19 +4,24 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
 
-import 'package:audio_waveforms/audio_waveforms.dart';
-import 'package:ffmpeg_kit_flutter_new_full/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_full/ffprobe_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_full/return_code.dart';
+import 'package:accessing_security_scoped_resource/accessing_security_scoped_resource.dart';
+import 'package:mixroom/ffmpeg/ffmpeg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_file_dialog/flutter_file_dialog.dart';
+import 'package:just_audio/just_audio.dart' as ja;
+import 'package:mixroom/ai/video_editor_ai.dart';
+import 'package:mixroom/config/llm_config.dart';
+import 'package:mixroom/helpers/auth_service.dart';
+import 'package:mixroom/helpers/export_save_dialog.dart';
+import 'package:mixroom/helpers/ffmpeg_waveform.dart';
 import 'package:mixroom/helpers/video_project_manager.dart';
 import 'package:mixroom/helpers/video_sequencer_engine.dart';
+import 'package:open_file/open_file.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
 class VideoSequencerEditorScreen extends StatefulWidget {
@@ -34,6 +39,8 @@ class VideoSequencerEditorScreen extends StatefulWidget {
       _VideoSequencerEditorScreenState();
 }
 
+enum _TimelineLayoutMode { storyboard, tracks }
+
 class _VideoSequencerEditorScreenState
     extends State<VideoSequencerEditorScreen> {
   static const Color _bg = Color(0xFF0B0C10);
@@ -47,8 +54,15 @@ class _VideoSequencerEditorScreenState
   static const double _kBottomDockApproxHeight = 72;
 
   late VideoSequencerEngine _engine;
+  late final VideoEditorAiService _videoAiService;
   VideoPlayerController? _previewController;
   String? _previewClipId;
+  final Map<String, ja.AudioPlayer> _overlayAudioPlayers =
+      <String, ja.AudioPlayer>{};
+  final Map<String, double> _overlayAudioVolumes = <String, double>{};
+  final AccessingSecurityScopedResource _securityScopedResource =
+      AccessingSecurityScopedResource();
+  String _projectId = '';
 
   Timer? _transportTimer;
   DateTime? _lastTransportTickAt;
@@ -56,20 +70,20 @@ class _VideoSequencerEditorScreenState
 
   bool _loadingProject = true;
   bool _loadingMedia = false;
+  bool _processingAi = false;
   bool _exporting = false;
   String? _busyLabel;
 
   final ScrollController _timelineScroll = ScrollController();
   final TextEditingController _chatTextController = TextEditingController();
   final FocusNode _chatFocusNode = FocusNode();
-  final WaveformExtractionController _waveformExtractor =
-      WaveformExtractionController();
   final Map<String, List<double>> _audioWaveformsByPath =
       <String, List<double>>{};
   final Set<String> _audioWaveformsLoading = <String>{};
   final Map<String, double> _clipDragDyAccumulator = <String, double>{};
   bool _snapEnabled = true;
   bool _autoFollowPlayhead = true;
+  _TimelineLayoutMode _timelineLayoutMode = _TimelineLayoutMode.storyboard;
   bool _chatExpanded = false;
   bool _chatInputActive = false;
   bool _chatHasText = false;
@@ -80,6 +94,8 @@ class _VideoSequencerEditorScreenState
   double _timelineScaleBasePps = 120.0;
   bool _previewSyncInFlight = false;
   DateTime? _lastPreviewSyncAt;
+  double? _lastAppliedPreviewVolume;
+  double? _lastAppliedPreviewSpeed;
 
   @override
   void initState() {
@@ -87,6 +103,16 @@ class _VideoSequencerEditorScreenState
     _engine = VideoSequencerEngine();
     _engine.addListener(_onEngineChanged);
     _chatTextController.addListener(_onChatTextChanged);
+    final authService = context.read<AuthService>();
+    _videoAiService = VideoEditorAiService(
+      apiKey: LlmConfig.canUseDirectOpenAi ? LlmConfig.openAiApiKey : '',
+      model: LlmConfig.openAiModel,
+      proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
+      proxyPath: LlmConfig.proxyPath,
+      requestTimeout: Duration(seconds: LlmConfig.requestTimeoutSeconds),
+      authTokenProvider: authService.getIdTokenOrNull,
+      refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
+    );
     _loadProjectState();
   }
 
@@ -99,8 +125,10 @@ class _VideoSequencerEditorScreenState
     _chatTextController.removeListener(_onChatTextChanged);
     _chatTextController.dispose();
     _chatFocusNode.dispose();
-    _waveformExtractor.stopWaveformExtraction();
     _previewController?.dispose();
+    for (final player in _overlayAudioPlayers.values) {
+      unawaited(player.dispose());
+    }
     unawaited(_persistProjectState());
     super.dispose();
   }
@@ -111,6 +139,17 @@ class _VideoSequencerEditorScreenState
     return base;
   }
 
+  Future<void> _openSavedExport(String path) async {
+    try {
+      await OpenFile.open(path);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open the saved export.')),
+      );
+    }
+  }
+
   void _onChatTextChanged() {
     final hasText = _chatTextController.text.trim().isNotEmpty;
     if (_chatHasText == hasText || !mounted) return;
@@ -118,6 +157,7 @@ class _VideoSequencerEditorScreenState
   }
 
   Future<void> _loadProjectState() async {
+    _projectId = await VideoProjectManager.ensureProjectId(widget.projectDir);
     final state = await VideoProjectManager.readState(widget.projectDir);
     final sequencerJson = state['sequencer'];
 
@@ -150,6 +190,7 @@ class _VideoSequencerEditorScreenState
     }
 
     _warmAudioWaveforms();
+    _warmVideoThumbnails();
     await _syncPreviewToSequencer(force: true);
     if (!mounted) return;
     setState(() => _loadingProject = false);
@@ -195,7 +236,7 @@ class _VideoSequencerEditorScreenState
     if (!force &&
         _engine.isPlaying &&
         last != null &&
-        now.difference(last).inMilliseconds < 55) {
+        now.difference(last).inMilliseconds < 85) {
       return;
     }
     _previewSyncInFlight = true;
@@ -258,8 +299,12 @@ class _VideoSequencerEditorScreenState
       if (_previewController != null) {
         await _previewController!.pause();
       }
+      await _syncOverlayAudioPlayers(force: force);
       if (_previewClipId != null && mounted) {
-        setState(() => _previewClipId = null);
+        _previewClipId = null;
+        _lastAppliedPreviewVolume = null;
+        _lastAppliedPreviewSpeed = null;
+        if (mounted) setState(() {});
       }
       return;
     }
@@ -289,10 +334,13 @@ class _VideoSequencerEditorScreenState
     }
 
     final controller = _previewController;
-    if (controller == null || !controller.value.isInitialized) return;
+    if (controller == null || !controller.value.isInitialized) {
+      await _syncOverlayAudioPlayers(force: force);
+      return;
+    }
 
     final driftMs = (controller.value.position - local).inMilliseconds.abs();
-    if (force || driftMs > 110) {
+    if (force || driftMs > (_engine.isPlaying ? 185 : 65)) {
       await controller.seekTo(local);
     }
 
@@ -301,19 +349,108 @@ class _VideoSequencerEditorScreenState
         clipTrack == null ? true : _engine.isTrackAudibleById(clipTrack.id);
     final targetVolume =
         (!trackAudible || clip.muted) ? 0.0 : clip.volume.clamp(0.0, 1.0);
-    await controller.setVolume(targetVolume);
-    await controller.setPlaybackSpeed(_previewPlaybackSpeed);
+    if (_lastAppliedPreviewVolume == null ||
+        (_lastAppliedPreviewVolume! - targetVolume).abs() > 0.001) {
+      await controller.setVolume(targetVolume);
+      _lastAppliedPreviewVolume = targetVolume;
+    }
+    if (_lastAppliedPreviewSpeed == null ||
+        (_lastAppliedPreviewSpeed! - _previewPlaybackSpeed).abs() > 0.001) {
+      await controller.setPlaybackSpeed(_previewPlaybackSpeed);
+      _lastAppliedPreviewSpeed = _previewPlaybackSpeed;
+    }
 
     if (_engine.isPlaying) {
       if (!controller.value.isPlaying) await controller.play();
     } else {
       if (controller.value.isPlaying) await controller.pause();
     }
+    await _syncOverlayAudioPlayers(force: force);
+  }
+
+  Future<void> _syncOverlayAudioPlayers({bool force = false}) async {
+    final activeClips =
+        _engine.clipsAtPlayhead(SequencerTrackType.audio).where((clip) {
+      final track = _engine.trackForClip(clip.id);
+      return track != null &&
+          _engine.isTrackAudibleById(track.id) &&
+          !clip.muted;
+    }).toList(growable: false);
+    final activeIds = activeClips.map((clip) => clip.id).toSet();
+
+    final staleIds = _overlayAudioPlayers.keys
+        .where((clipId) => !activeIds.contains(clipId))
+        .toList(growable: false);
+    for (final clipId in staleIds) {
+      await _disposeOverlayAudioPlayer(clipId);
+    }
+
+    for (final clip in activeClips) {
+      final sourceFile = File(clip.sourcePath);
+      if (!await sourceFile.exists()) continue;
+      final player = await _ensureOverlayAudioPlayer(clip);
+      if (player == null) continue;
+
+      final local = _engine.localSourcePositionForClip(clip, _engine.playhead);
+      final driftMs = (player.position - local).inMilliseconds.abs();
+      if (force || driftMs > (_engine.isPlaying ? 150 : 50)) {
+        await player.seek(local);
+      }
+
+      final targetVolume = clip.volume.clamp(0.0, 1.0);
+      final lastVolume = _overlayAudioVolumes[clip.id];
+      if (lastVolume == null || (lastVolume - targetVolume).abs() > 0.001) {
+        await player.setVolume(targetVolume);
+        _overlayAudioVolumes[clip.id] = targetVolume;
+      }
+      await player.setSpeed(_previewPlaybackSpeed);
+
+      if (_engine.isPlaying) {
+        if (!player.playing) await player.play();
+      } else {
+        if (player.playing) await player.pause();
+      }
+    }
+  }
+
+  Future<ja.AudioPlayer?> _ensureOverlayAudioPlayer(SequencerClip clip) async {
+    final existing = _overlayAudioPlayers[clip.id];
+    if (existing != null) return existing;
+
+    final next = ja.AudioPlayer(handleAudioSessionActivation: false);
+    try {
+      await next.setFilePath(clip.sourcePath);
+    } catch (_) {
+      await next.dispose();
+      return null;
+    }
+    _overlayAudioPlayers[clip.id] = next;
+    return next;
+  }
+
+  Future<void> _disposeOverlayAudioPlayer(String clipId) async {
+    final player = _overlayAudioPlayers.remove(clipId);
+    _overlayAudioVolumes.remove(clipId);
+    if (player == null) return;
+    try {
+      await player.pause();
+    } catch (_) {}
+    await player.dispose();
   }
 
   Future<void> _pickVideoClip() async {
     final res = await _runFilePickerRequest<FilePickerResult?>(
-      () => FilePicker.platform.pickFiles(type: FileType.video),
+      () => FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const <String>[
+          'mp4',
+          'mov',
+          'm4v',
+          'webm',
+          'mkv',
+          'avi',
+        ],
+      ),
     );
     if (res == null || res.files.isEmpty) return;
     final path = res.files.single.path;
@@ -323,7 +460,18 @@ class _VideoSequencerEditorScreenState
 
   Future<void> _pickAudioClip() async {
     final res = await _runFilePickerRequest<FilePickerResult?>(
-      () => FilePicker.platform.pickFiles(type: FileType.audio),
+      () => FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const <String>[
+          'mp3',
+          'wav',
+          'm4a',
+          'aac',
+          'aiff',
+          'flac',
+          'ogg',
+        ],
+      ),
     );
     if (res == null || res.files.isEmpty) return;
     final path = res.files.single.path;
@@ -357,6 +505,158 @@ class _VideoSequencerEditorScreenState
     }
   }
 
+  String _normalizePickedPath(String rawPath) {
+    final raw = rawPath.trim();
+    if (raw.isEmpty) return '';
+
+    final candidates = <String>{};
+
+    void addCandidate(String value) {
+      var path = value.trim();
+      if (path.isEmpty) return;
+
+      if (path.startsWith('file://')) {
+        try {
+          path = Uri.parse(path).toFilePath();
+        } catch (_) {}
+      }
+
+      try {
+        path = Uri.decodeFull(path);
+      } catch (_) {}
+
+      path = path.replaceAll('\\', '/');
+      if (!path.startsWith('/')) return;
+      path = p.normalize(path);
+      candidates.add(path);
+
+      if (path.startsWith('/private/')) {
+        candidates.add(p.normalize(path.replaceFirst('/private', '')));
+      } else if (path.startsWith('/var/')) {
+        candidates.add(p.normalize('/private$path'));
+      }
+    }
+
+    addCandidate(raw);
+    try {
+      final uri = Uri.parse(raw);
+      if (uri.scheme == 'file') {
+        addCandidate(uri.toFilePath());
+      }
+    } catch (_) {}
+
+    for (final candidate in candidates) {
+      if (File(candidate).existsSync() || Directory(candidate).existsSync()) {
+        return candidate;
+      }
+    }
+    return candidates.isEmpty ? '' : candidates.first;
+  }
+
+  Future<List<String>> _startSecurityScopedAccessForPath(String path) async {
+    if (!Platform.isIOS) return const <String>[];
+    final normalized = _normalizePickedPath(path);
+    if (normalized.isEmpty) return const <String>[];
+
+    final started = <String>[];
+    final keys = <String>{
+      normalized,
+      if (normalized.startsWith('/private/'))
+        normalized.replaceFirst('/private', ''),
+      if (normalized.startsWith('/var/')) '/private$normalized',
+      'uri:${Uri.file(normalized).toString()}',
+    };
+
+    for (final key in keys) {
+      bool granted = false;
+      try {
+        if (key.startsWith('uri:')) {
+          granted = await _securityScopedResource
+              .startAccessingSecurityScopedResourceWithURL(key.substring(4));
+        } else {
+          granted = await _securityScopedResource
+              .startAccessingSecurityScopedResourceWithFilePath(key);
+        }
+      } catch (_) {
+        granted = false;
+      }
+      if (granted) started.add(key);
+    }
+    return started;
+  }
+
+  Future<void> _stopSecurityScopedAccess(List<String> keys) async {
+    if (!Platform.isIOS || keys.isEmpty) return;
+    for (final key in keys) {
+      try {
+        if (key.startsWith('uri:')) {
+          await _securityScopedResource
+              .stopAccessingSecurityScopedResourceWithURL(key.substring(4));
+        } else {
+          await _securityScopedResource
+              .stopAccessingSecurityScopedResourceWithFilePath(key);
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<String> _materializeProjectMedia(String sourcePath) async {
+    final normalized = _normalizePickedPath(sourcePath);
+    if (normalized.isEmpty) {
+      throw FileSystemException('Could not access imported media');
+    }
+
+    final scopeKeys = await _startSecurityScopedAccessForPath(normalized);
+    try {
+      return await VideoProjectManager.importMediaIntoProject(
+        widget.projectDir,
+        normalized,
+      );
+    } finally {
+      await _stopSecurityScopedAccess(scopeKeys);
+    }
+  }
+
+  Future<String?> _generateVideoThumbnail(
+    String sourcePath, {
+    required String clipId,
+  }) async {
+    final normalized = _normalizePickedPath(sourcePath);
+    if (normalized.isEmpty) return null;
+    final thumbPath = await VideoProjectManager.nextThumbnailPath(
+      widget.projectDir,
+      stem: 'thumb-$clipId',
+    );
+    final command =
+        '-y -ss 0.250 -i "${_ff(normalized)}" -frames:v 1 -vf "scale=320:-2" "${_ff(thumbPath)}"';
+    final session = await FFmpegKit.execute(command);
+    final code = await session.getReturnCode();
+    if (!ReturnCode.isSuccess(code)) return null;
+    final file = File(thumbPath);
+    if (!await file.exists()) return null;
+    return file.path;
+  }
+
+  void _warmVideoThumbnails() {
+    for (final track in _engine.videoTracks) {
+      for (final clip in track.clips) {
+        if ((clip.thumbnailPath ?? '').trim().isNotEmpty) continue;
+        unawaited(_ensureThumbnailForClip(clip));
+      }
+    }
+  }
+
+  Future<void> _ensureThumbnailForClip(SequencerClip clip) async {
+    if (clip.trackType != SequencerTrackType.video) return;
+    if ((clip.thumbnailPath ?? '').trim().isNotEmpty) return;
+    final thumbnailPath = await _generateVideoThumbnail(
+      clip.sourcePath,
+      clipId: clip.id,
+    );
+    if (thumbnailPath == null || !mounted) return;
+    _engine.setClipThumbnailPath(clip.id, thumbnailPath);
+  }
+
   Future<void> _addVideoClipFromPath(
     String path, {
     Duration? preferredStart,
@@ -367,19 +667,21 @@ class _VideoSequencerEditorScreenState
     });
 
     try {
-      final duration = await _probeMediaDuration(path) ??
-          await _probeVideoDurationFallback(path) ??
+      final importedPath = await _materializeProjectMedia(path);
+      final duration = await _probeMediaDuration(importedPath) ??
+          await _probeVideoDurationFallback(importedPath) ??
           const Duration(seconds: 5);
 
       _selectedTransitionId = null;
-      _engine.addClip(
+      final clip = _engine.addClip(
         type: SequencerTrackType.video,
-        sourcePath: path,
-        label: p.basename(path),
+        sourcePath: importedPath,
+        label: p.basename(importedPath),
         sourceDuration: duration,
         sourceTotalDuration: duration,
         timelineStart: preferredStart,
       );
+      unawaited(_ensureThumbnailForClip(clip));
       await _syncPreviewToSequencer(force: true);
     } finally {
       if (mounted) {
@@ -398,17 +700,18 @@ class _VideoSequencerEditorScreenState
     });
 
     try {
+      final importedPath = await _materializeProjectMedia(path);
       final duration =
-          await _probeMediaDuration(path) ?? const Duration(seconds: 4);
+          await _probeMediaDuration(importedPath) ?? const Duration(seconds: 4);
       _selectedTransitionId = null;
       _engine.addClip(
         type: SequencerTrackType.audio,
-        sourcePath: path,
-        label: p.basename(path),
+        sourcePath: importedPath,
+        label: p.basename(importedPath),
         sourceDuration: duration,
         sourceTotalDuration: duration,
       );
-      unawaited(_ensureWaveformForPath(path));
+      unawaited(_ensureWaveformForPath(importedPath));
     } finally {
       if (mounted) {
         setState(() {
@@ -511,13 +814,13 @@ class _VideoSequencerEditorScreenState
     }
   }
 
-  Future<void> _addTransitionFromSelection() async {
+  Future<SequencerTransition?> _addTransitionFromSelection() async {
     final selected = _engine.selectedClip();
     if (selected == null || selected.trackType != SequencerTrackType.video) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Select a video clip first.')),
       );
-      return;
+      return null;
     }
 
     final next = _engine.nextVideoClip(selected.id);
@@ -528,7 +831,7 @@ class _VideoSequencerEditorScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Need two adjacent video clips.')),
       );
-      return;
+      return null;
     }
 
     final created = _engine.addOrUpdateTransition(
@@ -541,9 +844,10 @@ class _VideoSequencerEditorScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Unable to add transition here.')),
       );
-      return;
+      return null;
     }
     setState(() => _selectedTransitionId = created.id);
+    return created;
   }
 
   void _removeSelectedTransition() {
@@ -620,14 +924,13 @@ class _VideoSequencerEditorScreenState
     if (mounted) setState(() {});
 
     try {
-      final raw = await _waveformExtractor.extractWaveformData(
-        path: path,
-        noOfSamples: 120,
+      final raw = await extractNormalizedWaveformWithFfmpeg(
+        filePath: path,
+        targetBars: 120,
       );
       if (!mounted) return;
       setState(() {
-        _audioWaveformsByPath[path] =
-            raw.isEmpty ? const <double>[] : _normalizeWaveform(raw);
+        _audioWaveformsByPath[path] = raw;
         _audioWaveformsLoading.remove(path);
       });
     } catch (_) {
@@ -637,14 +940,6 @@ class _VideoSequencerEditorScreenState
         _audioWaveformsLoading.remove(path);
       });
     }
-  }
-
-  List<double> _normalizeWaveform(List<double> raw) {
-    if (raw.isEmpty) return const <double>[];
-    final abs = raw.map((v) => v.abs()).toList();
-    final maxVal = abs.reduce(math.max);
-    if (maxVal <= 0) return List<double>.filled(abs.length, 0.0);
-    return abs.map((v) => (v / maxVal).clamp(0.0, 1.0)).toList();
   }
 
   void _adjustTransitionDurationFromDrag(
@@ -873,7 +1168,9 @@ class _VideoSequencerEditorScreenState
               ),
               ListTile(
                 leading: Icon(
-                  clip.muted ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+                  clip.muted
+                      ? Icons.volume_up_rounded
+                      : Icons.volume_off_rounded,
                   color: Colors.white,
                 ),
                 title: Text(
@@ -886,8 +1183,8 @@ class _VideoSequencerEditorScreenState
                 },
               ),
               ListTile(
-                leading:
-                    const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                leading: const Icon(Icons.delete_outline_rounded,
+                    color: Colors.redAccent),
                 title: const Text('Delete Clip',
                     style: TextStyle(color: Colors.redAccent)),
                 onTap: () {
@@ -902,28 +1199,336 @@ class _VideoSequencerEditorScreenState
     );
   }
 
+  VideoEditorAiProjectSnapshot _buildVideoAiSnapshot() {
+    return VideoEditorAiProjectSnapshot.fromSequencer(
+      projectId:
+          _projectId.isEmpty ? p.basename(widget.projectDir.path) : _projectId,
+      projectName: _projectName,
+      engine: _engine,
+      selectedTransitionId: _selectedTransitionId,
+    );
+  }
+
+  List<Map<String, String>> _buildVideoAiConversation() {
+    return _chatMessages
+        .map(
+          (message) => <String, String>{
+            'role': message.role == 'assistant' ? 'assistant' : 'user',
+            'content': message.text,
+          },
+        )
+        .toList(growable: false);
+  }
+
+  int? _actionInt(dynamic raw) {
+    if (raw is int) return raw;
+    if (raw is num) return raw.round();
+    if (raw is String) return int.tryParse(raw.trim());
+    return null;
+  }
+
+  double? _actionDouble(dynamic raw) {
+    if (raw is double) return raw;
+    if (raw is num) return raw.toDouble();
+    if (raw is String) return double.tryParse(raw.trim());
+    return null;
+  }
+
+  Map<String, dynamic> _actionMap(dynamic raw) {
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return <String, dynamic>{};
+  }
+
+  SequencerClip? _resolveAiTargetClip(Map<String, dynamic> data) {
+    final target = _actionMap(data['target']);
+    final clipId =
+        (target['clip_id'] ?? data['clip_id'])?.toString().trim() ?? '';
+    if (clipId.isNotEmpty) {
+      for (final track in _engine.tracks) {
+        for (final clip in track.clips) {
+          if (clip.id == clipId) return clip;
+        }
+      }
+    }
+
+    final preferSelected = target['prefer_selected'] == true;
+    final selected = _engine.selectedClip();
+    if (preferSelected && selected != null) return selected;
+
+    final trackId =
+        (target['track_id'] ?? data['track_id'])?.toString().trim() ?? '';
+    final trackType =
+        (target['track_type'] ?? data['track_type'])?.toString().trim() ?? '';
+    final clipIndex = _actionInt(target['clip_index'] ?? data['clip_index']);
+
+    if (clipIndex != null && clipIndex >= 0) {
+      if (trackId.isNotEmpty) {
+        for (final track in _engine.tracks) {
+          if (track.id == trackId && clipIndex < track.clips.length) {
+            return track.clips[clipIndex];
+          }
+        }
+      }
+
+      final matchingTracks = _engine.tracks
+          .where((track) => trackType.isEmpty || track.type.name == trackType)
+          .toList(growable: false);
+      final all = matchingTracks
+          .expand(
+              (track) => track.clips.map((clip) => (track: track, clip: clip)))
+          .toList(growable: false)
+        ..sort((a, b) => a.clip.timelineStart.compareTo(b.clip.timelineStart));
+      if (clipIndex < all.length) {
+        return all[clipIndex].clip;
+      }
+    }
+
+    return selected;
+  }
+
+  SequencerTransition? _resolveAiTargetTransition(Map<String, dynamic> data) {
+    final transitionId =
+        (data['transition_id']?.toString().trim() ?? '').trim();
+    if (transitionId.isNotEmpty) {
+      return _engine.transitionById(transitionId);
+    }
+
+    final fromClipId = (data['from_clip_id']?.toString().trim() ?? '').trim();
+    final toClipId = (data['to_clip_id']?.toString().trim() ?? '').trim();
+    if (fromClipId.isNotEmpty && toClipId.isNotEmpty) {
+      return _engine.transitionBetweenClips(fromClipId, toClipId);
+    }
+
+    if (_selectedTransitionId != null) {
+      return _engine.transitionById(_selectedTransitionId!);
+    }
+    return null;
+  }
+
+  Future<void> _applyVideoAiActions(List<VideoEditorAiAction> actions) async {
+    for (final action in actions) {
+      switch (action.type) {
+        case 'playhead':
+          final atMs = _actionInt(action.data['at_ms']);
+          if (atMs != null) {
+            _engine.seek(Duration(milliseconds: math.max(0, atMs)));
+          }
+          break;
+        case 'clip_edit':
+          _applyVideoAiClipEdit(action.data);
+          break;
+        case 'transition_edit':
+          _applyVideoAiTransitionEdit(action.data);
+          break;
+        case 'clarify':
+          break;
+      }
+    }
+
+    await _syncPreviewToSequencer(force: true);
+    _scheduleStateSave();
+  }
+
+  void _applyVideoAiClipEdit(Map<String, dynamic> data) {
+    final operation = (data['operation']?.toString().trim() ?? '').trim();
+    final clip = _resolveAiTargetClip(data);
+    if (clip == null) return;
+
+    switch (operation) {
+      case 'split':
+        final atMs =
+            _actionInt(data['at_ms']) ?? _engine.playhead.inMilliseconds;
+        _engine.splitClip(clip.id, Duration(milliseconds: math.max(0, atMs)));
+        break;
+      case 'trim':
+        final track = _engine.trackForClip(clip.id);
+        if (track == null) return;
+        final trimSide = (data['trim_side']?.toString().trim() ?? 'end').trim();
+        var deltaMs = _actionInt(data['delta_ms']);
+        final timelineStartMs = _actionInt(data['timeline_start_ms']);
+        final timelineEndMs = _actionInt(data['timeline_end_ms']);
+        if (deltaMs == null && timelineStartMs != null) {
+          deltaMs = timelineStartMs - clip.timelineStart.inMilliseconds;
+        }
+        if (deltaMs == null && timelineEndMs != null) {
+          deltaMs = timelineEndMs - clip.timelineEnd.inMilliseconds;
+        }
+        if (deltaMs == null || deltaMs == 0) return;
+        final deltaDx = (deltaMs / 1000.0) * _engine.pixelsPerSecond;
+        if (trimSide == 'start') {
+          _trimClipFromLeftDrag(track, clip, deltaDx);
+        } else {
+          _trimClipFromRightDrag(track, clip, deltaDx);
+        }
+        break;
+      case 'move':
+        final newStartMs = _actionInt(data['new_start_ms']);
+        final deltaMs = _actionInt(data['delta_ms']);
+        final desiredStartMs =
+            newStartMs ?? (clip.timelineStart.inMilliseconds + (deltaMs ?? 0));
+        final targetTrackId =
+            (data['new_track_id']?.toString().trim() ?? '').trim();
+        if (targetTrackId.isNotEmpty) {
+          _engine.moveClipToTrack(
+            clip.id,
+            targetTrackId,
+            desiredStart: Duration(milliseconds: math.max(0, desiredStartMs)),
+          );
+        } else {
+          _engine.moveClip(
+            clip.id,
+            Duration(milliseconds: math.max(0, desiredStartMs)),
+          );
+        }
+        break;
+      case 'duplicate':
+        _engine.duplicateClip(clip.id);
+        break;
+      case 'delete':
+        _engine.removeClip(clip.id);
+        break;
+      case 'mute':
+        _engine.setClipMuted(clip.id, true);
+        break;
+      case 'unmute':
+        _engine.setClipMuted(clip.id, false);
+        break;
+      case 'set_volume':
+        final volume = _actionDouble(data['volume']);
+        if (volume != null) {
+          _engine.setClipVolume(clip.id, volume);
+        }
+        break;
+    }
+  }
+
+  void _applyVideoAiTransitionEdit(Map<String, dynamic> data) {
+    final operation = (data['operation']?.toString().trim() ?? '').trim();
+    switch (operation) {
+      case 'add':
+        var fromClipId = (data['from_clip_id']?.toString().trim() ?? '').trim();
+        var toClipId = (data['to_clip_id']?.toString().trim() ?? '').trim();
+        if (fromClipId.isEmpty || toClipId.isEmpty) {
+          final selected = _engine.selectedClip();
+          if (selected != null &&
+              selected.trackType == SequencerTrackType.video) {
+            final next = _engine.nextVideoClip(selected.id);
+            final prev = _engine.previousVideoClip(selected.id);
+            final left = next != null ? selected : prev;
+            final right = next ?? selected;
+            if (left != null && right.id != left.id) {
+              fromClipId = left.id;
+              toClipId = right.id;
+            }
+          }
+        }
+        if (fromClipId.isEmpty || toClipId.isEmpty) return;
+        final durationMs = _actionInt(data['duration_ms']) ?? 420;
+        final rawType =
+            (data['transition_type']?.toString().trim() ?? '').trim();
+        final transitionType =
+            rawType == SequencerTransitionType.dipToBlack.name
+                ? SequencerTransitionType.dipToBlack
+                : SequencerTransitionType.crossDissolve;
+        final created = _engine.addOrUpdateTransition(
+          fromClipId: fromClipId,
+          toClipId: toClipId,
+          duration: Duration(milliseconds: durationMs),
+          type: transitionType,
+        );
+        if (created != null) {
+          _selectedTransitionId = created.id;
+        }
+        break;
+      case 'remove':
+        final transition = _resolveAiTargetTransition(data);
+        if (transition == null) return;
+        _engine.removeTransition(transition.id);
+        if (_selectedTransitionId == transition.id) {
+          _selectedTransitionId = null;
+        }
+        break;
+      case 'set_duration':
+        final transition = _resolveAiTargetTransition(data);
+        final durationMs = _actionInt(data['duration_ms']);
+        if (transition == null || durationMs == null) return;
+        _engine.setTransitionDuration(
+          transition.id,
+          Duration(milliseconds: durationMs),
+        );
+        _selectedTransitionId = transition.id;
+        break;
+      case 'set_type':
+        final transition = _resolveAiTargetTransition(data);
+        if (transition == null) return;
+        final rawType =
+            (data['transition_type']?.toString().trim() ?? '').trim();
+        final transitionType =
+            rawType == SequencerTransitionType.dipToBlack.name
+                ? SequencerTransitionType.dipToBlack
+                : SequencerTransitionType.crossDissolve;
+        _engine.setTransitionType(transition.id, transitionType);
+        _selectedTransitionId = transition.id;
+        break;
+    }
+  }
+
   Future<void> _submitChatMessage() async {
     final text = _chatTextController.text.trim();
     if (text.isEmpty) return;
 
+    final priorConversation = _buildVideoAiConversation();
+    final createdAt = DateTime.now().millisecondsSinceEpoch;
     setState(() {
       _chatMessages.add(_EditorChatMessage(
         role: 'user',
         text: text,
-        createdAtMs: DateTime.now().millisecondsSinceEpoch,
-      ));
-      _chatMessages.add(_EditorChatMessage(
-        role: 'assistant',
-        text:
-            'Video AI placeholder: wiring to your Mixroom AI backend will be added here.',
-        createdAtMs: DateTime.now().millisecondsSinceEpoch,
+        createdAtMs: createdAt,
       ));
       _chatTextController.clear();
       _chatExpanded = false;
       _chatInputActive = false;
+      _processingAi = true;
+      _busyLabel = 'Mixroom AI is editing...';
     });
     _chatFocusNode.unfocus();
-    _scheduleStateSave();
+
+    try {
+      final reply = await _videoAiService.handleUserText(
+        userText: text,
+        snapshot: _buildVideoAiSnapshot(),
+        conversation: priorConversation,
+      );
+      if (reply.actions.isNotEmpty) {
+        await _applyVideoAiActions(reply.actions);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _chatMessages.add(_EditorChatMessage(
+          role: 'assistant',
+          text: reply.message,
+          createdAtMs: DateTime.now().millisecondsSinceEpoch,
+        ));
+        _processingAi = false;
+        _busyLabel = null;
+      });
+      _scheduleStateSave();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _chatMessages.add(_EditorChatMessage(
+          role: 'assistant',
+          text:
+              'I hit an error while editing the timeline. Try that request again.',
+          createdAtMs: DateTime.now().millisecondsSinceEpoch,
+        ));
+        _processingAi = false;
+        _busyLabel = null;
+      });
+      _scheduleStateSave();
+    }
   }
 
   void _onChatBarTap() {
@@ -996,13 +1601,15 @@ class _VideoSequencerEditorScreenState
         throw Exception(logs ?? 'Export failed');
       }
 
-      final saveName =
-          '${_projectName.replaceAll(RegExp(r'[^a-zA-Z0-9_\\-]'), '_')}.mp4';
-      final params = SaveFileDialogParams(
-        sourceFilePath: outPath,
-        fileName: saveName,
+      final saveName = ExportSaveDialog.buildSuggestedFileName(
+        baseName: _projectName,
+        extension: 'mp4',
       );
-      final savedPath = await FlutterFileDialog.saveFile(params: params);
+      final savedPath = await ExportSaveDialog.saveExportedFile(
+        sourceFilePath: outPath,
+        suggestedFileName: saveName,
+        desktopDialogTitle: 'Save export',
+      );
       if (!mounted) return;
 
       if (savedPath == null) {
@@ -1012,7 +1619,15 @@ class _VideoSequencerEditorScreenState
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export saved: $savedPath')),
+          SnackBar(
+            content: Text('Export saved: ${p.basename(savedPath)}'),
+            action: SnackBarAction(
+              label: 'Open',
+              onPressed: () {
+                unawaited(_openSavedExport(savedPath));
+              },
+            ),
+          ),
         );
       }
     } catch (e) {
@@ -1266,7 +1881,8 @@ class _VideoSequencerEditorScreenState
                   : const [Color(0xFF191E26), Color(0xFF0F1319)],
             ),
             border: Border.all(
-              color: Colors.white.withValues(alpha: onTap == null ? 0.07 : 0.14),
+              color:
+                  Colors.white.withValues(alpha: onTap == null ? 0.07 : 0.14),
             ),
             boxShadow: [
               BoxShadow(
@@ -1333,7 +1949,8 @@ class _VideoSequencerEditorScreenState
                       colors: [Color(0xFF1A202A), Color(0xFF10151D)],
                     ),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                    border:
+                        Border.all(color: Colors.white.withValues(alpha: 0.15)),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.46),
@@ -1363,6 +1980,11 @@ class _VideoSequencerEditorScreenState
                   ),
                 ),
                 const Spacer(),
+                _buildTopBarIconButton(
+                  icon: Icons.add_photo_alternate_outlined,
+                  onTap: _loadingMedia ? null : _showAddMediaSheet,
+                ),
+                const SizedBox(width: 2),
                 _buildTopBarIconButton(
                   icon: Icons.ios_share_rounded,
                   onTap: _exporting ? null : _exportComposition,
@@ -1395,10 +2017,10 @@ class _VideoSequencerEditorScreenState
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading:
-                    const Icon(Icons.add_photo_alternate_outlined, color: Colors.white),
-                title:
-                    const Text('Add Media', style: TextStyle(color: Colors.white)),
+                leading: const Icon(Icons.add_photo_alternate_outlined,
+                    color: Colors.white),
+                title: const Text('Add Media',
+                    style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   _showAddMediaSheet();
@@ -1412,7 +2034,9 @@ class _VideoSequencerEditorScreenState
                   color: Colors.white,
                 ),
                 title: Text(
-                  _autoFollowPlayhead ? 'Disable Playhead Follow' : 'Enable Playhead Follow',
+                  _autoFollowPlayhead
+                      ? 'Disable Playhead Follow'
+                      : 'Enable Playhead Follow',
                   style: const TextStyle(color: Colors.white),
                 ),
                 onTap: () {
@@ -1611,6 +2235,7 @@ class _VideoSequencerEditorScreenState
     );
   }
 
+  // ignore: unused_element
   Widget _buildAssistantDockCard({required bool compact}) {
     final messages = _chatMessages.length > 18
         ? _chatMessages.sublist(_chatMessages.length - 18)
@@ -1632,7 +2257,7 @@ class _VideoSequencerEditorScreenState
                   size: 15, color: _accent.withValues(alpha: 0.92)),
               const SizedBox(width: 6),
               const Text(
-                'Assistant (Placeholder)',
+                'Mixroom Assistant',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w700,
@@ -1683,22 +2308,44 @@ class _VideoSequencerEditorScreenState
                   child: TextField(
                     controller: _chatTextController,
                     focusNode: _chatFocusNode,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontFamily: 'Pretendard',
+                      fontWeight: FontWeight.w500,
+                      height: 1.16,
+                      letterSpacing: -0.12,
+                    ),
+                    cursorColor: Colors.white,
                     decoration: const InputDecoration(
                       border: InputBorder.none,
-                      hintText: 'Type...',
-                      hintStyle: TextStyle(color: Colors.white70),
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 8),
+                      hintText: 'Ask Mixroom AI...',
+                      hintStyle: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        fontFamily: 'Pretendard',
+                        fontWeight: FontWeight.w500,
+                        height: 1.16,
+                        letterSpacing: -0.12,
+                      ),
                     ),
                     textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _submitChatMessage(),
+                    onSubmitted: (_) {
+                      if (_processingAi) return;
+                      _submitChatMessage();
+                    },
                   ),
                 ),
                 IconButton(
-                  onPressed: _chatHasText ? _submitChatMessage : null,
+                  onPressed: (_chatHasText && !_processingAi)
+                      ? _submitChatMessage
+                      : null,
                   icon: Icon(
                     Icons.send_rounded,
                     size: 18,
-                    color: _chatHasText
+                    color: (_chatHasText && !_processingAi)
                         ? _accent.withValues(alpha: 0.96)
                         : Colors.white38,
                   ),
@@ -1734,7 +2381,8 @@ class _VideoSequencerEditorScreenState
       ),
       child: LayoutBuilder(
         builder: (_, constraints) {
-          final minTextWidth = math.min(90.0, math.max(64.0, constraints.maxWidth * 0.32));
+          final minTextWidth =
+              math.min(90.0, math.max(64.0, constraints.maxWidth * 0.32));
           final controls = Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1753,12 +2401,14 @@ class _VideoSequencerEditorScreenState
               const SizedBox(width: 6),
               _buildTransportControlButton(
                 icon: Icons.undo_rounded,
-                onTap: selectedClip == null ? null : () => _nudgeSelectedClip(-1),
+                onTap:
+                    selectedClip == null ? null : () => _nudgeSelectedClip(-1),
               ),
               const SizedBox(width: 6),
               _buildTransportControlButton(
                 icon: Icons.redo_rounded,
-                onTap: selectedClip == null ? null : () => _nudgeSelectedClip(1),
+                onTap:
+                    selectedClip == null ? null : () => _nudgeSelectedClip(1),
               ),
               const SizedBox(width: 6),
               _buildTransportControlButton(
@@ -1834,11 +2484,19 @@ class _VideoSequencerEditorScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Playback Speed',
+                      'Preview Speed',
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,
                         fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'This changes live preview playback only.',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.58),
+                        fontSize: 11.5,
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -1946,15 +2604,128 @@ class _VideoSequencerEditorScreenState
     );
   }
 
-  void _showAnimationQuickAction() {
-    final selected = _engine.selectedClip();
-    if (selected == null || selected.trackType != SequencerTrackType.video) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a video clip first.')),
-      );
-      return;
-    }
-    unawaited(_addTransitionFromSelection());
+  Future<void> _showTransitionSheet() async {
+    var transition = _selectedTransitionId == null
+        ? null
+        : _engine.transitionById(_selectedTransitionId!);
+    transition ??= await _addTransitionFromSelection();
+    if (transition == null) return;
+    if (!mounted) return;
+
+    var draftDurationMs = transition.duration.inMilliseconds.toDouble();
+    var draftType = transition.type;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _panel,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (_, setLocalState) {
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Transition',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        _buildTransitionTypeChip(
+                          label: 'Dissolve',
+                          active: draftType ==
+                              SequencerTransitionType.crossDissolve,
+                          onTap: () => setLocalState(
+                            () => draftType =
+                                SequencerTransitionType.crossDissolve,
+                          ),
+                        ),
+                        _buildTransitionTypeChip(
+                          label: 'Dip',
+                          active:
+                              draftType == SequencerTransitionType.dipToBlack,
+                          onTap: () => setLocalState(
+                            () =>
+                                draftType = SequencerTransitionType.dipToBlack,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: Colors.white,
+                        thumbColor: Colors.white,
+                      ),
+                      child: Slider(
+                        value: draftDurationMs,
+                        min: VideoSequencerEngine
+                            .minTransitionDuration.inMilliseconds
+                            .toDouble(),
+                        max: VideoSequencerEngine
+                            .maxTransitionDuration.inMilliseconds
+                            .toDouble(),
+                        divisions: 14,
+                        label:
+                            '${(draftDurationMs / 1000.0).toStringAsFixed(2)}s',
+                        onChanged: (value) =>
+                            setLocalState(() => draftDurationMs = value),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        TextButton(
+                          onPressed: () {
+                            _selectedTransitionId = transition!.id;
+                            _removeSelectedTransition();
+                            Navigator.of(sheetContext).pop();
+                          },
+                          child: const Text('Delete'),
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          child: const Text('Cancel'),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () {
+                            final resolved =
+                                _engine.transitionById(transition!.id);
+                            if (resolved != null) {
+                              _engine.setTransitionType(resolved.id, draftType);
+                              _engine.setTransitionDuration(
+                                resolved.id,
+                                Duration(milliseconds: draftDurationMs.round()),
+                              );
+                              _selectedTransitionId = resolved.id;
+                            }
+                            Navigator.of(sheetContext).pop();
+                          },
+                          child: const Text('Apply'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Widget _buildBottomActionButton({
@@ -2043,7 +2814,8 @@ class _VideoSequencerEditorScreenState
         onScaleStart: (_) => _timelineScaleBasePps = _engine.pixelsPerSecond,
         onScaleUpdate: (details) {
           if (details.pointerCount < 2) return;
-          final next = (_timelineScaleBasePps * details.scale).clamp(60.0, 280.0);
+          final next =
+              (_timelineScaleBasePps * details.scale).clamp(60.0, 280.0);
           _engine.setPixelsPerSecond(next);
         },
         child: CustomPaint(
@@ -2225,6 +2997,35 @@ class _VideoSequencerEditorScreenState
           ),
           child: Stack(
             children: [
+              if (track.type == SequencerTrackType.video &&
+                  (clip.thumbnailPath ?? '').trim().isNotEmpty)
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(9),
+                    child: Image.file(
+                      File(clip.thumbnailPath!),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+              if (track.type == SequencerTrackType.video)
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(9),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.08),
+                          Colors.black.withValues(alpha: 0.22),
+                          Colors.black.withValues(alpha: 0.46),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               if (selected)
                 Positioned(
                   left: 0,
@@ -2508,117 +3309,249 @@ class _VideoSequencerEditorScreenState
     );
   }
 
+  Widget _buildTimelineModePill({
+    required String label,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: active
+          ? Colors.white.withValues(alpha: 0.16)
+          : Colors.white.withValues(alpha: 0.05),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: active
+                  ? Colors.white.withValues(alpha: 0.96)
+                  : Colors.white.withValues(alpha: 0.64),
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMiniTimelineAction({
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.8),
+            fontSize: 10.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStoryboardTimeline(double contentWidth) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            controller: _timelineScroll,
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: contentWidth,
+              child: Column(
+                children: [
+                  _buildTimelineHeader(contentWidth),
+                  const SizedBox(height: 6),
+                  _buildCompactVideoTrackLane(contentWidth),
+                  for (final track in _engine.audioTracks)
+                    if (track.clips.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      _buildCompactAudioTrackLane(track, contentWidth),
+                    ],
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Column(
+          children: [
+            const SizedBox(height: 26),
+            InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: _showAddMediaSheet,
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF131821),
+                  borderRadius: BorderRadius.circular(7),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.22)),
+                ),
+                child: const Icon(
+                  Icons.add_rounded,
+                  size: 15,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTracksTimeline(double contentWidth) {
+    final lanes = <Widget>[
+      _buildTimelineHeader(contentWidth),
+      const SizedBox(height: 6),
+      for (final track in _engine.videoTracks) ...[
+        _buildTrackLane(track, contentWidth),
+        if (track.clips.length > 1) _buildTransitionsLane(track, contentWidth),
+      ],
+      for (final track in _engine.audioTracks)
+        _buildTrackLane(track, contentWidth),
+    ];
+
+    return Scrollbar(
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        child: SingleChildScrollView(
+          controller: _timelineScroll,
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: contentWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: lanes,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildTimelineSection() {
     final contentSeconds = math.max(
       20.0,
       (_engine.totalDuration.inMilliseconds / 1000.0) + 6.0,
     );
-    final contentWidth = math.max(460.0, contentSeconds * _engine.pixelsPerSecond);
+    final contentWidth =
+        math.max(460.0, contentSeconds * _engine.pixelsPerSecond);
     final selectedClip = _engine.selectedClip();
 
     return Container(
       margin: const EdgeInsets.fromLTRB(10, 3, 10, 6),
       child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF0A0D13), Color(0xFF06080C)],
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFF0A0D13), Color(0xFF06080C)],
+                ),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.11)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.54),
+                    blurRadius: 13,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
               ),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.11)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.54),
-                  blurRadius: 13,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      _formatDuration(_engine.playhead),
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.82),
-                        fontSize: 9.2,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      _formatDuration(_engine.totalDuration),
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.58),
-                        fontSize: 9.2,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        controller: _timelineScroll,
-                        scrollDirection: Axis.horizontal,
-                        child: SizedBox(
-                          width: contentWidth,
-                          child: Column(
-                            children: [
-                              _buildTimelineHeader(contentWidth),
-                              const SizedBox(height: 6),
-                              _buildCompactVideoTrackLane(contentWidth),
-                            ],
-                          ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        _formatDuration(_engine.playhead),
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.82),
+                          fontSize: 9.2,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Column(
-                      children: [
-                        const SizedBox(height: 26),
-                        InkWell(
-                          borderRadius: BorderRadius.circular(4),
-                          onTap: _pickVideoClip,
-                          child: Container(
-                            width: 26,
-                            height: 26,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF131821),
-                              borderRadius: BorderRadius.circular(7),
-                              border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.22)),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.36),
-                                  blurRadius: 7,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: const Icon(
-                              Icons.add_rounded,
-                              size: 15,
-                              color: Colors.white,
-                            ),
+                      const SizedBox(width: 10),
+                      _buildTimelineModePill(
+                        label: 'Storyboard',
+                        active: _timelineLayoutMode ==
+                            _TimelineLayoutMode.storyboard,
+                        onTap: () => setState(
+                          () => _timelineLayoutMode =
+                              _TimelineLayoutMode.storyboard,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      _buildTimelineModePill(
+                        label: 'Tracks',
+                        active:
+                            _timelineLayoutMode == _TimelineLayoutMode.tracks,
+                        onTap: () => setState(
+                          () =>
+                              _timelineLayoutMode = _TimelineLayoutMode.tracks,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (_timelineLayoutMode ==
+                          _TimelineLayoutMode.tracks) ...[
+                        _buildMiniTimelineAction(
+                          label: '+V',
+                          onTap: () => _engine.addTrack(
+                            SequencerTrackType.video,
                           ),
                         ),
+                        const SizedBox(width: 6),
+                        _buildMiniTimelineAction(
+                          label: '+A',
+                          onTap: () => _engine.addTrack(
+                            SequencerTrackType.audio,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                       ],
-                    ),
-                  ],
-                ),
-              ],
+                      Text(
+                        _formatDuration(_engine.totalDuration),
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.58),
+                          fontSize: 9.2,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: _timelineLayoutMode == _TimelineLayoutMode.storyboard
+                        ? _buildStoryboardTimeline(contentWidth)
+                        : _buildTracksTimeline(contentWidth),
+                  ),
+                ],
+              ),
             ),
           ),
-          const Spacer(),
+          const SizedBox(height: 8),
           Container(
             height: 67,
             decoration: BoxDecoration(
@@ -2659,8 +3592,8 @@ class _VideoSequencerEditorScreenState
                   onTap: selectedClip == null ? null : _toggleSelectedClipMute,
                 ),
                 _buildBottomActionButton(
-                  icon: Icons.speed_rounded,
-                  label: 'Speed',
+                  icon: Icons.play_circle_outline_rounded,
+                  label: 'Preview',
                   onTap: _showSpeedSheet,
                 ),
                 _buildBottomActionButton(
@@ -2670,8 +3603,8 @@ class _VideoSequencerEditorScreenState
                 ),
                 _buildBottomActionButton(
                   icon: Icons.auto_awesome_motion_rounded,
-                  label: 'Animation',
-                  onTap: _showAnimationQuickAction,
+                  label: 'Transition',
+                  onTap: _showTransitionSheet,
                 ),
                 _buildBottomActionButton(
                   icon: Icons.delete_outline_rounded,
@@ -2679,7 +3612,9 @@ class _VideoSequencerEditorScreenState
                   onTap: selectedClip == null ? null : _deleteSelectedClip,
                 ),
                 _buildBottomActionButton(
-                  icon: _snapEnabled ? Icons.grid_on_rounded : Icons.grid_off_rounded,
+                  icon: _snapEnabled
+                      ? Icons.grid_on_rounded
+                      : Icons.grid_off_rounded,
                   label: _snapEnabled ? 'Snap On' : 'Snap Off',
                   onTap: _toggleSnap,
                 ),
@@ -2716,9 +3651,9 @@ class _VideoSequencerEditorScreenState
   Widget _buildCompactVideoTrackLane(double width) {
     final track = _engine.videoTrack;
     const laneHeight = 54.0;
-    final playheadX = ((_engine.playhead.inMilliseconds / 1000.0) *
-            _engine.pixelsPerSecond)
-        .clamp(0.0, width - 2);
+    final playheadX =
+        ((_engine.playhead.inMilliseconds / 1000.0) * _engine.pixelsPerSecond)
+            .clamp(0.0, width - 2);
     return Container(
       width: width,
       height: laneHeight,
@@ -2744,7 +3679,8 @@ class _VideoSequencerEditorScreenState
               ),
             ),
           for (final clip in track.clips)
-            _buildCompactVideoClip(track: track, clip: clip, laneHeight: laneHeight),
+            _buildCompactVideoClip(
+                track: track, clip: clip, laneHeight: laneHeight),
           Positioned(
             left: playheadX,
             top: 0,
@@ -2794,13 +3730,7 @@ class _VideoSequencerEditorScreenState
         onPanCancel: () => _onClipPanEnd(clip),
         child: Container(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: selected
-                  ? const [Color(0xFF737E94), Color(0xFF596276)]
-                  : const [Color(0xFF5A6478), Color(0xFF485062)],
-            ),
+            color: const Color(0xFF485062),
             borderRadius: BorderRadius.circular(5),
             border: Border.all(
               color: selected
@@ -2820,18 +3750,46 @@ class _VideoSequencerEditorScreenState
           ),
           child: Stack(
             children: [
-              Row(
-                children: [
-                  for (int i = 0; i < thumbCount; i++)
-                    Expanded(
-                      child: Container(
-                        margin: EdgeInsets.only(right: i == thumbCount - 1 ? 0 : 1),
-                        color: i.isEven
-                            ? Colors.white.withValues(alpha: 0.13)
-                            : Colors.white.withValues(alpha: 0.22),
-                      ),
+              if ((clip.thumbnailPath ?? '').trim().isNotEmpty)
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: Image.file(
+                      File(clip.thumbnailPath!),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                     ),
-                ],
+                  ),
+                )
+              else
+                Row(
+                  children: [
+                    for (int i = 0; i < thumbCount; i++)
+                      Expanded(
+                        child: Container(
+                          margin: EdgeInsets.only(
+                              right: i == thumbCount - 1 ? 0 : 1),
+                          color: i.isEven
+                              ? Colors.white.withValues(alpha: 0.13)
+                              : Colors.white.withValues(alpha: 0.22),
+                        ),
+                      ),
+                  ],
+                ),
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.08),
+                        Colors.black.withValues(alpha: 0.24),
+                        Colors.black.withValues(alpha: 0.58),
+                      ],
+                    ),
+                  ),
+                ),
               ),
               Positioned(
                 left: 4,
@@ -2849,6 +3807,174 @@ class _VideoSequencerEditorScreenState
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactAudioTrackLane(SequencerTrack track, double width) {
+    const laneHeight = 44.0;
+    final playheadX =
+        ((_engine.playhead.inMilliseconds / 1000.0) * _engine.pixelsPerSecond)
+            .clamp(0.0, width - 2);
+    return Container(
+      width: width,
+      height: laneHeight,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF0D1821), Color(0xFF081118)],
+        ),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.11)),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            left: 8,
+            top: 4,
+            child: Text(
+              track.name,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.54),
+                fontSize: 9.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          for (final clip in track.clips)
+            _buildCompactAudioClip(
+              track: track,
+              clip: clip,
+              laneHeight: laneHeight,
+            ),
+          Positioned(
+            left: playheadX,
+            top: 0,
+            bottom: 0,
+            child: Container(
+              width: 2,
+              color: Colors.white.withValues(alpha: 0.95),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactAudioClip({
+    required SequencerTrack track,
+    required SequencerClip clip,
+    required double laneHeight,
+  }) {
+    final selected = clip.id == _engine.selectedClipId;
+    final left =
+        (clip.timelineStart.inMilliseconds / 1000.0) * _engine.pixelsPerSecond;
+    final clipWidth = math.max(
+      56.0,
+      (clip.sourceDuration.inMilliseconds / 1000.0) * _engine.pixelsPerSecond,
+    );
+    final waveform = _audioWaveformsByPath[clip.sourcePath];
+    if (waveform == null) {
+      unawaited(_ensureWaveformForPath(clip.sourcePath));
+    }
+
+    return Positioned(
+      left: left,
+      top: 14,
+      width: clipWidth,
+      height: laneHeight - 18,
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          _engine.setSelectedClip(clip.id);
+          setState(() => _selectedTransitionId = null);
+        },
+        onLongPress: () => unawaited(_showClipQuickActions(clip)),
+        onPanStart: (_) => _onClipPanStart(clip),
+        onPanUpdate: (details) => _onClipPanUpdate(track, clip, details),
+        onPanEnd: (_) => _onClipPanEnd(clip),
+        onPanCancel: () => _onClipPanEnd(clip),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF2D6976), Color(0xFF204D59)],
+            ),
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(
+              color: selected
+                  ? Colors.white.withValues(alpha: 0.95)
+                  : Colors.white.withValues(alpha: 0.2),
+              width: selected ? 1.3 : 1.0,
+            ),
+          ),
+          child: Stack(
+            children: [
+              if (waveform != null && waveform.isNotEmpty)
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: CustomPaint(
+                        painter: _ClipWaveformPainter(
+                          samples: waveform,
+                          color: Colors.white.withValues(alpha: 0.26),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              Positioned(
+                left: 4,
+                right: 4,
+                bottom: 2,
+                child: Text(
+                  clip.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 8.1,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTransitionTypeChip({
+    required String label,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: active
+          ? Colors.white.withValues(alpha: 0.15)
+          : Colors.white.withValues(alpha: 0.06),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: active
+                  ? Colors.white.withValues(alpha: 0.96)
+                  : Colors.white.withValues(alpha: 0.68),
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
           ),
         ),
       ),
@@ -2931,12 +4057,16 @@ class _VideoSequencerEditorScreenState
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Ask AI for edits, captions, subtitles',
+                  'Ask Mixroom AI for edits, captions, or timing',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.72),
                     fontSize: 14,
+                    fontFamily: 'Pretendard',
+                    fontWeight: FontWeight.w500,
+                    height: 1.16,
+                    letterSpacing: -0.12,
                   ),
                 ),
               ),
@@ -2945,26 +4075,45 @@ class _VideoSequencerEditorScreenState
                 child: TextField(
                   controller: _chatTextController,
                   focusNode: _chatFocusNode,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'Pretendard',
+                    fontWeight: FontWeight.w500,
+                    fontSize: 14,
+                    height: 1.16,
+                    letterSpacing: -0.12,
+                  ),
+                  cursorColor: Colors.white,
                   decoration: const InputDecoration(
                     border: InputBorder.none,
-                    isCollapsed: true,
-                    hintText: 'Ask CapCut AI...',
-                    hintStyle: TextStyle(color: Colors.white70),
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 7),
+                    hintText: 'Ask Mixroom AI...',
+                    hintStyle: TextStyle(
+                      color: Colors.white70,
+                      fontFamily: 'Pretendard',
+                      fontWeight: FontWeight.w500,
+                      fontSize: 14,
+                      height: 1.16,
+                      letterSpacing: -0.12,
+                    ),
                   ),
                   textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _submitChatMessage(),
+                  onSubmitted: (_) {
+                    if (_processingAi) return;
+                    _submitChatMessage();
+                  },
                   onTapOutside: (_) => _chatFocusNode.unfocus(),
                 ),
               ),
               const SizedBox(width: 8),
               IgnorePointer(
-                ignoring: !_chatHasText,
+                ignoring: !_chatHasText || _processingAi,
                 child: Opacity(
-                  opacity: _chatHasText ? 1 : 0,
+                  opacity: (_chatHasText && !_processingAi) ? 1 : 0,
                   child: InkWell(
                     borderRadius: BorderRadius.circular(999),
-                    onTap: _submitChatMessage,
+                    onTap: _processingAi ? null : _submitChatMessage,
                     child: Container(
                       width: 30,
                       height: 30,
@@ -2998,7 +4147,8 @@ class _VideoSequencerEditorScreenState
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.16)),
                 ),
                 child: Icon(
                   _chatExpanded
@@ -3174,7 +4324,8 @@ class _VideoSequencerEditorScreenState
                     96.0,
                     math.min(
                       248.0,
-                      math.max(96.0, math.min(previewMaxByViewport, previewMaxByReserve)),
+                      math.max(96.0,
+                          math.min(previewMaxByViewport, previewMaxByReserve)),
                     ),
                   );
                   return Column(
@@ -3228,7 +4379,7 @@ class _VideoSequencerEditorScreenState
             alignment: Alignment.bottomCenter,
             child: _buildBottomDock(),
           ),
-          if (_loadingMedia || _exporting)
+          if (_loadingMedia || _exporting || _processingAi)
             Positioned.fill(
               child: Container(
                 color: Colors.black.withValues(alpha: 0.5),
