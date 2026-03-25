@@ -42,6 +42,7 @@ S3 is only the static origin for the website files. It is not where your admin d
 - `app.js`
 - `infrastructure/aws_static_site.template.yaml`
 - `scripts/deploy_site.sh`
+- `scripts/deploy_prod_mixroom_admin_site.sh`
 
 ## Backend requirements
 
@@ -51,6 +52,7 @@ Relevant backend parameters:
 
 - `CognitoUserPoolId`
 - `CognitoAppClientId`
+- `AdminCognitoUserPoolId`
 - `AdminCognitoAppClientId`
 - `AiUsageStateTableName`
 - `AiUsageEventsTableName`
@@ -74,7 +76,8 @@ Important admin-specific values during deploy:
 
 - `CognitoUserPoolId`: your existing user pool
 - `CognitoAppClientId`: your existing mobile/web app client if you already have one
-- `AdminCognitoAppClientId`: create a separate app client for the admin website
+- `AdminCognitoUserPoolId`: the dedicated employee/admin user pool
+- `AdminCognitoAppClientId`: the admin website app client inside that admin user pool
 - `AiUsageStateTableName`: optional, but needed for AI usage counters
 - `AiUsageEventsTableName`: optional, but needed for AI-active project tracking
 
@@ -109,34 +112,31 @@ After deploy, collect these outputs:
 
 ## 3. Configure Cognito for employees
 
-Use the same Cognito user pool as the app, but create a separate app client for the admin website.
+Use a dedicated Cognito user pool for employees/admins, and create the admin website app client in that pool.
 
 Recommended admin app client settings:
 
 - callback URL: your deployed admin site URL, for example `https://admin.yourcompany.com/`
 - logout URL: same as callback URL
-- scopes: `openid`, `email`, `profile`
+- scopes: `openid`, `email`
 - Hosted UI domain: enabled
 - usernames: employee email addresses
 
-This keeps employee admin access separate from the mobile app client.
+This keeps employee admin access separate from the mobile app pool and app client.
 
 ## 4. Upload the site
 
 The deploy script generates the live `config.js` during upload, so you do not need to hand-edit the checked-in file.
 
+For `admin.mixroom.ai`, prefer the production wrapper so the Cognito domain and client ID stay aligned with the dedicated admin pool:
+
 ```bash
-admin_site/scripts/deploy_site.sh \
-  --bucket mixroom-admin-site-prod \
-  --distribution-id YOUR_CLOUDFRONT_DISTRIBUTION_ID \
-  --site-url https://admin.yourcompany.com/ \
-  --api-base-url https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/prod \
-  --cognito-domain-url https://YOUR_DOMAIN.auth.YOUR_REGION.amazoncognito.com \
-  --cognito-client-id YOUR_ADMIN_COGNITO_APP_CLIENT_ID
+admin_site/scripts/deploy_prod_mixroom_admin_site.sh
 ```
 
 Optional:
 
+- `MIXROOM_ADMIN_API_BASE_URL`: override the production API URL for a one-off deploy
 - `--redirect-uri`: override callback URL if needed
 - `--logout-uri`: override logout URL if needed
 - `--scopes`: comma-separated scope list, default is `openid,email,profile`
@@ -195,13 +195,7 @@ If you want the employee to stop being able to sign in at all, also disable the 
 After the first setup, website updates are usually just:
 
 ```bash
-admin_site/scripts/deploy_site.sh \
-  --bucket mixroom-admin-site-prod \
-  --distribution-id YOUR_CLOUDFRONT_DISTRIBUTION_ID \
-  --site-url https://admin.yourcompany.com/ \
-  --api-base-url https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/prod \
-  --cognito-domain-url https://YOUR_DOMAIN.auth.YOUR_REGION.amazoncognito.com \
-  --cognito-client-id YOUR_ADMIN_COGNITO_APP_CLIENT_ID
+admin_site/scripts/deploy_prod_mixroom_admin_site.sh
 ```
 
 Employees can then access the site at the same URL at any time.

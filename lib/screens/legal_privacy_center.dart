@@ -221,6 +221,19 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                   onTap: () => _launchUri(Uri.parse(LegalConfig.termsUrl)),
                 ),
                 _ActionItem(
+                  icon: Icons.groups_outlined,
+                  title: L10n.translate(context, 'Subprocessors'),
+                  subtitle: L10n.translate(context,
+                      'See third-party service providers that process data on Mixroom\'s behalf.'),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const SubprocessorsDocumentScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _ActionItem(
                   icon: Icons.integration_instructions_outlined,
                   title: L10n.translate(context, 'Open-source licenses'),
                   subtitle: L10n.translate(
@@ -243,9 +256,10 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                 _ToggleItem(
                   icon: Icons.analytics_outlined,
                   title: L10n.translate(
-                      context, 'Usage analytics and crash diagnostics'),
+                      context, 'Optional analytics and diagnostics'),
                   subtitle: L10n.translate(
-                      context, 'Helps improve stability and product quality.'),
+                      context,
+                      'Share additional usage data to help improve Mixroom stability and quality.'),
                   value: _analyticsEnabled,
                   enabled: !_loadingPreferences && !isBusy,
                   onChanged: (next) => _saveToggle(
@@ -741,6 +755,69 @@ class TermsOfServiceDocumentScreen extends StatelessWidget {
           heading: '7. Contact',
           body:
               'Legal questions can be sent to privacy@mixroom.ai or support@mixroom.ai.',
+        ),
+      ],
+    );
+  }
+}
+
+class SubprocessorsDocumentScreen extends StatelessWidget {
+  const SubprocessorsDocumentScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return _LegalDocumentScreen(
+      title: L10n.translate(context, 'Subprocessors'),
+      updatedAt: '2026-03-25',
+      intro:
+          'Mixroom uses third-party service providers to operate core app features. These providers process data on our behalf under contractual controls.',
+      sections: const [
+        _LegalSection(
+          heading: 'Amazon Web Services (AWS)',
+          body:
+              'Purpose: account/authentication infrastructure, APIs, and application hosting. '
+              'Typical data categories: account identifiers, authentication metadata, service logs, and app data required to deliver Mixroom features.',
+        ),
+        _LegalSection(
+          heading: 'Google (Google Sign-In)',
+          body:
+              'Purpose: social sign-in and account identity verification when users choose Google login. '
+              'Typical data categories: basic profile identifiers (such as email and account subject ID) returned by Google authentication flows.',
+        ),
+        _LegalSection(
+          heading: 'Apple (Sign in with Apple)',
+          body:
+              'Purpose: social sign-in and account identity verification when users choose Apple login. '
+              'Typical data categories: Apple account subject identifier and email relay/associated account email data provided by Apple auth.',
+        ),
+        _LegalSection(
+          heading: 'Kakao (Kakao Login)',
+          body:
+              'Purpose: social sign-in and account identity verification when users choose Kakao login. '
+              'Typical data categories: Kakao account identifier and profile/email fields provided through Kakao authorization.',
+        ),
+        _LegalSection(
+          heading: 'PostHog',
+          body:
+              'Purpose: product analytics and event telemetry, subject to user privacy toggle settings in-app. '
+              'Typical data categories: app interaction events, device/app metadata, and aggregated usage signals.',
+        ),
+        _LegalSection(
+          heading: 'Sentry',
+          body:
+              'Purpose: crash reporting and diagnostics, subject to user privacy toggle settings in-app. '
+              'Typical data categories: crash stack traces, runtime diagnostics, and device/app version metadata.',
+        ),
+        _LegalSection(
+          heading: 'OpenAI',
+          body:
+              'Purpose: AI assistant and model-inference features. '
+              'Typical data categories: prompts/instructions and related context needed to generate assistant responses.',
+        ),
+        _LegalSection(
+          heading: 'Updates',
+          body:
+              'This list may change as Mixroom adds or removes service providers. Material updates are reflected in-app and in Mixroom privacy documentation.',
         ),
       ],
     );

@@ -5,15 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
-import 'package:mixroom/helpers/app_user_service.dart';
-import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/models/entitlement_models.dart';
-import 'package:mixroom/models/auth_user_profile.dart';
 import 'package:mixroom/screens/account.dart';
 import 'package:mixroom/screens/projects.dart';
 import 'package:mixroom/screens/video_projects_placeholder.dart';
@@ -32,7 +29,6 @@ class _SignedInShellState extends State<SignedInShell> {
 
   int _selectedIndex = _defaultTab;
   int? _lastTrackedIndex;
-  bool _welcomeCheckInFlight = false;
 
   @override
   void initState() {
@@ -88,75 +84,9 @@ class _SignedInShellState extends State<SignedInShell> {
     );
   }
 
-  String _displayNameForWelcome(AuthUserProfile user) {
-    final raw = user.displayName.trim();
-    if (raw.isEmpty) return 'there';
-    final parts = raw.split(RegExp(r'\s+'));
-    return parts.first.trim().isEmpty ? raw : parts.first.trim();
-  }
-
   Future<void> _maybeShowWelcomeOnboarding() async {
-    if (_welcomeCheckInFlight) return;
-    _welcomeCheckInFlight = true;
-    try {
-      final auth = context.read<AuthService>();
-      final appUser = context.read<AppUserService>();
-      final user = auth.signedInUser;
-      final profile = appUser.current;
-      if (user == null || profile == null) return;
-      if (!profile.isSignupComplete || profile.hasSeenWelcomeOnboarding) {
-        return;
-      }
-      final hasSeenLocally = await appUser.hasSeenWelcomeOnboardingLocally(
-        user.userId,
-      );
-      if (hasSeenLocally) {
-        return;
-      }
-      await appUser.stageWelcomeOnboardingSeen();
-      if (!mounted) return;
-      final navigatorContext =
-          Navigator.of(context, rootNavigator: true).context;
-
-      await Future<void>.delayed(const Duration(milliseconds: 260));
-      if (!mounted || !navigatorContext.mounted) return;
-
-      final decision = await showGeneralDialog<_WelcomeOnboardingDecision>(
-        context: navigatorContext,
-        barrierDismissible: true,
-        barrierLabel: 'Welcome to Mixroom',
-        barrierColor: Colors.black.withValues(alpha: 0.42),
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return _WelcomeOnboardingDialog(
-            firstName: _displayNameForWelcome(user),
-          );
-        },
-        transitionBuilder: (context, animation, secondaryAnimation, child) {
-          final curved = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-            reverseCurve: Curves.easeInCubic,
-          );
-          return FadeTransition(
-            opacity: curved,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: 0.96, end: 1.0).animate(curved),
-              child: child,
-            ),
-          );
-        },
-      );
-      if (!mounted) return;
-      if (decision == _WelcomeOnboardingDecision.startTour) {
-        await DawOnboardingPrefs.setPendingQuickTour(
-          user.userId,
-          pending: true,
-        );
-      }
-      unawaited(appUser.syncWelcomeOnboardingSeen());
-    } finally {
-      _welcomeCheckInFlight = false;
-    }
+    // Intentionally disabled for now; a redesigned onboarding flow will replace this.
+    return;
   }
 
   @override
@@ -883,7 +813,7 @@ class _HomeComingSoonScreen extends StatelessWidget {
                 const SizedBox(height: 18),
                 SizedBox(
                   width: double.infinity,
-                  child: OutlinedButton.icon(
+                  child: OutlinedButton(
                     onPressed: () async {
                       final authService = context.read<AuthService>();
                       final draft = await showFeedbackSheet(
@@ -918,13 +848,30 @@ class _HomeComingSoonScreen extends StatelessWidget {
                         );
                       }
                     },
-                    icon: const Icon(Icons.forum_outlined),
                     style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: Colors.white.withValues(alpha: 0.16)),
+                      side: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.16)),
                       foregroundColor: Colors.white,
                       minimumSize: const Size.fromHeight(46),
                     ),
-                    label: const Text('Share feedback or report a bug'),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.forum_outlined),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            L10n.translate(
+                              context,
+                              'Share feedback or report a bug',
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],

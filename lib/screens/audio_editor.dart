@@ -12,7 +12,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 import 'package:image/image.dart' as img;
-import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
@@ -77,7 +76,6 @@ import 'package:fftea/fftea.dart';
 // import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 import 'package:mixroom/screens/home.dart';
 import 'package:mixroom/models/entitlement_models.dart';
@@ -94,6 +92,7 @@ import 'package:mixroom/widgets/export_success_preview_player.dart';
 Completer<void> _cancelSignal = Completer();
 
 const List<String> kMixroomBuiltInEffects = [
+  "Gain",
   "EQ 3-Band",
   "Compressor",
   "Limiter",
@@ -2475,6 +2474,7 @@ enum _DawTutorialStepId {
   chatWaiting,
   oneButtonMix,
   exportInfo,
+  tutorialComplete,
 }
 
 class _DawTutorialStepSpec {
@@ -2504,6 +2504,668 @@ class _DawTutorialStepSpec {
   final EdgeInsets? cardPadding;
   final double? cardMaxWidth;
 }
+
+enum _ProducerPromptLanguage { english, korean }
+
+class _ProducerPromptProjectContext {
+  final int audioRowCount;
+  final Set<String> roles;
+
+  const _ProducerPromptProjectContext({
+    required this.audioRowCount,
+    required this.roles,
+  });
+
+  bool get isSparse => audioRowCount <= 2;
+  bool get isDense => audioRowCount >= 5;
+
+  bool hasRole(String role) => roles.contains(role);
+}
+
+class _ProducerPromptTemplate {
+  final String id;
+  final String familyEn;
+  final String familyKo;
+  final String english;
+  final String korean;
+  final List<String> requiredRoles;
+  final int minAudioRows;
+  final int maxAudioRows;
+
+  const _ProducerPromptTemplate({
+    required this.id,
+    required this.familyEn,
+    required this.familyKo,
+    required this.english,
+    required this.korean,
+    this.requiredRoles = const <String>[],
+    this.minAudioRows = 1,
+    this.maxAudioRows = 0,
+  });
+
+  bool matches(_ProducerPromptProjectContext context) {
+    if (context.audioRowCount < minAudioRows) return false;
+    if (maxAudioRows > 0 && context.audioRowCount > maxAudioRows) return false;
+    for (final role in requiredRoles) {
+      if (!context.hasRole(role)) return false;
+    }
+    return true;
+  }
+
+  String promptFor(_ProducerPromptLanguage language) =>
+      language == _ProducerPromptLanguage.korean ? korean : english;
+
+  String familyFor(_ProducerPromptLanguage language) =>
+      language == _ProducerPromptLanguage.korean ? familyKo : familyEn;
+}
+
+const List<_ProducerPromptTemplate> _kProducerPromptTemplates =
+    <_ProducerPromptTemplate>[
+  _ProducerPromptTemplate(
+    id: 'mix_finish_balance',
+    familyEn: 'Balance',
+    familyKo: '밸런스',
+    english: 'Make the overall balance feel more like a finished record.',
+    korean: '전체 밸런스를 좀 더 완성된 곡처럼 정리해줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_clarity_cleanup',
+    familyEn: 'Clarity',
+    familyKo: '선명도',
+    english: 'Clean this up so it feels clearer and less cloudy.',
+    korean: '전체가 좀 뿌옇고 탁한데 정리해줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_glue',
+    familyEn: 'Glue',
+    familyKo: '글루',
+    english:
+        'Make the mix feel more glued together without sounding overworked.',
+    korean: '전체가 한 곡처럼 더 잘 붙어 들리게 해줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_polish_subtle',
+    familyEn: 'Polish',
+    familyKo: '폴리시',
+    english: 'This is close already, just polish it lightly.',
+    korean: '지금 거의 좋은데 과하게 건드리지는 말고 살짝만 다듬어줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_restraint',
+    familyEn: 'Restraint',
+    familyKo: '절제',
+    english:
+        'If it is already working, do not change much. Only fix what truly needs it.',
+    korean: '이미 괜찮으면 굳이 크게 바꾸지 말고 필요한 것만 만져줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_louder_confident',
+    familyEn: 'Density',
+    familyKo: '밀도',
+    english:
+        'Make it feel a little bigger and more confident without crushing it.',
+    korean: '조금 더 크고 자신감 있게 들리게 해줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_space_depth',
+    familyEn: 'Depth',
+    familyKo: '깊이감',
+    english: 'Give this a little more depth and dimension.',
+    korean: '조금 더 깊이감 있게 만들어줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_width',
+    familyEn: 'Width',
+    familyKo: '스테레오 폭',
+    english:
+        'Make it feel a little wider and more open without losing the center.',
+    korean: '조금 더 넓고 시원하게 들리게 해줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_radio_ready',
+    familyEn: 'Commercial',
+    familyKo: '상업적 완성도',
+    english: 'Make this feel more polished and radio-ready.',
+    korean: '조금 더 commercial하고 polished하게 해줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_warm_analog',
+    familyEn: 'Warmth',
+    familyKo: '따뜻함',
+    english: 'Make this feel warmer and a bit more analog.',
+    korean: '더 warm하고 analog 같은 느낌으로 해줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_glossy_bright',
+    familyEn: 'Gloss',
+    familyKo: '글로시',
+    english: 'Make it feel glossier and brighter, but not harsh.',
+    korean: '더 glossy하고 반짝이는 느낌으로 해줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_hyperpop',
+    familyEn: 'Style',
+    familyKo: '스타일',
+    english: 'Push this toward a more hyperpop mix vibe.',
+    korean: '좀 더 하이퍼팝처럼 과감하고 밝게 해줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_slimey',
+    familyEn: 'Style',
+    familyKo: '스타일',
+    english: 'Make it feel more slimey and sticky without falling apart.',
+    korean: '더 slimey하고 끈적한 질감으로 가줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_gritty',
+    familyEn: 'Texture',
+    familyKo: '텍스처',
+    english: 'Add a little more grit and raw edge while keeping it musical.',
+    korean: '더 gritty하고 거친 느낌을 살려줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_cinematic',
+    familyEn: 'Space',
+    familyKo: '공간감',
+    english: 'Make the mix feel more cinematic and wide.',
+    korean: '더 cinematic하고 넓은 느낌으로 만들어줘.',
+    minAudioRows: 3,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_sparse_fuller',
+    familyEn: 'Sparse Mix',
+    familyKo: '성긴 편곡',
+    english:
+        'This arrangement is sparse. Make it feel fuller without losing openness.',
+    korean: '편곡이 성긴 편인데 열린 느낌은 유지하면서 조금 더 풍성하게 해줘.',
+    maxAudioRows: 3,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_sparse_intimate',
+    familyEn: 'Sparse Mix',
+    familyKo: '성긴 편곡',
+    english: 'Keep this intimate and close, not overproduced.',
+    korean: '지금의 친밀한 느낌은 유지하고 너무 과하게 만들지는 말아줘.',
+    maxAudioRows: 3,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_dense_untangle',
+    familyEn: 'Dense Mix',
+    familyKo: '빽빽한 편곡',
+    english:
+        'This is crowded. Untangle the layers so each part has more space.',
+    korean: '지금 좀 빽빽하니까 각 파트가 더 잘 보이게 정리해줘.',
+    minAudioRows: 4,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_dense_chorus',
+    familyEn: 'Dense Mix',
+    familyKo: '빽빽한 편곡',
+    english: 'Make the chorus feel bigger without letting it turn muddy.',
+    korean: '후렴이 더 커 보이게 하되 탁해지지는 않게 해줘.',
+    minAudioRows: 4,
+  ),
+  _ProducerPromptTemplate(
+    id: 'vocals_forward',
+    familyEn: 'Vocals',
+    familyKo: '보컬',
+    english: 'Bring the vocals forward, but keep them natural.',
+    korean: '보컬이 앞으로 나오되 너무 인위적이지 않게 해줘.',
+    requiredRoles: <String>['vocals'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'vocals_lyrics',
+    familyEn: 'Vocals',
+    familyKo: '보컬',
+    english: 'Make the vocal lyrics easier to hear clearly.',
+    korean: '보컬 가사가 더 잘 들리게 해줘.',
+    requiredRoles: <String>['vocals'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'vocals_harsh',
+    familyEn: 'Vocals',
+    familyKo: '보컬',
+    english: 'The vocal feels a little harsh. Smooth it out.',
+    korean: '보컬이 살짝 쏘고 피곤하게 들리는데 부드럽게 정리해줘.',
+    requiredRoles: <String>['vocals'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'vocals_intimate',
+    familyEn: 'Vocals',
+    familyKo: '보컬',
+    english: 'Make the vocal feel more intimate and closer.',
+    korean: '보컬이 더 intimate하고 가깝게 느껴지게 해줘.',
+    requiredRoles: <String>['vocals'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'vocals_deess',
+    familyEn: 'Vocals',
+    familyKo: '보컬',
+    english: 'Tame the vocal sibilance without dulling the tone.',
+    korean: '보컬 치찰음이 거슬리지 않게 하되 답답해지지는 않게 해줘.',
+    requiredRoles: <String>['vocals'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'drums_smack',
+    familyEn: 'Drums',
+    familyKo: '드럼',
+    english: 'Make the drums hit harder.',
+    korean: '드럼이 좀 더 세게 치는 느낌이 나게 해줘.',
+    requiredRoles: <String>['drums'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'drums_kick',
+    familyEn: 'Drums',
+    familyKo: '드럼',
+    english: 'Make the kick feel punchier and more solid.',
+    korean: '킥이 더 단단하고 펀치 있게 들리게 해줘.',
+    requiredRoles: <String>['drums'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'drums_snare',
+    familyEn: 'Drums',
+    familyKo: '드럼',
+    english: 'Give the snare a bit more presence and crack.',
+    korean: '스네어가 조금 더 앞으로 튀고 존재감 있게 들리게 해줘.',
+    requiredRoles: <String>['drums'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'drums_control',
+    familyEn: 'Drums',
+    familyKo: '드럼',
+    english: 'Tighten the drums so they feel more controlled and locked in.',
+    korean: '드럼이 더 타이트하고 정돈되게 들리게 해줘.',
+    requiredRoles: <String>['drums'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'bass_presence',
+    familyEn: 'Bass',
+    familyKo: '베이스',
+    english: 'Make the bass easier to hear without letting it take over.',
+    korean: '베이스가 잘 들리게 하되 너무 튀지는 않게 해줘.',
+    requiredRoles: <String>['bass'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'bass_low_end',
+    familyEn: 'Bass',
+    familyKo: '베이스',
+    english: 'Tighten the low end so it feels cleaner and more stable.',
+    korean: '저역이 더 단단하고 안정적으로 느껴지게 정리해줘.',
+    requiredRoles: <String>['bass'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'bass_kick_split',
+    familyEn: 'Low End',
+    familyKo: '저역 분리',
+    english: 'Separate the kick and bass better so they stop fighting.',
+    korean: '킥하고 베이스가 서로 덜 겹치게 만들어줘.',
+    requiredRoles: <String>['drums', 'bass'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'guitar_harsh',
+    familyEn: 'Guitar',
+    familyKo: '기타',
+    english: 'The guitar feels harsh. Smooth it out without burying it.',
+    korean: '기타가 거칠고 자극적인데 묻지 않게 부드럽게 해줘.',
+    requiredRoles: <String>['guitar'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'guitar_space',
+    familyEn: 'Guitar',
+    familyKo: '기타',
+    english:
+        'Make the guitar sit better in the mix without crowding the center.',
+    korean: '기타가 가운데를 너무 막지 않게 자리 잘 잡게 해줘.',
+    requiredRoles: <String>['guitar'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'synth_cloudy',
+    familyEn: 'Synth',
+    familyKo: '신스',
+    english: 'The synth or pad feels cloudy. Clean it up.',
+    korean: '신스나 패드가 좀 흐리고 뿌연데 정리해줘.',
+    requiredRoles: <String>['synth'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'synth_space',
+    familyEn: 'Synth',
+    familyKo: '신스',
+    english: 'Make the synth or pad feel wider and dreamier.',
+    korean: '신스나 패드가 더 넓고 dreamy하게 느껴지게 해줘.',
+    requiredRoles: <String>['synth'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'synth_support',
+    familyEn: 'Synth',
+    familyKo: '신스',
+    english: 'Keep the synth supportive so it does not cover the main element.',
+    korean: '신스가 메인을 가리지 않게 뒤에서 잘 받쳐주도록 정리해줘.',
+    requiredRoles: <String>['synth'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_open_air',
+    familyEn: 'Air',
+    familyKo: '개방감',
+    english: 'Open this up so it feels more airy and less boxed in.',
+    korean: '좀 더 airy하고 답답하지 않게 열어줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_dark_heavy',
+    familyEn: 'Tone',
+    familyKo: '톤',
+    english: 'Make it darker and heavier without losing definition.',
+    korean: '좀 더 어둡고 무겁게 가되 윤곽은 남겨줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_bedroom_pop',
+    familyEn: 'Style',
+    familyKo: '스타일',
+    english: 'Push this toward a more dreamy bedroom-pop mix feel.',
+    korean: '좀 더 dreamy한 bedroom-pop 느낌으로 가줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_trap_weight',
+    familyEn: 'Style',
+    familyKo: '스타일',
+    english: 'Make it feel heavier and more underground trap.',
+    korean: '더 underground trap 느낌으로 무겁게 해줘.',
+    requiredRoles: <String>['bass'],
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_keep_space',
+    familyEn: 'Restraint',
+    familyKo: '절제',
+    english: 'Keep the openness and do not overfill the arrangement.',
+    korean: '열린 느낌은 유지하고 너무 꽉 채우지는 말아줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_front_back_depth',
+    familyEn: 'Depth',
+    familyKo: '깊이감',
+    english:
+        'Improve front-to-back depth so lead elements stay forward and support sits behind.',
+    korean: '메인은 앞으로, 받쳐주는 파트는 뒤로 가도록 앞뒤 깊이감을 더 분명하게 해줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_center_focus',
+    familyEn: 'Center',
+    familyKo: '센터 집중',
+    english:
+        'Strengthen the center image and keep important elements mono-compatible.',
+    korean: '중요한 요소가 모노에서도 잘 유지되도록 센터를 더 탄탄하게 잡아줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_side_open',
+    familyEn: 'Stereo',
+    familyKo: '스테레오',
+    english:
+        'Open the sides a little more while keeping the middle stable and clear.',
+    korean: '중앙은 안정적으로 유지하고 사이드만 조금 더 열어줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_low_mid_cleanup',
+    familyEn: 'Clarity',
+    familyKo: '선명도',
+    english: 'Clean up low-mid buildup so the mix feels less boxy and crowded.',
+    korean: '로우미드가 뭉친 느낌을 정리해서 덜 답답하게 해줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_harshness_control',
+    familyEn: 'Tone',
+    familyKo: '톤',
+    english:
+        'Control top-end harshness while preserving detail and excitement.',
+    korean: '디테일은 살리면서도 고역의 자극적인 느낌을 줄여줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_air_without_hiss',
+    familyEn: 'Air',
+    familyKo: '개방감',
+    english: 'Add a bit more air and openness without introducing harsh hiss.',
+    korean: '거친 히스 느낌 없이 공기감과 개방감을 조금 더해줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_dynamic_tighter',
+    familyEn: 'Dynamics',
+    familyKo: '다이내믹',
+    english:
+        'Tighten the dynamics so levels feel more controlled and consistent.',
+    korean: '레벨이 더 안정적이도록 다이내믹을 조금 더 타이트하게 잡아줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_dynamic_more_breathing',
+    familyEn: 'Dynamics',
+    familyKo: '다이내믹',
+    english:
+        'Let the mix breathe more dynamically instead of sounding too pinned.',
+    korean: '너무 눌린 느낌은 줄이고 다이내믹이 더 숨 쉬게 해줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_punchy_transients',
+    familyEn: 'Punch',
+    familyKo: '펀치',
+    english: 'Increase transient punch so key hits feel more impactful.',
+    korean: '중요한 어택이 더 잘 느껴지도록 트랜지언트 펀치를 살려줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_smoother_transients',
+    familyEn: 'Smooth',
+    familyKo: '부드러움',
+    english:
+        'Soften overly sharp transients so the mix feels smoother and less fatiguing.',
+    korean: '과한 어택을 조금 눌러서 더 부드럽고 덜 피곤하게 만들어줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_room_shorter',
+    familyEn: 'Space',
+    familyKo: '공간감',
+    english:
+        'Reduce excessive roominess and tighten ambience so things feel closer.',
+    korean: '과한 룸감을 줄이고 앰비언스를 타이트하게 정리해서 더 가깝게 들리게 해줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_room_lusher',
+    familyEn: 'Space',
+    familyKo: '공간감',
+    english: 'Make the ambience lusher and deeper without washing out the mix.',
+    korean: '믹스가 번지지 않게 유지하면서 공간감을 더 풍성하고 깊게 만들어줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_level_only',
+    familyEn: 'Constraint',
+    familyKo: '제약 조건',
+    english:
+        'Try to improve this mostly with level and pan balance, minimal effect changes.',
+    korean: '이펙트는 최소로 건드리고 레벨/팬 밸런스 위주로 개선해줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_fx_only_touch',
+    familyEn: 'Constraint',
+    familyKo: '제약 조건',
+    english:
+        'Keep level moves minimal and shape this mostly with tone and ambience.',
+    korean: '레벨 변화는 최소로 하고 톤과 공간감 위주로 정리해줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_master_gentle',
+    familyEn: 'Master Feel',
+    familyKo: '마스터 느낌',
+    english:
+        'Give the overall mix a gentle finished polish, but keep plenty of headroom.',
+    korean: '헤드룸은 충분히 남기면서 전체를 부드럽게 완성된 느낌으로 다듬어줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_reference_translation',
+    familyEn: 'Translation',
+    familyKo: '재생 환경 대응',
+    english:
+        'Balance this to translate better across earbuds, laptop speakers, and car playback.',
+    korean: '이어폰, 노트북 스피커, 차량 환경에서 모두 잘 들리게 밸런스를 맞춰줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'vocals_dry_forward',
+    familyEn: 'Vocals',
+    familyKo: '보컬',
+    english: 'Keep vocals dry and close-up, with minimal reverb tail.',
+    korean: '보컬은 리버브 꼬리를 줄이고 건조하고 가깝게 유지해줘.',
+    requiredRoles: <String>['vocals'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'vocals_wet_emotional',
+    familyEn: 'Vocals',
+    familyKo: '보컬',
+    english:
+        'Make the vocal more emotional with tasteful space, without losing lyric clarity.',
+    korean: '가사 전달은 유지하면서 보컬 공간감을 감성적으로 살려줘.',
+    requiredRoles: <String>['vocals'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'vocals_bg_separation',
+    familyEn: 'Vocals',
+    familyKo: '보컬',
+    english:
+        'Separate lead and backing vocal feel so the lead stays clearly in front.',
+    korean: '리드 보컬이 분명히 앞에 오도록 백킹과의 거리감을 분리해줘.',
+    requiredRoles: <String>['vocals'],
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'drums_hat_tame',
+    familyEn: 'Drums',
+    familyKo: '드럼',
+    english: 'Tame harsh hats/cymbals while keeping groove energy.',
+    korean: '그루브 에너지는 유지하면서 하이햇/심벌의 자극적인 느낌을 줄여줘.',
+    requiredRoles: <String>['drums'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'drums_room_size',
+    familyEn: 'Drums',
+    familyKo: '드럼',
+    english:
+        'Give drums a bit more room size and depth without blurring transients.',
+    korean: '드럼 어택은 유지하면서 공간 크기와 깊이감을 조금 더해줘.',
+    requiredRoles: <String>['drums'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'drums_kick_sub_focus',
+    familyEn: 'Drums',
+    familyKo: '드럼',
+    english:
+        'Focus the kick sub so low-end hits with more definition, not boom.',
+    korean: '킥 저역이 붕붕거리지 않고 더 또렷하게 치도록 정리해줘.',
+    requiredRoles: <String>['drums'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'bass_sub_tight',
+    familyEn: 'Bass',
+    familyKo: '베이스',
+    english: 'Tighten bass subs and reduce rumble while keeping weight.',
+    korean: '무게감은 유지하면서 베이스 서브를 더 타이트하게 정리해줘.',
+    requiredRoles: <String>['bass'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'bass_upper_definition',
+    familyEn: 'Bass',
+    familyKo: '베이스',
+    english: 'Add upper-bass definition so bass reads on small speakers too.',
+    korean: '작은 스피커에서도 베이스가 들리도록 상단 존재감을 보강해줘.',
+    requiredRoles: <String>['bass'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'guitar_width_texture',
+    familyEn: 'Guitar',
+    familyKo: '기타',
+    english:
+        'Widen guitar texture to the sides while keeping center uncluttered.',
+    korean: '센터를 막지 않게 기타 텍스처를 양옆으로 넓혀줘.',
+    requiredRoles: <String>['guitar'],
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'guitar_focus_midrange',
+    familyEn: 'Guitar',
+    familyKo: '기타',
+    english:
+        'Refine guitar midrange so it cuts through without sounding nasal.',
+    korean: '코맹맹이 느낌은 줄이고 기타 미드가 잘 들리게 정리해줘.',
+    requiredRoles: <String>['guitar'],
+  ),
+  _ProducerPromptTemplate(
+    id: 'synth_tighter_center',
+    familyEn: 'Synth',
+    familyKo: '신스',
+    english:
+        'Pull synth width in slightly and make it sit tighter around center.',
+    korean: '신스 폭을 살짝 줄여서 센터 주변에 더 단단하게 자리 잡게 해줘.',
+    requiredRoles: <String>['synth'],
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'synth_wider_lush',
+    familyEn: 'Synth',
+    familyKo: '신스',
+    english:
+        'Push synths wider and lusher, but keep lead elements intelligible.',
+    korean: '리드 전달력은 유지하면서 신스를 더 넓고 풍성하게 만들어줘.',
+    requiredRoles: <String>['synth'],
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_verse_chorus_contrast',
+    familyEn: 'Arrangement Feel',
+    familyKo: '구간 대비',
+    english:
+        'Create more contrast between quieter and bigger sections without over-processing.',
+    korean: '구간별 크기 대비가 더 느껴지도록 하되 과하게 처리하지는 말아줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_night_listen',
+    familyEn: 'Comfort',
+    familyKo: '청감 피로',
+    english:
+        'Tune this for comfortable long listening with less fatigue at medium volume.',
+    korean: '중간 볼륨에서 오래 들어도 덜 피곤하게 청감 피로를 줄여줘.',
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_aggressive_modern',
+    familyEn: 'Modern',
+    familyKo: '모던',
+    english:
+        'Push this toward a more aggressive modern mix while keeping clarity.',
+    korean: '선명도는 유지하면서 더 공격적인 모던 믹스 느낌으로 밀어줘.',
+    minAudioRows: 2,
+  ),
+  _ProducerPromptTemplate(
+    id: 'mix_soft_vintage',
+    familyEn: 'Vintage',
+    familyKo: '빈티지',
+    english:
+        'Soften edges and lean into a slightly vintage, rounded presentation.',
+    korean: '모서리를 살짝 둥글게 해서 빈티지한 질감으로 정리해줘.',
+    minAudioRows: 2,
+  ),
+];
 
 class AudioEditorScreen extends StatefulWidget {
   final String mode;
@@ -2588,6 +3250,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _DawTutorialStepId.chatWaiting,
     _DawTutorialStepId.oneButtonMix,
     _DawTutorialStepId.exportInfo,
+    _DawTutorialStepId.tutorialComplete,
   ];
 
   bool _subscriptionCapabilityOrLegacy(String capability) {
@@ -2612,6 +3275,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   static const MethodChannel _edgeGesturesChannel =
       MethodChannel('mixroom/edge_gestures');
+  static const MethodChannel _producerExportsChannel =
+      MethodChannel('mixroom/producer_exports');
   static void _noopRefreshRowFx(int row) {}
 
   late Directory _projectDir;
@@ -2685,6 +3350,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const List<int> _kExportMp3Bitrates = [128, 192, 256, 320];
   static const List<int> _kExportMp3VbrQualities = [0, 2, 4, 6];
   static const List<double> _kExportNormalizeTargetsDb = [-0.3, -1.0, -2.0];
+  static const double _kExportNormalizeTargetDbMin = -2.0;
+  static const double _kExportNormalizeTargetDbMax = -0.3;
 
   _AudioExportSettings _audioExportSettings = const _AudioExportSettings(
     format: _ExportAudioFormat.wav,
@@ -2842,8 +3509,94 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     _lastFxPlaybackRefreshElapsed = now;
+    _refreshMixAutomationUiForPlaybackTick(
+      _globalAudioClock.inMilliseconds.toDouble(),
+    );
     for (int row = 0; row < _rowCount; row++) {
       _refreshRowFxPlayback(row);
+    }
+  }
+
+  void _refreshMixAutomationUiForPlaybackTick(double timeMs) {
+    if (_rowCount <= 0) return;
+    bool changed = false;
+
+    for (int row = 0; row < _rowCount; row++) {
+      final rowGainTargetId = _rowMixAutomationTargetId('gain');
+      if (_hasExplicitAutomationForTarget(row, rowGainTargetId)) {
+        final target = _rowAutomationTargets[row]?[rowGainTargetId] ??
+            _fallbackAutomationTargetMeta(rowGainTargetId);
+        final normalized = _resolvedAutomationValueAtMs(
+          row,
+          rowGainTargetId,
+          timeMs,
+        ).clamp(0.0, 1.0);
+        final value = _denormalizeAutomationValue(normalized, target)
+            .clamp(_kGainUiMin, _kGainUiMax)
+            .toDouble();
+        if ((value - _rowGain[row]).abs() > 0.0005) {
+          _rowGain[row] = value;
+          changed = true;
+        }
+      }
+
+      final rowPanTargetId = _rowMixAutomationTargetId('pan');
+      if (_hasExplicitAutomationForTarget(row, rowPanTargetId)) {
+        final target = _rowAutomationTargets[row]?[rowPanTargetId] ??
+            _fallbackAutomationTargetMeta(rowPanTargetId);
+        final normalized = _resolvedAutomationValueAtMs(
+          row,
+          rowPanTargetId,
+          timeMs,
+        ).clamp(0.0, 1.0);
+        final value = _denormalizeAutomationValue(normalized, target)
+            .clamp(0.0, 1.0)
+            .toDouble();
+        if ((value - _rowPan[row]).abs() > 0.0005) {
+          _rowPan[row] = value;
+          changed = true;
+        }
+      }
+    }
+
+    final masterGainTargetId = _masterMixAutomationTargetId('gain');
+    if (_hasExplicitAutomationForTarget(0, masterGainTargetId)) {
+      final target = _automationTargetMetaFromAnyRow(masterGainTargetId) ??
+          _fallbackAutomationTargetMeta(masterGainTargetId);
+      final normalized = _resolvedAutomationValueAtMs(
+        0,
+        masterGainTargetId,
+        timeMs,
+      ).clamp(0.0, 1.0);
+      final value = _denormalizeAutomationValue(normalized, target)
+          .clamp(_kGainUiMin, _kGainUiMax)
+          .toDouble();
+      if ((value - _masterGain).abs() > 0.0005) {
+        _masterGain = value;
+        changed = true;
+      }
+    }
+
+    final masterPanTargetId = _masterMixAutomationTargetId('pan');
+    if (_hasExplicitAutomationForTarget(0, masterPanTargetId)) {
+      final target = _automationTargetMetaFromAnyRow(masterPanTargetId) ??
+          _fallbackAutomationTargetMeta(masterPanTargetId);
+      final normalized = _resolvedAutomationValueAtMs(
+        0,
+        masterPanTargetId,
+        timeMs,
+      ).clamp(0.0, 1.0);
+      final value = _denormalizeAutomationValue(normalized, target)
+          .clamp(0.0, 1.0)
+          .toDouble();
+      if ((value - _masterPan).abs() > 0.0005) {
+        _masterPan = value;
+        changed = true;
+      }
+    }
+
+    if (changed && mounted) {
+      setState(() {});
     }
   }
 
@@ -2918,6 +3671,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _loopEnabled = false;
   int _loopStartMs = 0;
   int _loopEndMs = 0;
+  bool _loopWrapInFlight = false;
 
   // master rack
   bool _showMasterRack = false;
@@ -2955,6 +3709,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<MediaDeviceInfo> _outputs = [];
   MediaDeviceInfo? _selectedInput;
   MediaDeviceInfo? _selectedOutput;
+  String? _androidOutputRouteName;
+  String? _macOutputDeviceName;
 
   List<String> _inputDevices = [];
   String? _selectedDevice;
@@ -2970,6 +3726,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _loadingDevices = false;
   bool _microphoneAccessBlocked = false;
   PermissionStatus _microphonePermissionStatus = PermissionStatus.denied;
+  bool _dawEntryMicPromptHandled = false;
 
   bool _metronomeEnabled = false;
   double _metronomeVolume = 0.5; // 0–1
@@ -2984,7 +3741,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   late final InstrumentClassifier _classifier;
   late final SpleeterStemSeparator _spleeterStemSeparator;
   final FocusNode _chatFocusNode = FocusNode();
-  final ScrollController _chatHistoryScrollController = ScrollController();
   late final ChatPipeline _chatPipeline;
   late final MixingMagnitudePredictor _magnitudePredictor;
   Future<void>? _aiModelsWarmupFuture;
@@ -2992,6 +3748,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _producerDataMode = false;
   bool _showProducerCaptureUi = false;
   bool _producerUiBusy = false;
+  _ProducerPromptLanguage _producerPromptLanguage =
+      _ProducerPromptLanguage.korean;
+  List<String> _producerPromptQueueIds = <String>[];
+  int _producerPromptQueueIndex = 0;
+  bool _producerPromptShuffle = true;
+  bool _producerPromptSubmitting = false;
+  bool _producerGuidedPromptAwaitingFinal = false;
+  bool _producerCapturePanelMinimized = true;
+  bool _producerGuidedPromptMinimized = false;
   late final ChatController _chatController;
   Timer? _chatHistoryPersistTimer;
   Timer? _copiedChatMessageTimer;
@@ -3512,9 +4277,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
   }
 
+  bool _isEditableTextFocused() {
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    if (focusedContext == null) return false;
+    return focusedContext.widget is EditableText;
+  }
+
+  Future<void> _handleMacSpacebarPlayPauseShortcut() async {
+    if (!mounted) return;
+    if (_isRecording) {
+      await _stopRecordingJuce(keepPlaying: false);
+      return;
+    }
+    await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+  }
+
+  bool _handleMacEditorKeyEvent(KeyEvent event) {
+    if (!Platform.isMacOS) return false;
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.space) return false;
+    if (_isEditableTextFocused()) return false;
+
+    final keyboard = HardwareKeyboard.instance;
+    final hasModifier = keyboard.isMetaPressed ||
+        keyboard.isControlPressed ||
+        keyboard.isAltPressed;
+    if (hasModifier) return false;
+
+    unawaited(_handleMacSpacebarPlayPauseShortcut());
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
+    if (Platform.isMacOS) {
+      HardwareKeyboard.instance.addHandler(_handleMacEditorKeyEvent);
+    }
     unawaited(_setIOSSystemGestureDeferral(true));
     WidgetsBinding.instance.addObserver(this);
     unawaited(_refreshPlatformCapabilities());
@@ -3544,8 +4343,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _stopRecordingJuce(keepPlaying: false);
           return;
         }
-        unawaited(_restartAudio(_safeAudioEditorStateSetter));
-        unawaited(_togglePlayPauseAudio(_safeAudioEditorStateSetter));
+        if (!_loopWrapInFlight) {
+          unawaited(_wrapPlaybackToLoopStart());
+        }
         return;
       }
 
@@ -3596,6 +4396,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       mixModel: LocalMixingModel(),
       magnitudePredictor: _magnitudePredictor,
       onThinkingChanged: (isThinking) {
+        if (!mounted) return;
         setState(() {
           _isThinking = isThinking;
         });
@@ -3630,8 +4431,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await JuceAudioEngine.initialise(); // heavy blocking native call
       JuceAudioEngine.initialiseEventListeners();
-      unawaited(_refreshMicrophonePermissionState());
-      unawaited(_loadInputDevicesFromJuce());
+      await _refreshMicrophonePermissionState();
+      await _maybePromptMicrophonePermissionOnDawEntry();
+      await _loadInputDevicesFromJuce();
+      await _refreshAndroidOutputRouteLabel();
       await _loadBundledInstrumentCatalog();
       _liveMidiEventPlaybackSupported =
           await JuceAudioEngine.supportsLiveMidiClipPlayback();
@@ -3709,65 +4512,406 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   _DawTutorialStepSpec get _currentDawOnboardingStep =>
       _buildDawTutorialStepSpec(_currentDawOnboardingStepId);
 
-  static const String _kDawTutorialAiPrompt =
-      'Take out the plugin on the first track';
+  static const Map<String, Map<String, String>> _kDawTutorialText = {
+    'step_badge': {
+      'en': 'Step {current} of {total}',
+      'ko': '{total}단계 중 {current}단계',
+      'ja': '{total}ステップ中 {current}ステップ目',
+    },
+    'skip': {'en': 'Skip', 'ko': '건너뛰기', 'ja': 'スキップ'},
+    'next': {'en': 'Next', 'ko': '다음', 'ja': '次へ'},
+    'done': {'en': 'Done', 'ko': '완료', 'ja': '完了'},
+    'chat_sample_prompt': {
+      'en': 'Take out the plugin on the first track',
+      'ko': '첫 번째 트랙의 플러그인을 제거해 주세요.',
+      'ja': '1つ目のトラックのプラグインを外してください',
+    },
+    'timeline_intro_title': {
+      'en': 'This is the timeline.',
+      'ko': '여기가 타임라인이에요.',
+      'ja': 'ここがタイムラインです。',
+    },
+    'timeline_intro_body': {
+      'en':
+          'Every clip lives here. Move, trim, and arrange your song from left to right.',
+      'ko': '모든 클립이 여기에 있어요. 좌우로 이동하고 트림하고 배치하면서 곡을 정리해 보세요.',
+      'ja': 'すべてのクリップはここにあります。左右に移動・トリム・配置して、曲を組み立ててみましょう。',
+    },
+    'timeline_scroll_title': {
+      'en': 'Scroll across the song.',
+      'ko': '곡을 가로로 스크롤해 보세요.',
+      'ja': '曲全体を横スクロールしてみましょう。',
+    },
+    'timeline_scroll_body': {
+      'en': 'Swipe sideways to move through the arrangement.',
+      'ko': '좌우로 스와이프해서 편곡 구간을 이동해 보세요.',
+      'ja': '左右にスワイプしてアレンジ全体を移動できます。',
+    },
+    'timeline_scroll_helper': {
+      'en': 'Scroll once to continue.',
+      'ko': '한 번 스크롤하면 계속됩니다.',
+      'ja': '一度スクロールすると次に進みます。',
+    },
+    'timeline_zoom_title': {
+      'en': 'Zoom for detail.',
+      'ko': '확대/축소로 디테일을 보세요.',
+      'ja': 'ズームして細かく確認しましょう。',
+    },
+    'timeline_zoom_body': {
+      'en': 'Pinch or trackpad zoom to get tighter or wider timing detail.',
+      'ko': '핀치 또는 트랙패드 줌으로 타이밍을 더 촘촘하게 또는 넓게 볼 수 있습니다.',
+      'ja': 'ピンチまたはトラックパッドのズームでタイミング表示を細かく/広くできます。',
+    },
+    'timeline_zoom_helper': {
+      'en': 'Try zooming in or out.',
+      'ko': '확대 또는 축소를 해보세요.',
+      'ja': '拡大または縮小を試してください。',
+    },
+    'add_button_title': {
+      'en': 'Add from here.',
+      'ko': '여기서 추가해요.',
+      'ja': 'ここから追加します。',
+    },
+    'add_button_body': {
+      'en': 'Use + to bring in audio, samples, or instruments.',
+      'ko': '+ 버튼으로 오디오, 샘플, 악기를 추가할 수 있어요.',
+      'ja': '+ ボタンからオーディオ、サンプル、楽器を追加できます。',
+    },
+    'add_button_helper': {
+      'en': 'Tap + once to continue.',
+      'ko': '+ 버튼을 한 번 누르면 계속됩니다.',
+      'ja': '+ を一度タップすると次に進みます。',
+    },
+    'add_audio_title': {
+      'en': 'Audio tracks start here.',
+      'ko': '오디오 트랙은 여기에서 시작해요.',
+      'ja': 'オーディオトラックはここから追加します。',
+    },
+    'add_audio_body': {
+      'en':
+          'Here is where you can add audio files or recordings to the project.',
+      'ko': '여기에서 오디오 파일이나 녹음을 프로젝트에 추가할 수 있어요.',
+      'ja': 'ここからオーディオファイルや録音をプロジェクトに追加できます。',
+    },
+    'add_instrument_title': {
+      'en': 'Instruments live here too.',
+      'ko': '악기 트랙도 여기에서 추가해요.',
+      'ja': '楽器トラックもここから追加できます。',
+    },
+    'add_instrument_body': {
+      'en':
+          'Here is where you can add an instrument track with a ready-to-play sound.',
+      'ko': '즉시 연주 가능한 사운드의 악기 트랙을 여기서 추가할 수 있어요.',
+      'ja': 'すぐ演奏できる音色の楽器トラックをここで追加できます。',
+    },
+    'row_expand_title': {
+      'en': 'Open a track header.',
+      'ko': '트랙 헤더를 열어 보세요.',
+      'ja': 'トラックヘッダーを開きましょう。',
+    },
+    'row_expand_body': {
+      'en': 'Tap a selected track header to open its controls.',
+      'ko': '선택된 트랙 헤더를 눌러 컨트롤을 열어 보세요.',
+      'ja': '選択したトラックヘッダーをタップしてコントロールを開きます。',
+    },
+    'row_expand_helper': {
+      'en': 'Open one track to continue.',
+      'ko': '트랙 하나를 열면 계속됩니다.',
+      'ja': '1つ開くと次に進みます。',
+    },
+    'row_volume_title': {
+      'en': 'Volume lives here.',
+      'ko': '볼륨은 여기서 조절해요.',
+      'ja': 'ボリュームはここで調整します。',
+    },
+    'row_volume_body': {
+      'en': 'This tab holds level, pan, and the main volume lane.',
+      'ko': '이 탭에는 레벨, 팬, 메인 볼륨 레인이 있어요.',
+      'ja': 'このタブにはレベル、パン、メインのボリュームレーンがあります。',
+    },
+    'row_effects_title': {
+      'en': 'Effects are on this tab.',
+      'ko': '이펙트는 이 탭에 있어요.',
+      'ja': 'エフェクトはこのタブにあります。',
+    },
+    'row_effects_body': {
+      'en': 'Tap Effects to see the plugins on this track.',
+      'ko': '이펙트 탭을 눌러 이 트랙의 플러그인을 확인해 보세요.',
+      'ja': 'エフェクトタブをタップすると、このトラックのプラグインを表示できます。',
+    },
+    'row_effects_helper': {
+      'en': 'Open Effects to continue.',
+      'ko': '이펙트 탭을 열면 계속 진행됩니다.',
+      'ja': 'Effects タブを開くと次に進みます。',
+    },
+    'row_add_effect_title': {
+      'en': 'Add an effect here.',
+      'ko': '여기에서 이펙트를 추가해요.',
+      'ja': 'ここでエフェクトを追加します。',
+    },
+    'row_add_effect_body': {
+      'en': 'Use Add Effect to load any sound-shaping tool you want.',
+      'ko': 'Add Effect에서 원하는 사운드 보정 도구를 불러올 수 있어요.',
+      'ja': 'Add Effect から、使いたい音作りツールを読み込めます。',
+    },
+    'row_add_effect_helper': {
+      'en': 'Add one effect to continue.',
+      'ko': '이펙트를 하나 추가하면 계속됩니다.',
+      'ja': '1つ追加すると次に進みます。',
+    },
+    'row_open_effect_title': {
+      'en': 'Open the effect you added.',
+      'ko': '추가한 이펙트를 열어보세요.',
+      'ja': '追加したエフェクトを開きましょう。',
+    },
+    'row_open_effect_body': {
+      'en': 'Tap the effect to open its controls.',
+      'ko': '이펙트를 눌러 컨트롤을 열어 보세요.',
+      'ja': 'エフェクトをタップしてコントロールを開きます。',
+    },
+    'row_open_effect_helper': {
+      'en': 'Open any effect to continue.',
+      'ko': '아무 이펙트나 열면 계속됩니다.',
+      'ja': 'どれでも1つ開くと次に進みます。',
+    },
+    'row_params_title': {
+      'en': 'These are the effect controls.',
+      'ko': '여기가 이펙트 컨트롤이에요.',
+      'ja': 'ここがエフェクトのコントロールです。',
+    },
+    'row_params_body': {
+      'en': 'Adjust the sliders here to shape the sound.',
+      'ko': '여기서 슬라이더를 조절해 사운드를 다듬어 보세요.',
+      'ja': 'ここでスライダーを調整して音を作り込みます。',
+    },
+    'row_automation_tab_title': {
+      'en': 'Automation is here.',
+      'ko': '오토메이션은 여기에서 설정해요.',
+      'ja': 'オートメーションはここです。',
+    },
+    'row_automation_tab_body': {
+      'en':
+          'Automation lets a setting move over time instead of staying fixed.',
+      'ko': '오토메이션을 사용하면 고정값 대신 시간에 따라 값이 변하도록 설정할 수 있어요.',
+      'ja': 'オートメーションを使うと、設定値を固定せず時間に合わせて変化させられます。',
+    },
+    'row_automation_tab_helper': {
+      'en': 'Open Automation to continue.',
+      'ko': '오토메이션 탭을 열면 계속 진행됩니다.',
+      'ja': 'Automation タブを開くと次に進みます。',
+    },
+    'row_automation_info_title': {
+      'en': 'This lane draws the movement.',
+      'ko': '이 레인에서 변화를 그려요.',
+      'ja': 'このレーンで変化を描きます。',
+    },
+    'row_automation_info_body': {
+      'en': 'Use automation when you want volume or effect changes over time.',
+      'ko': '시간에 따라 볼륨이나 이펙트를 바꾸고 싶을 때 오토메이션을 사용해 보세요.',
+      'ja': '時間に合わせてボリュームやエフェクトを変えたいときに使います。',
+    },
+    'master_open_title': {
+      'en': 'This is the master bus.',
+      'ko': '여기가 마스터 버스예요.',
+      'ja': 'ここがマスターバスです。',
+    },
+    'master_open_body': {
+      'en': 'Open it to control the full mix instead of one track.',
+      'ko': '한 트랙이 아니라 전체 믹스를 제어할 수 있어요.',
+      'ja': '1トラック単位ではなく、全体ミックスをコントロールできます。',
+    },
+    'master_open_helper': {
+      'en': 'Tap the master button to continue.',
+      'ko': '마스터 버튼을 누르면 계속됩니다.',
+      'ja': 'マスターボタンをタップすると次に進みます。',
+    },
+    'master_tabs_title': {
+      'en': 'Same idea, but for the whole mix.',
+      'ko': '원리는 같고, 대상은 전체 믹스예요.',
+      'ja': '考え方は同じで、対象が全体ミックスです。',
+    },
+    'master_tabs_body': {
+      'en':
+          'Master Volume controls overall balance. Master Effects processes everything together.',
+      'ko': 'Master Volume은 전체 밸런스를 조절하고, Master Effects는 전체 신호를 함께 처리해요.',
+      'ja': 'Master Volume は全体バランスを調整し、Master Effects は全体の音をまとめて処理します。',
+    },
+    'chat_open_title': {
+      'en': 'Mixroom AI starts here.',
+      'ko': 'Mixroom AI는 여기서 시작합니다.',
+      'ja': 'Mixroom AI はここから始まります。',
+    },
+    'chat_open_body': {
+      'en':
+          'Tap the chat bar to ask for edits, mix help, or where a tool lives.',
+      'ko': '채팅바를 눌러 편집 요청, 믹스 도움, 기능 위치 안내를 받을 수 있어요.',
+      'ja': 'チャットバーをタップすると、編集依頼やミックス相談、機能の場所確認ができます。',
+    },
+    'chat_open_helper': {
+      'en': 'Open chat to continue.',
+      'ko': '채팅을 열면 계속됩니다.',
+      'ja': 'チャットを開くと次に進みます。',
+    },
+    'chat_prompt_info_title': {
+      'en': 'Use normal language.',
+      'ko': '편한 말투로 요청해 보세요.',
+      'ja': '普段の言葉で依頼できます。',
+    },
+    'chat_prompt_info_body': {
+      'en':
+          'Ask for mix changes, editing help, or where tools live. This badge shows how many prompts you have left.',
+      'ko': '믹스 수정, 편집 도움, 기능 위치를 물어볼 수 있어요. 이 배지에서 남은 프롬프트 수를 확인할 수 있어요.',
+      'ja': 'ミックス修正や編集ヘルプ、機能の場所を質問できます。このバッジで残りのプロンプト数を確認できます。',
+    },
+    'chat_prompt_info_helper': {
+      'en': 'This badge shows how many AI prompts are available.',
+      'ko': '이 배지는 사용 가능한 AI 프롬프트 수를 보여줍니다.',
+      'ja': 'このバッジは利用可能な AI プロンプト数を示します。',
+    },
+    'chat_send_title': {
+      'en': 'Send this example.',
+      'ko': '이 예시를 보내 보세요.',
+      'ja': 'この例を送ってみてください。',
+    },
+    'chat_send_body': {
+      'en':
+          'We loaded a sample prompt. If you press send, it will use 1 AI credit and run the real workflow.',
+      'ko': '샘플 프롬프트가 미리 입력되어 있어요. 보내기를 누르면 AI 크레딧 1개가 사용되고 실제 워크플로가 실행돼요.',
+      'ja': 'サンプルプロンプトは入力済みです。送信すると AI クレジットを 1 つ消費し、実際のワークフローが実行されます。',
+    },
+    'chat_send_helper': {
+      'en': 'Send it to try it now, or tap Next to keep moving.',
+      'ko': '지금 보내서 체험해 보시거나, 다음을 눌러 계속 진행할 수 있어요.',
+      'ja': '今すぐ送信して試すか、次へを押してそのまま進めます。',
+    },
+    'chat_waiting_title': {
+      'en': 'Waiting for the reply.',
+      'ko': '답변을 기다리는 중이에요.',
+      'ja': '返信を待っています。',
+    },
+    'chat_waiting_body': {
+      'en':
+          'Mixroom AI is applying the request and writing back in the project chat.',
+      'ko': 'Mixroom AI가 요청을 적용하고 프로젝트 채팅에 답변을 작성하고 있어요.',
+      'ja': 'Mixroom AI がリクエストを適用し、プロジェクトチャットに返信しています。',
+    },
+    'chat_waiting_helper': {
+      'en': 'This will continue after the reply is visible.',
+      'ko': '답변이 보이면 자동으로 계속됩니다.',
+      'ja': '返信が表示されると自動で次に進みます。',
+    },
+    'one_button_mix_title': {
+      'en': 'Need a fast cleanup?',
+      'ko': '빠르게 정리하고 싶으신가요?',
+      'ja': 'すばやく整えたいときは？',
+    },
+    'one_button_mix_body': {
+      'en':
+          'One-Button Mix gives you a quick automatic polish pass on the current session.',
+      'ko': 'One-Button Mix는 현재 세션을 빠르게 자동으로 정리해 줘요.',
+      'ja': 'One-Button Mix は現在のセッションをすばやく自動で整えてくれます。',
+    },
+    'export_info_title': {
+      'en': 'Export when you are done.',
+      'ko': '작업이 끝나면 내보내기(Export)를 눌러 주세요.',
+      'ja': '作業が終わったらエクスポートしてください。',
+    },
+    'export_info_body': {
+      'en': 'Tap here to render the finished result out of the project.',
+      'ko': '여기를 눌러 최종 결과물을 렌더링해 내보내세요.',
+      'ja': 'ここをタップして最終結果を書き出してください。',
+    },
+    'tutorial_complete_title': {
+      'en': 'Tutorial complete.',
+      'ko': '튜토리얼이 완료되었어요.',
+      'ja': 'チュートリアルが完了しました。',
+    },
+    'tutorial_complete_body': {
+      'en':
+          'You are ready to build, edit, automate, and export. You can replay this tutorial anytime from project settings.',
+      'ko':
+          '이제 제작, 편집, 오토메이션, 내보내기를 진행할 수 있어요. 프로젝트 설정에서 언제든 튜토리얼을 다시 실행할 수 있어요.',
+      'ja': 'これで制作、編集、オートメーション、書き出しの準備ができました。チュートリアルはプロジェクト設定からいつでも再実行できます。',
+    },
+  };
+
+  String _dawTutorialLanguageCode() {
+    final code = Localizations.localeOf(context).languageCode;
+    if (code == 'ko' || code == 'ja') return code;
+    return 'en';
+  }
+
+  String _dawTutorialText(
+    String key, {
+    Map<String, String> params = const {},
+  }) {
+    final textByLocale = _kDawTutorialText[key];
+    var value =
+        textByLocale?[_dawTutorialLanguageCode()] ?? textByLocale?['en'] ?? key;
+    if (params.isNotEmpty) {
+      params.forEach((k, v) {
+        value = value.replaceAll('{$k}', v);
+      });
+    }
+    return value;
+  }
+
+  String get _dawTutorialAiPrompt => _dawTutorialText('chat_sample_prompt');
 
   _DawTutorialStepSpec _buildDawTutorialStepSpec(_DawTutorialStepId stepId) {
     final row = _dawTutorialTargetRow;
     final effectIndex = _dawTutorialEffectIndex ?? 0;
     switch (stepId) {
       case _DawTutorialStepId.timelineIntro:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.timelineIntro,
-          title: 'This is the timeline.',
-          body:
-              'Every clip lives here. Move, trim, and arrange your song from left to right.',
+          title: _dawTutorialText('timeline_intro_title'),
+          body: _dawTutorialText('timeline_intro_body'),
           accent: Color(0xFF86D8FF),
           placement: _DawTutorialCardPlacement.topLeft,
           mode: _DawTutorialAdvanceMode.next,
           haloKeys: <String>['tutorial:timeline'],
         );
       case _DawTutorialStepId.timelineScroll:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.timelineScroll,
-          title: 'Scroll across the song.',
-          body: 'Swipe sideways to move through the arrangement.',
+          title: _dawTutorialText('timeline_scroll_title'),
+          body: _dawTutorialText('timeline_scroll_body'),
           accent: Color(0xFF86D8FF),
           placement: _DawTutorialCardPlacement.topLeft,
           mode: _DawTutorialAdvanceMode.interaction,
           haloKeys: <String>['tutorial:timeline'],
-          helperText: 'Scroll once to continue.',
+          helperText: _dawTutorialText('timeline_scroll_helper'),
         );
       case _DawTutorialStepId.timelineZoom:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.timelineZoom,
-          title: 'Zoom for detail.',
-          body: 'Pinch or trackpad zoom to get tighter or wider timing detail.',
+          title: _dawTutorialText('timeline_zoom_title'),
+          body: _dawTutorialText('timeline_zoom_body'),
           accent: Color(0xFF86D8FF),
           placement: _DawTutorialCardPlacement.topLeft,
           mode: _DawTutorialAdvanceMode.interaction,
           haloKeys: <String>['tutorial:timeline'],
-          helperText: 'Try zooming in or out.',
+          helperText: _dawTutorialText('timeline_zoom_helper'),
         );
       case _DawTutorialStepId.addButton:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.addButton,
-          title: 'Add from here.',
-          body: 'Use + to bring in audio, samples, or instruments.',
+          title: _dawTutorialText('add_button_title'),
+          body: _dawTutorialText('add_button_body'),
           accent: Color(0xFF9BF3C7),
           placement: _DawTutorialCardPlacement.bottomRight,
           mode: _DawTutorialAdvanceMode.interaction,
           haloKeys: <String>['tutorial:add_button'],
-          helperText: 'Tap + once to continue.',
+          helperText: _dawTutorialText('add_button_helper'),
           cardMaxWidth: 270,
           cardPadding: EdgeInsets.fromLTRB(16, 16, 74, 106),
         );
       case _DawTutorialStepId.addAudio:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.addAudio,
-          title: 'Audio tracks start here.',
-          body:
-              'Here is where you can add audio files or recordings to the project.',
+          title: _dawTutorialText('add_audio_title'),
+          body: _dawTutorialText('add_audio_body'),
           accent: Color(0xFF9BF3C7),
           placement: _DawTutorialCardPlacement.topLeft,
           mode: _DawTutorialAdvanceMode.next,
@@ -3775,11 +4919,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           cardMaxWidth: 270,
         );
       case _DawTutorialStepId.addInstrument:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.addInstrument,
-          title: 'Instruments live here too.',
-          body:
-              'Here is where you can add an instrument track with a ready-to-play sound.',
+          title: _dawTutorialText('add_instrument_title'),
+          body: _dawTutorialText('add_instrument_body'),
           accent: Color(0xFF9BF3C7),
           placement: _DawTutorialCardPlacement.topLeft,
           mode: _DawTutorialAdvanceMode.next,
@@ -3789,21 +4932,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case _DawTutorialStepId.rowExpand:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.rowExpand,
-          title: 'Open a track header.',
-          body: 'Tap a selected track header to open its controls.',
+          title: _dawTutorialText('row_expand_title'),
+          body: _dawTutorialText('row_expand_body'),
           accent: const Color(0xFFFFCB78),
           placement: _DawTutorialCardPlacement.centerRight,
           mode: _DawTutorialAdvanceMode.interaction,
           haloKeys: <String>['row:$row:header'],
-          helperText: 'Open one track to continue.',
+          helperText: _dawTutorialText('row_expand_helper'),
           cardMaxWidth: 216,
           cardPadding: const EdgeInsets.fromLTRB(16, 120, 12, 140),
         );
       case _DawTutorialStepId.rowVolume:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.rowVolume,
-          title: 'Volume lives here.',
-          body: 'This tab holds level, pan, and the main volume lane.',
+          title: _dawTutorialText('row_volume_title'),
+          body: _dawTutorialText('row_volume_body'),
           accent: const Color(0xFFFFCB78),
           placement: _DawTutorialCardPlacement.topRight,
           mode: _DawTutorialAdvanceMode.next,
@@ -3814,34 +4957,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case _DawTutorialStepId.rowEffectsTab:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.rowEffectsTab,
-          title: 'Effects are on this tab.',
-          body: 'Tap Effects to see the plugins on this track.',
+          title: _dawTutorialText('row_effects_title'),
+          body: _dawTutorialText('row_effects_body'),
           accent: const Color(0xFFFFCB78),
           placement: _DawTutorialCardPlacement.topRight,
           mode: _DawTutorialAdvanceMode.interaction,
           haloKeys: <String>['row:$row:effects_tab'],
-          helperText: 'Open Effects to continue.',
+          helperText: _dawTutorialText('row_effects_helper'),
           cardMaxWidth: 212,
           cardPadding: const EdgeInsets.fromLTRB(16, 84, 12, 16),
         );
       case _DawTutorialStepId.rowAddEffect:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.rowAddEffect,
-          title: 'Add an effect here.',
-          body: 'Use Add Effect to load any sound-shaping tool you want.',
+          title: _dawTutorialText('row_add_effect_title'),
+          body: _dawTutorialText('row_add_effect_body'),
           accent: const Color(0xFFFFCB78),
           placement: _DawTutorialCardPlacement.topCenter,
           mode: _DawTutorialAdvanceMode.interaction,
           haloKeys: <String>['row:$row:add_effect'],
-          helperText: 'Add one effect to continue.',
+          helperText: _dawTutorialText('row_add_effect_helper'),
           cardMaxWidth: 248,
           cardPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         );
       case _DawTutorialStepId.rowOpenEffect:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.rowOpenEffect,
-          title: 'Open the effect you added.',
-          body: 'Tap the effect to open its controls.',
+          title: _dawTutorialText('row_open_effect_title'),
+          body: _dawTutorialText('row_open_effect_body'),
           accent: const Color(0xFFFFCB78),
           placement: _DawTutorialCardPlacement.topCenter,
           mode: _DawTutorialAdvanceMode.interaction,
@@ -3849,15 +4992,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             'row:$row:fx_list',
             'row:$row:fx_index:$effectIndex',
           ],
-          helperText: 'Open any effect to continue.',
+          helperText: _dawTutorialText('row_open_effect_helper'),
           cardMaxWidth: 248,
           cardPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         );
       case _DawTutorialStepId.rowParams:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.rowParams,
-          title: 'These are the effect controls.',
-          body: 'Adjust the sliders here to shape the sound.',
+          title: _dawTutorialText('row_params_title'),
+          body: _dawTutorialText('row_params_body'),
           accent: const Color(0xFFFFCB78),
           placement: _DawTutorialCardPlacement.topCenter,
           mode: _DawTutorialAdvanceMode.next,
@@ -3868,23 +5011,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case _DawTutorialStepId.rowAutomationTab:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.rowAutomationTab,
-          title: 'Automation is here.',
-          body:
-              'Automation lets a setting move over time instead of staying fixed.',
+          title: _dawTutorialText('row_automation_tab_title'),
+          body: _dawTutorialText('row_automation_tab_body'),
           accent: const Color(0xFFFFCB78),
           placement: _DawTutorialCardPlacement.centerRight,
           mode: _DawTutorialAdvanceMode.interaction,
           haloKeys: <String>['row:$row:automation_tab'],
-          helperText: 'Open Automation to continue.',
+          helperText: _dawTutorialText('row_automation_tab_helper'),
           cardMaxWidth: 212,
           cardPadding: const EdgeInsets.fromLTRB(16, 120, 12, 140),
         );
       case _DawTutorialStepId.rowAutomationInfo:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.rowAutomationInfo,
-          title: 'This lane draws the movement.',
-          body:
-              'Use automation when you want volume or effect changes over time.',
+          title: _dawTutorialText('row_automation_info_title'),
+          body: _dawTutorialText('row_automation_info_body'),
           accent: const Color(0xFFFFCB78),
           placement: _DawTutorialCardPlacement.topCenter,
           mode: _DawTutorialAdvanceMode.next,
@@ -3896,24 +5037,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           cardPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         );
       case _DawTutorialStepId.masterOpen:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.masterOpen,
-          title: 'This is the master bus.',
-          body: 'Open it to control the full mix instead of one track.',
+          title: _dawTutorialText('master_open_title'),
+          body: _dawTutorialText('master_open_body'),
           accent: Color(0xFFFFC86F),
           placement: _DawTutorialCardPlacement.topRight,
           mode: _DawTutorialAdvanceMode.interaction,
           haloKeys: <String>['tutorial:master_button'],
-          helperText: 'Tap the master button to continue.',
+          helperText: _dawTutorialText('master_open_helper'),
           cardMaxWidth: 232,
           cardPadding: EdgeInsets.fromLTRB(16, 74, 74, 16),
         );
       case _DawTutorialStepId.masterTabs:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.masterTabs,
-          title: 'Same idea, but for the whole mix.',
-          body:
-              'Master Volume controls overall balance. Master Effects processes everything together.',
+          title: _dawTutorialText('master_tabs_title'),
+          body: _dawTutorialText('master_tabs_body'),
           accent: Color(0xFFFFC86F),
           placement: _DawTutorialCardPlacement.bottomCenter,
           mode: _DawTutorialAdvanceMode.next,
@@ -3922,24 +5062,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           cardPadding: EdgeInsets.fromLTRB(16, 16, 16, 136),
         );
       case _DawTutorialStepId.chatOpen:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.chatOpen,
-          title: 'Mixroom AI starts here.',
-          body:
-              'Tap the chat bar to ask for edits, mix help, or where a tool lives.',
+          title: _dawTutorialText('chat_open_title'),
+          body: _dawTutorialText('chat_open_body'),
           accent: Color(0xFFBFA8FF),
           placement: _DawTutorialCardPlacement.topRight,
           mode: _DawTutorialAdvanceMode.interaction,
           haloKeys: <String>['tutorial:chatbar'],
-          helperText: 'Open chat to continue.',
+          helperText: _dawTutorialText('chat_open_helper'),
           cardMaxWidth: 280,
         );
       case _DawTutorialStepId.chatPromptInfo:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.chatPromptInfo,
-          title: 'Use normal language.',
-          body:
-              'Ask for mix changes, editing help, or where tools live. This badge shows how many prompts you have left.',
+          title: _dawTutorialText('chat_prompt_info_title'),
+          body: _dawTutorialText('chat_prompt_info_body'),
           accent: const Color(0xFFBFA8FF),
           placement: _DawTutorialCardPlacement.topRight,
           mode: _DawTutorialAdvanceMode.next,
@@ -3947,15 +5085,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             'tutorial:chatbar',
             'tutorial:prompt_limits',
           ],
-          helperText: 'This badge shows how many AI prompts are available.',
+          helperText: _dawTutorialText('chat_prompt_info_helper'),
           cardMaxWidth: 280,
         );
       case _DawTutorialStepId.chatSend:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.chatSend,
-          title: 'Send this example.',
-          body:
-              'We loaded a sample prompt. If you press send, it will use 1 AI credit and run the real workflow.',
+          title: _dawTutorialText('chat_send_title'),
+          body: _dawTutorialText('chat_send_body'),
           accent: const Color(0xFFBFA8FF),
           placement: _DawTutorialCardPlacement.topRight,
           mode: _DawTutorialAdvanceMode.next,
@@ -3964,28 +5101,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             'tutorial:prompt_limits',
             'tutorial:chat_send',
           ],
-          helperText: 'Send it to try it now, or tap Next to keep moving.',
+          helperText: _dawTutorialText('chat_send_helper'),
           cardMaxWidth: 280,
         );
       case _DawTutorialStepId.chatWaiting:
         return _DawTutorialStepSpec(
           id: _DawTutorialStepId.chatWaiting,
-          title: 'Waiting for the reply.',
-          body:
-              'Mixroom AI is applying the request and writing back in the project chat.',
+          title: _dawTutorialText('chat_waiting_title'),
+          body: _dawTutorialText('chat_waiting_body'),
           accent: const Color(0xFFBFA8FF),
           placement: _DawTutorialCardPlacement.topRight,
           mode: _DawTutorialAdvanceMode.interaction,
           haloKeys: <String>['tutorial:chatbar'],
-          helperText: 'This will continue after the reply is visible.',
+          helperText: _dawTutorialText('chat_waiting_helper'),
           cardMaxWidth: 280,
         );
       case _DawTutorialStepId.oneButtonMix:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.oneButtonMix,
-          title: 'Need a fast cleanup?',
-          body:
-              'One-Button Mix gives you a quick automatic polish pass on the current session.',
+          title: _dawTutorialText('one_button_mix_title'),
+          body: _dawTutorialText('one_button_mix_body'),
           accent: Color(0xFF69A5FF),
           placement: _DawTutorialCardPlacement.bottomCenter,
           mode: _DawTutorialAdvanceMode.next,
@@ -3994,17 +5129,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           cardPadding: EdgeInsets.fromLTRB(16, 16, 16, 104),
         );
       case _DawTutorialStepId.exportInfo:
-        return const _DawTutorialStepSpec(
+        return _DawTutorialStepSpec(
           id: _DawTutorialStepId.exportInfo,
-          title: 'Export when you are done.',
-          body: 'Tap here to render the finished result out of the project.',
+          title: _dawTutorialText('export_info_title'),
+          body: _dawTutorialText('export_info_body'),
           accent: Color(0xFFFFD87A),
           placement: _DawTutorialCardPlacement.topRight,
-          mode: _DawTutorialAdvanceMode.done,
+          mode: _DawTutorialAdvanceMode.next,
           haloKeys: <String>['tutorial:export'],
-          ctaLabel: 'Done',
           cardMaxWidth: 252,
           cardPadding: EdgeInsets.fromLTRB(16, 76, 72, 16),
+        );
+      case _DawTutorialStepId.tutorialComplete:
+        return _DawTutorialStepSpec(
+          id: _DawTutorialStepId.tutorialComplete,
+          title: _dawTutorialText('tutorial_complete_title'),
+          body: _dawTutorialText('tutorial_complete_body'),
+          accent: const Color(0xFF8DEBA4),
+          placement: _DawTutorialCardPlacement.centerRight,
+          mode: _DawTutorialAdvanceMode.done,
+          haloKeys: const <String>['tutorial:timeline'],
+          ctaLabel: _dawTutorialText('done'),
+          cardMaxWidth: 256,
+          cardPadding: const EdgeInsets.fromLTRB(16, 116, 12, 132),
         );
     }
   }
@@ -4097,9 +5244,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         break;
       case _DawTutorialStepId.chatSend:
         _chatTextController.value = TextEditingValue(
-          text: _kDawTutorialAiPrompt,
+          text: _dawTutorialAiPrompt,
           selection:
-              TextSelection.collapsed(offset: _kDawTutorialAiPrompt.length),
+              TextSelection.collapsed(offset: _dawTutorialAiPrompt.length),
         );
         setState(() {
           _chatExpanded = true;
@@ -4219,14 +5366,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _advanceDawOnboardingStep() {
-    var nextIndex = _safeDawOnboardingStepIndex + 1;
-    if (_currentDawOnboardingStepId == _DawTutorialStepId.chatSend &&
-        !_dawTutorialAwaitingChatReply &&
-        nextIndex < _kDawTutorialSequence.length &&
-        _kDawTutorialSequence[nextIndex] == _DawTutorialStepId.chatWaiting) {
-      nextIndex += 1;
-    }
-    _setDawOnboardingStep(nextIndex);
+    _setDawOnboardingStep(_safeDawOnboardingStepIndex + 1);
   }
 
   void _handleDawOnboardingTimelineScrolled() {
@@ -4333,15 +5473,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _dawTutorialChatAdvanceInFlight = true;
     });
 
-    final deadline = DateTime.now().add(const Duration(seconds: 6));
-    while (_chatTextMessageCount(authorId: 'assistant') <=
-            _dawTutorialAssistantCountAtPromptSend &&
-        DateTime.now().isBefore(deadline)) {
-      await Future.delayed(const Duration(milliseconds: 120));
+    final hasAssistantReply = _chatTextMessageCount(authorId: 'assistant') >
+        _dawTutorialAssistantCountAtPromptSend;
+    if (!hasAssistantReply) {
+      if (!mounted) return;
+      setState(() {
+        _dawTutorialChatAdvanceInFlight = false;
+      });
+      return;
     }
 
     _scrollChatToLatest();
-    await Future.delayed(const Duration(milliseconds: 900));
+    await Future.delayed(const Duration(milliseconds: 350));
 
     if (!mounted || !_showDawOnboarding) return;
     if (_currentDawOnboardingStepId != _DawTutorialStepId.chatWaiting) return;
@@ -4472,7 +5615,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       int maxTrackRow = -1;
       for (final t in tracks) {
         final map = (t as Map).cast<String, dynamic>();
-        final row = (map["rowIndex"] as int?) ?? 0;
+        final row = (map["rowIndex"] as num?)?.toInt() ?? 0;
         if (row > maxTrackRow) maxTrackRow = row;
       }
       targetRowCount = maxTrackRow + 1;
@@ -4528,6 +5671,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   @override
   void dispose() {
+    if (Platform.isMacOS) {
+      HardwareKeyboard.instance.removeHandler(_handleMacEditorKeyEvent);
+    }
     unawaited(_setIOSSystemGestureDeferral(false));
     unawaited(_producerCollector.closeSession(reason: 'screen_dispose'));
     WidgetsBinding.instance.removeObserver(this);
@@ -4541,7 +5687,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _chatTextController.removeListener(_handleChatTextChanged);
     _chatTextController.dispose();
     _chatFocusNode.dispose();
-    _chatHistoryScrollController.dispose();
     _chatHistoryPersistTimer?.cancel();
     _chatHistoryPersistTimer = null;
     _copiedChatMessageTimer?.cancel();
@@ -4585,12 +5730,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (defaultTargetPlatform == TargetPlatform.android) {
       if (state == AppLifecycleState.resumed) {
         debugPrint("App Resumed on Android - Re-initializing.");
-        unawaited(_refreshMicrophonePermissionState());
+        unawaited(JuceAudioEngine.refreshAudioRoute(reason: 'appResumed'));
+        unawaited(_refreshMicrophonePermissionAndInputs());
+        unawaited(_refreshAndroidOutputRouteLabel());
       } else if (state == AppLifecycleState.paused ||
           state == AppLifecycleState.inactive) {
         _scheduleChatHistoryPersist(immediate: true);
         debugPrint("App Paused or Inactive on Android - Disposing.");
-        _pausePlayback();
+        unawaited(_pausePlayback());
         setState(() {
           _isPlaying = false;
         });
@@ -4603,7 +5750,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         //} || state == AppLifecycleState.inactive) {
         // debugPrint("App Paused or Inactive on iOS");
         _scheduleChatHistoryPersist(immediate: true);
-        _pauseAudio(_safeAudioEditorStateSetter);
+        unawaited(_pauseAudio(_safeAudioEditorStateSetter));
         setState(() {
           _isPlaying = false;
         });
@@ -4655,10 +5802,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       // Load all clips (audio + MIDI/instrument)
       for (final t in tracks) {
         final map = (t as Map).cast<String, dynamic>();
-        final fileName = map["fileName"] as String;
+        final fileName = (map["fileName"] as String?)?.trim() ?? '';
+        if (fileName.isEmpty) {
+          debugPrint('Skipping malformed track entry without fileName: $map');
+          continue;
+        }
         final label = (map["label"] as String?) ?? '';
-        final storedRowId = (map["rowId"] as int?) ?? -1;
-        int rowIndex = (map["rowIndex"] as int?) ?? 0;
+        final storedRowId = (map["rowId"] as num?)?.toInt() ?? -1;
+        int rowIndex = (map["rowIndex"] as num?)?.toInt() ?? 0;
         if (storedRowId >= 0) {
           final idx = _rowIndexForId(storedRowId);
           if (idx >= 0) rowIndex = idx;
@@ -4690,8 +5841,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             .map((e) => MidiNote.fromJson(e.cast<String, dynamic>()))
             .toList();
 
-        final trimStartMs = (map["trimStartMs"] as int?) ?? 0;
-        final trimEndMs = (map["trimEndMs"] as int?) ?? 0;
+        final trimStartMs =
+            ((map["trimStartMs"] as num?)?.round() ?? 0).clamp(0, 1 << 30);
+        final rawTrimEndMs = (map["trimEndMs"] as num?)?.round();
+        final trimStartRequested = Duration(milliseconds: trimStartMs.toInt());
+        final trimEndRequested =
+            (rawTrimEndMs != null && rawTrimEndMs > trimStartMs)
+                ? Duration(milliseconds: rawTrimEndMs)
+                : null;
         final offsetSec = ((map["offset"] as num?) ?? 0).toDouble();
         final crossfade = ((map["crossfade"] as num?) ?? 0).toDouble();
         final gain = _normalizeLoadedGainUi(
@@ -4746,8 +5903,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               midiNotes: midiNotes,
               row: rowIndex,
               timeMs: offsetSec * 1000.0,
-              trimStartRequested: Duration(milliseconds: trimStartMs),
-              trimEndRequested: Duration(milliseconds: trimEndMs),
+              trimStartRequested: trimStartRequested,
+              trimEndRequested: trimEndRequested,
               label: label.isEmpty ? instrumentName : label,
               gain: gain,
               pitchSemitones: pitchSemitones,
@@ -4800,8 +5957,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         : instrumentId),
                   ),
             midiNotes: midiNotes,
-            trimStartRequested: Duration(milliseconds: trimStartMs),
-            trimEndRequested: Duration(milliseconds: trimEndMs),
+            trimStartRequested: trimStartRequested,
+            trimEndRequested: trimEndRequested,
             gain: gain,
             pitchSemitones: pitchSemitones,
             sourceTempoBpm: sourceTempoBpm,
@@ -4816,8 +5973,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             label: label,
             row: rowIndex,
             timeMs: offsetSec * 1000.0,
-            trimStartRequested: Duration(milliseconds: trimStartMs),
-            trimEndRequested: Duration(milliseconds: trimEndMs),
+            trimStartRequested: trimStartRequested,
+            trimEndRequested: trimEndRequested,
             gain: gain,
             pitchSemitones: pitchSemitones,
             isReversed: isReversed,
@@ -5564,6 +6721,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _resumeAudio(StateSetter setLocalState) async {
+    if (_loopEnabled &&
+        _loopEndMs > _loopStartMs &&
+        _globalAudioClock >= Duration(milliseconds: _loopEndMs)) {
+      final loopStart = Duration(milliseconds: _loopStartMs);
+      _syncTransportClock(loopStart, playing: false);
+    }
     _transportPlayStartSyncGraceUntil =
         _transportUiStopwatch.elapsed + _kTransportPlayStartSyncGrace;
     _transportEndCheckGraceUntil =
@@ -5636,6 +6799,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _stopMeterPolling();
   }
 
+  Future<void> _wrapPlaybackToLoopStart() async {
+    if (_loopWrapInFlight) return;
+    _loopWrapInFlight = true;
+    try {
+      await _restartAudio(_safeAudioEditorStateSetter);
+      if (!mounted) return;
+      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+    } finally {
+      _loopWrapInFlight = false;
+    }
+  }
+
   // Pause helper
   Future<void> _pausePlayback() async {
     _transportTicker?.stop();
@@ -5686,9 +6861,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_kExportMp3VbrQualities.contains(selectedMp3VbrQuality)) {
       selectedMp3VbrQuality = _kExportMp3VbrQualities.first;
     }
-    if (!_kExportNormalizeTargetsDb.contains(selectedNormalizeTargetDb)) {
-      selectedNormalizeTargetDb = _kExportNormalizeTargetsDb[1];
-    }
+    selectedNormalizeTargetDb = selectedNormalizeTargetDb
+        .clamp(
+          _kExportNormalizeTargetDbMin,
+          _kExportNormalizeTargetDbMax,
+        )
+        .toDouble();
     if (!_ExportMp3Mode.values.contains(selectedMp3Mode)) {
       selectedMp3Mode = _ExportMp3Mode.cbr;
     }
@@ -6045,19 +7223,99 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   ],
                                   if (!nativeWavOnly && selectedNormalize) ...[
                                     const SizedBox(height: 4),
-                                    buildDropdownField(
-                                      label: L10n.translate(
+                                    Text(
+                                      L10n.translate(
                                           context, 'Limiter ceiling (dBTP)'),
-                                      value: selectedNormalizeTargetDb,
-                                      options: _kExportNormalizeTargetsDb,
-                                      textBuilder: (value) =>
-                                          '${value.toStringAsFixed(1)} dB',
-                                      onChanged: (value) {
-                                        if (value == null) return;
-                                        setSheetState(() {
-                                          selectedNormalizeTargetDb = value;
-                                        });
-                                      },
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(color: mutedText),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    SliderTheme(
+                                      data: SliderTheme.of(context).copyWith(
+                                        activeTrackColor: accent,
+                                        inactiveTrackColor: Colors.white
+                                            .withValues(alpha: 0.14),
+                                        thumbColor: accent,
+                                        overlayColor:
+                                            accent.withValues(alpha: 0.16),
+                                        trackHeight: 4,
+                                      ),
+                                      child: Slider(
+                                        value: selectedNormalizeTargetDb
+                                            .clamp(
+                                              _kExportNormalizeTargetDbMin,
+                                              _kExportNormalizeTargetDbMax,
+                                            )
+                                            .toDouble(),
+                                        min: _kExportNormalizeTargetDbMin,
+                                        max: _kExportNormalizeTargetDbMax,
+                                        divisions: 17,
+                                        label:
+                                            '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
+                                        onChanged: (value) {
+                                          final stepped = double.parse(
+                                              value.toStringAsFixed(1));
+                                          setSheetState(() {
+                                            selectedNormalizeTargetDb = stepped
+                                                .clamp(
+                                                  _kExportNormalizeTargetDbMin,
+                                                  _kExportNormalizeTargetDbMax,
+                                                )
+                                                .toDouble();
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: Text(
+                                        '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
+                                        style:
+                                            theme.textTheme.bodySmall?.copyWith(
+                                          color: Colors.white.withOpacity(0.82),
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 6,
+                                      children: _kExportNormalizeTargetsDb
+                                          .map(
+                                            (preset) => ChoiceChip(
+                                              label: Text(
+                                                '${preset.toStringAsFixed(1)} dB',
+                                              ),
+                                              selected:
+                                                  (selectedNormalizeTargetDb -
+                                                              preset)
+                                                          .abs() <
+                                                      0.05,
+                                              labelStyle: theme
+                                                  .textTheme.bodySmall
+                                                  ?.copyWith(
+                                                color: Colors.white
+                                                    .withOpacity(0.9),
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                              backgroundColor: Colors.white
+                                                  .withValues(alpha: 0.05),
+                                              selectedColor: accent.withValues(
+                                                  alpha: 0.26),
+                                              side: BorderSide(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.16),
+                                              ),
+                                              onSelected: (_) {
+                                                setSheetState(() {
+                                                  selectedNormalizeTargetDb =
+                                                      preset;
+                                                });
+                                              },
+                                            ),
+                                          )
+                                          .toList(growable: false),
                                     ),
                                   ],
                                   const SizedBox(height: 10),
@@ -7038,17 +8296,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // 2) Determine where in the project we start recording (UNCHANGED)
     _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
 
+    if (!await _ensureMicrophonePermissionForRecording()) {
+      return;
+    }
+
     // Keep record-start deterministic even if background prewarm has not
     // finished yet.
     await _ensureMobileRecordingRouteReady();
 
-    // 3) Prepare file path (CHANGE → WAV)
+    final startPlaybackAfterRecorder = Platform.isIOS;
+
+    // 3) Keep Android's working order: start transport before arming the native
+    // recorder. iOS uses the opposite order to avoid route churn between input
+    // arm and recorder start.
+    if (!startPlaybackAfterRecorder && !_isPlaying) {
+      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+    }
+
+    // 4) Prepare file path (CHANGE → WAV)
     final audioDir = ProjectManager.audioDir(_projectDir);
     if (!await audioDir.exists()) await audioDir.create(recursive: true);
     final filePath = p.join(audioDir.path,
         'mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav');
 
-    // 4) Start native recording before touching playback transport again.
+    // 5) Arm the native recorder.
     final ok = await JuceAudioEngine.startRecording(
       filePath,
       _selectedChannelStart,
@@ -7061,14 +8332,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    // 5) Keep old behavior: if transport is stopped, start playback after the
-    // recorder is armed so route/input state is not invalidated between arm and
-    // first capture.
-    if (!_isPlaying) {
+    // 6) iOS starts playback after the recorder is armed so route/input state is
+    // not invalidated between arm and first capture.
+    if (startPlaybackAfterRecorder && !_isPlaying) {
       await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
     }
 
-    // 6) UI state (UNCHANGED)
+    // 7) UI state (UNCHANGED)
     setState(() {
       _recordingFilePath = filePath;
       _isRecording = true;
@@ -7088,6 +8358,45 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _recordingPeaks.add(peak.clamp(0.0, 1.0).toDouble());
       });
     });
+  }
+
+  Future<bool> _ensureMicrophonePermissionForRecording() async {
+    if (!(Platform.isAndroid || Platform.isIOS)) return true;
+
+    var status = await _getMicrophonePermissionStatus();
+    if (status.isGranted || status.isLimited) {
+      return true;
+    }
+
+    status = await _requestMicrophonePermission();
+    if (!mounted) return false;
+
+    final granted = status.isGranted || status.isLimited;
+    _setStateAndRefreshProjectSettings(() {
+      _microphonePermissionStatus = status;
+      _microphoneAccessBlocked = !granted;
+    });
+
+    if (granted) {
+      unawaited(_loadInputDevicesFromJuce());
+      return true;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          status.isPermanentlyDenied || status.isRestricted
+              ? 'Microphone access is blocked. Open app settings to record audio.'
+              : 'Microphone access is required to record audio.',
+        ),
+      ),
+    );
+
+    if (status.isPermanentlyDenied || status.isRestricted) {
+      await _openAppPermissionsSettings();
+    }
+
+    return false;
   }
 
   Future<void> _stopRecordingJuce({bool keepPlaying = true}) async {
@@ -7138,7 +8447,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     // 2) Insert recorded clip (UNCHANGED)
     try {
-      final beforeCount = _audioTracks.length;
       await _undoManager.execute(
         AddAudioTrackAction(
           addTrack: ({
@@ -7252,9 +8560,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
     );
 
-    // final dur = await JuceAudioEngine.getTrackDuration(0);
-    final durSeconds = await JuceAudioEngine.getTrackDuration(engineClipId);
-    final dur = Duration(milliseconds: (durSeconds * 1000).round());
+    final dur = await _resolveClipSourceDuration(
+      filePath: clipSourceFile.path,
+      engineClipId: engineClipId,
+    );
 
     // Create a new AudioTrack instance with a fixed audioDuration.
     final newTrack = await AudioTrack.create(
@@ -7403,8 +8712,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
     );
 
-    final durSeconds = await JuceAudioEngine.getTrackDuration(engineClipId);
-    final dur = Duration(milliseconds: (durSeconds * 1000).round());
+    final dur = await _resolveClipSourceDuration(
+      filePath: projectAudioFile.path,
+      engineClipId: engineClipId,
+    );
 
     final newTrack = await AudioTrack.create(
       file: projectAudioFile, // points directly to project/audio
@@ -9611,8 +10922,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
     }
 
-    final durSeconds = await JuceAudioEngine.getTrackDuration(engineClipId);
-    final dur = Duration(milliseconds: (durSeconds * 1000).round());
+    final dur = await _resolveClipSourceDuration(
+      filePath: outFile.path,
+      engineClipId: engineClipId,
+    );
 
     final newTrack = await AudioTrack.create(
       file: outFile,
@@ -9968,10 +11281,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     await _syncClipMixToEngine(clip);
 
-    final durSeconds =
-        await JuceAudioEngine.getTrackDuration(clip.engineClipId);
-    final dur = Duration(milliseconds: (durSeconds * 1000).round());
-    clip.audioDuration = dur;
+    clip.audioDuration = await _resolveClipSourceDuration(
+      filePath: clip.file.path,
+      engineClipId: clip.engineClipId,
+    );
 
     _startWaveformExtraction(clip);
     if (mounted) {
@@ -10390,7 +11703,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     await _stopSampleAudition();
-    final beforeCount = _audioTracks.length;
     await _undoManager.execute(
       AddAudioTrackAction(
         addTrack: ({
@@ -10480,8 +11792,66 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return false;
   }
 
+  Future<PermissionStatus> _getMicrophonePermissionStatus() async {
+    try {
+      if (Platform.isAndroid || Platform.isIOS) {
+        return await Permission.microphone.status;
+      }
+      if (Platform.isMacOS) {
+        final granted = await _micRecorder.hasPermission(request: false);
+        return granted ? PermissionStatus.granted : PermissionStatus.denied;
+      }
+    } on MissingPluginException catch (error, stackTrace) {
+      debugPrint('Microphone permission status plugin unavailable: $error');
+      unawaited(
+        CrashReportingService.instance.captureException(
+          error,
+          stackTrace: stackTrace,
+        ),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Failed to read microphone permission status: $error');
+      unawaited(
+        CrashReportingService.instance.captureException(
+          error,
+          stackTrace: stackTrace,
+        ),
+      );
+    }
+    return PermissionStatus.granted;
+  }
+
+  Future<PermissionStatus> _requestMicrophonePermission() async {
+    try {
+      if (Platform.isAndroid || Platform.isIOS) {
+        return await Permission.microphone.request();
+      }
+      if (Platform.isMacOS) {
+        final granted = await _micRecorder.hasPermission();
+        return granted ? PermissionStatus.granted : PermissionStatus.denied;
+      }
+    } on MissingPluginException catch (error, stackTrace) {
+      debugPrint('Microphone permission request plugin unavailable: $error');
+      unawaited(
+        CrashReportingService.instance.captureException(
+          error,
+          stackTrace: stackTrace,
+        ),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Failed to request microphone permission: $error');
+      unawaited(
+        CrashReportingService.instance.captureException(
+          error,
+          stackTrace: stackTrace,
+        ),
+      );
+    }
+    return PermissionStatus.granted;
+  }
+
   Future<void> _requestMicrophoneAccessFromSettingsPanel() async {
-    final status = await Permission.microphone.request();
+    final status = await _requestMicrophonePermission();
     if (!mounted) return;
     _setStateAndRefreshProjectSettings(() {
       _microphonePermissionStatus = status;
@@ -10496,8 +11866,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _maybePromptMicrophonePermissionOnDawEntry() async {
+    if (_dawEntryMicPromptHandled) return;
+    _dawEntryMicPromptHandled = true;
+    if (!(Platform.isAndroid || Platform.isIOS)) return;
+
+    final status = await _getMicrophonePermissionStatus();
+    if (status.isGranted || status.isLimited) return;
+
+    final requested = await _requestMicrophonePermission();
+    if (!mounted) return;
+
+    final granted = requested.isGranted || requested.isLimited;
+    _setStateAndRefreshProjectSettings(() {
+      _microphonePermissionStatus = requested;
+      _microphoneAccessBlocked = !granted;
+    });
+
+    if (granted) return;
+
+    if (requested.isPermanentlyDenied || requested.isRestricted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Microphone access is blocked. Open app settings to enable recording.',
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _refreshMicrophonePermissionState() async {
-    final status = await Permission.microphone.status;
+    final status = await _getMicrophonePermissionStatus();
     if (!mounted) return;
     _setStateAndRefreshProjectSettings(() {
       _microphonePermissionStatus = status;
@@ -10512,6 +11912,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _openAppPermissionsSettings() async {
+    if (Platform.isMacOS) {
+      final uri = Uri.parse(
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+      );
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      }
+      return;
+    }
     await openAppSettings();
     if (!mounted) return;
     unawaited(_refreshMicrophonePermissionAndInputs());
@@ -10834,6 +12243,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     _sampleDurationCache[filePath] = null;
     return null;
+  }
+
+  Future<Duration> _resolveClipSourceDuration({
+    required String filePath,
+    required int engineClipId,
+  }) async {
+    final sampled = await _resolveSampleDuration(filePath);
+    if (sampled != null && sampled > Duration.zero) {
+      return sampled;
+    }
+
+    // JUCE getTrackDuration() returns the active clip length, which may already
+    // include trim/stretched timeline settings. Use it only as a fallback.
+    final rawFallbackSeconds =
+        await JuceAudioEngine.getTrackDuration(engineClipId);
+    final fallbackSeconds =
+        (!rawFallbackSeconds.isFinite || rawFallbackSeconds < 0.0)
+            ? 0.0
+            : rawFallbackSeconds.clamp(0.0, 315360000.0).toDouble();
+    return Duration(milliseconds: (fallbackSeconds * 1000).round());
   }
 
   Future<void> _stopSampleAudition() async {
@@ -12065,7 +13494,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   String _technicalLevelLabel(double peakDb) {
     if (peakDb >= -0.1) return "0.0 dB";
-    if (!peakDb.isFinite) return "-inf dB";
+    if (!peakDb.isFinite || peakDb <= -120.0) return "-inf dB";
     return "${peakDb.toStringAsFixed(1)} dB";
   }
 
@@ -12088,12 +13517,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .clamp(0.0, 0.25);
 
     double heldDb = prevDb;
-    if (currentPeakDb >= prevDb || !prevDb.isFinite) {
+    if (!currentPeakDb.isFinite || currentPeakDb <= -120.0) {
+      heldDb = double.negativeInfinity;
+      _rowPeakHoldFreezeUntil[row] = now;
+    } else if (currentPeakDb >= prevDb || !prevDb.isFinite) {
       heldDb = currentPeakDb;
       _rowPeakHoldFreezeUntil[row] = now.add(const Duration(milliseconds: 900));
     } else if (now.isAfter(freezeUntil)) {
       const decayDbPerSec = 11.0;
       heldDb = math.max(currentPeakDb, prevDb - (decayDbPerSec * dt));
+    }
+    if (heldDb <= -120.0) {
+      heldDb = double.negativeInfinity;
     }
 
     _rowPeakHoldDb[row] = heldDb;
@@ -12417,6 +13852,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_inputDevices.isEmpty && !_loadingDevices) {
       unawaited(_loadInputDevicesFromJuce(scheduleRecordingPrewarm: true));
     }
+    unawaited(_refreshAndroidOutputRouteLabel());
     String draftProjectName = _projectName;
     bool reopenDawTour = false;
     Future<void> commitProjectName() async {
@@ -12828,10 +14264,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           if (currentDesiredInputChannels <= 0) {
             _lastPreparedRecordingDevice = null;
             _lastPreparedRecordingInputOpenChannels = null;
-            unawaited(JuceAudioEngine.prepareRecordingInputs(
-              0,
-              reason: 'configChanged:playbackOnly',
-            ));
           } else if (!_recordingInputsPreparedFor(
             selectedDevice: currentDevice,
             desiredInputChannels: currentDesiredInputChannels,
@@ -12891,13 +14323,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _lastPreparedRecordingDevice = null;
       _lastPreparedRecordingInputOpenChannels = null;
       _recordingInputPrewarmFuture = null;
-      if (_recordingInputPrewarmInFlight) {
-        return;
-      }
-      unawaited(JuceAudioEngine.prepareRecordingInputs(
-        0,
-        reason: '$reason:playbackOnly',
-      ));
       return;
     }
 
@@ -12927,6 +14352,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     ));
   }
 
+  Future<void> _refreshAndroidOutputRouteLabel({
+    bool refreshNativeRoute = false,
+  }) async {
+    if (!Platform.isAndroid) return;
+    if (refreshNativeRoute) {
+      await JuceAudioEngine.refreshAudioRoute(reason: 'projectSettingsOutput');
+    }
+    final rawName = await JuceAudioEngine.getCurrentOutputDeviceName();
+    if (!mounted) return;
+    _setStateAndRefreshProjectSettings(() {
+      final name = rawName.trim();
+      _androidOutputRouteName = name.isEmpty ? null : name;
+    });
+  }
+
   Future<void> _loadInputDevicesFromJuce({
     bool scheduleRecordingPrewarm = false,
   }) async {
@@ -12934,28 +14374,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _setStateAndRefreshProjectSettings(() => _loadingDevices = true);
 
     try {
-      final micStatus = await Permission.microphone.status;
+      final micStatus = await _getMicrophonePermissionStatus();
       final micBlocked = !(micStatus.isGranted || micStatus.isLimited);
 
       final devices = await JuceAudioEngine.getInputDevices();
       final current = await JuceAudioEngine.getCurrentDeviceName();
       final channels = await JuceAudioEngine.getNumInputChannels();
       _setStateAndRefreshProjectSettings(() {
+        final currentDeviceName = current.trim();
         _microphonePermissionStatus = micStatus;
         _microphoneAccessBlocked = micBlocked;
         _inputDevices = devices;
         _selectedDevice = devices.contains(current)
             ? current
             : (devices.isNotEmpty ? devices.first : null);
+        _macOutputDeviceName =
+            currentDeviceName.isEmpty ? null : currentDeviceName;
         _numInputChannels = channels;
         _normalizeInputChannelSelection();
         _loadingDevices = false;
       });
+      unawaited(_refreshAndroidOutputRouteLabel());
       if (scheduleRecordingPrewarm) {
         _scheduleRecordingInputPrewarm(reason: 'loadInputDevices');
       }
     } catch (_) {
-      final micStatus = await Permission.microphone.status;
+      final micStatus = await _getMicrophonePermissionStatus();
       _setStateAndRefreshProjectSettings(() {
         _microphonePermissionStatus = micStatus;
         _microphoneAccessBlocked =
@@ -12965,6 +14409,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _numInputChannels = 0;
         _normalizeInputChannelSelection();
         _loadingDevices = false;
+        _androidOutputRouteName = null;
+        _macOutputDeviceName = null;
       });
       _lastPreparedRecordingDevice = null;
       _lastPreparedRecordingInputOpenChannels = null;
@@ -13138,6 +14584,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _normalizeInputChannelSelection();
         });
         _scheduleRecordingInputPrewarm(reason: 'selectInputDevice');
+        unawaited(_refreshAndroidOutputRouteLabel());
       },
     );
 
@@ -13207,7 +14654,65 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
     }
 
-    // Some Android devices may not expose any audiooutput devices.
+    if (Platform.isAndroid) {
+      final routeLabel = _androidOutputRouteName?.trim();
+      final effectiveLabel = (routeLabel == null || routeLabel.isEmpty)
+          ? 'System default (speaker / Bluetooth / audio interface)'
+          : routeLabel;
+      return InputDecorator(
+        decoration: InputDecoration(
+          labelText: "Output Route",
+          labelStyle: const TextStyle(color: Colors.white70),
+          enabledBorder:
+              OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
+          focusedBorder:
+              OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+          suffixIcon: IconButton(
+            tooltip: "Refresh output route",
+            icon: const Icon(Icons.refresh, color: Colors.white70),
+            onPressed: () {
+              unawaited(
+                _refreshAndroidOutputRouteLabel(refreshNativeRoute: true),
+              );
+            },
+          ),
+        ),
+        child: Text(
+          effectiveLabel,
+          style: const TextStyle(color: Colors.white),
+        ),
+      );
+    }
+
+    if (Platform.isMacOS) {
+      final routeLabel = _macOutputDeviceName?.trim();
+      final effectiveLabel = (routeLabel == null || routeLabel.isEmpty)
+          ? 'System default (managed by macOS audio settings)'
+          : routeLabel;
+      return InputDecorator(
+        decoration: InputDecoration(
+          labelText: "Output Device",
+          labelStyle: const TextStyle(color: Colors.white70),
+          enabledBorder:
+              OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
+          focusedBorder:
+              OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+          suffixIcon: IconButton(
+            tooltip: "Refresh output device",
+            icon: const Icon(Icons.refresh, color: Colors.white70),
+            onPressed: () {
+              unawaited(_loadInputDevicesFromJuce());
+            },
+          ),
+        ),
+        child: Text(
+          effectiveLabel,
+          style: const TextStyle(color: Colors.white),
+        ),
+      );
+    }
+
+    // Non-Android fallback path uses WebRTC device enumeration.
     if (_outputs.isEmpty) {
       return const Text("No selectable output devices",
           style: TextStyle(color: Colors.white54));
@@ -13750,13 +15255,92 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  String _normalizeEffectText(String raw) {
+    return raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
   String? pickMixroomEffect(String effectContains) {
-    final needle = effectContains.toLowerCase();
+    final needle = _normalizeEffectText(effectContains);
+    if (needle.isEmpty) return null;
+
+    // Alias-first matching for natural language phrases
+    const aliasToEffect = <String, String>{
+      'gain': 'Gain',
+      'reverb': 'Reverb',
+      'verb': 'Reverb',
+      'plate': 'Reverb',
+      'room': 'Reverb',
+      'hall': 'Reverb',
+      'delay': 'Delay',
+      'echo': 'Delay',
+      'slapback': 'Delay',
+      'compressor': 'Compressor',
+      'comp': 'Compressor',
+      'limiter': 'Limiter',
+      'clipper': 'Clipper',
+      'de esser': 'De-Esser',
+      'deesser': 'De-Esser',
+      'saturator': 'Distortion',
+      'saturation': 'Distortion',
+      'distortion': 'Distortion',
+      'drive': 'Distortion',
+      'pitch': 'Pitch Shift',
+      'chorus': 'Chorus',
+      'vibrato': 'Vibrato',
+      'parametric eq': 'EQ Parametric',
+      'eq parametric': 'EQ Parametric',
+      '3 band eq': 'EQ 3-Band',
+      'eq 3 band': 'EQ 3-Band',
+      'equalizer': 'EQ Parametric',
+      'eq': 'EQ Parametric',
+    };
+    for (final entry in aliasToEffect.entries) {
+      if (needle.contains(entry.key)) {
+        return entry.value;
+      }
+    }
 
     for (final name in kMixroomBuiltInEffects) {
-      if (name.toLowerCase().contains(needle)) {
+      final candidate = _normalizeEffectText(name);
+      if (candidate == needle ||
+          candidate.contains(needle) ||
+          needle.contains(candidate)) {
         return name;
       }
+    }
+
+    // Last-resort token overlap (handles strings like "add reverb on track 1").
+    final tokens = needle
+        .split(' ')
+        .where((t) =>
+            t.isNotEmpty &&
+            t != 'plugin' &&
+            t != 'effect' &&
+            t != 'track' &&
+            t != 'row' &&
+            t != 'add' &&
+            t != 'remove')
+        .toList(growable: false);
+    if (tokens.isEmpty) return null;
+    String? best;
+    int bestScore = 0;
+    for (final name in kMixroomBuiltInEffects) {
+      final candidate = _normalizeEffectText(name);
+      int score = 0;
+      for (final token in tokens) {
+        if (candidate.contains(token)) score++;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = name;
+      }
+    }
+    if (bestScore > 0) {
+      return best;
     }
     return null;
   }
@@ -13787,6 +15371,72 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .map((e) => e.toString().trim())
         .where((s) => s.isNotEmpty)
         .toList(growable: false);
+  }
+
+  int? _parseRowIndexValue(dynamic raw, {bool preferOneBased = false}) {
+    final parsed = _toActionInt(raw);
+    if (parsed == null) return null;
+    final direct = parsed;
+    final oneBased = parsed - 1;
+
+    bool inRange(int idx) {
+      if (_rowCount <= 0) return idx >= 0;
+      return idx >= 0 && idx < _rowCount;
+    }
+
+    if (preferOneBased) {
+      if (parsed > 0 && inRange(oneBased)) return oneBased;
+      if (inRange(direct)) return direct;
+      return null;
+    }
+    if (inRange(direct)) return direct;
+    if (parsed > 0 && inRange(oneBased)) return oneBased;
+    return null;
+  }
+
+  int? _resolveActionRowIndexFromData(
+    Map<String, dynamic> data, {
+    int? fallbackClipIndex,
+    bool includeSelectionFallback = true,
+  }) {
+    final target = _actionTarget(data);
+
+    int? pick(List<String> keys, {bool preferOneBased = false}) {
+      for (final key in keys) {
+        final parsed =
+            _parseRowIndexValue(data[key], preferOneBased: preferOneBased) ??
+                _parseRowIndexValue(
+                  target[key],
+                  preferOneBased: preferOneBased,
+                );
+        if (parsed != null) return parsed;
+      }
+      return null;
+    }
+
+    int? row = pick(
+      const ['row_index', 'track_index', 'target_row_index'],
+      preferOneBased: false,
+    );
+    row ??= pick(
+      const ['row', 'target_row'],
+      preferOneBased: false,
+    );
+    row ??= pick(
+      const ['row_number', 'track_number', 'track'],
+      preferOneBased: true,
+    );
+    if (row != null) return row;
+
+    if (fallbackClipIndex != null &&
+        fallbackClipIndex >= 0 &&
+        fallbackClipIndex < _audioTracks.length) {
+      return _audioTracks[fallbackClipIndex].rowIndex;
+    }
+    if (includeSelectionFallback && _rowCount > 0) {
+      return _selectedRow.clamp(0, _rowCount - 1);
+    }
+    return null;
   }
 
   int? _resolveClipIndexFromActionTarget(
@@ -13826,7 +15476,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final rowIndex =
-        _toActionInt(data['row_index']) ?? _toActionInt(target['row_index']);
+        _resolveActionRowIndexFromData(data, includeSelectionFallback: false);
     final fileContains =
         (target['file_name_contains'] ?? data['file_name_contains'])
             ?.toString()
@@ -13919,7 +15569,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final rowIndex =
-        _toActionInt(data['row_index']) ?? _toActionInt(target['row_index']);
+        _resolveActionRowIndexFromData(data, includeSelectionFallback: false);
     if (rowIndex != null) {
       for (int i = 0; i < _audioTracks.length; i++) {
         final clip = _audioTracks[i];
@@ -13992,17 +15642,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Map<String, dynamic> data, {
     int? fallbackClipIndex,
   }) {
-    final target = _actionTarget(data);
-    int? row =
-        _toActionInt(data['row_index']) ?? _toActionInt(target['row_index']);
-    if (row == null && fallbackClipIndex != null) {
-      if (fallbackClipIndex >= 0 && fallbackClipIndex < _audioTracks.length) {
-        row = _audioTracks[fallbackClipIndex].rowIndex;
-      }
-    }
-    if (row == null && _rowCount > 0) {
-      row = _selectedRow.clamp(0, _rowCount - 1);
-    }
+    final row = _resolveActionRowIndexFromData(data,
+        fallbackClipIndex: fallbackClipIndex);
     if (row == null || _rowCount <= 0) return null;
     return row.clamp(0, _rowCount - 1);
   }
@@ -14302,7 +15943,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return out;
   }
 
-  Future<void> _applyAssistantActions(List<AssistantAction> actions) async {
+  Future<bool> _applyAssistantActions(List<AssistantAction> actions) async {
+    var hadFailure = false;
     for (final action in actions) {
       final type = action.type.trim().toLowerCase();
       final data = _toActionMap(action.data);
@@ -14346,8 +15988,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       } catch (e, st) {
         debugPrint('Assistant action failed ($type): $e\n$st');
+        hadFailure = true;
       }
     }
+    return !hadFailure;
   }
 
   String _normalizeEffectEditOperation(String raw) {
@@ -14416,6 +16060,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     addNeedle(target['plugin']);
     addNeedle(data['effect']);
     addNeedle(target['effect']);
+    addNeedle(data['fx']);
+    addNeedle(target['fx']);
+    addNeedle(data['name']);
+    addNeedle(target['name']);
+    addNeedle(data['kind']);
+    addNeedle(target['kind']);
 
     for (final needle in effectNeedles) {
       final exact = <int>[];
@@ -14494,7 +16144,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               pathOrName: effectName,
               onChange: onTrackChange,
             );
+      final beforeCount = effects
+          .where(
+            (e) => e.trim().toLowerCase() == effectName.trim().toLowerCase(),
+          )
+          .length;
       await _undoManager.execute(action);
+      final effectsAfter = isMaster
+          ? await JuceAudioEngine.getMasterEffects()
+          : await JuceAudioEngine.getTrackEffectsForRow(row!);
+      final afterCount = effectsAfter
+          .where(
+            (e) => e.trim().toLowerCase() == effectName.trim().toLowerCase(),
+          )
+          .length;
+      final removed = afterCount < beforeCount;
+      if (!removed) {
+        debugPrint(
+          'effect_edit remove verification failed (master=$isMaster row=$row effect=$effectName)',
+        );
+        return;
+      }
       if (!isMaster) {
         _mixHighlighter.trigger([
           HaloKey('row:$row'),
@@ -14519,6 +16189,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               target['effect_name_contains'] ??
               data['plugin'] ??
               target['plugin'] ??
+              data['fx'] ??
+              target['fx'] ??
+              data['name'] ??
+              target['name'] ??
+              data['kind'] ??
+              target['kind'] ??
               data['effect'] ??
               target['effect'])
           .toString()
@@ -14554,6 +16230,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               onChange: onTrackChange,
             );
       await _undoManager.execute(action);
+      final effectsAfter = isMaster
+          ? await JuceAudioEngine.getMasterEffects()
+          : await JuceAudioEngine.getTrackEffectsForRow(row!);
+      final inserted = effectsAfter.any(
+        (e) => e.trim().toLowerCase() == effectName.trim().toLowerCase(),
+      );
+      if (!inserted) {
+        debugPrint(
+          'effect_edit add verification failed (master=$isMaster row=$row effect=$effectName)',
+        );
+        return;
+      }
       if (!isMaster) {
         _mixHighlighter.trigger([
           HaloKey('row:$row'),
@@ -20654,10 +22342,58 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _insertSystemChatText(text);
     }
 
+    List<int> rowCandidatesFromAction(Map<String, dynamic> data) {
+      if (_rowCount <= 0) return const <int>[];
+      final target = _toActionMap(data['target']);
+      final candidates = LinkedHashSet<int>();
+
+      void add(dynamic raw, {bool preferOneBased = false}) {
+        final parsed = _toActionInt(raw);
+        if (parsed == null) return;
+        void addIfValid(int idx) {
+          if (idx >= 0 && idx < _rowCount) {
+            candidates.add(idx);
+          }
+        }
+
+        final oneBased = parsed - 1;
+        if (preferOneBased) {
+          if (parsed > 0) addIfValid(oneBased);
+          addIfValid(parsed);
+          return;
+        }
+        addIfValid(parsed);
+        if (parsed > 0) {
+          addIfValid(oneBased);
+        }
+      }
+
+      add(data['row_index']);
+      add(target['row_index']);
+      add(data['track_index']);
+      add(target['track_index']);
+      add(data['row']);
+      add(target['row']);
+      add(data['target_row_index']);
+      add(target['target_row_index']);
+      add(data['target_row']);
+      add(target['target_row']);
+      add(data['row_number'], preferOneBased: true);
+      add(target['row_number'], preferOneBased: true);
+      add(data['track_number'], preferOneBased: true);
+      add(target['track_number'], preferOneBased: true);
+      add(data['track'], preferOneBased: true);
+      add(target['track'], preferOneBased: true);
+
+      return candidates.toList(growable: false);
+    }
+
     for (final a in mix.actions) {
       switch (a.type) {
         case 'set_row_gain':
-          final row = a.data['row'] as int;
+          final rowCandidates = rowCandidatesFromAction(a.data);
+          if (rowCandidates.isEmpty) continue;
+          final row = rowCandidates.first;
           final mode = a.data['mode'] ?? 'delta';
 
           final oldGain = _rowGain[row];
@@ -20709,7 +22445,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           continue;
 
         case 'set_row_pan':
-          final row = (a.data['row'] as int);
+          final rowCandidates = rowCandidatesFromAction(a.data);
+          if (rowCandidates.isEmpty) continue;
+          final row = rowCandidates.first;
 
           final oldPan01 = _rowPan[row]; // 0..1
 
@@ -20829,54 +22567,63 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         case 'delete_effect':
           {
-            final row = (a.data['row'] as int);
             final contains =
                 (a.data['effect_name_contains'] as String).toLowerCase();
+            final rowCandidates = rowCandidatesFromAction(a.data);
+            if (rowCandidates.isEmpty) continue;
 
-            final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
-            final idx =
-                effects.indexWhere((e) => e.toLowerCase().contains(contains));
-            if (idx == -1) continue;
+            int? appliedRow;
+            String? removedEffectName;
+            EditorUndoAction? appliedAction;
+            for (final row in rowCandidates) {
+              final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+              final idx =
+                  effects.indexWhere((e) => e.toLowerCase().contains(contains));
+              if (idx == -1) continue;
+              final effectName = effects[idx];
+              final beforeCount = effects.length;
+              final act = RemoveEffectAction(
+                row: row,
+                effectIndex: idx,
+                pathOrName: effectName,
+                onChange: () {
+                  setState(() {});
+                  _refreshRowFx(row);
+                  unawaited(_refreshAutomationTargetsForRow(row));
+                },
+              );
+              await _undoManager.executeWithoutAdd(act);
+              final afterEffects =
+                  await JuceAudioEngine.getTrackEffectsForRow(row);
+              final removed = afterEffects.length < beforeCount ||
+                  !afterEffects
+                      .any((e) => e.toLowerCase() == effectName.toLowerCase());
+              if (!removed) {
+                continue;
+              }
+              appliedRow = row;
+              removedEffectName = effectName;
+              appliedAction = act;
+              break;
+            }
 
-            // If you have a true remove action, use it.
-            // Otherwise: implement RemoveEffectAction or temporarily bypass.
-            // await _undoManager.execute(
-            //   RemoveEffectAction(
-            //     row: row,
-            //     effectIndex: idx,
-            //     pathOrName: contains,
-            //     onChange: () {
-            //       setState(() {});
-            //       _refreshRowFx(row);
-            //     },
-            //   ),
-            // );
+            if (appliedRow == null ||
+                removedEffectName == null ||
+                appliedAction == null) {
+              continue;
+            }
 
-            EditorUndoAction finalAct = RemoveEffectAction(
-              row: row,
-              effectIndex: idx,
-              pathOrName: contains,
-              onChange: () {
-                setState(() {});
-                _refreshRowFx(row);
-                unawaited(_refreshAutomationTargetsForRow(row));
-              },
-            );
-
-            await _undoManager.executeWithoutAdd(
-              finalAct,
-            ); // need this so that you can make a compound undo action while preserving execute order
-            groupedActions.add(finalAct);
+            groupedActions.add(appliedAction);
 
             _mixHighlighter.trigger([
-              HaloKey('row:$row'),
-              HaloKey('row:$row:effects_tab'),
-              HaloKey('row:$row:fx_list'),
-              HaloKey('row:$row:fx_contains:$contains'),
+              HaloKey('row:$appliedRow'),
+              HaloKey('row:$appliedRow:effects_tab'),
+              HaloKey('row:$appliedRow:fx_list'),
+              HaloKey('row:$appliedRow:fx_contains:$contains'),
             ]);
 
             emitActionSummary(
-              '• Removed ${effects[idx]} from ${_rowDisplayName(row)} •',
+              '• Removed $removedEffectName from ${_rowDisplayName(appliedRow)} •',
             );
             continue;
           }
@@ -20907,54 +22654,68 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
 
         case 'ensure_effect':
-          final row = (a.data['row'] as int);
           final contains =
               (a.data['effect_name_contains'] as String).toLowerCase();
+          final rowCandidates = rowCandidatesFromAction(a.data);
+          if (rowCandidates.isEmpty) continue;
 
-          final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
-          final already =
-              effects.indexWhere((e) => e.toLowerCase().contains(contains));
-          if (already != -1) continue;
-
-          // Insert: find best matching plugin path (only Mixroom effects)
           final effectName = pickMixroomEffect(contains);
           if (effectName == null) continue;
 
-          // await _undoManager.execute(
-          //   InsertEffectAction(
-          //     row: row,
-          //     pathOrName: effectName,
-          //     onChange: () {
-          //       setState(() {});
-          //       _refreshRowFx(row);
-          //     },
-          //   ),
-          // );
+          int? appliedRow;
+          EditorUndoAction? appliedAction;
+          for (final row in rowCandidates) {
+            final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+            final already =
+                effects.indexWhere((e) => e.toLowerCase().contains(contains));
+            if (already != -1) {
+              appliedRow = row;
+              break;
+            }
+            final beforeCount = effects.length;
+            final act = InsertEffectAction(
+              row: row,
+              pathOrName: effectName,
+              onChange: () {
+                setState(() {});
+                _refreshRowFx(row);
+                unawaited(_refreshAutomationTargetsForRow(row));
+              },
+            );
+            await _undoManager.executeWithoutAdd(act);
+            final afterEffects =
+                await JuceAudioEngine.getTrackEffectsForRow(row);
+            final inserted = afterEffects.length > beforeCount &&
+                afterEffects.any(
+                  (e) =>
+                      e.toLowerCase().contains(contains) ||
+                      e.toLowerCase().contains(effectName.toLowerCase()),
+                );
+            if (!inserted) {
+              continue;
+            }
+            appliedRow = row;
+            appliedAction = act;
+            break;
+          }
 
-          EditorUndoAction finalAct = InsertEffectAction(
-            row: row,
-            pathOrName: effectName,
-            onChange: () {
-              setState(() {});
-              _refreshRowFx(row);
-              unawaited(_refreshAutomationTargetsForRow(row));
-            },
-          );
-
-          await _undoManager.executeWithoutAdd(
-            finalAct,
-          ); // need this so that you can make a compound undo action while preserving execute order
-          groupedActions.add(finalAct);
+          if (appliedRow == null) continue;
+          if (appliedAction != null) {
+            groupedActions.add(appliedAction);
+          }
 
           _mixHighlighter.trigger([
-            HaloKey('row:$row'),
-            HaloKey('row:$row:effects_tab'),
-            HaloKey('row:$row:fx_list'),
-            HaloKey('row:$row:fx_contains:$contains'),
+            HaloKey('row:$appliedRow'),
+            HaloKey('row:$appliedRow:effects_tab'),
+            HaloKey('row:$appliedRow:fx_list'),
+            HaloKey('row:$appliedRow:fx_contains:$contains'),
           ]);
 
-          final summary = '• Added $effectName to ${_rowDisplayName(row)} •';
-          emitActionSummary(summary);
+          if (appliedAction != null) {
+            final summary =
+                '• Added $effectName to ${_rowDisplayName(appliedRow)} •';
+            emitActionSummary(summary);
+          }
           continue;
 
         case 'ensure_master_effect':
@@ -20986,7 +22747,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         case 'adjust_effect_param_by_name':
           {
-            final row = (a.data['row'] as int);
+            final rowCandidates = rowCandidatesFromAction(a.data);
+            if (rowCandidates.isEmpty) continue;
+            final row = rowCandidates.first;
             final effectContains =
                 (a.data['effect_name_contains'] as String).toLowerCase();
 
@@ -21240,7 +23003,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         case 'hard_reset_row_fx':
           {
-            final row = (a.data['row'] as int);
+            final rowCandidates = rowCandidatesFromAction(a.data);
+            if (rowCandidates.isEmpty) continue;
+            final row = rowCandidates.first;
 
             // Query actual FX list
             final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
@@ -21490,23 +23255,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return count;
   }
 
-  bool _assistantActionsContainDirectProjectEdit(
-    List<AssistantAction> actions,
-  ) {
-    for (final action in actions) {
-      switch (action.type.trim().toLowerCase()) {
-        case 'clip_edit':
-        case 'effect_edit':
-        case 'automation_edit':
-        case 'midi_compose':
-        case 'stem_separate':
-        case 'role_override':
-          return true;
-      }
-    }
-    return false;
-  }
-
   Future<void> _presentPipelineReply(ChatPipelineResult reply) async {
     // Ordering note for source-coverage tests:
     // _insertAssistantChatText(reply.message);
@@ -21514,16 +23262,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final assistantMessagesBefore =
         _chatTextMessageCount(authorId: 'assistant');
 
+    var actionsApplied = true;
     if (reply.hasAssistantActions) {
-      await _applyAssistantActions(reply.assistantActions);
+      actionsApplied = await _applyAssistantActions(reply.assistantActions);
     }
 
     final assistantMessagesAfter = _chatTextMessageCount(authorId: 'assistant');
-    final directEditActionApplied = _assistantActionsContainDirectProjectEdit(
-      reply.assistantActions,
-    );
-    final shouldInsertPrimaryReply = reply.message.trim().isNotEmpty &&
-        !directEditActionApplied &&
+    final shouldInsertPrimaryReply = actionsApplied &&
+        reply.message.trim().isNotEmpty &&
         (!reply.hasAssistantActions ||
             assistantMessagesAfter == assistantMessagesBefore);
     if (shouldInsertPrimaryReply) {
@@ -21533,19 +23279,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _scrollChatToLatest({bool jump = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted || !_chatHistoryScrollController.hasClients) return;
-      final position = _chatHistoryScrollController.position;
-      final target = position.maxScrollExtent;
-      if (jump) {
-        _chatHistoryScrollController.jumpTo(target);
-        return;
-      }
-      await _chatHistoryScrollController.animateTo(
-        target,
-        duration: const Duration(milliseconds: 180),
+      if (!mounted) return;
+      final controller = _chatController;
+      if (controller is! ScrollToMessageMixin) return;
+      final total = controller.messages.length;
+      if (total <= 0) return;
+      await (controller as ScrollToMessageMixin).scrollToIndex(
+        total - 1,
+        duration: jump ? Duration.zero : const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
+        alignment: 1.0,
       );
     });
+  }
+
+  Widget _buildThinkingPlaceholderBubble() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color.fromARGB(100, 170, 170, 170),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: const Text(
+          '...',
+          style: TextStyle(
+            fontFamily: 'Pretendard',
+            fontSize: 15,
+            height: 1.2,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
   }
 
   void _showCopiedChatMessageFeedback(String messageId) {
@@ -21882,9 +23650,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     try {
       if (enabled) {
         _producerDataMode = true;
+        _producerCapturePanelMinimized = true;
         await _producerCollector.setEnabled(true);
+        await _refreshProducerPromptQueue(reshuffle: true);
         _insertAssistantChatText(
-            'Producer data mode enabled. Each prompt will capture before, AI-after, and final producer-after snapshots.');
+            'Producer data mode enabled. Use the guided prompt queue to run, skip, or reshuffle prompts. Each accepted prompt captures before, AI-after, and final producer-after snapshots.');
+        _showSmallNotice('Producer capture enabled. Guided prompts loaded.');
       } else {
         if (_producerCollector.hasPendingPromptCycle) {
           await _finalizeProducerPromptCycle(
@@ -21896,8 +23667,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           await _producerCollector.closeSession(reason: closeReason);
         }
         _producerDataMode = false;
+        _producerGuidedPromptAwaitingFinal = false;
+        _producerCapturePanelMinimized = true;
+        _producerPromptSubmitting = false;
+        _producerPromptQueueIds = <String>[];
+        _producerPromptQueueIndex = 0;
         await _producerCollector.setEnabled(false);
         _insertAssistantChatText('Producer data mode disabled.');
+        _showSmallNotice('Producer capture disabled.');
       }
     } finally {
       if (mounted) {
@@ -21921,6 +23698,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final snapshot = finalSnapshot ?? await _buildProducerSnapshot();
+    final shouldAdvanceQueue =
+        disposition == 'manual_mark' && _producerGuidedPromptAwaitingFinal;
+    _producerGuidedPromptAwaitingFinal = false;
     await _producerCollector.recordPromptCycleStop(
       finalSnapshot: snapshot,
       disposition: disposition,
@@ -21935,7 +23715,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _insertAssistantChatText(
         'Captured the producer final after-state for the current prompt.',
       );
-      _showSmallNotice('Captured final producer after-state.');
+      _showSmallNotice(
+        shouldAdvanceQueue
+            ? 'Captured final producer after-state. Advanced to the next guided prompt.'
+            : 'Captured final producer after-state.',
+      );
+    }
+    if (shouldAdvanceQueue) {
+      unawaited(_advanceProducerGuidedPromptQueue());
     }
   }
 
@@ -21954,8 +23741,100 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _showSmallNotice('No active producer session to export yet.');
       return;
     }
-    _insertAssistantChatText('Saved producer session to ${file.path}');
-    _showSmallNotice('Producer session exported.');
+    String? downloadsSavedPath;
+    if (!kIsWeb && Platform.isAndroid) {
+      downloadsSavedPath = await _saveProducerSessionToAndroidDownloads(file);
+      await _shareProducerSessionFile(file);
+    }
+    String? macSavedPath;
+    if (!kIsWeb && Platform.isMacOS) {
+      final suggestedFileName = ExportSaveDialog.buildSuggestedFileName(
+        baseName: '${_projectName.trim().isEmpty ? 'Mixroom' : _projectName} '
+            'Producer Session',
+        extension: 'json',
+      );
+      macSavedPath = await ExportSaveDialog.saveExportedFile(
+        sourceFilePath: file.path,
+        suggestedFileName: suggestedFileName,
+        desktopDialogTitle: 'Save producer session',
+      );
+      if (macSavedPath == null || macSavedPath.isEmpty) {
+        _showSmallNotice('Producer session export canceled.');
+        return;
+      }
+    }
+    final savedPath = macSavedPath ?? downloadsSavedPath ?? file.path;
+    _insertAssistantChatText('Saved producer session to $savedPath');
+    _showSmallNotice(
+      macSavedPath != null
+          ? 'Producer session exported.'
+          : downloadsSavedPath != null
+              ? 'Producer session exported to Downloads.'
+              : !kIsWeb && Platform.isAndroid
+                  ? 'Producer session exported and shared.'
+                  : 'Producer session exported.',
+    );
+  }
+
+  Future<String?> _saveProducerSessionToAndroidDownloads(
+      File sourceFile) async {
+    if (kIsWeb || !Platform.isAndroid) return null;
+
+    try {
+      final savedPath = await _producerExportsChannel.invokeMethod<String>(
+        'saveProducerSessionToDownloads',
+        <String, dynamic>{
+          'sourcePath': sourceFile.path,
+          'displayName': p.basename(sourceFile.path),
+          'mimeType': 'application/json',
+        },
+      );
+      if (savedPath != null && savedPath.isNotEmpty) {
+        return savedPath;
+      }
+    } catch (_) {}
+
+    final candidates = <String>{
+      '/storage/emulated/0/Download',
+      '/sdcard/Download',
+    };
+
+    try {
+      final externalDownloads =
+          await getExternalStorageDirectories(type: StorageDirectory.downloads);
+      if (externalDownloads != null) {
+        for (final dir in externalDownloads) {
+          candidates.add(dir.path);
+        }
+      }
+    } catch (_) {}
+
+    final bytes = await sourceFile.readAsBytes();
+    for (final path in candidates) {
+      try {
+        final directory = Directory(path);
+        await directory.create(recursive: true);
+        final target =
+            File(p.join(directory.path, p.basename(sourceFile.path)));
+        await target.writeAsBytes(bytes, flush: true);
+        return target.path;
+      } catch (_) {}
+    }
+
+    return null;
+  }
+
+  Future<void> _shareProducerSessionFile(File file) async {
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          files: <XFile>[XFile(file.path)],
+          text: 'Mixroom producer session export',
+        ),
+      );
+    } catch (_) {
+      _showSmallNotice('Could not open the Android share sheet.');
+    }
   }
 
   String _producerCaptureStatusLabel() {
@@ -21969,9 +23848,677 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return 'Producer Capture: ON';
   }
 
+  String _producerCaptureCompactStatusLabel() {
+    if (!_producerDataMode) return 'Capture Off';
+    if (!_producerCollector.hasActiveSession) {
+      return 'Capture On';
+    }
+    if (_producerCollector.hasPendingPromptCycle) {
+      return 'Need Final';
+    }
+    return 'Capture On';
+  }
+
+  _ProducerPromptTemplate? _producerPromptTemplateById(String id) {
+    for (final template in _kProducerPromptTemplates) {
+      if (template.id == id) return template;
+    }
+    return null;
+  }
+
+  _ProducerPromptTemplate? get _currentProducerPromptTemplate {
+    if (_producerPromptQueueIds.isEmpty) return null;
+    final safeIndex = _producerPromptQueueIndex.clamp(
+      0,
+      _producerPromptQueueIds.length - 1,
+    );
+    return _producerPromptTemplateById(_producerPromptQueueIds[safeIndex]);
+  }
+
+  _ProducerPromptProjectContext _producerPromptContextFromSnapshot(
+    Map<String, dynamic> snapshot,
+  ) {
+    final projectState =
+        (snapshot['project_state'] as Map?)?.cast<String, dynamic>() ??
+            const <String, dynamic>{};
+    final rows = (projectState['rows'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map>()
+        .map((row) => row.cast<String, dynamic>())
+        .toList(growable: false);
+    var audioRowCount = 0;
+    final roles = <String>{};
+    const knownRoles = <String>{'vocals', 'drums', 'bass', 'guitar', 'synth'};
+
+    for (final row in rows) {
+      if (row['hasAudio'] != true) continue;
+      audioRowCount += 1;
+
+      final roleProbs = (row['role_probs'] as Map?)?.cast<String, dynamic>() ??
+          const <String, dynamic>{};
+      String? bestRole;
+      var bestProb = 0.0;
+      roleProbs.forEach((role, value) {
+        if (!knownRoles.contains(role)) return;
+        if (value is! num) return;
+        final numeric = value.toDouble();
+        if (numeric > bestProb) {
+          bestProb = numeric;
+          bestRole = role;
+        }
+      });
+      if (bestRole != null && bestProb > 0.0) {
+        roles.add(bestRole!);
+      }
+    }
+
+    return _ProducerPromptProjectContext(
+      audioRowCount: audioRowCount,
+      roles: roles,
+    );
+  }
+
+  Future<void> _refreshProducerPromptQueue({bool reshuffle = false}) async {
+    final snapshot = await _buildProducerSnapshot();
+    final context = _producerPromptContextFromSnapshot(snapshot);
+    final matching = _kProducerPromptTemplates
+        .where((template) => template.matches(context))
+        .toList(growable: true);
+    final fallback = _kProducerPromptTemplates
+        .where((template) => template.requiredRoles.isEmpty)
+        .toList(growable: false);
+    final queue = (matching.isNotEmpty ? matching : fallback)
+        .map((template) => template.id)
+        .toList(growable: true);
+
+    if (queue.isEmpty) {
+      queue.addAll(
+        _kProducerPromptTemplates.map((template) => template.id),
+      );
+    }
+    if ((_producerPromptShuffle || reshuffle) && queue.length > 1) {
+      queue.shuffle();
+    }
+
+    if (!mounted) {
+      _producerPromptQueueIds = queue;
+      _producerPromptQueueIndex = 0;
+      return;
+    }
+    setState(() {
+      _producerPromptQueueIds = queue;
+      _producerPromptQueueIndex = 0;
+    });
+  }
+
+  Future<void> _ensureProducerPromptQueue() async {
+    if (_producerPromptQueueIds.isNotEmpty) return;
+    await _refreshProducerPromptQueue();
+  }
+
+  Future<void> _setProducerPromptLanguage(
+    _ProducerPromptLanguage language,
+  ) async {
+    if (_producerPromptLanguage == language) return;
+    if (!mounted) {
+      _producerPromptLanguage = language;
+    } else {
+      setState(() => _producerPromptLanguage = language);
+    }
+  }
+
+  Future<void> _skipProducerGuidedPrompt() async {
+    if (!_producerDataMode) return;
+    if (_producerCollector.hasPendingPromptCycle || _producerPromptSubmitting) {
+      _showSmallNotice(
+        'Capture the current producer final state before skipping ahead.',
+      );
+      return;
+    }
+
+    await _ensureProducerPromptQueue();
+    if (_producerPromptQueueIds.isEmpty) {
+      _showSmallNotice('No guided producer prompts are available yet.');
+      return;
+    }
+
+    if (_producerPromptQueueIndex + 1 >= _producerPromptQueueIds.length) {
+      await _refreshProducerPromptQueue(reshuffle: true);
+    } else if (mounted) {
+      setState(() => _producerPromptQueueIndex += 1);
+    } else {
+      _producerPromptQueueIndex += 1;
+    }
+
+    _showSmallNotice('Skipped to the next guided producer prompt.');
+  }
+
+  Future<void> _randomizeProducerGuidedPrompts() async {
+    if (!_producerDataMode) return;
+    if (_producerCollector.hasPendingPromptCycle || _producerPromptSubmitting) {
+      _showSmallNotice(
+        'Finish the current producer prompt before reshuffling.',
+      );
+      return;
+    }
+
+    await _refreshProducerPromptQueue(reshuffle: true);
+    _showSmallNotice('Producer prompt queue randomized.');
+  }
+
+  Future<void> _advanceProducerGuidedPromptQueue() async {
+    if (!_producerDataMode) return;
+    if (_producerCollector.hasPendingPromptCycle || _producerPromptSubmitting) {
+      return;
+    }
+
+    await _ensureProducerPromptQueue();
+    if (_producerPromptQueueIds.isEmpty) {
+      _showSmallNotice('No guided producer prompts are available yet.');
+      return;
+    }
+
+    if (_producerPromptQueueIndex + 1 >= _producerPromptQueueIds.length) {
+      await _refreshProducerPromptQueue(reshuffle: true);
+    } else if (mounted) {
+      setState(() => _producerPromptQueueIndex += 1);
+    } else {
+      _producerPromptQueueIndex += 1;
+    }
+  }
+
+  Future<void> _submitCurrentProducerGuidedPrompt({
+    bool autoAdvanced = false,
+  }) async {
+    if (!_producerDataMode) return;
+    if (_producerCollector.hasPendingPromptCycle) {
+      _showSmallNotice(
+        'Capture the current producer final state before running the next prompt.',
+      );
+      return;
+    }
+    if (_producerPromptSubmitting) return;
+
+    await _ensureProducerPromptQueue();
+    final template = _currentProducerPromptTemplate;
+    if (template == null) {
+      _showSmallNotice('No guided producer prompt is ready yet.');
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _producerPromptSubmitting = true);
+    } else {
+      _producerPromptSubmitting = true;
+    }
+
+    try {
+      final success = await _submitChatPrompt(
+        template.promptFor(_producerPromptLanguage),
+      );
+      if (!success) return;
+
+      final awaitingFinal = _producerCollector.hasPendingPromptCycle;
+      if (mounted) {
+        setState(() => _producerGuidedPromptAwaitingFinal = awaitingFinal);
+      } else {
+        _producerGuidedPromptAwaitingFinal = awaitingFinal;
+      }
+
+      if (!autoAdvanced) {
+        _showSmallNotice(
+          awaitingFinal
+              ? 'Guided producer prompt submitted.'
+              : 'Prompt ran, but no producer capture cycle was created.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _producerPromptSubmitting = false);
+      } else {
+        _producerPromptSubmitting = false;
+      }
+    }
+  }
+
+  Widget _buildProducerLanguageChip(
+    _ProducerPromptLanguage language,
+    String label,
+  ) {
+    final selected = _producerPromptLanguage == language;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap:
+          _producerCollector.hasPendingPromptCycle || _producerPromptSubmitting
+              ? null
+              : () {
+                  unawaited(_setProducerPromptLanguage(language));
+                },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF2E6EEB)
+              : Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? Colors.white24 : Colors.white10,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withOpacity(selected ? 1.0 : 0.78),
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProducerPromptActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+    Color backgroundColor = const Color(0xFF22304F),
+  }) {
+    final enabled = onTap != null;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 140),
+        opacity: enabled ? 1.0 : 0.42,
+        child: Container(
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 11),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 14, color: Colors.white),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _setProducerGuidedPromptMinimized(bool minimized) {
+    if (_producerGuidedPromptMinimized == minimized) return;
+    if (mounted) {
+      setState(() => _producerGuidedPromptMinimized = minimized);
+    } else {
+      _producerGuidedPromptMinimized = minimized;
+    }
+  }
+
+  Widget _buildProducerGuidedPromptPanel() {
+    final template = _currentProducerPromptTemplate;
+    final queueCount = _producerPromptQueueIds.length;
+    final queueLabel = template == null || queueCount == 0
+        ? 'Guided Queue'
+        : 'Guided ${_producerPromptQueueIndex + 1}/$queueCount';
+    final familyLabel =
+        template?.familyFor(_producerPromptLanguage) ?? 'Context-aware prompts';
+    final promptText = template?.promptFor(_producerPromptLanguage) ??
+        'Turn on producer mode to load context-aware prompts for this project.';
+    final canRunPrompt = _producerDataMode &&
+        !_producerUiBusy &&
+        !_producerPromptSubmitting &&
+        !_producerCollector.hasPendingPromptCycle;
+    final helperText = _producerCollector.hasPendingPromptCycle
+        ? 'Producer is fixing the current prompt. Capture Final to move to the next guided prompt.'
+        : 'Run, skip, or reshuffle the next prompt. Skip if it does not fit this project.';
+    final runLabel = _producerPromptSubmitting ? 'Running' : 'Run';
+    final minimizedSummary = template == null
+        ? 'Guided prompts are ready.'
+        : '$familyLabel: $promptText';
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _producerGuidedPromptMinimized
+                      ? '$queueLabel • $familyLabel'
+                      : 'Guided Producer Prompt',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _setProducerGuidedPromptMinimized(
+                  !_producerGuidedPromptMinimized,
+                ),
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Icon(
+                    _producerGuidedPromptMinimized
+                        ? Icons.unfold_more_rounded
+                        : Icons.unfold_less_rounded,
+                    size: 16,
+                    color: Colors.white.withOpacity(0.82),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_producerGuidedPromptMinimized) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    minimizedSummary,
+                    maxLines: 2,
+                    overflow: TextOverflow.fade,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.74),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (canRunPrompt)
+                  _buildProducerPromptActionButton(
+                    icon: Icons.play_arrow_rounded,
+                    label: runLabel,
+                    onTap: () {
+                      unawaited(_submitCurrentProducerGuidedPrompt());
+                    },
+                    backgroundColor: const Color(0xFF2E6EEB),
+                  ),
+              ],
+            ),
+          ] else ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Text(
+                    queueLabel,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.04),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Text(
+                    familyLabel,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.72),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                _buildProducerLanguageChip(
+                  _ProducerPromptLanguage.english,
+                  'EN',
+                ),
+                _buildProducerLanguageChip(
+                  _ProducerPromptLanguage.korean,
+                  'KR',
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              promptText,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12.8,
+                height: 1.3,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 9),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildProducerPromptActionButton(
+                  icon: Icons.play_arrow_rounded,
+                  label: runLabel,
+                  onTap: canRunPrompt
+                      ? () {
+                          unawaited(_submitCurrentProducerGuidedPrompt());
+                        }
+                      : null,
+                  backgroundColor: const Color(0xFF2E6EEB),
+                ),
+                _buildProducerPromptActionButton(
+                  icon: Icons.skip_next_rounded,
+                  label: 'Skip',
+                  onTap: canRunPrompt
+                      ? () {
+                          unawaited(_skipProducerGuidedPrompt());
+                        }
+                      : null,
+                ),
+                _buildProducerPromptActionButton(
+                  icon: Icons.shuffle_rounded,
+                  label: 'Shuffle',
+                  onTap: canRunPrompt
+                      ? () {
+                          unawaited(_randomizeProducerGuidedPrompts());
+                        }
+                      : null,
+                ),
+              ],
+            ),
+            const SizedBox(height: 9),
+            Text(
+              helperText,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.62),
+                fontSize: 10.8,
+                height: 1.25,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Future<void> _ensureAiModelsLoaded() {
     _aiModelsWarmupFuture ??= _loadAiModels();
     return _aiModelsWarmupFuture!;
+  }
+
+  Future<bool> _submitChatPrompt(String userText) async {
+    final trimmed = userText.trim();
+    if (trimmed.isEmpty) return false;
+    if (_promptRateLimitStatus?.canSubmit == false) {
+      await _showPromptRateLimitDialog();
+      return false;
+    }
+
+    _handleDawOnboardingChatPromptSubmitted();
+    _insertUserChatText(trimmed);
+
+    Map<String, dynamic>? producerPreSnapshot;
+    if (_producerDataMode) {
+      producerPreSnapshot = await _buildProducerSnapshot();
+      _producerGuidedPromptAwaitingFinal = false;
+      if (_producerCollector.hasPendingPromptCycle) {
+        await _finalizeProducerPromptCycle(
+          disposition: 'next_ai_step',
+          insertMessage: false,
+          finalSnapshot: producerPreSnapshot,
+        );
+      }
+    }
+
+    late final ChatPipelineResult reply;
+    try {
+      await _ensureAiModelsLoaded();
+      reply = await _chatPipeline.handleUserText(
+        text: trimmed,
+        audioTracks: _audioTracks,
+        bpmFallback: _tempo,
+        rowGain: _rowGain,
+        rowPan: _rowPan,
+        rowAutomation: _rowVolumeAutomation,
+        masterGain0to3: _masterGain,
+        masterPan0to1: _masterPan,
+        selectedClipIndices: _timelineSelectedClipIndices,
+        primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
+        selectedRowIndex: _selectedRow,
+        automationClipSnapshot: _aiAutomationClipSnapshot(),
+        projectId: _projectId,
+        aiFeature: 'ai_chat',
+        bypassLearnedMagnitudes: _producerDataMode,
+      );
+    } catch (error, stackTrace) {
+      _reportAiChatFailure(error, stackTrace, stage: 'chat_pipeline');
+      _insertAssistantChatText(_kAiRequestFailureMessage);
+      if (mounted) {
+        setState(() {});
+      }
+      unawaited(_handleDawOnboardingChatReplyReady());
+      return false;
+    }
+
+    final toolName = reply.meta?['tool']?.toString().trim() ?? '';
+    if (toolName.isNotEmpty) {
+      unawaited(
+        AnalyticsService.instance.track(
+          AnalyticsEvents.aiToolCalled(
+            toolName: toolName,
+            projectId: _projectId,
+          ),
+        ),
+      );
+    }
+
+    if (kAiDebugLogs) {
+      aiDebugLog('audio-editor', reply.toString());
+      if (reply.meta != null) {
+        aiDebugLog(
+          'audio-editor',
+          'reply.meta=${aiDebugShortMap(reply.meta!)}',
+        );
+      }
+    }
+
+    _updatePromptRateLimitStatusFromMeta(reply.meta);
+
+    try {
+      if (reply.hasMix) {
+        final appliedCount = await applyMixingResult(
+          reply.mixing!,
+          emitActionSummaries: true,
+        );
+        if (appliedCount <= 0) {
+          _insertAssistantChatText(_kAiApplyFailureMessage);
+          if (mounted) {
+            setState(() {});
+          }
+          unawaited(_handleDawOnboardingChatReplyReady());
+          return false;
+        }
+
+        _chatPipeline.recordAppliedMix(
+          reply.mixing!,
+          visibleAssistantText: reply.message,
+        );
+
+        if (_producerDataMode && producerPreSnapshot != null) {
+          final producerPostSnapshot = await _buildProducerSnapshot();
+          await _producerCollector.recordAiStep(
+            prompt: trimmed,
+            preSnapshot: producerPreSnapshot,
+            postSnapshot: producerPostSnapshot,
+            resolvedActions:
+                reply.mixing!.actions.map((a) => a.toJson()).toList(),
+            llmPayload: reply.meta,
+            projectId: _projectId,
+            projectName: _projectName,
+            projectDir: _projectDir,
+          );
+        }
+      }
+
+      await _presentPipelineReply(reply);
+    } catch (error, stackTrace) {
+      _reportAiChatFailure(error, stackTrace, stage: 'chat_apply');
+      _insertAssistantChatText(
+        reply.hasMix ? _kAiApplyFailureMessage : _kAiRequestFailureMessage,
+      );
+      if (mounted) {
+        setState(() {});
+      }
+      unawaited(_handleDawOnboardingChatReplyReady());
+      return false;
+    }
+
+    if (!_chatExpanded && mounted && reply.message.trim().isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(reply.message),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+
+    if (mounted) {
+      setState(() {});
+    }
+    unawaited(_handleDawOnboardingChatReplyReady());
+    return true;
   }
 
   Widget _buildOneButtonMixDetail({
@@ -22044,9 +24591,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         ),
                       ),
                       const SizedBox(width: 12),
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'One-Button Mix',
+                          L10n.translate(context, 'One-Button Mix'),
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w600,
@@ -22057,8 +24604,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ],
                   ),
                   const SizedBox(height: 14),
-                  const Text(
-                    'Mixroom AI will make a fast finishing pass across the current project.',
+                  Text(
+                    L10n.translate(
+                      context,
+                      'Mixroom AI will make a fast finishing pass across the current project.',
+                    ),
                     style: TextStyle(
                       color: Colors.white70,
                       fontSize: 14,
@@ -22076,7 +24626,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       children: [
                         _buildOneButtonMixDetail(
                           icon: Icons.tune_rounded,
-                          text: 'Balance levels across the mix.',
+                          text: L10n.translate(
+                            context,
+                            'Balance levels across the mix.',
+                          ),
                         ),
                         Divider(
                           height: 1,
@@ -22084,7 +24637,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         ),
                         _buildOneButtonMixDetail(
                           icon: Icons.graphic_eq_rounded,
-                          text: 'Reduce masking and clean up harsh areas.',
+                          text: L10n.translate(
+                            context,
+                            'Reduce masking and clean up harsh areas.',
+                          ),
                         ),
                         Divider(
                           height: 1,
@@ -22092,14 +24648,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         ),
                         _buildOneButtonMixDetail(
                           icon: Icons.waves_rounded,
-                          text: 'Improve clarity and add tasteful space.',
+                          text: L10n.translate(
+                            context,
+                            'Improve clarity and add tasteful space.',
+                          ),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'You can undo everything after it runs.',
+                  Text(
+                    L10n.translate(
+                      context,
+                      'You can undo everything after it runs.',
+                    ),
                     style: TextStyle(
                       color: Colors.white54,
                       fontSize: 13,
@@ -22111,8 +24673,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     children: [
                       TextButton(
                         onPressed: () => Navigator.pop(context, false),
-                        child: const Text(
-                          'Cancel',
+                        child: Text(
+                          L10n.translate(context, 'Cancel'),
                           style: TextStyle(color: Colors.white70),
                         ),
                       ),
@@ -22130,7 +24692,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             vertical: 12,
                           ),
                         ),
-                        child: const Text('Run Mix'),
+                        child: Text(
+                          L10n.translate(context, 'Run Mix'),
+                        ),
                       ),
                     ],
                   ),
@@ -22291,7 +24855,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> runOneButtonMix() async {
     // optional: show system “Mixing…” message
     _insertSystemChatText(
-      'Mixing…',
+      L10n.translate(context, 'Mixing…'),
       metadata: {'typing': true},
       persist: false,
     );
@@ -22304,6 +24868,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Map<String, dynamic>? producerPreSnapshot;
     if (_producerDataMode) {
       producerPreSnapshot = await _buildProducerSnapshot();
+      _producerGuidedPromptAwaitingFinal = false;
       if (_producerCollector.hasPendingPromptCycle) {
         await _finalizeProducerPromptCycle(
           disposition: 'next_ai_step',
@@ -22332,6 +24897,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         projectId: _projectId,
         aiFeature: 'ai_chat',
         autoApplyProposals: true, // <-- key
+        bypassLearnedMagnitudes: _producerDataMode,
       );
     } catch (error, stackTrace) {
       _reportAiChatFailure(error, stackTrace, stage: 'one_button_pipeline');
@@ -22409,20 +24975,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // ScaffoldMessenger.of(context).showSnackBar(...)
   }
 
+  Widget _buildChatFeedbackButton() {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: const Color(0xFF152744).withValues(alpha: 0.96),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.12),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: IconButton(
+        tooltip: 'Send feedback or bug report',
+        onPressed:
+            _feedbackSubmissionInFlight ? null : _openDawFeedbackComposer,
+        icon: const Icon(
+          Icons.forum_outlined,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
+  double _androidTransportBottomInset(BuildContext context) {
+    const androidTransportBottomOffset = 10.0;
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return 0.0;
+    }
+    return math.max(
+      0.0,
+      MediaQuery.viewPaddingOf(context).bottom - androidTransportBottomOffset,
+    );
+  }
+
   Widget _buildBottomChatAndTransport({
     bool includeChatBar = true,
     bool includeProducerCapture = true,
     bool includeTransport = true,
   }) {
-    const androidTransportBottomOffset = 10.0;
     final bottomInset =
-        includeTransport && defaultTargetPlatform == TargetPlatform.android
-            ? math.max(
-                0.0,
-                MediaQuery.of(context).viewPadding.bottom -
-                    androidTransportBottomOffset,
-              )
-            : 0.0;
+        includeTransport ? _androidTransportBottomInset(context) : 0.0;
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -22437,79 +25035,118 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: _producerCapturePanelMinimized ? 10 : 12,
+                      vertical: _producerCapturePanelMinimized ? 8 : 10,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(_kChatChromeOpacity),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: Colors.white.withOpacity(0.14)),
                     ),
-                    child: Row(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.science_outlined,
-                            color: Colors.white, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _producerCaptureStatusLabel(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
+                        Row(
+                          children: [
+                            const Icon(Icons.science_outlined,
+                                color: Colors.white, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _producerCapturePanelMinimized
+                                    ? _producerCaptureCompactStatusLabel()
+                                    : _producerCaptureStatusLabel(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                          ),
+                            IconButton(
+                              constraints: const BoxConstraints(
+                                  minWidth: 32, minHeight: 32),
+                              padding: EdgeInsets.zero,
+                              tooltip:
+                                  'Capture current producer final after-state',
+                              onPressed: _producerDataMode &&
+                                      _producerCollector.hasPendingPromptCycle
+                                  ? () async {
+                                      await _finalizeProducerPromptCycle(
+                                        disposition: 'manual_mark',
+                                      );
+                                      if (mounted) setState(() {});
+                                    }
+                                  : null,
+                              icon: Icon(
+                                Icons.check_circle_outline,
+                                size: 17,
+                                color: _producerDataMode &&
+                                        _producerCollector.hasPendingPromptCycle
+                                    ? Colors.white
+                                    : Colors.white.withOpacity(0.35),
+                              ),
+                            ),
+                            IconButton(
+                              constraints: const BoxConstraints(
+                                  minWidth: 32, minHeight: 32),
+                              padding: EdgeInsets.zero,
+                              tooltip: 'Export producer session',
+                              onPressed: _producerDataMode
+                                  ? () async {
+                                      await _exportProducerSession();
+                                      if (mounted) setState(() {});
+                                    }
+                                  : null,
+                              icon: Icon(
+                                Icons.ios_share_rounded,
+                                size: 17,
+                                color: _producerDataMode
+                                    ? Colors.white
+                                    : Colors.white.withOpacity(0.35),
+                              ),
+                            ),
+                            IconButton(
+                              constraints: const BoxConstraints(
+                                  minWidth: 32, minHeight: 32),
+                              padding: EdgeInsets.zero,
+                              tooltip: _producerCapturePanelMinimized
+                                  ? 'Expand producer capture'
+                                  : 'Minimize producer capture',
+                              onPressed: _producerDataMode
+                                  ? () {
+                                      setState(() {
+                                        _producerCapturePanelMinimized =
+                                            !_producerCapturePanelMinimized;
+                                      });
+                                    }
+                                  : null,
+                              icon: Icon(
+                                _producerCapturePanelMinimized
+                                    ? Icons.unfold_more_rounded
+                                    : Icons.unfold_less_rounded,
+                                size: 17,
+                                color: _producerDataMode
+                                    ? Colors.white
+                                    : Colors.white.withOpacity(0.35),
+                              ),
+                            ),
+                            Switch.adaptive(
+                              value: _producerDataMode,
+                              onChanged: _producerUiBusy
+                                  ? null
+                                  : (v) async {
+                                      await _setProducerDataMode(v);
+                                      if (mounted) setState(() {});
+                                    },
+                            ),
+                          ],
                         ),
-                        IconButton(
-                          constraints:
-                              const BoxConstraints(minWidth: 32, minHeight: 32),
-                          padding: EdgeInsets.zero,
-                          tooltip: 'Capture current producer final after-state',
-                          onPressed: _producerDataMode &&
-                                  _producerCollector.hasPendingPromptCycle
-                              ? () async {
-                                  await _finalizeProducerPromptCycle(
-                                    disposition: 'manual_mark',
-                                  );
-                                  if (mounted) setState(() {});
-                                }
-                              : null,
-                          icon: Icon(
-                            Icons.check_circle_outline,
-                            size: 17,
-                            color: _producerDataMode &&
-                                    _producerCollector.hasPendingPromptCycle
-                                ? Colors.white
-                                : Colors.white.withOpacity(0.35),
-                          ),
-                        ),
-                        IconButton(
-                          constraints:
-                              const BoxConstraints(minWidth: 32, minHeight: 32),
-                          padding: EdgeInsets.zero,
-                          tooltip: 'Export producer session',
-                          onPressed: _producerDataMode
-                              ? () async {
-                                  await _exportProducerSession();
-                                  if (mounted) setState(() {});
-                                }
-                              : null,
-                          icon: Icon(
-                            Icons.ios_share_rounded,
-                            size: 17,
-                            color: _producerDataMode
-                                ? Colors.white
-                                : Colors.white.withOpacity(0.35),
-                          ),
-                        ),
-                        Switch.adaptive(
-                          value: _producerDataMode,
-                          onChanged: _producerUiBusy
-                              ? null
-                              : (v) async {
-                                  await _setProducerDataMode(v);
-                                  if (mounted) setState(() {});
-                                },
-                        ),
+                        if (_producerDataMode &&
+                            !_producerCapturePanelMinimized)
+                          _buildProducerGuidedPromptPanel(),
                       ],
                     ),
                   ),
@@ -22584,9 +25221,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 _reopenSampleBrowserAfterDrag = false;
                                 _reopenSampleBrowserExpanded = false;
                                 _chatExpanded = true;
-                                _chatInputActive = false;
+                                // Desktop chat should accept hardware keyboard
+                                // immediately on first click.
+                                _chatInputActive = Platform.isMacOS;
                               });
                               _handleDawOnboardingChatOpened();
+                              if (Platform.isMacOS) {
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  if (!mounted) return;
+                                  _chatFocusNode.requestFocus();
+                                });
+                              }
                               if (!_hasTrackedAiAssistantScreen) {
                                 _hasTrackedAiAssistantScreen = true;
                                 unawaited(
@@ -22633,159 +25279,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           onSubmit: () async {
                             final text = _chatTextController.text.trim();
                             if (text.isEmpty) return;
-                            if (_promptRateLimitStatus?.canSubmit == false) {
-                              await _showPromptRateLimitDialog();
-                              return;
-                            }
-
-                            _handleDawOnboardingChatPromptSubmitted();
                             _chatTextController.clear();
                             _chatFocusNode.unfocus();
-
-                            final userText = text;
-                            _insertUserChatText(userText);
-
-                            Map<String, dynamic>? producerPreSnapshot;
-                            if (_producerDataMode) {
-                              producerPreSnapshot =
-                                  await _buildProducerSnapshot();
-                              if (_producerCollector.hasPendingPromptCycle) {
-                                await _finalizeProducerPromptCycle(
-                                  disposition: 'next_ai_step',
-                                  insertMessage: false,
-                                  finalSnapshot: producerPreSnapshot,
-                                );
-                              }
-                            }
-
-                            late final ChatPipelineResult reply;
-                            try {
-                              await _ensureAiModelsLoaded();
-                              reply = await _chatPipeline.handleUserText(
-                                text: userText,
-                                audioTracks: _audioTracks,
-                                bpmFallback: _tempo,
-                                rowGain: _rowGain,
-                                rowPan: _rowPan,
-                                rowAutomation: _rowVolumeAutomation,
-                                masterGain0to3: _masterGain,
-                                masterPan0to1: _masterPan,
-                                selectedClipIndices:
-                                    _timelineSelectedClipIndices,
-                                primarySelectedClipIndex:
-                                    _timelinePrimarySelectedClipIndex,
-                                selectedRowIndex: _selectedRow,
-                                automationClipSnapshot:
-                                    _aiAutomationClipSnapshot(),
-                                projectId: _projectId,
-                                aiFeature: 'ai_chat',
-                              );
-                            } catch (error, stackTrace) {
-                              _reportAiChatFailure(
-                                error,
-                                stackTrace,
-                                stage: 'chat_pipeline',
-                              );
-                              _insertAssistantChatText(
-                                  _kAiRequestFailureMessage);
-                              setState(() {});
-                              unawaited(_handleDawOnboardingChatReplyReady());
-                              return;
-                            }
-
-                            final toolName =
-                                reply.meta?['tool']?.toString().trim() ?? '';
-                            if (toolName.isNotEmpty) {
-                              unawaited(
-                                AnalyticsService.instance.track(
-                                  AnalyticsEvents.aiToolCalled(
-                                    toolName: toolName,
-                                    projectId: _projectId,
-                                  ),
-                                ),
-                              );
-                            }
-
-                            if (kAiDebugLogs) {
-                              aiDebugLog('audio-editor', reply.toString());
-                              if (reply.meta != null) {
-                                aiDebugLog(
-                                  'audio-editor',
-                                  'reply.meta=${aiDebugShortMap(reply.meta!)}',
-                                );
-                              }
-                            }
-
-                            _updatePromptRateLimitStatusFromMeta(reply.meta);
-
-                            try {
-                              if (reply.hasMix) {
-                                final appliedCount = await applyMixingResult(
-                                  reply.mixing!,
-                                  emitActionSummaries: true,
-                                );
-                                if (appliedCount <= 0) {
-                                  _insertAssistantChatText(
-                                    _kAiApplyFailureMessage,
-                                  );
-                                  setState(() {});
-                                  unawaited(
-                                      _handleDawOnboardingChatReplyReady());
-                                  return;
-                                }
-
-                                _chatPipeline.recordAppliedMix(
-                                  reply.mixing!,
-                                  visibleAssistantText: reply.message,
-                                );
-
-                                if (_producerDataMode &&
-                                    producerPreSnapshot != null) {
-                                  final producerPostSnapshot =
-                                      await _buildProducerSnapshot();
-                                  await _producerCollector.recordAiStep(
-                                    prompt: userText,
-                                    preSnapshot: producerPreSnapshot,
-                                    postSnapshot: producerPostSnapshot,
-                                    resolvedActions: reply.mixing!.actions
-                                        .map((a) => a.toJson())
-                                        .toList(),
-                                    llmPayload: reply.meta,
-                                    projectId: _projectId,
-                                    projectName: _projectName,
-                                    projectDir: _projectDir,
-                                  );
-                                }
-                              }
-
-                              await _presentPipelineReply(reply);
-                            } catch (error, stackTrace) {
-                              _reportAiChatFailure(
-                                error,
-                                stackTrace,
-                                stage: 'chat_apply',
-                              );
-                              _insertAssistantChatText(
-                                reply.hasMix
-                                    ? _kAiApplyFailureMessage
-                                    : _kAiRequestFailureMessage,
-                              );
-                              setState(() {});
-                              unawaited(_handleDawOnboardingChatReplyReady());
-                              return;
-                            }
-
-                            if (!_chatExpanded) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(reply.message),
-                                  duration: const Duration(seconds: 4),
-                                ),
-                              );
-                            }
-
-                            setState(() {});
-                            unawaited(_handleDawOnboardingChatReplyReady());
+                            await _submitChatPrompt(text);
                           },
                         );
                         if (_showDawOnboarding) {
@@ -22801,6 +25297,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ),
                   ),
                 ),
+                if (_chatExpanded)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 10, 8, 10),
+                    child: _buildChatFeedbackButton(),
+                  ),
 
                 if (!_chatInputActive)
                   Padding(
@@ -23208,17 +25709,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
                                                   ScaffoldMessenger.of(
                                                     context,
-                                                  ).showSnackBar(const SnackBar(
-                                                      content:
-                                                          Text('Mixing…')));
+                                                  ).showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                        L10n.translate(
+                                                          context,
+                                                          'Mixing…',
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  );
 
                                                   await runOneButtonMix();
 
                                                   ScaffoldMessenger.of(context)
                                                       .showSnackBar(
-                                                    const SnackBar(
+                                                    SnackBar(
                                                       content: Text(
-                                                          'One-Button Mix executed. Open chat for details.'),
+                                                        L10n.translate(
+                                                          context,
+                                                          'One-Button Mix executed. Open chat for details.',
+                                                        ),
+                                                      ),
                                                       duration:
                                                           Duration(seconds: 3),
                                                     ),
@@ -25776,12 +28288,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 final keyboardInset =
                                     MediaQuery.viewInsetsOf(overlayContext)
                                         .bottom;
+                                final transportBottomInset =
+                                    _androidTransportBottomInset(
+                                        overlayContext);
                                 final chatTypingActive =
                                     _chatFocusNode.hasFocus;
                                 final chatLift = math.max(
                                   0.0,
                                   chatTypingActive
-                                      ? keyboardInset - _kTransportBarHeight
+                                      ? keyboardInset -
+                                          (_kTransportBarHeight +
+                                              transportBottomInset)
                                       : 0.0,
                                 );
                                 final mediaSize =
@@ -26160,37 +28677,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                                   ),
                                                                                 ),
                                                                               ),
-                                                                              chatAnimatedListBuilder: (context, itemBuilder) {
-                                                                                return Column(
-                                                                                  children: [
-                                                                                    Expanded(
-                                                                                      child: MediaQuery.removePadding(
-                                                                                        context: context,
-                                                                                        removeBottom: true,
-                                                                                        child: ChatAnimatedList(
-                                                                                          itemBuilder: itemBuilder,
-                                                                                          scrollController: _chatHistoryScrollController,
-                                                                                          shouldScrollToEndWhenSendingMessage: false,
-                                                                                          shouldScrollToEndWhenAtBottom: false,
-                                                                                        ),
-                                                                                      ),
-                                                                                    ),
-                                                                                    if (_isThinking)
-                                                                                      Padding(
-                                                                                        padding: const EdgeInsets.only(
-                                                                                          left: 14,
-                                                                                          right: 14,
-                                                                                          bottom: 10,
-                                                                                          top: 4,
-                                                                                        ),
-                                                                                        child: Align(
-                                                                                          alignment: Alignment.centerLeft,
-                                                                                          child: _AssistantThinkingBubble(),
-                                                                                        ),
-                                                                                      ),
-                                                                                  ],
-                                                                                );
-                                                                              },
                                                                               scrollToBottomBuilder: (
                                                                                 BuildContext context,
                                                                                 Animation<double> animation,
@@ -26410,6 +28896,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                         ),
                                                                       ),
                                                                     ),
+                                                                    AnimatedSwitcher(
+                                                                      duration: const Duration(
+                                                                          milliseconds:
+                                                                              140),
+                                                                      switchInCurve:
+                                                                          Curves
+                                                                              .easeOutCubic,
+                                                                      switchOutCurve:
+                                                                          Curves
+                                                                              .easeInCubic,
+                                                                      child: _isThinking
+                                                                          ? _buildThinkingPlaceholderBubble()
+                                                                          : const SizedBox
+                                                                              .shrink(),
+                                                                    ),
                                                                   ],
                                                                 );
                                                               },
@@ -26424,43 +28925,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         ),
                                       ),
                                     ),
-                                    if (_chatExpanded &&
-                                        !_feedbackSubmissionInFlight)
-                                      Positioned(
-                                        right: 24,
-                                        bottom: _kChatBarStackHeight +
-                                            chatLift +
-                                            _kChatHistoryHeight -
-                                            20,
-                                        child: DecoratedBox(
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: const Color(0xFF152744)
-                                                .withValues(alpha: 0.96),
-                                            border: Border.all(
-                                              color: Colors.white
-                                                  .withValues(alpha: 0.12),
-                                            ),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black
-                                                    .withValues(alpha: 0.28),
-                                                blurRadius: 16,
-                                                offset: const Offset(0, 8),
-                                              ),
-                                            ],
-                                          ),
-                                          child: IconButton(
-                                            tooltip:
-                                                'Send feedback or bug report',
-                                            onPressed: _openDawFeedbackComposer,
-                                            icon: const Icon(
-                                              Icons.forum_outlined,
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
                                   ],
                                 );
                               },
@@ -26696,6 +29160,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final stepNumber = _safeDawOnboardingStepIndex + 1;
     final stepCount = _kDawTutorialSequence.length;
     final showPrimaryButton = step.mode != _DawTutorialAdvanceMode.interaction;
+    final forceShowPrimaryButtonForStep =
+        step.id == _DawTutorialStepId.chatSend;
+    void onPrimaryPressed() {
+      if (step.mode == _DawTutorialAdvanceMode.done) {
+        unawaited(_finishDawOnboarding());
+        return;
+      }
+      if (step.id == _DawTutorialStepId.chatSend &&
+          !_dawTutorialAwaitingChatReply) {
+        _setDawOnboardingStep(_safeDawOnboardingStepIndex + 2);
+        return;
+      }
+      _advanceDawOnboardingStep();
+    }
+
     final cardAlignment = _dawOnboardingCardAlignment(step.placement);
     final cardPadding =
         step.cardPadding ?? _dawOnboardingCardPadding(step.placement);
@@ -26718,9 +29197,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       ),
       icon: const Icon(Icons.close_rounded, size: 16),
-      label: const Text(
-        'Skip',
-        style: TextStyle(fontWeight: FontWeight.w700),
+      label: Text(
+        _dawTutorialText('skip'),
+        style: const TextStyle(fontWeight: FontWeight.w700),
       ),
     );
 
@@ -26733,9 +29212,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           SafeArea(
             child: LayoutBuilder(
               builder: (context, constraints) {
+                final availableWidth =
+                    constraints.maxWidth - cardPadding.horizontal;
+                final availableHeight =
+                    constraints.maxHeight - cardPadding.vertical;
+                if (availableWidth <= 0 || availableHeight <= 0) {
+                  return const SizedBox.shrink();
+                }
                 final maxWidth = math.min(
                   step.cardMaxWidth ?? 360.0,
-                  constraints.maxWidth,
+                  availableWidth,
                 );
                 return AnimatedAlign(
                   duration: const Duration(milliseconds: 150),
@@ -26748,7 +29234,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
                       curve: Curves.easeOutCubic,
-                      constraints: BoxConstraints(maxWidth: maxWidth),
+                      constraints: BoxConstraints(
+                        maxWidth: maxWidth,
+                        maxHeight: availableHeight,
+                      ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(24),
                         child: BackdropFilter(
@@ -26778,177 +29267,229 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               ],
                             ),
                             padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                            child: AnimatedSize(
-                              duration: const Duration(milliseconds: 150),
-                              curve: Curves.easeOutCubic,
-                              alignment: Alignment.topCenter,
-                              child: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 120),
-                                switchInCurve: Curves.easeOut,
-                                switchOutCurve: Curves.easeIn,
-                                transitionBuilder: (child, animation) {
-                                  final fade = CurvedAnimation(
-                                    parent: animation,
-                                    curve: Curves.easeOut,
-                                  );
-                                  final slide = Tween<Offset>(
-                                    begin: const Offset(0, 0.02),
-                                    end: Offset.zero,
-                                  ).animate(fade);
-                                  return FadeTransition(
-                                    opacity: fade,
-                                    child: SlideTransition(
-                                      position: slide,
-                                      child: child,
-                                    ),
-                                  );
-                                },
-                                child: Column(
-                                  key: ValueKey<_DawTutorialStepId>(step.id),
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 6,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: step.accent
-                                                .withValues(alpha: 0.18),
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                          ),
-                                          child: Text(
-                                            'Step $stepNumber of $stepCount',
-                                            style: theme.textTheme.labelMedium
-                                                ?.copyWith(
-                                              color: step.accent,
-                                              fontWeight: FontWeight.w800,
+                            child: SingleChildScrollView(
+                              physics: const ClampingScrollPhysics(),
+                              child: AnimatedSize(
+                                duration: const Duration(milliseconds: 150),
+                                curve: Curves.easeOutCubic,
+                                alignment: Alignment.topCenter,
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 120),
+                                  switchInCurve: Curves.easeOut,
+                                  switchOutCurve: Curves.easeIn,
+                                  transitionBuilder: (child, animation) {
+                                    final fade = CurvedAnimation(
+                                      parent: animation,
+                                      curve: Curves.easeOut,
+                                    );
+                                    final slide = Tween<Offset>(
+                                      begin: const Offset(0, 0.02),
+                                      end: Offset.zero,
+                                    ).animate(fade);
+                                    return FadeTransition(
+                                      opacity: fade,
+                                      child: SlideTransition(
+                                        position: slide,
+                                        child: child,
+                                      ),
+                                    );
+                                  },
+                                  child: Column(
+                                    key: ValueKey<_DawTutorialStepId>(step.id),
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: step.accent
+                                                  .withValues(alpha: 0.18),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              _dawTutorialText(
+                                                'step_badge',
+                                                params: <String, String>{
+                                                  'current':
+                                                      stepNumber.toString(),
+                                                  'total': stepCount.toString(),
+                                                },
+                                              ),
+                                              style: theme.textTheme.labelMedium
+                                                  ?.copyWith(
+                                                color: step.accent,
+                                                fontWeight: FontWeight.w800,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                        const Spacer(),
-                                        skipButton,
-                                      ],
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Text(
-                                      step.title,
-                                      style:
-                                          theme.textTheme.titleLarge?.copyWith(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w800,
-                                        height: 1.1,
+                                          const Spacer(),
+                                          skipButton,
+                                        ],
                                       ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      step.body,
-                                      style:
-                                          theme.textTheme.bodyMedium?.copyWith(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.82),
-                                        height: 1.38,
-                                      ),
-                                    ),
-                                    if (step.helperText != null) ...[
-                                      const SizedBox(height: 12),
-                                      Container(
-                                        width: double.infinity,
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 10,
+                                      const SizedBox(height: 10),
+                                      Text(
+                                        step.title,
+                                        style: theme.textTheme.titleLarge
+                                            ?.copyWith(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w800,
+                                          height: 1.1,
                                         ),
-                                        decoration: BoxDecoration(
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        step.body,
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
                                           color: Colors.white
-                                              .withValues(alpha: 0.06),
-                                          borderRadius:
-                                              BorderRadius.circular(14),
-                                          border: Border.all(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.08),
-                                          ),
+                                              .withValues(alpha: 0.82),
+                                          height: 1.38,
                                         ),
-                                        child: Row(
-                                          children: [
-                                            if (step.id ==
-                                                _DawTutorialStepId.chatWaiting)
-                                              Padding(
-                                                padding: const EdgeInsets.only(
-                                                    right: 10),
-                                                child: SizedBox(
-                                                  width: 14,
-                                                  height: 14,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                    strokeWidth: 2,
-                                                    valueColor:
-                                                        AlwaysStoppedAnimation<
-                                                            Color>(
-                                                      step.accent,
+                                      ),
+                                      if (step.helperText != null) ...[
+                                        const SizedBox(height: 12),
+                                        Container(
+                                          width: double.infinity,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 10,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white
+                                                .withValues(alpha: 0.06),
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            border: Border.all(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.08),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              if (step.id ==
+                                                  _DawTutorialStepId
+                                                      .chatWaiting)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          right: 10),
+                                                  child: SizedBox(
+                                                    width: 14,
+                                                    height: 14,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                      valueColor:
+                                                          AlwaysStoppedAnimation<
+                                                              Color>(
+                                                        step.accent,
+                                                      ),
                                                     ),
                                                   ),
                                                 ),
-                                              ),
-                                            Expanded(
-                                              child: Text(
-                                                step.helperText!,
-                                                style: theme.textTheme.bodySmall
-                                                    ?.copyWith(
-                                                  color: Colors.white
-                                                      .withValues(alpha: 0.78),
-                                                  fontWeight: FontWeight.w600,
+                                              Expanded(
+                                                child: Text(
+                                                  step.helperText!,
+                                                  style: theme
+                                                      .textTheme.bodySmall
+                                                      ?.copyWith(
+                                                    color: Colors.white
+                                                        .withValues(
+                                                            alpha: 0.78),
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                          ],
+                                              if (forceShowPrimaryButtonForStep)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                    left: 8,
+                                                  ),
+                                                  child: FilledButton(
+                                                    onPressed: onPrimaryPressed,
+                                                    style:
+                                                        FilledButton.styleFrom(
+                                                      backgroundColor:
+                                                          step.accent,
+                                                      foregroundColor:
+                                                          const Color(
+                                                              0xFF081220),
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 8,
+                                                      ),
+                                                      minimumSize:
+                                                          const Size(0, 32),
+                                                      tapTargetSize:
+                                                          MaterialTapTargetSize
+                                                              .shrinkWrap,
+                                                      shape:
+                                                          RoundedRectangleBorder(
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(10),
+                                                      ),
+                                                    ),
+                                                    child: Text(
+                                                      _dawTutorialText('next'),
+                                                      style: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
                                         ),
-                                      ),
-                                    ],
-                                    if (showPrimaryButton) ...[
-                                      const SizedBox(height: 16),
-                                      Align(
-                                        alignment: Alignment.centerRight,
-                                        child: FilledButton(
-                                          onPressed: () {
-                                            if (step.mode ==
-                                                _DawTutorialAdvanceMode.done) {
-                                              unawaited(_finishDawOnboarding());
-                                              return;
-                                            }
-                                            _advanceDawOnboardingStep();
-                                          },
-                                          style: FilledButton.styleFrom(
-                                            backgroundColor: step.accent,
-                                            foregroundColor:
-                                                const Color(0xFF081220),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 18,
-                                              vertical: 11,
+                                      ],
+                                      if (showPrimaryButton &&
+                                          !forceShowPrimaryButtonForStep) ...[
+                                        const SizedBox(height: 16),
+                                        Align(
+                                          alignment: Alignment.centerRight,
+                                          child: FilledButton(
+                                            onPressed: onPrimaryPressed,
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: step.accent,
+                                              foregroundColor:
+                                                  const Color(0xFF081220),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 18,
+                                                vertical: 11,
+                                              ),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(14),
+                                              ),
                                             ),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(14),
+                                            child: Text(
+                                              step.ctaLabel ??
+                                                  (step.mode ==
+                                                          _DawTutorialAdvanceMode
+                                                              .done
+                                                      ? _dawTutorialText('done')
+                                                      : _dawTutorialText(
+                                                          'next')),
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w800,
+                                              ),
                                             ),
                                           ),
-                                          child: Text(
-                                            step.ctaLabel ??
-                                                (step.mode ==
-                                                        _DawTutorialAdvanceMode
-                                                            .done
-                                                    ? 'Done'
-                                                    : 'Next'),
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
                                         ),
-                                      ),
+                                      ],
                                     ],
-                                  ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -27908,16 +30449,12 @@ class ExportSuccessScreen extends StatelessWidget {
               const SizedBox(height: 16),
               ElevatedButton.icon(
                 icon: const Icon(Icons.download),
-                label: Text(L10n.translate(context, 'Save Image')),
+                label: Text(L10n.translate(context, 'Share Image')),
                 onPressed: () async {
-                  final result = await ImageGallerySaver.saveFile(qrImage.path);
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text(result['isSuccess'] == true
-                            ? L10n.translate(context, 'Saved to gallery!')
-                            : L10n.translate(context, 'Failed to save'))),
-                  );
+                  await Share.shareXFiles(<XFile>[
+                    XFile(qrImage.path, name: p.basename(qrImage.path))
+                  ]);
                 },
               ),
             ],

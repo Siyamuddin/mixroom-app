@@ -190,6 +190,7 @@ object JuceBridge {
     @JvmStatic external fun refreshAudioRouteJNI(reason: String)
     @JvmStatic external fun getRecordingPeakJNI(): Double
     @JvmStatic external fun getCurrentDeviceNameJNI(): String
+    @JvmStatic external fun getCurrentOutputDeviceNameJNI(): String
     @JvmStatic external fun startRecordingJNI(path: String, channelStart: Int, channelCount: Int): Boolean
     @JvmStatic external fun stopRecordingJNI()
     @JvmStatic external fun isRecordingJNI(): Boolean

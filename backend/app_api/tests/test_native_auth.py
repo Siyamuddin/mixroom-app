@@ -331,6 +331,36 @@ class NativeAuthFlowTests(unittest.TestCase):
         self.assertEqual(repo.profiles, {})
         self.assertEqual(repo.entitlements, {})
 
+    def test_email_signup_returns_suppressed_when_email_is_suppressed(self) -> None:
+        repo = _FakeRepo()
+
+        with mock.patch.object(
+            native_auth,
+            "send_auth_email",
+            side_effect=native_auth.EmailSuppressedError(
+                email="user@example.com",
+                reason="BOUNCE",
+            ),
+        ), mock.patch.object(
+            native_auth,
+            "_generate_numeric_code",
+            return_value="123456",
+        ):
+            with self.assertRaises(native_auth.AppUserAuthError) as raised:
+                native_auth.register_email_account(
+                    repo,
+                    email="user@example.com",
+                    password="CorrectHorseBatteryStaple1!",
+                    display_name="Native User",
+                )
+
+        self.assertEqual(raised.exception.code, "EMAIL_SUPPRESSED")
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.details.get("reason"), "BOUNCE")
+        self.assertEqual(repo.accounts, {})
+        self.assertEqual(repo.profiles, {})
+        self.assertEqual(repo.entitlements, {})
+
     def test_resend_sign_up_code_restores_previous_code_when_email_send_fails(self) -> None:
         repo = _FakeRepo()
 
@@ -361,6 +391,44 @@ class NativeAuthFlowTests(unittest.TestCase):
                 )
 
         self.assertEqual(raised.exception.code, "EMAIL_DELIVERY_UNAVAILABLE")
+        restored = repo.get_auth_account_by_email("user@example.com")
+        self.assertEqual(restored, original)
+
+    def test_resend_sign_up_code_restores_previous_code_when_email_is_suppressed(self) -> None:
+        repo = _FakeRepo()
+
+        with mock.patch.object(native_auth, "send_auth_email"), mock.patch.object(
+            native_auth,
+            "_generate_numeric_code",
+            side_effect=["123456", "654321"],
+        ):
+            native_auth.register_email_account(
+                repo,
+                email="user@example.com",
+                password="CorrectHorseBatteryStaple1!",
+                display_name="Native User",
+            )
+
+        original = repo.get_auth_account_by_email("user@example.com")
+        self.assertIsNotNone(original)
+
+        with mock.patch.object(
+            native_auth,
+            "send_auth_email",
+            side_effect=native_auth.EmailSuppressedError(
+                email="user@example.com",
+                reason="COMPLAINT",
+            ),
+        ):
+            with self.assertRaises(native_auth.AppUserAuthError) as raised:
+                native_auth.resend_email_verification_code(
+                    repo,
+                    email="user@example.com",
+                )
+
+        self.assertEqual(raised.exception.code, "EMAIL_SUPPRESSED")
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.details.get("reason"), "COMPLAINT")
         restored = repo.get_auth_account_by_email("user@example.com")
         self.assertEqual(restored, original)
 
@@ -403,6 +471,53 @@ class NativeAuthFlowTests(unittest.TestCase):
                 )
 
         self.assertEqual(raised.exception.code, "EMAIL_DELIVERY_UNAVAILABLE")
+        restored = repo.get_auth_account_by_email("user@example.com")
+        self.assertEqual(restored, original)
+
+    def test_password_reset_request_restores_previous_code_when_email_is_suppressed(self) -> None:
+        repo = _FakeRepo()
+
+        with mock.patch.object(native_auth, "send_auth_email"), mock.patch.object(
+            native_auth,
+            "_generate_numeric_code",
+            return_value="123456",
+        ):
+            native_auth.register_email_account(
+                repo,
+                email="user@example.com",
+                password="CorrectHorseBatteryStaple1!",
+                display_name="Native User",
+            )
+            native_auth.confirm_email_account(
+                repo,
+                email="user@example.com",
+                code="123456",
+            )
+
+        original = repo.get_auth_account_by_email("user@example.com")
+        self.assertIsNotNone(original)
+
+        with mock.patch.object(
+            native_auth,
+            "send_auth_email",
+            side_effect=native_auth.EmailSuppressedError(
+                email="user@example.com",
+                reason="BOUNCE",
+            ),
+        ), mock.patch.object(
+            native_auth,
+            "_generate_numeric_code",
+            return_value="654321",
+        ):
+            with self.assertRaises(native_auth.AppUserAuthError) as raised:
+                native_auth.request_password_reset(
+                    repo,
+                    email="user@example.com",
+                )
+
+        self.assertEqual(raised.exception.code, "EMAIL_SUPPRESSED")
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.details.get("reason"), "BOUNCE")
         restored = repo.get_auth_account_by_email("user@example.com")
         self.assertEqual(restored, original)
 

@@ -188,6 +188,24 @@ class CompletePasswordSignInTests(unittest.TestCase):
         self.assertEqual(error.code, "EMAIL_CONFIRMATION_REQUIRED")
         self.assertEqual(error.details.get("email"), "pending@example.com")
 
+    def test_rejects_unknown_non_email_identifier_without_legacy_fallback(self) -> None:
+        repo = _FakeRepo(account=None, profile=None)
+
+        with mock.patch.object(
+            native_auth,
+            "sign_in_legacy_cognito_password",
+        ) as legacy_sign_in:
+            with self.assertRaises(native_auth.AppUserAuthError) as raised:
+                native_auth.complete_password_sign_in(
+                    repo,
+                    identifier="legacy_only_username",
+                    password="correct-password",
+                )
+
+        error = raised.exception
+        self.assertEqual(error.code, "INVALID_CREDENTIALS")
+        legacy_sign_in.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

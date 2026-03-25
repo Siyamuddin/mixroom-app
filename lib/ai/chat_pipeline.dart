@@ -51,6 +51,7 @@ class ChatPipeline {
     String? projectId,
     String? aiFeature,
     bool autoApplyProposals = false,
+    bool bypassLearnedMagnitudes = false,
   }) async {
     final userText = text.trim();
     if (userText.isEmpty) {
@@ -167,7 +168,7 @@ class ChatPipeline {
         if (msg.isEmpty) {
           msg = (llmRes.text?.trim().isNotEmpty == true)
               ? llmRes.text!.trim()
-              : "Done.";
+              : '';
         }
 
         final assistantActions = rawActions
@@ -208,8 +209,9 @@ class ChatPipeline {
           msg,
           meta: <String, dynamic>{
             ...llmMeta,
-            'daw_actions':
-                calls.length == 1 ? calls.first : <String, dynamic>{'calls': calls},
+            'daw_actions': calls.length == 1
+                ? calls.first
+                : <String, dynamic>{'calls': calls},
           },
           assistantActions: assistantActions,
         );
@@ -302,14 +304,17 @@ class ChatPipeline {
       rawMode = rawMode.isEmpty ? 'propose' : rawMode;
 
       final bool strict = rawMode == 'execute';
+      final learnedMagnitudeEnabled =
+          magnitudePredictor.isEnabled && !bypassLearnedMagnitudes;
       final modelMeta = <String, dynamic>{
         ...llmMeta,
         'mode': rawMode,
         'assistant_message': assistantMessage,
         'llm_actions': actions,
         if (calls.length > 1) 'llm_calls': calls,
-        'learned_magnitude_enabled': magnitudePredictor.isEnabled,
+        'learned_magnitude_enabled': learnedMagnitudeEnabled,
         'learned_magnitude_ready': magnitudePredictor.isReady,
+        'learned_magnitude_bypassed': bypassLearnedMagnitudes,
       };
 
       // Collect a merged mix result across all calls
@@ -320,7 +325,7 @@ class ChatPipeline {
 
       aiDebugLog(
         'pipeline',
-        'mix request mode=$rawMode llmActions=${actions.length} learnedEnabled=${magnitudePredictor.isEnabled} learnedReady=${magnitudePredictor.isReady}',
+        'mix request mode=$rawMode llmActions=${actions.length} learnedEnabled=$learnedMagnitudeEnabled learnedReady=${magnitudePredictor.isReady} bypassed=$bypassLearnedMagnitudes',
       );
 
       for (final action in actions) {
@@ -365,31 +370,40 @@ class ChatPipeline {
 
         var resolvedActions = mix.actions;
         if (resolvedActions.isNotEmpty) {
-          final refineResult = await magnitudePredictor.refine(
-            project: project,
-            goal: goal,
-            actions: resolvedActions,
-            strict: strict,
-          );
-          resolvedActions = refineResult.actions;
-          if (refineResult.fallbackUsed) {
+          if (bypassLearnedMagnitudes) {
             fallbackUsed = true;
-            if (refineResult.fallbackReason != null &&
-                refineResult.fallbackReason!.isNotEmpty) {
-              fallbackReasons.add(refineResult.fallbackReason!);
+            fallbackReasons.add('producer_capture_mode');
+            aiDebugLog(
+              'mix-plan',
+              'magnitude refine bypassed -> using heuristic actions only',
+            );
+          } else {
+            final refineResult = await magnitudePredictor.refine(
+              project: project,
+              goal: goal,
+              actions: resolvedActions,
+              strict: strict,
+            );
+            resolvedActions = refineResult.actions;
+            if (refineResult.fallbackUsed) {
+              fallbackUsed = true;
+              if (refineResult.fallbackReason != null &&
+                  refineResult.fallbackReason!.isNotEmpty) {
+                fallbackReasons.add(refineResult.fallbackReason!);
+              }
             }
-          }
-          aiDebugLog(
-            'mix-plan',
-            'magnitude refine -> actions=${resolvedActions.length} fallback=${refineResult.fallbackUsed} reason=${refineResult.fallbackReason ?? '-'}',
-          );
-          if (kAiDebugVerbose && resolvedActions.isNotEmpty) {
-            for (int i = 0; i < resolvedActions.length; i++) {
-              final a = resolvedActions[i];
-              aiDebugLog(
-                'mix-plan',
-                'refined[$i] ${a.type} ${aiDebugShortMap(a.data)}',
-              );
+            aiDebugLog(
+              'mix-plan',
+              'magnitude refine -> actions=${resolvedActions.length} fallback=${refineResult.fallbackUsed} reason=${refineResult.fallbackReason ?? '-'}',
+            );
+            if (kAiDebugVerbose && resolvedActions.isNotEmpty) {
+              for (int i = 0; i < resolvedActions.length; i++) {
+                final a = resolvedActions[i];
+                aiDebugLog(
+                  'mix-plan',
+                  'refined[$i] ${a.type} ${aiDebugShortMap(a.data)}',
+                );
+              }
             }
           }
         }
@@ -414,7 +428,9 @@ class ChatPipeline {
       if (fallbackUsed) {
         aiDebugLog(
           'pipeline',
-          !magnitudePredictor.isEnabled
+          bypassLearnedMagnitudes
+              ? 'learned magnitudes bypassed for producer capture mode; using heuristic actions'
+              : !magnitudePredictor.isEnabled
               ? 'learned magnitudes disabled; using heuristic actions'
               : 'learned magnitudes fallback engaged (${fallbackReasons.join(",")})',
         );

@@ -288,6 +288,9 @@ class JuceAudioEngine {
       return rawList.map((item) {
         return Map<String, dynamic>.from(item as Map);
       }).toList();
+    } on MissingPluginException catch (e) {
+      _logError('getPluginParameters', e);
+      return <Map<String, dynamic>>[];
     } on PlatformException catch (e) {
       _logError('getPluginParameters', e);
       return <Map<String, dynamic>>[];
@@ -308,6 +311,9 @@ class JuceAudioEngine {
       return rawList.map((item) {
         return Map<String, dynamic>.from(item as Map);
       }).toList();
+    } on MissingPluginException catch (e) {
+      _logError('getTrackPluginParameters', e);
+      return <Map<String, dynamic>>[];
     } on PlatformException catch (e) {
       _logError('getTrackPluginParameters', e);
       return <Map<String, dynamic>>[];
@@ -327,6 +333,9 @@ class JuceAudioEngine {
       return rawList.map((item) {
         return Map<String, dynamic>.from(item as Map);
       }).toList();
+    } on MissingPluginException catch (e) {
+      _logError('getMasterPluginParameters', e);
+      return <Map<String, dynamic>>[];
     } on PlatformException catch (e) {
       _logError('getMasterPluginParameters', e);
       return <Map<String, dynamic>>[];
@@ -461,6 +470,9 @@ class JuceAudioEngine {
         normalized.add(out);
       }
       return normalized;
+    } on MissingPluginException catch (e) {
+      _logError('scanPlugins', e);
+      return <Map<String, dynamic>>[];
     } on PlatformException catch (e) {
       _logError('scanPlugins', e);
       return <Map<String, dynamic>>[];
@@ -960,6 +972,8 @@ class JuceAudioEngine {
           details: {'row': row, 'path': path},
         );
       }
+    } on MissingPluginException catch (e) {
+      _logError('insertTrackEffect', e);
     } on PlatformException catch (e) {
       _logError('insertTrackEffect', e);
     }
@@ -971,6 +985,8 @@ class JuceAudioEngine {
         'row': row,
         'effect': effectIndex,
       });
+    } on MissingPluginException catch (e) {
+      _logError('removeTrackEffect', e);
     } on PlatformException catch (e) {
       _logError('removeTrackEffect', e);
     }
@@ -983,6 +999,8 @@ class JuceAudioEngine {
         'from': from,
         'to': to,
       });
+    } on MissingPluginException catch (e) {
+      _logError('reorderTrackEffects', e);
     } on PlatformException catch (e) {
       _logError('reorderTrackEffects', e);
     }
@@ -995,6 +1013,9 @@ class JuceAudioEngine {
         {'row': row},
       );
       return list ?? <String>[];
+    } on MissingPluginException catch (e) {
+      _logError('getTrackEffectsForRow', e);
+      return <String>[];
     } on PlatformException catch (e) {
       _logError('getTrackEffectsForRow', e);
       return <String>[];
@@ -1008,6 +1029,9 @@ class JuceAudioEngine {
         {'row': row},
       );
       return list ?? <String>[];
+    } on MissingPluginException catch (e) {
+      _logError('getTrackEffectIdsForRow', e);
+      return <String>[];
     } on PlatformException catch (e) {
       _logError('getTrackEffectIdsForRow', e);
       return <String>[];
@@ -1021,6 +1045,9 @@ class JuceAudioEngine {
         {'row': row},
       );
       return list ?? <String>[];
+    } on MissingPluginException catch (e) {
+      _logError('getTrackEffectInstanceIdsForRow', e);
+      return <String>[];
     } on PlatformException catch (e) {
       _logError('getTrackEffectInstanceIdsForRow', e);
       return <String>[];
@@ -1036,6 +1063,8 @@ class JuceAudioEngine {
         'paramId': paramId,
         'value': value,
       });
+    } on MissingPluginException catch (e) {
+      _logError('setTrackEffect', e);
     } on PlatformException catch (e) {
       _logError('setTrackEffect', e);
     }
@@ -1049,6 +1078,8 @@ class JuceAudioEngine {
         'effect': effectIndex,
         'bypass': bypass,
       });
+    } on MissingPluginException catch (e) {
+      _logError('bypassRowEffect', e);
     } on PlatformException catch (e) {
       _logError('bypassRowEffect', e);
     }
@@ -1064,6 +1095,9 @@ class JuceAudioEngine {
         },
       );
       return res ?? false;
+    } on MissingPluginException catch (e) {
+      _logError('getRowEffectBypassState', e);
+      return false;
     } on PlatformException catch (e) {
       _logError('getRowEffectBypassState', e);
       return false;
@@ -1204,6 +1238,8 @@ class JuceAudioEngine {
           details: {'path': path},
         );
       }
+    } on MissingPluginException catch (e) {
+      _logError('insertMasterEffect', e);
     } on PlatformException catch (e) {
       _logError('insertMasterEffect', e);
     }
@@ -1214,6 +1250,8 @@ class JuceAudioEngine {
       await _ch.invokeMethod('removeMasterEffect', {
         'effect': effectIndex,
       });
+    } on MissingPluginException catch (e) {
+      _logError('removeMasterEffect', e);
     } on PlatformException catch (e) {
       _logError('removeMasterEffect', e);
     }
@@ -1225,6 +1263,8 @@ class JuceAudioEngine {
         'from': from,
         'to': to,
       });
+    } on MissingPluginException catch (e) {
+      _logError('reorderMasterEffects', e);
     } on PlatformException catch (e) {
       _logError('reorderMasterEffects', e);
     }
@@ -1234,6 +1274,9 @@ class JuceAudioEngine {
     try {
       final list = await _ch.invokeListMethod<String>('getMasterEffects');
       return list ?? <String>[];
+    } on MissingPluginException catch (e) {
+      _logError('getMasterEffects', e);
+      return <String>[];
     } on PlatformException catch (e) {
       _logError('getMasterEffects', e);
       return <String>[];
@@ -1244,6 +1287,9 @@ class JuceAudioEngine {
     try {
       final list = await _ch.invokeListMethod<String>('getMasterEffectIds');
       return list ?? <String>[];
+    } on MissingPluginException catch (e) {
+      _logError('getMasterEffectIds', e);
+      return <String>[];
     } on PlatformException catch (e) {
       _logError('getMasterEffectIds', e);
       return <String>[];
@@ -1258,6 +1304,8 @@ class JuceAudioEngine {
         'paramId': paramId,
         'value': value,
       });
+    } on MissingPluginException catch (e) {
+      _logError('setMasterEffect', e);
     } on PlatformException catch (e) {
       _logError('setMasterEffect', e);
     }
@@ -1269,6 +1317,8 @@ class JuceAudioEngine {
         'effect': effectIndex,
         'bypass': bypass,
       });
+    } on MissingPluginException catch (e) {
+      _logError('bypassMasterEffect', e);
     } on PlatformException catch (e) {
       _logError('bypassMasterEffect', e);
     }
@@ -1281,6 +1331,9 @@ class JuceAudioEngine {
         {'effect': effectIndex},
       );
       return res ?? false;
+    } on MissingPluginException catch (e) {
+      _logError('getMasterEffectBypassState', e);
+      return false;
     } on PlatformException catch (e) {
       _logError('getMasterEffectBypassState', e);
       return false;
@@ -1540,6 +1593,16 @@ class JuceAudioEngine {
       return res ?? '';
     } on PlatformException catch (e) {
       _logError('getCurrentDeviceName', e);
+      return '';
+    }
+  }
+
+  static Future<String> getCurrentOutputDeviceName() async {
+    try {
+      final res = await _ch.invokeMethod<String>('getCurrentOutputDeviceName');
+      return res ?? '';
+    } on PlatformException catch (e) {
+      _logError('getCurrentOutputDeviceName', e);
       return '';
     }
   }

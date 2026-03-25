@@ -111,23 +111,47 @@ class AuthService extends ChangeNotifier {
   Future<http.Response> authorizedRequest(
     Future<http.Response> Function(String token) send,
   ) async {
-    final token = await getIdTokenOrNull();
-    if (token == null || token.trim().isEmpty) {
-      throw StateError('Session token unavailable.');
+    final initialCandidates = await _collectAuthTokenCandidates();
+    if (initialCandidates.isEmpty) {
+      await _expireSessionAndThrow();
     }
 
-    var response = await send(token.trim());
-    if (response.statusCode != 401 && response.statusCode != 403) {
-      return response;
+    http.Response? lastAuthFailure;
+    for (final token in initialCandidates) {
+      final response = await send(token);
+      if (!_isUnauthorizedResponse(response)) {
+        return response;
+      }
+      lastAuthFailure = response;
     }
 
-    final refreshedToken = await refreshIdTokenOrNull();
-    if (refreshedToken == null || refreshedToken.trim().isEmpty) {
-      throw StateError('Session token unavailable.');
+    final refreshedCandidates =
+        await _collectAuthTokenCandidates(forceRefresh: true);
+    if (refreshedCandidates.isEmpty) {
+      if (lastAuthFailure != null) {
+        if (_isUnauthorizedResponse(lastAuthFailure)) {
+          await _expireSessionAndThrow();
+        }
+        return lastAuthFailure;
+      }
+      await _expireSessionAndThrow();
     }
 
-    response = await send(refreshedToken.trim());
-    return response;
+    for (final token in refreshedCandidates) {
+      final response = await send(token);
+      if (!_isUnauthorizedResponse(response)) {
+        return response;
+      }
+      lastAuthFailure = response;
+    }
+
+    if (lastAuthFailure != null) {
+      if (_isUnauthorizedResponse(lastAuthFailure)) {
+        await _expireSessionAndThrow();
+      }
+      return lastAuthFailure;
+    }
+    await _expireSessionAndThrow();
   }
 
   Future<void> _restoreSession() async {
@@ -270,19 +294,21 @@ class AuthService extends ChangeNotifier {
     required String identifier,
     required String password,
   }) async {
-    final response = await _httpClient
-        .post(
-          _subscriptionApiUri('/v1/auth/sign-in'),
-          headers: <String, String>{
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode(<String, dynamic>{
-            'identifier': identifier,
-            'password': password,
-          }),
-        )
-        .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds));
+    final uri = _subscriptionApiUri('/v1/auth/sign-in');
+    final headers = <String, String>{
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    };
+    final body = jsonEncode(<String, dynamic>{
+      'identifier': identifier,
+      'password': password,
+    });
+
+    final response = await _postWithAuthResilience(
+      uri: uri,
+      headers: headers,
+      body: body,
+    );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final backendDetails = _extractBackendErrorDetails(response.body);
@@ -349,6 +375,44 @@ class AuthService extends ChangeNotifier {
         AnalyticsEvents.userLoggedIn(loginMethod: AuthProviderType.email.value),
       ),
     );
+  }
+
+  Future<http.Response> _postWithAuthResilience({
+    required Uri uri,
+    required Map<String, String> headers,
+    required String body,
+  }) async {
+    final timeoutSeconds = AppApiConfig.requestTimeoutSeconds < 20
+        ? 20
+        : AppApiConfig.requestTimeoutSeconds;
+    const maxAttempts = 2;
+
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await _httpClient
+            .post(
+              uri,
+              headers: headers,
+              body: body,
+            )
+            .timeout(Duration(seconds: timeoutSeconds));
+      } on TimeoutException {
+        if (attempt >= maxAttempts) {
+          throw StateError(
+            'Connection is slow right now. Please try again in a moment.',
+          );
+        }
+      } on http.ClientException {
+        if (attempt >= maxAttempts) {
+          throw StateError(
+            'Network error. Please check your connection and try again.',
+          );
+        }
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+    }
+
+    throw StateError('Sign-in failed. Please try again.');
   }
 
   Future<void> registerWithEmail({
@@ -1146,6 +1210,8 @@ class AuthService extends ChangeNotifier {
         return 'Please verify your email first.';
       case 'EMAIL_DELIVERY_UNAVAILABLE':
         return 'Email delivery is not configured yet. Please try again later.';
+      case 'EMAIL_SUPPRESSED':
+        return 'That email address cannot receive verification emails right now. Try another email or contact support.';
       case 'PASSWORD_RESET_UNAVAILABLE':
         return 'Password reset is not available for this account.';
       case 'INVALID_VERIFICATION_CODE':
@@ -1260,6 +1326,66 @@ class AuthService extends ChangeNotifier {
       return safe.toLowerCase();
     }
     return safe.startsWith('@') ? safe.substring(1).trim() : safe;
+  }
+
+  bool _isUnauthorizedResponse(http.Response response) {
+    return response.statusCode == 401 || response.statusCode == 403;
+  }
+
+  Future<List<String>> _collectAuthTokenCandidates({
+    bool forceRefresh = false,
+  }) async {
+    final user = signedInUser;
+    final existingTokens = _tokens;
+    if (user == null || existingTokens == null) {
+      return const <String>[];
+    }
+
+    var activeTokens = existingTokens;
+    try {
+      final refreshed = await _refreshSessionIfNeeded(
+        provider: user.provider,
+        forceRefresh: forceRefresh,
+      );
+      if (refreshed != null) {
+        _setSession(
+          refreshed,
+          provider: user.provider,
+          createdAt: user.createdAt,
+        );
+        await _persistSession();
+        activeTokens = refreshed.tokens;
+      }
+    } catch (_) {
+      if (forceRefresh) {
+        return _tokenCandidates(existingTokens);
+      }
+    }
+
+    return _tokenCandidates(activeTokens);
+  }
+
+  List<String> _tokenCandidates(CognitoTokens tokens) {
+    if (tokens.expiresAtUtc.isBefore(DateTime.now().toUtc())) {
+      return const <String>[];
+    }
+    final idToken = tokens.idToken.trim();
+    final accessToken = tokens.accessToken.trim();
+    final candidates = <String>[];
+    if (idToken.isNotEmpty) {
+      candidates.add(idToken);
+    }
+    if (accessToken.isNotEmpty && accessToken != idToken) {
+      candidates.add(accessToken);
+    }
+    return candidates;
+  }
+
+  Future<Never> _expireSessionAndThrow() async {
+    await _clearSession();
+    await _syncObservabilityUser();
+    notifyListeners();
+    throw StateError('Session expired. Please sign in again.');
   }
 
   _ParsedSocialSignInPayload? _parseSocialSignInPayload(

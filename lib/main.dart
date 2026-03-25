@@ -214,6 +214,25 @@ void _absorbZeroOffsetPointerEvent(PointerEvent event) {
   }
 }
 
+Future<void> _runStartupStep(
+  String name,
+  Future<void> Function() step,
+) async {
+  try {
+    await step();
+  } catch (error, stackTrace) {
+    debugPrint('Startup step failed ($name): $error');
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'mixroom.startup',
+        context: ErrorDescription('while running startup step "$name"'),
+      ),
+    );
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -224,7 +243,9 @@ void main() async {
     listenForNativeLogs();
   }
 
-  await PlatformCapabilities.refresh();
+  await _runStartupStep('platform_capabilities.refresh', () async {
+    await PlatformCapabilities.refresh();
+  });
 
   if (PlatformCapabilities.current.lockPortraitOrientation) {
     await SystemChrome.setPreferredOrientations(
@@ -233,8 +254,12 @@ void main() async {
     await SystemChrome.setPreferredOrientations(<DeviceOrientation>[]);
   }
 
-  await AnalyticsService.instance.initialize();
-  await CrashReportingService.instance.initialize();
+  await _runStartupStep('analytics.initialize', () async {
+    await AnalyticsService.instance.initialize();
+  });
+  await _runStartupStep('crash_reporting.initialize', () async {
+    await CrashReportingService.instance.initialize();
+  });
 
   FlutterError.onError = (details) {
     FlutterError.presentError(details);

@@ -114,7 +114,7 @@ def _claims_match_allowed_source(
 
     if allow_native and issuer == config.APP_AUTH_ISSUER:
         session_id = str(claims.get("sid") or "").strip()
-        return bool(session_id and token_use in ("access", "id"))
+        return bool(session_id and token_use == "access")
 
     if not allow_cognito:
         return False
@@ -178,7 +178,7 @@ def _verify_native_session_claims(token: str) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         raise AppAuthTokenError("Token payload is invalid.")
     token_use = str(payload.get("token_use") or "").strip()
-    if token_use not in ("access", "id"):
+    if token_use != "access":
         raise AppAuthTokenError("Token use is invalid.")
     user_id = str(payload.get("sub") or "").strip()
     session_id = str(payload.get("sid") or "").strip()

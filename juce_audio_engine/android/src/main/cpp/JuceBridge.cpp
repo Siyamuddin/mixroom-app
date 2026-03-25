@@ -665,6 +665,12 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_initialiseEngineJNI(JNIEnv *env,
         juce::Thread::initialiseJUCE(env, juce::juceContext); // context must be set first
         juceThreadInitialized = true;
     }
+    static bool juceGuiInitialized = false;
+    if (!juceGuiInitialized)
+    {
+        juce::initialiseJuce_GUI();
+        juceGuiInitialized = true;
+    }
     __android_log_print(ANDROID_LOG_INFO, "JUCE", "🧠 JNI passed step2");
     JuceEngine::get().initialiseEngine();
 }
@@ -1964,6 +1970,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getCurrentDeviceNameJNI(JNIEnv *
     juce::String name;
     juce::MessageManager::getInstance()->callSync([&]
                                                   { name = JuceEngine::get().getCurrentInputDeviceName(); });
+    return env->NewStringUTF(name.toRawUTF8());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getCurrentOutputDeviceNameJNI(JNIEnv *env, jclass)
+{
+    juce::String name;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { name = JuceEngine::get().getCurrentOutputDeviceName(); });
     return env->NewStringUTF(name.toRawUTF8());
 }
 

@@ -6,6 +6,7 @@ import math
 import re
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Dict
 
 try:
@@ -169,7 +170,7 @@ class FeedbackRepository:
         if screenshot:
             item["screenshot"] = screenshot
 
-        self._table.put_item(Item=item)
+        self._table.put_item(Item=self._coerce_for_dynamodb(item))
         return {
             "submission_id": submission_id,
             "created_at": now,
@@ -431,3 +432,20 @@ class FeedbackRepository:
         if height > 0:
             result["height"] = min(height, 4096)
         return result
+
+    def _coerce_for_dynamodb(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: self._coerce_for_dynamodb(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._coerce_for_dynamodb(item) for item in value]
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                return None
+            # boto3 DynamoDB serializer rejects float; Decimal is required.
+            return Decimal(str(value))
+        return value

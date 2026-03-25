@@ -2,6 +2,9 @@
 -keep class com.arthenica.** { *; }
 -keep class org.ffmpeg.** { *; }
 -keep class com.github.kekdvv.** { *; }   # (group used by ffmpeg_kit_flutter_new)
+# ffmpeg_kit_flutter_new_full uses the repackaged com.antonkarpenko namespace.
+# Keep these classes intact so JNI registration in libffmpegkit_abidetect succeeds.
+-keep class com.antonkarpenko.ffmpegkit.** { *; }
 
 # Preserve all native method signatures used by JNI
 -keepclasseswithmembernames class * {

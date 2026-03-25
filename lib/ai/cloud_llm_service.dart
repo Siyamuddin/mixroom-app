@@ -283,7 +283,7 @@ Rules:
 - Requests like `show me`, `where is`, `where do I`, `where to adjust`, `how do I adjust`, `walk me through`, or `which control` are tutorial requests, not informational chat
 - For tutorial requests, emit a `tutorial` action with drill-down targets instead of a long written explanation
 - For tutorial requests, keep `assistant_message` to one short sentence and let the tutorial steps / halos do the guidance
-- For tutorial requests, prefer short lines like "Showing you in the UI." or "Showing you on the drum track." and avoid "Here's how..." / numbered step text in `assistant_message`
+- `assistant_message` must be model-authored and specific to the user's request; do not use placeholder-only copy like "Showing you in the UI." unless the user explicitly asks for that wording
 - Broad clip-edit commands like "move all clips", "move all clips to measure 3", "move everything", "delete all clips", or "move drums 10 seconds ahead" should default to the obvious broad scope instead of asking about selection
 - If the user already said "all clips", "everything", or another explicit project-wide scope, do NOT ask which track and do NOT narrow it to the selected clips
 - If the user explicitly asked for project-wide clip scope ("all clips", "everything", "whole project", "all tracks"), your `clip_edit.target` MUST use `scope="all"` and MUST NOT use `clip_index`, `clip_indices`, or a selection-only target instead
@@ -1003,7 +1003,7 @@ Top level:
 `{"assistant_message":"...","actions":[{"type":"tutorial|clarify|clip_edit|effect_edit|automation_edit|midi_compose|stem_separate|role_override","data":{...}}]}`
 - keep `assistant_message` to one short sentence
 - if any action is `clarify` or `tutorial`, do not use `assistant_message` to restate the same question or steps
-- if any action is `tutorial`, prefer short copy like `Showing you in the UI.` rather than numbered instructions
+- `assistant_message` must be non-empty and specific; avoid generic placeholders like `Done`, `Applied`, or `Showing you in the UI`
 
 Action data
 - `tutorial`: `{"topic":"...","steps":[{"text":"...","target_id":"...", ...}]}`
@@ -1179,7 +1179,7 @@ Safety and style
               'assistant_message': {
                 'type': 'string',
                 'description':
-                    'Short response shown to the user in their language.',
+                    'Required short response shown to the user in their language; must be specific and non-placeholder.',
               },
               'actions': {
                 'type': 'array',
@@ -1223,7 +1223,7 @@ Safety and style
               'assistant_message': {
                 'type': 'string',
                 'description':
-                    'Single unified message describing the overall mix change',
+                    'Required single unified message describing the overall mix change; must be specific and non-placeholder.',
               },
               'asks_permission': {'type': 'boolean'},
               'actions': {
@@ -1627,9 +1627,9 @@ Safety and style
   String _fallbackAssistantText(String toolName) {
     switch (toolName) {
       case 'mix_model_request':
-        return 'Applied the requested mix changes.';
+        return '';
       case 'daw_assistant_actions':
-        return 'Here are the relevant steps.';
+        return '';
       default:
         return "I couldn't complete that request just now. Please try again.";
     }
@@ -1663,50 +1663,15 @@ Safety and style
     return !_containsNonAsciiLetters(trimmed);
   }
 
-  String _shortTutorialAssistantMessage(
-    Object? value, {
-    required String userText,
-  }) {
-    final raw = _sanitizeUserFacingText(
-      value,
-      toolName: 'daw_assistant_actions',
-      userText: userText,
-    );
-    final normalized = raw.replaceAll('\n', ' ').trim();
-    if (normalized.isEmpty ||
-        normalized == _fallbackAssistantText('daw_assistant_actions')) {
-      return _isProbablyEnglish(userText) ? 'Showing you in the UI.' : raw;
-    }
-
-    final looksVerbose = normalized.contains('\n') ||
-        normalized.length > 60 ||
-        RegExp(r'[.!?].+\S').hasMatch(normalized);
-    if (looksVerbose && _isProbablyEnglish(userText)) {
-      return 'Showing you in the UI.';
-    }
-
-    final firstSentence = normalized
-        .split(RegExp(r'(?<=[.!?])\s+'))
-        .map((s) => s.trim())
-        .firstWhere((s) => s.isNotEmpty, orElse: () => normalized);
-
-    final concise = firstSentence.length > 90
-        ? '${firstSentence.substring(0, 89).trimRight()}.'
-        : firstSentence;
-    if (concise.length <= 90 && !concise.contains('\n')) {
-      return concise;
-    }
-    return _isProbablyEnglish(userText) ? 'Showing you in the UI.' : concise;
-  }
-
   String _sanitizeUserFacingText(
     Object? value, {
     required String toolName,
     required String userText,
+    bool allowFallback = true,
   }) {
     final raw = (value?.toString() ?? '').trim();
     final fallback = _fallbackAssistantText(toolName);
-    if (raw.isEmpty) return fallback;
+    if (raw.isEmpty) return allowFallback ? fallback : '';
 
     final lowered = raw.toLowerCase();
     if (lowered.contains('mix_model_request') ||
@@ -1716,14 +1681,157 @@ Safety and style
         lowered.contains('"row_index"') ||
         raw.startsWith('{') ||
         raw.startsWith('[')) {
-      return fallback;
+      return allowFallback ? fallback : '';
     }
 
     if (_isProbablyEnglish(userText) && _containsNonAsciiLetters(raw)) {
-      return fallback;
+      return allowFallback ? fallback : '';
     }
 
     return raw;
+  }
+
+  static const Set<String> _dawAssistantActionTypes = <String>{
+    'tutorial',
+    'clarify',
+    'clip_edit',
+    'effect_edit',
+    'automation_edit',
+    'midi_compose',
+    'stem_separate',
+    'role_override',
+  };
+
+  int? _parseActionInt(dynamic raw) {
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    if (raw is String) return int.tryParse(raw.trim());
+    return null;
+  }
+
+  int? _parseRowAlias(dynamic raw, {required bool oneBased}) {
+    final v = _parseActionInt(raw);
+    if (v == null) return null;
+    if (oneBased) {
+      if (v == 0) return 0;
+      return v > 0 ? v - 1 : null;
+    }
+    return v >= 0 ? v : null;
+  }
+
+  int? _extractNormalizedRowIndex(
+    Map<String, dynamic> data,
+    Map<String, dynamic> target,
+  ) {
+    int? pick(List<String> keys, {required bool oneBased}) {
+      for (final key in keys) {
+        final fromData = _parseRowAlias(data[key], oneBased: oneBased);
+        if (fromData != null) return fromData;
+        final fromTarget = _parseRowAlias(target[key], oneBased: oneBased);
+        if (fromTarget != null) return fromTarget;
+      }
+      return null;
+    }
+
+    return pick(
+          const ['row_index', 'track_index', 'target_row_index'],
+          oneBased: false,
+        ) ??
+        pick(const ['row', 'target_row'], oneBased: true) ??
+        pick(const ['row_number', 'track_number', 'track'], oneBased: true);
+  }
+
+  String? _extractEffectToken(
+    Map<String, dynamic> data,
+    Map<String, dynamic> target,
+  ) {
+    const keys = <String>[
+      'effect_name',
+      'plugin_name',
+      'effect_name_contains',
+      'plugin',
+      'effect',
+      'fx',
+      'name',
+      'kind',
+    ];
+    for (final key in keys) {
+      final fromData = data[key]?.toString().trim() ?? '';
+      if (fromData.isNotEmpty) return fromData;
+      final fromTarget = target[key]?.toString().trim() ?? '';
+      if (fromTarget.isNotEmpty) return fromTarget;
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _normalizeDawActionData(
+    String actionType,
+    Map<String, dynamic> rawData,
+  ) {
+    final data = Map<String, dynamic>.from(rawData);
+    final rawTarget = data['target'];
+    final target = rawTarget is Map<String, dynamic>
+        ? Map<String, dynamic>.from(rawTarget)
+        : (rawTarget is Map
+            ? Map<String, dynamic>.from(rawTarget)
+            : <String, dynamic>{});
+
+    final scopeValue =
+        (data['scope'] ?? target['scope'])?.toString().trim().toLowerCase();
+    if (scopeValue != null && scopeValue.isNotEmpty) {
+      data['scope'] = scopeValue;
+      target['scope'] = scopeValue;
+    }
+
+    final rowIndex = _extractNormalizedRowIndex(data, target);
+    final isMasterScope = (target['scope']?.toString().trim().toLowerCase() ??
+            data['scope']?.toString().trim().toLowerCase()) ==
+        'master';
+    if (!isMasterScope && rowIndex != null) {
+      data['row_index'] = rowIndex;
+      target['row_index'] = rowIndex;
+    }
+
+    if (actionType == 'effect_edit') {
+      final effectToken = _extractEffectToken(data, target);
+      if (effectToken != null) {
+        target.putIfAbsent('effect_name', () => effectToken);
+        target.putIfAbsent('plugin_name', () => effectToken);
+        target.putIfAbsent('effect_name_contains', () => effectToken);
+        data.putIfAbsent('effect_name', () => effectToken);
+      }
+    }
+
+    if (actionType == 'role_override') {
+      final role = (data['role']?.toString().trim().toLowerCase() ?? '');
+      if (role.isNotEmpty) {
+        data['role'] = role;
+      }
+    }
+
+    data['target'] = target;
+    return data;
+  }
+
+  List<Map<String, dynamic>> _normalizeDawAssistantActions(List rawActions) {
+    final out = <Map<String, dynamic>>[];
+    for (final rawAction in rawActions) {
+      if (rawAction is! Map) continue;
+      final action = Map<String, dynamic>.from(rawAction);
+      final type = (action['type']?.toString().trim().toLowerCase() ?? '');
+      if (!_dawAssistantActionTypes.contains(type)) continue;
+      final rawData = action['data'];
+      final data = rawData is Map<String, dynamic>
+          ? Map<String, dynamic>.from(rawData)
+          : (rawData is Map
+              ? Map<String, dynamic>.from(rawData)
+              : <String, dynamic>{});
+      out.add({
+        'type': type,
+        'data': _normalizeDawActionData(type, data),
+      });
+    }
+    return out;
   }
 
   Map<String, dynamic>? _decodeToolArgs(dynamic raw) {
@@ -1773,19 +1881,16 @@ Safety and style
     if (toolName == 'daw_assistant_actions') {
       final actions = args['actions'];
       if (actions is! List || actions.isEmpty) return null;
-      final hasTutorial = actions.any((action) =>
-          action is Map &&
-          (action['type']?.toString().trim().toLowerCase() == 'tutorial'));
-      args['assistant_message'] = hasTutorial
-          ? _shortTutorialAssistantMessage(
-              args['assistant_message'],
-              userText: userText,
-            )
-          : _sanitizeUserFacingText(
-              args['assistant_message'],
-              toolName: toolName,
-              userText: userText,
-            );
+      final normalizedActions = _normalizeDawAssistantActions(actions);
+      if (normalizedActions.isEmpty) return null;
+      final assistantMessage = _sanitizeUserFacingText(
+        args['assistant_message'],
+        toolName: toolName,
+        userText: userText,
+        allowFallback: false,
+      );
+      args['actions'] = normalizedActions;
+      args['assistant_message'] = assistantMessage;
       return args;
     }
 
@@ -1826,11 +1931,13 @@ Safety and style
         }
       }
 
-      args['assistant_message'] = _sanitizeUserFacingText(
+      final assistantMessage = _sanitizeUserFacingText(
         args['assistant_message'],
         toolName: toolName,
         userText: userText,
+        allowFallback: false,
       );
+      args['assistant_message'] = assistantMessage;
       return args;
     }
 

@@ -29,12 +29,17 @@ class LocaleProvider with ChangeNotifier {
   }
 
   Future<void> _loadLocaleInternal() async {
-    final prefs = await SharedPreferences.getInstance();
-    final storedLanguageCode = prefs.getString(_localePrefKey);
+    SharedPreferences? prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+    } catch (error) {
+      debugPrint('LocaleProvider: shared preferences unavailable: $error');
+    }
+    final storedLanguageCode = prefs?.getString(_localePrefKey);
 
     if (_locale != null) {
       final current = LocaleConfig.resolveLocale(_locale);
-      if (storedLanguageCode != current.languageCode) {
+      if (prefs != null && storedLanguageCode != current.languageCode) {
         await prefs.setString(_localePrefKey, current.languageCode);
       }
       return;
@@ -59,7 +64,7 @@ class LocaleProvider with ChangeNotifier {
     }
 
     _locale = resolvedLocale;
-    if (storedLanguageCode != resolvedLocale.languageCode) {
+    if (prefs != null && storedLanguageCode != resolvedLocale.languageCode) {
       await prefs.setString(_localePrefKey, resolvedLocale.languageCode);
     }
 
@@ -73,7 +78,11 @@ class LocaleProvider with ChangeNotifier {
     _locale = resolvedLocale;
     notifyListeners();
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_localePrefKey, resolvedLocale.languageCode);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_localePrefKey, resolvedLocale.languageCode);
+    } catch (error) {
+      debugPrint('LocaleProvider: unable to persist locale: $error');
+    }
   }
 }

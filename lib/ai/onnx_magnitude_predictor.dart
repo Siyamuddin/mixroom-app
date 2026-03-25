@@ -125,6 +125,7 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
       'onnx-mag',
       'loading assets apply="$applyModelAsset" magnitude="$magnitudeModelAsset"',
     );
+
     try {
       _applySession = await _ort.createSessionFromAsset(applyModelAsset);
       aiDebugLog('onnx-mag', 'apply model loaded');

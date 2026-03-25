@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from typing import Any, Dict
 
@@ -143,7 +144,9 @@ def _identifier_scope(action_name: str, body: Dict[str, Any], claims: Dict[str, 
     elif action_name == "refresh":
         refresh_token = str(body.get("refresh_token") or body.get("refreshToken") or "").strip()
         if refresh_token:
-            scopes["refresh_token"] = refresh_token
+            scopes["refresh_token"] = hashlib.sha256(
+                refresh_token.encode("utf-8")
+            ).hexdigest()
     elif action_name == "resend_email_verification":
         user_id = str(claims.get("sub") or "").strip()
         if user_id:

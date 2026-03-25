@@ -963,6 +963,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "getCurrentDeviceName" -> {
           result.success(JuceBridge.getCurrentDeviceNameJNI())
         }
+        "getCurrentOutputDeviceName" -> {
+          result.success(JuceBridge.getCurrentOutputDeviceNameJNI())
+        }
         "startRecording" -> {
           result.success(
             JuceBridge.startRecordingJNI(

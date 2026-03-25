@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -584,6 +585,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double _kTimelineAutomationLaneExpandedHeight =
       kRowHeight - (_kTimelineAutomationLaneInset * 2.0);
   static const double _kTimelineAutomationLaneCollapsedHeight = 20.0;
+  static const double _kMacWheelZoomSensitivity = 0.0025;
   double _pixelsPerMs = 0.1; // Initial zoom level
   double _scrollOffsetMs = 0.0;
   int _selectedClipIndex = -1;
@@ -737,8 +739,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   final Map<int, VoidCallback> _rowEffectPlaybackRefreshers = {};
   Timer? _headerHoldTimer;
   Timer? _magnetHoldTimer;
-  static const Duration _rowMenuHoldDelay = Duration(milliseconds: 140);
+  static const Duration _rowMenuHoldDelay = Duration(milliseconds: 200);
   static const double _headerTapMoveTolerance = 12.0;
+  static const double _deadZoneHoldMoveTolerance = 4.0;
   static const Duration _magnetHoldDelay = Duration(milliseconds: 160);
   static const List<_QuantizePreset> _quantizePresets = <_QuantizePreset>[
     _QuantizePreset(divisionsPerBar: 1, label: '1/1'),
@@ -755,6 +758,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   bool _headerEligible = false;
   bool _headerMoved = false;
   bool _headerMenuOpened = false;
+  Timer? _deadZoneHoldTimer;
+  int? _deadZonePointer;
+  int? _deadZoneRow;
+  Offset? _deadZoneDownGlobalPos;
+  bool _deadZoneMoved = false;
+  bool _suppressNextTimelineTapAfterDeadZoneHold = false;
   bool _magnetMenuShownFromHold = false;
   Offset? _magnetDownGlobalPos;
   final GlobalKey _externalSampleDropTargetKey = GlobalKey();
@@ -912,12 +921,28 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onTimelinePointerDown(PointerDownEvent event) {
+    _suppressNextTimelineTapAfterDeadZoneHold = false;
     _activeTimelinePointers.add(event.pointer);
+    final isPrimaryLikePointer = event.kind != PointerDeviceKind.mouse ||
+        event.buttons == kPrimaryMouseButton;
+    final deadZoneRow = _deadZoneRowAtLocalPosition(event.localPosition);
+    final canArmDeadZoneHold = isPrimaryLikePointer &&
+        deadZoneRow != null &&
+        (_activeTool == _TimelineTool.pencil ||
+            _activeTool == _TimelineTool.stretch) &&
+        !_selectionBoxActive &&
+        !_hasActiveAutomationClipDrag &&
+        _interactionMode != 'automation';
+    if (canArmDeadZoneHold) {
+      _startDeadZoneRowMenuHold(deadZoneRow, event.pointer, event.position);
+    }
     if (_activeTimelinePointers.length == 1) {
       _singleTouchSelectionSnapshot = _captureGestureSelectionSnapshot();
     }
     final becameMultiTouch = _timelineHasMultiTouch;
     if (becameMultiTouch) {
+      _cancelDeadZoneHoldTimer();
+      _resetDeadZonePointerState();
       setState(() {
         final snapshot = _singleTouchSelectionSnapshot;
         if (snapshot != null) {
@@ -933,8 +958,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       });
       _singleTouchSelectionSnapshot = null;
     }
-    if (event.kind != PointerDeviceKind.mouse ||
-        event.buttons == kPrimaryMouseButton) {
+    if (isPrimaryLikePointer) {
       if (_activeTool == _TimelineTool.paint && !becameMultiTouch) {
         final tappedClipIndex = _getGestureClipIndexAt(event.localPosition);
         if (tappedClipIndex != null) {
@@ -950,7 +974,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       if (_activeTool != _TimelineTool.cut &&
           _activeTool != _TimelineTool.paint &&
           _activeTool != _TimelineTool.delete &&
-          !becameMultiTouch) {
+          !becameMultiTouch &&
+          !canArmDeadZoneHold) {
         _handleTapDown(
           TapDownDetails(
             globalPosition: event.position,
@@ -978,6 +1003,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onTimelinePointerMove(PointerMoveEvent event) {
+    _onDeadZonePointerMove(event);
     if (_activeTool == _TimelineTool.cut) {
       _updateCutPreviewAtLocal(event.localPosition);
       return;
@@ -992,7 +1018,76 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _updateCutPreviewAtLocal(event.localPosition);
   }
 
+  void _onTimelinePointerSignal(PointerSignalEvent event) {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.macOS) return;
+    if (event is! PointerScrollEvent) return;
+
+    final keyboard = HardwareKeyboard.instance;
+    final cmdPressed = keyboard.isMetaPressed;
+    final shiftPressed = keyboard.isShiftPressed;
+    if (!cmdPressed && !shiftPressed) return;
+
+    GestureBinding.instance.pointerSignalResolver.register(
+      event,
+      (PointerSignalEvent resolved) {
+        if (resolved is! PointerScrollEvent) return;
+        if (cmdPressed) {
+          _handleMacTimelineZoom(resolved);
+          return;
+        }
+        if (shiftPressed) {
+          _handleMacTimelineHorizontalScroll(resolved);
+        }
+      },
+    );
+  }
+
+  void _handleMacTimelineZoom(PointerScrollEvent event) {
+    final rawDelta = event.scrollDelta.dy.abs() >= event.scrollDelta.dx.abs()
+        ? event.scrollDelta.dy
+        : event.scrollDelta.dx;
+    if (rawDelta == 0) return;
+
+    bool didZoom = false;
+    setState(() {
+      final zoomFactor = math.exp(-rawDelta * _kMacWheelZoomSensitivity);
+      final newPixelsPerMs = (_pixelsPerMs * zoomFactor).clamp(0.0025, 1.0);
+      if ((newPixelsPerMs - _pixelsPerMs).abs() < 0.0001) return;
+
+      final focalPointPx = event.localPosition.dx;
+      final focalPointMs = _scrollOffsetMs + focalPointPx / _pixelsPerMs;
+      _scrollOffsetMs = focalPointMs - (focalPointPx / newPixelsPerMs);
+      _pixelsPerMs = newPixelsPerMs;
+      _clampScroll();
+      didZoom = true;
+
+      final playheadPx = _getPlayheadPx(context);
+      widget.onScrubRequested(_scrollOffsetMs + playheadPx / _pixelsPerMs);
+    });
+
+    if (didZoom) {
+      widget.onTutorialTimelineZoomed?.call();
+    }
+  }
+
+  void _handleMacTimelineHorizontalScroll(PointerScrollEvent event) {
+    final rawDelta = event.scrollDelta.dx.abs() >= event.scrollDelta.dy.abs()
+        ? event.scrollDelta.dx
+        : event.scrollDelta.dy;
+    if (rawDelta == 0) return;
+
+    setState(() {
+      _scrollOffsetMs += rawDelta / _pixelsPerMs;
+      _clampScroll();
+      final playheadPx = _getPlayheadPx(context);
+      widget.onScrubRequested(_scrollOffsetMs + playheadPx / _pixelsPerMs);
+    });
+
+    widget.onTutorialTimelineScrolled?.call();
+  }
+
   void _onTimelinePointerUp(PointerUpEvent event) {
+    _onDeadZonePointerUp(event);
     _activeTimelinePointers.remove(event.pointer);
     _tentativeClipSelectionActive = false;
     if (_activeTimelinePointers.isEmpty) {
@@ -1042,6 +1137,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onTimelinePointerCancel(PointerCancelEvent event) {
+    _onDeadZonePointerCancel(event);
     _activeTimelinePointers.remove(event.pointer);
     _tentativeClipSelectionActive = false;
     if (_activeTimelinePointers.isEmpty) {
@@ -2596,6 +2692,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   @override
   void dispose() {
     _cancelHeaderHoldTimer();
+    _cancelDeadZoneHoldTimer();
     _cancelMagnetHoldTimer();
     widget.controller?._unbind(
       ensureRowExpanded: ensureRowExpanded,
@@ -2678,6 +2775,80 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_headerPointer != e.pointer) return;
     _cancelHeaderHoldTimer();
     _resetHeaderPointerState();
+  }
+
+  void _cancelDeadZoneHoldTimer() {
+    _deadZoneHoldTimer?.cancel();
+    _deadZoneHoldTimer = null;
+  }
+
+  void _resetDeadZonePointerState() {
+    _deadZonePointer = null;
+    _deadZoneRow = null;
+    _deadZoneDownGlobalPos = null;
+    _deadZoneMoved = false;
+  }
+
+  void _startDeadZoneRowMenuHold(int row, int pointer, Offset globalPosition) {
+    _cancelDeadZoneHoldTimer();
+    _deadZonePointer = pointer;
+    _deadZoneRow = row;
+    _deadZoneDownGlobalPos = globalPosition;
+    _deadZoneMoved = false;
+    _deadZoneHoldTimer = Timer(_rowMenuHoldDelay, () {
+      if (!mounted) return;
+      if (_deadZonePointer != pointer || _deadZoneRow != row) return;
+      if (row < 0 || row >= _rowCount) return;
+      _suppressNextTimelineTapAfterDeadZoneHold = true;
+      _showRowMenu(row);
+      _cancelDeadZoneHoldTimer();
+      _resetDeadZonePointerState();
+    });
+  }
+
+  void _onDeadZonePointerMove(PointerMoveEvent event) {
+    if (_deadZonePointer != event.pointer || _deadZoneMoved) return;
+    final armedRow = _deadZoneRow;
+    if (armedRow == null ||
+        _deadZoneRowAtLocalPosition(event.localPosition) != armedRow) {
+      _deadZoneMoved = true;
+      _cancelDeadZoneHoldTimer();
+      return;
+    }
+    final down = _deadZoneDownGlobalPos;
+    if (down == null) return;
+    final movedBy = (event.position - down).distance;
+    if (movedBy <= _deadZoneHoldMoveTolerance) return;
+    _deadZoneMoved = true;
+    _cancelDeadZoneHoldTimer();
+  }
+
+  void _onDeadZonePointerUp(PointerUpEvent event) {
+    if (_deadZonePointer != event.pointer) return;
+    _cancelDeadZoneHoldTimer();
+    _resetDeadZonePointerState();
+  }
+
+  void _onDeadZonePointerCancel(PointerCancelEvent event) {
+    if (_deadZonePointer != event.pointer) return;
+    _cancelDeadZoneHoldTimer();
+    _resetDeadZonePointerState();
+  }
+
+  int? _deadZoneRowAtLocalPosition(Offset localPos) {
+    if (_rowCount <= 0) return null;
+    final zeroMsX = (0 - _scrollOffsetMs) * _pixelsPerMs;
+    if (zeroMsX <= 12) return null;
+    final viewportWidth = _getViewportWidth(context);
+    final maxWidth = math.min(zeroMsX - 8, viewportWidth - 8);
+    if (maxWidth <= 0) return null;
+    final row = _rowForLocalY(localPos.dy);
+    if (row == null || row < 0 || row >= _rowCount) return null;
+    final top = _rowYPositions[row] + 8;
+    const bubbleHeight = 28.0;
+    final bubbleRect = Rect.fromLTWH(6.0, top, maxWidth, bubbleHeight);
+    if (!bubbleRect.contains(localPos)) return null;
+    return row;
   }
 
   void _handleHeaderTapSelectionAndExpand(int tappedRow) {
@@ -5447,6 +5618,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                     onPointerDown: _onTimelinePointerDown,
                                     onPointerMove: _onTimelinePointerMove,
                                     onPointerHover: _onTimelinePointerHover,
+                                    onPointerSignal: _onTimelinePointerSignal,
                                     onPointerUp: _onTimelinePointerUp,
                                     onPointerCancel: _onTimelinePointerCancel,
                                     child: GestureDetector(
@@ -8534,8 +8706,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final clip = widget.clips[_trimClipIndex!];
     final fullDuration = widget.getFullDurationMs(clip);
     final isReversed = clip.isReversed;
-    final timelineScale = (_trimTimelineScaleValue ?? 1.0)
-        .clamp(0.0001, double.infinity);
+    final timelineScale =
+        (_trimTimelineScaleValue ?? 1.0).clamp(0.0001, double.infinity);
     const minRawTrimMs = 50.0;
     final minTimelineTrimMs = minRawTrimMs * timelineScale;
     final originalStartMs = _trimOriginalStartMs!;
@@ -9059,6 +9231,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onTimelineTap(TapUpDetails details) {
+    if (_suppressNextTimelineTapAfterDeadZoneHold) {
+      _suppressNextTimelineTapAfterDeadZoneHold = false;
+      return;
+    }
     if (_pendingDrag) {
       setState(_clearPendingClipTapState);
     }

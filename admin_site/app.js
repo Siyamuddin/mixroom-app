@@ -2418,7 +2418,7 @@ function buildFeedbackScreenshotSrc(screenshot) {
   }
 
   const mimeType = `${screenshot.mime_type || screenshot.mimeType || ""}`.trim();
-  const base64Data = `${screenshot.base64_data || screenshot.base64Data || ""}`.trim();
+  const base64Data = `${screenshot.data_base64 || screenshot.base64_data || screenshot.base64Data || ""}`.trim();
   if (!mimeType || !base64Data) {
     return "";
   }

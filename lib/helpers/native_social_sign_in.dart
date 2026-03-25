@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import 'package:mixroom/config/native_social_auth_config.dart';
@@ -70,12 +71,21 @@ class NativeSocialSignInClient {
     }
 
     try {
+      final nonce = generateNonce();
+      final state = generateNonce(length: 16);
       final credential = await SignInWithApple.getAppleIDCredential(
         scopes: const <AppleIDAuthorizationScopes>[
           AppleIDAuthorizationScopes.email,
           AppleIDAuthorizationScopes.fullName,
         ],
+        nonce: nonce,
+        state: state,
       );
+      if ((credential.state ?? '').trim() != state) {
+        throw const _NativeSocialSignInException(
+          'Apple sign-in state validation failed. Please try again.',
+        );
+      }
       final identityToken = credential.identityToken?.trim() ?? '';
       if (identityToken.isEmpty) {
         throw const _NativeSocialSignInException(
@@ -93,6 +103,7 @@ class NativeSocialSignInClient {
         body: <String, dynamic>{
           'provider': AuthProviderType.apple.value,
           'id_token': identityToken,
+          'nonce': nonce,
           'email': (credential.email ?? '').trim().toLowerCase(),
           'display_name': displayName,
         },
@@ -114,10 +125,7 @@ class NativeSocialSignInClient {
     await _ensureKakaoInitialized();
 
     try {
-      final hasKakaoTalk = await isKakaoTalkInstalled();
-      var token = hasKakaoTalk
-          ? await UserApi.instance.loginWithKakaoTalk()
-          : await UserApi.instance.loginWithKakaoAccount();
+      var token = await _startKakaoSignIn();
       var user = await UserApi.instance.me();
       var kakaoAccount = user.kakaoAccount;
       if (((kakaoAccount?.email ?? '').trim().isEmpty ||
@@ -140,15 +148,14 @@ class NativeSocialSignInClient {
           'display_name': (profile?.nickname ?? '').trim(),
         },
       );
-    } on KakaoException catch (e) {
-      final message =
-          (e is KakaoClientException ? e.msg : (e.message ?? '')).trim();
-      if (message.toLowerCase().contains('cancel')) {
+    } catch (e) {
+      final message = _extractKakaoErrorMessage(e);
+      if (_isKakaoCancelledError(e, message)) {
         throw const _NativeSocialSignInException(
             'Social sign-in was cancelled.');
       }
       throw _NativeSocialSignInException(
-        message.isEmpty ? 'Kakao sign-in could not be completed.' : message,
+        _friendlyKakaoErrorMessage(e, rawMessage: message),
       );
     }
   }
@@ -196,6 +203,74 @@ class NativeSocialSignInClient {
       customScheme: 'kakao${NativeSocialAuthConfig.effectiveKakaoNativeAppKey}',
     );
     _kakaoInitialized = true;
+  }
+
+  static Future<OAuthToken> _startKakaoSignIn() async {
+    final hasKakaoTalk = await isKakaoTalkInstalled();
+    if (!hasKakaoTalk) {
+      return UserApi.instance.loginWithKakaoAccount();
+    }
+    try {
+      return await UserApi.instance.loginWithKakaoTalk();
+    } catch (e) {
+      if (_shouldFallbackToKakaoAccountLogin(e)) {
+        return UserApi.instance.loginWithKakaoAccount();
+      }
+      rethrow;
+    }
+  }
+
+  static bool _shouldFallbackToKakaoAccountLogin(Object error) {
+    final code = _extractKakaoErrorCode(error).toLowerCase();
+    final message = _extractKakaoErrorMessage(error).toLowerCase();
+    final combined = '$code $message';
+    return combined.contains('not connected to kakao account') ||
+        combined.contains('kakaotalk is installed but not connected') ||
+        combined.contains('notsupporterror');
+  }
+
+  static bool _isKakaoCancelledError(Object error, String message) {
+    final code = _extractKakaoErrorCode(error).toLowerCase();
+    final normalizedMessage = message.toLowerCase();
+    return code.contains('cancel') || normalizedMessage.contains('cancel');
+  }
+
+  static String _friendlyKakaoErrorMessage(
+    Object error, {
+    required String rawMessage,
+  }) {
+    if (_shouldFallbackToKakaoAccountLogin(error)) {
+      return 'KakaoTalk is installed but no Kakao account is signed in on this device. '
+          'Sign in to KakaoTalk and try again, or continue with Kakao account sign-in.';
+    }
+    if (rawMessage.isEmpty) {
+      return 'Kakao sign-in could not be completed.';
+    }
+    return rawMessage;
+  }
+
+  static String _extractKakaoErrorCode(Object error) {
+    if (error is PlatformException) {
+      return error.code.trim();
+    }
+    return '';
+  }
+
+  static String _extractKakaoErrorMessage(Object error) {
+    if (error is KakaoClientException) {
+      return error.msg.trim();
+    }
+    if (error is KakaoException) {
+      return (error.message ?? '').trim();
+    }
+    if (error is PlatformException) {
+      final parts = <String>[
+        error.message?.trim() ?? '',
+        error.details?.toString().trim() ?? '',
+      ].where((part) => part.isNotEmpty).toList();
+      return parts.join(' ').trim();
+    }
+    return '';
   }
 }
 

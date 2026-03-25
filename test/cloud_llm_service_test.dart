@@ -66,8 +66,7 @@ void main() {
       );
 
       expect(result.toolName, 'mix_model_request');
-      expect(result.toolArgs?['assistant_message'],
-          'Applied the requested mix changes.');
+      expect(result.toolArgs?['assistant_message'], isEmpty);
       final action = (result.toolArgs?['actions'] as List).first as Map;
       final goal = action['goal'] as Map;
       final intents = goal['intents'] as List;
@@ -113,7 +112,8 @@ void main() {
       );
     });
 
-    test('compresses tutorial assistant text to a short one-liner', () async {
+    test('preserves specific tutorial assistant text (no placeholder rewrite)',
+        () async {
       final client = MockClient((_) async {
         return http.Response(
           jsonEncode({
@@ -162,8 +162,10 @@ void main() {
       );
 
       expect(result.toolName, 'daw_assistant_actions');
-      expect(result.toolArgs?['assistant_message'], 'Showing you in the UI.');
-      expect(result.text, 'Showing you in the UI.');
+      const expected =
+          "Here's how to adjust the reverb on the drums track. First open the drums effects tab, then find reverb, then open its controls and adjust the mix knob.";
+      expect(result.toolArgs?['assistant_message'], expected);
+      expect(result.text, expected);
     });
 
     test('aggregates multiple mix_model_request function calls', () async {
@@ -373,7 +375,9 @@ void main() {
       );
 
       final surfacedAssistantText =
-          result.toolArgs?['assistant_message']?.toString() ?? result.text ?? '';
+          result.toolArgs?['assistant_message']?.toString() ??
+              result.text ??
+              '';
       expect(surfacedAssistantText, isNot('드럼 트랙에 리버브를 추가했습니다.'));
       expect(surfacedAssistantText.contains('드럼 트랙'), isFalse);
     });
@@ -650,7 +654,8 @@ void main() {
       expect(result.meta?['soft_error']?['usage_refunded'], isTrue);
     });
 
-    test('retries proxy requests once after auth rejection with a refreshed token',
+    test(
+        'retries proxy requests once after auth rejection with a refreshed token',
         () async {
       final seenTokens = <String>[];
       final client = MockClient((request) async {

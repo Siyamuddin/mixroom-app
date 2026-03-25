@@ -66,6 +66,7 @@ class _AuthGateState extends State<AuthGate> {
                   !appUser.isInitialized,
               isResolvingPostSignIn: appUser.isResolvingPostSignIn,
               hasPendingSignupProfileSync: false,
+              onSignOut: auth.isBusy ? null : auth.signOut,
             );
             stageKey = 'profile_loading';
           } else if (_needsRequiredProfile(
@@ -86,6 +87,7 @@ class _AuthGateState extends State<AuthGate> {
               busy: appUser.isLoading,
               isResolvingPostSignIn: false,
               hasPendingSignupProfileSync: true,
+              onSignOut: auth.isBusy ? null : auth.signOut,
             );
             stageKey = 'pending_signup_sync';
           } else {
@@ -708,11 +710,13 @@ class _SignupCompletionGate extends StatelessWidget {
     required this.busy,
     required this.isResolvingPostSignIn,
     required this.hasPendingSignupProfileSync,
+    required this.onSignOut,
   });
 
   final bool busy;
   final bool isResolvingPostSignIn;
   final bool hasPendingSignupProfileSync;
+  final Future<void> Function()? onSignOut;
 
   @override
   Widget build(BuildContext context) {
@@ -749,6 +753,13 @@ class _SignupCompletionGate extends StatelessWidget {
                   style: theme.textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
+                if (onSignOut != null) ...[
+                  const SizedBox(height: 14),
+                  TextButton(
+                    onPressed: busy ? null : onSignOut,
+                    child: const Text('Sign out'),
+                  ),
+                ],
               ],
             ),
           ),

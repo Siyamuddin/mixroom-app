@@ -93,6 +93,9 @@ class AppUserService extends ChangeNotifier {
       );
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          throw StateError('Session expired. Please sign in again.');
+        }
         throw StateError(
           _extractErrorMessage(
                 response.body,
@@ -179,6 +182,9 @@ class AppUserService extends ChangeNotifier {
       );
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          throw StateError('Session expired. Please sign in again.');
+        }
         throw StateError(
           _extractErrorMessage(
                 response.body,
@@ -274,6 +280,9 @@ class AppUserService extends ChangeNotifier {
     );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        throw StateError('Session expired. Please sign in again.');
+      }
       throw StateError(
         _extractErrorMessage(
               response.body,
@@ -402,7 +411,15 @@ class AppUserService extends ChangeNotifier {
       final decoded = jsonDecode(rawBody);
       if (decoded is Map) {
         final message = decoded['error']?.toString().trim() ?? '';
-        if (message.isNotEmpty) return message;
+        if (message.isNotEmpty) {
+          final normalized = message.toLowerCase();
+          if (normalized == 'unauthorized' ||
+              normalized.contains('not authorized') ||
+              normalized.contains('forbidden')) {
+            return 'Session expired. Please sign in again.';
+          }
+          return message;
+        }
       }
     } catch (_) {
       // Ignore parse failures and use fallback.
@@ -438,6 +455,9 @@ class AppUserService extends ChangeNotifier {
       _lastSyncedAtUtc = null;
       _lastError = null;
       _isInitialized = false;
+      // Reset in-flight signup/auth resolution markers when account context changes.
+      _hasPendingSignupProfileSync = false;
+      _isResolvingPostSignIn = false;
       notifyListeners();
       unawaited(
         _loadPendingSignupProfileSyncFlag(user.email)
@@ -449,6 +469,8 @@ class AppUserService extends ChangeNotifier {
     if (_boundSignature != signature) {
       _boundSignature = signature;
       _setFallbackFromAuth(user, notify: false);
+      // Signature drift can happen during auth transitions; avoid stale loading gates.
+      _isResolvingPostSignIn = false;
       notifyListeners();
       unawaited(refresh(force: true));
       return;
@@ -621,6 +643,11 @@ class AppUserService extends ChangeNotifier {
       );
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          _lastError =
+              'Session expired. Please sign in again and finish account setup.';
+          return null;
+        }
         _lastError = _extractErrorMessage(
               response.body,
               fallback: 'Failed to finish creating your account.',

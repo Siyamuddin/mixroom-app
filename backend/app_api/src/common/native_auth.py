@@ -25,7 +25,7 @@ from .cognito_legacy_auth import (
     sign_in_with_password as sign_in_legacy_cognito_password,
     verify_cognito_token,
 )
-from .email_delivery import EmailDeliveryError, send_auth_email
+from .email_delivery import EmailDeliveryError, EmailSuppressedError, send_auth_email
 from .repository import BillingRepository
 from .models import free_entitlement
 from .users import (
@@ -304,6 +304,7 @@ def complete_password_sign_in(
 ) -> Dict[str, Any]:
     safe_identifier = str(identifier or "").strip()
     safe_password = str(password or "")
+    identifier_is_email = _looks_like_email(safe_identifier)
     if not safe_identifier or not safe_password:
         raise AppUserAuthError(
             "Identifier and password are required.",
@@ -312,6 +313,7 @@ def complete_password_sign_in(
         )
 
     resolved = resolve_account_by_identifier(repo, safe_identifier)
+    legacy_identifier = safe_identifier
     if resolved is not None:
         account = resolved["account"]
         profile = resolved["profile"]
@@ -337,17 +339,23 @@ def complete_password_sign_in(
 
         if not _can_attempt_legacy_cognito_password_sign_in(account):
             raise _invalid_credentials()
+        # Legacy Cognito accepts a separate internal USERNAME. When signing in
+        # via app username, force fallback auth to use the account email so
+        # arbitrary legacy usernames cannot be used as login identifiers.
+        legacy_identifier = str(account.get("email") or "").strip().lower() or safe_identifier
+    elif not identifier_is_email:
+        raise _invalid_credentials()
 
     try:
         legacy_claims = sign_in_legacy_cognito_password(
-            identifier=safe_identifier,
+            identifier=legacy_identifier,
             password=safe_password,
         )
     except CognitoLegacyAuthError as exc:
         if exc.code == "UserNotConfirmedException":
             legacy_user = (
-                find_legacy_cognito_user_by_email(safe_identifier)
-                if _looks_like_email(safe_identifier)
+                find_legacy_cognito_user_by_email(legacy_identifier)
+                if _looks_like_email(legacy_identifier)
                 else None
             )
             if legacy_user:
@@ -1392,6 +1400,14 @@ def _send_verification_email(*, email: str, code: str, display_name: str) -> Non
                 "If you did not request this, you can ignore this email."
             ),
         )
+    except EmailSuppressedError as exc:
+        details = {"reason": exc.reason} if exc.reason else None
+        raise AppUserAuthError(
+            "This email address cannot receive verification emails right now.",
+            code="EMAIL_SUPPRESSED",
+            status_code=409,
+            details=details,
+        ) from exc
     except EmailDeliveryError as exc:
         raise AppUserAuthError(
             "Email delivery is not configured.",
@@ -1413,6 +1429,14 @@ def _send_password_reset_email(*, email: str, code: str, display_name: str) -> N
                 "If you did not request this, you can ignore this email."
             ),
         )
+    except EmailSuppressedError as exc:
+        details = {"reason": exc.reason} if exc.reason else None
+        raise AppUserAuthError(
+            "This email address cannot receive password reset emails right now.",
+            code="EMAIL_SUPPRESSED",
+            status_code=409,
+            details=details,
+        ) from exc
     except EmailDeliveryError as exc:
         raise AppUserAuthError(
             "Email delivery is not configured.",

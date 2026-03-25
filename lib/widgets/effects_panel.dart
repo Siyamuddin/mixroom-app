@@ -16,6 +16,10 @@ import 'package:juce_audio_engine/juce_audio_engine.dart';
 
 const int maxNumEffects = 10;
 
+bool _shouldShowDefaultReorderHandles(BuildContext context) {
+  return Theme.of(context).platform != TargetPlatform.macOS;
+}
+
 List<String> _buildStableEffectKeys(List<String> effectIds) {
   final counts = <String, int>{};
   final keys = <String>[];
@@ -406,7 +410,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     }
     if (action != 'automate') return;
     _triggerHalos(haloKeys);
-    await widget.onRequestAutomateParameter!(
+    final requestAutomateParameter = widget.onRequestAutomateParameter;
+    if (requestAutomateParameter == null) return;
+    await requestAutomateParameter(
       widget.rowIndex,
       effectIndex,
       effectName,
@@ -1521,6 +1527,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 child: ReorderableListView(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
+                  buildDefaultDragHandles:
+                      _shouldShowDefaultReorderHandles(context),
                   padding: EdgeInsets.zero,
                   children: [
                     for (int i = 0; i < _effects.length; i++)
@@ -1891,7 +1899,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   // =========================
 
   Future<void> _showAddEffectModal() async {
-    final plugins = await widget.scanPlugins();
+    List<Map<String, dynamic>> plugins;
+    try {
+      plugins = await widget.scanPlugins();
+    } catch (_) {
+      plugins = const <Map<String, dynamic>>[];
+    }
     // const allowedInBasic = ['Reverb', 'EQ Parametric', 'EQ 3-Band', 'Delay', 'Distortion', 'De-Esser', 'Compressor'];
     const allowedInBasic = [
       "Gain",
@@ -2029,13 +2042,30 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     },
                   ),
                   ListView.separated(
-                    itemCount: plugins.length,
+                    itemCount: plugins.isEmpty ? 1 : plugins.length,
                     separatorBuilder: (_, __) => Divider(
                       height: 1,
                       thickness: 1,
                       color: Colors.white.withOpacity(0.07),
                     ),
                     itemBuilder: (context, i) {
+                      if (plugins.isEmpty) {
+                        return ListTile(
+                          dense: true,
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 10),
+                          title: Text(
+                            L10n.translate(context, 'No external plugins found'),
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.72),
+                              fontSize: 13.0,
+                            ),
+                          ),
+                        );
+                      }
                       final meta = plugins[i];
                       final path = (meta['id'] ?? '').toString();
                       if (path.isEmpty) return const SizedBox.shrink();
@@ -2218,13 +2248,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         (pB4Q?['value'] as num?)?.toDouble() ?? 1.0,
       ];
 
-      _EqFaderSpec? buildEqFader(
-        Map<String, dynamic>? param, {
+      _EqFaderSpec buildEqFader(
+        Map<String, dynamic> param, {
         required String label,
         required String unit,
         bool logarithmic = false,
       }) {
-        if (param == null) return null;
         final name = param['name'] as String;
         return _EqFaderSpec(
           label: label,
@@ -2242,8 +2271,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             _setTrackEffectParam(widget.rowIndex, idx, name, v);
           },
           onChangeEnd: (v) {
-            final startValue = _EQParamStartValue;
-            if (startValue == null) return;
+            final startValue =
+                _EQParamStartValue ?? (param['value'] as num).toDouble();
             _commitTrackEffectParam(
               widget.rowIndex,
               idx,
@@ -2272,10 +2301,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       }
 
       final gainFaders = <_EqFaderSpec>[
-        if (pB1 != null) buildEqFader(pB1, label: 'Band 1', unit: 'dB')!,
-        if (pB2 != null) buildEqFader(pB2, label: 'Band 2', unit: 'dB')!,
-        if (pB3 != null) buildEqFader(pB3, label: 'Band 3', unit: 'dB')!,
-        if (pB4 != null) buildEqFader(pB4, label: 'Band 4', unit: 'dB')!,
+        if (pB1 != null) buildEqFader(pB1, label: 'Band 1', unit: 'dB'),
+        if (pB2 != null) buildEqFader(pB2, label: 'Band 2', unit: 'dB'),
+        if (pB3 != null) buildEqFader(pB3, label: 'Band 3', unit: 'dB'),
+        if (pB4 != null) buildEqFader(pB4, label: 'Band 4', unit: 'dB'),
       ];
       final frequencyFaders = <_EqFaderSpec>[
         if (pB1Freq != null)
@@ -2284,34 +2313,34 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             label: 'Band 1',
             unit: 'Hz',
             logarithmic: true,
-          )!,
+          ),
         if (pB2Freq != null)
           buildEqFader(
             pB2Freq,
             label: 'Band 2',
             unit: 'Hz',
             logarithmic: true,
-          )!,
+          ),
         if (pB3Freq != null)
           buildEqFader(
             pB3Freq,
             label: 'Band 3',
             unit: 'Hz',
             logarithmic: true,
-          )!,
+          ),
         if (pB4Freq != null)
           buildEqFader(
             pB4Freq,
             label: 'Band 4',
             unit: 'Hz',
             logarithmic: true,
-          )!,
+          ),
       ];
       final qFaders = <_EqFaderSpec>[
-        if (pB1Q != null) buildEqFader(pB1Q, label: 'Band 1', unit: 'Q')!,
-        if (pB2Q != null) buildEqFader(pB2Q, label: 'Band 2', unit: 'Q')!,
-        if (pB3Q != null) buildEqFader(pB3Q, label: 'Band 3', unit: 'Q')!,
-        if (pB4Q != null) buildEqFader(pB4Q, label: 'Band 4', unit: 'Q')!,
+        if (pB1Q != null) buildEqFader(pB1Q, label: 'Band 1', unit: 'Q'),
+        if (pB2Q != null) buildEqFader(pB2Q, label: 'Band 2', unit: 'Q'),
+        if (pB3Q != null) buildEqFader(pB3Q, label: 'Band 3', unit: 'Q'),
+        if (pB4Q != null) buildEqFader(pB4Q, label: 'Band 4', unit: 'Q'),
       ];
       final hpfSlopeChoices =
           (pHPFSlope != null && pHPFSlope['type'] == 'choice')
@@ -2349,8 +2378,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                   widget.rowIndex, idx, pHPF['name'] as String, v);
             },
             onChangeEnd: (v) {
-              final startValue = _EQParamStartValue;
-              if (startValue == null) return;
+              final startValue =
+                  _EQParamStartValue ?? (pHPF['value'] as num).toDouble();
               _commitTrackEffectParam(
                 widget.rowIndex,
                 idx,
@@ -2414,8 +2443,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                   widget.rowIndex, idx, pLPF['name'] as String, v);
             },
             onChangeEnd: (v) {
-              final startValue = _EQParamStartValue;
-              if (startValue == null) return;
+              final startValue =
+                  _EQParamStartValue ?? (pLPF['value'] as num).toDouble();
               _commitTrackEffectParam(
                 widget.rowIndex,
                 idx,
@@ -2748,11 +2777,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                             (pLow['value'] as num).toDouble();
                                       },
                                       onChangeEnd: (v) {
+                                        final startValue = _EQParamStartValue ??
+                                            (pLow['value'] as num).toDouble();
                                         _commitTrackEffectParam(
                                           widget.rowIndex,
                                           idx,
                                           pLow['name'] as String,
-                                          _EQParamStartValue!,
+                                          startValue,
                                           v,
                                         );
                                         _EQParamStartValue = null;
@@ -2821,11 +2852,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                             (pMid['value'] as num).toDouble();
                                       },
                                       onChangeEnd: (v) {
+                                        final startValue = _EQParamStartValue ??
+                                            (pMid['value'] as num).toDouble();
                                         _commitTrackEffectParam(
                                           widget.rowIndex,
                                           idx,
                                           pMid['name'] as String,
-                                          _EQParamStartValue!,
+                                          startValue,
                                           v,
                                         );
                                         _EQParamStartValue = null;
@@ -2895,11 +2928,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                             (pHigh['value'] as num).toDouble();
                                       },
                                       onChangeEnd: (v) {
+                                        final startValue = _EQParamStartValue ??
+                                            (pHigh['value'] as num).toDouble();
                                         _commitTrackEffectParam(
                                           widget.rowIndex,
                                           idx,
                                           pHigh['name'] as String,
-                                          _EQParamStartValue!,
+                                          startValue,
                                           v,
                                         );
                                         _EQParamStartValue = null;
@@ -3537,7 +3572,9 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     }
     if (action != 'automate') return;
     _triggerHalos(haloKeys);
-    await widget.onRequestAutomateParameter!(
+    final requestAutomateParameter = widget.onRequestAutomateParameter;
+    if (requestAutomateParameter == null) return;
+    await requestAutomateParameter(
       effectIndex,
       effectName,
       paramId,
@@ -4230,6 +4267,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             child: ReorderableListView(
               // shrinkWrap: true,
               // physics: const NeverScrollableScrollPhysics(),
+              buildDefaultDragHandles:
+                  _shouldShowDefaultReorderHandles(context),
               padding: EdgeInsets.zero,
               children: [
                 for (int i = 0; i < _effects.length; i++)
@@ -4544,7 +4583,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   // =========================
 
   Future<void> _showAddEffectModal() async {
-    final plugins = await widget.scanPlugins();
+    List<Map<String, dynamic>> plugins;
+    try {
+      plugins = await widget.scanPlugins();
+    } catch (_) {
+      plugins = const <Map<String, dynamic>>[];
+    }
     const allowedInBasic = [
       "Gain",
       "EQ 3-Band",
@@ -4671,13 +4715,30 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                     },
                   ),
                   ListView.separated(
-                    itemCount: plugins.length,
+                    itemCount: plugins.isEmpty ? 1 : plugins.length,
                     separatorBuilder: (_, __) => Divider(
                       height: 1,
                       thickness: 1,
                       color: Colors.white.withOpacity(0.07),
                     ),
                     itemBuilder: (context, i) {
+                      if (plugins.isEmpty) {
+                        return ListTile(
+                          dense: true,
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 10),
+                          title: Text(
+                            L10n.translate(context, 'No external plugins found'),
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.72),
+                              fontSize: 13.0,
+                            ),
+                          ),
+                        );
+                      }
                       final meta = plugins[i];
                       final path = (meta['id'] ?? '').toString();
                       if (path.isEmpty) return const SizedBox.shrink();
@@ -4887,13 +4948,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         (pB4Q?['value'] as num?)?.toDouble() ?? 1.0,
       ];
 
-      _EqFaderSpec? buildEqFader(
-        Map<String, dynamic>? param, {
+      _EqFaderSpec buildEqFader(
+        Map<String, dynamic> param, {
         required String label,
         required String unit,
         bool logarithmic = false,
       }) {
-        if (param == null) return null;
         final name = param['name'] as String;
         return _EqFaderSpec(
           label: label,
@@ -4911,8 +4971,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             widget.setMasterEffectParam(idx, name, v);
           },
           onChangeEnd: (v) {
-            final startValue = _EQParamStartValue;
-            if (startValue == null) return;
+            final startValue =
+                _EQParamStartValue ?? (param['value'] as num).toDouble();
             widget.onMasterPluginParamCommit?.call(
               idx,
               name,
@@ -4939,10 +4999,10 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       }
 
       final gainFaders = <_EqFaderSpec>[
-        if (pB1 != null) buildEqFader(pB1, label: 'Band 1', unit: 'dB')!,
-        if (pB2 != null) buildEqFader(pB2, label: 'Band 2', unit: 'dB')!,
-        if (pB3 != null) buildEqFader(pB3, label: 'Band 3', unit: 'dB')!,
-        if (pB4 != null) buildEqFader(pB4, label: 'Band 4', unit: 'dB')!,
+        if (pB1 != null) buildEqFader(pB1, label: 'Band 1', unit: 'dB'),
+        if (pB2 != null) buildEqFader(pB2, label: 'Band 2', unit: 'dB'),
+        if (pB3 != null) buildEqFader(pB3, label: 'Band 3', unit: 'dB'),
+        if (pB4 != null) buildEqFader(pB4, label: 'Band 4', unit: 'dB'),
       ];
       final frequencyFaders = <_EqFaderSpec>[
         if (pB1Freq != null)
@@ -4951,34 +5011,34 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             label: 'Band 1',
             unit: 'Hz',
             logarithmic: true,
-          )!,
+          ),
         if (pB2Freq != null)
           buildEqFader(
             pB2Freq,
             label: 'Band 2',
             unit: 'Hz',
             logarithmic: true,
-          )!,
+          ),
         if (pB3Freq != null)
           buildEqFader(
             pB3Freq,
             label: 'Band 3',
             unit: 'Hz',
             logarithmic: true,
-          )!,
+          ),
         if (pB4Freq != null)
           buildEqFader(
             pB4Freq,
             label: 'Band 4',
             unit: 'Hz',
             logarithmic: true,
-          )!,
+          ),
       ];
       final qFaders = <_EqFaderSpec>[
-        if (pB1Q != null) buildEqFader(pB1Q, label: 'Band 1', unit: 'Q')!,
-        if (pB2Q != null) buildEqFader(pB2Q, label: 'Band 2', unit: 'Q')!,
-        if (pB3Q != null) buildEqFader(pB3Q, label: 'Band 3', unit: 'Q')!,
-        if (pB4Q != null) buildEqFader(pB4Q, label: 'Band 4', unit: 'Q')!,
+        if (pB1Q != null) buildEqFader(pB1Q, label: 'Band 1', unit: 'Q'),
+        if (pB2Q != null) buildEqFader(pB2Q, label: 'Band 2', unit: 'Q'),
+        if (pB3Q != null) buildEqFader(pB3Q, label: 'Band 3', unit: 'Q'),
+        if (pB4Q != null) buildEqFader(pB4Q, label: 'Band 4', unit: 'Q'),
       ];
       final hpfSlopeChoices =
           (pHPFSlope != null && pHPFSlope['type'] == 'choice')
@@ -5015,8 +5075,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               widget.setMasterEffectParam(idx, pHPF['name'] as String, v);
             },
             onChangeEnd: (v) {
-              final startValue = _EQParamStartValue;
-              if (startValue == null) return;
+              final startValue =
+                  _EQParamStartValue ?? (pHPF['value'] as num).toDouble();
               widget.onMasterPluginParamCommit?.call(
                 idx,
                 pHPF['name'] as String,
@@ -5076,8 +5136,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               widget.setMasterEffectParam(idx, pLPF['name'] as String, v);
             },
             onChangeEnd: (v) {
-              final startValue = _EQParamStartValue;
-              if (startValue == null) return;
+              final startValue =
+                  _EQParamStartValue ?? (pLPF['value'] as num).toDouble();
               widget.onMasterPluginParamCommit?.call(
                 idx,
                 pLPF['name'] as String,
@@ -5390,10 +5450,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                         (pLow['value'] as num).toDouble();
                                   },
                                   onChangeEnd: (v) {
+                                    final startValue = _EQParamStartValue ??
+                                        (pLow['value'] as num).toDouble();
                                     widget.onMasterPluginParamCommit?.call(
                                       idx,
                                       pLow['name'] as String,
-                                      _EQParamStartValue!,
+                                      startValue,
                                       v,
                                     );
                                     _EQParamStartValue = null;
@@ -5457,10 +5519,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                         (pMid['value'] as num).toDouble();
                                   },
                                   onChangeEnd: (v) {
+                                    final startValue = _EQParamStartValue ??
+                                        (pMid['value'] as num).toDouble();
                                     widget.onMasterPluginParamCommit?.call(
                                       idx,
                                       pMid['name'] as String,
-                                      _EQParamStartValue!,
+                                      startValue,
                                       v,
                                     );
                                     _EQParamStartValue = null;
@@ -5525,10 +5589,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                         (pHigh['value'] as num).toDouble();
                                   },
                                   onChangeEnd: (v) {
+                                    final startValue = _EQParamStartValue ??
+                                        (pHigh['value'] as num).toDouble();
                                     widget.onMasterPluginParamCommit?.call(
                                       idx,
                                       pHigh['name'] as String,
-                                      _EQParamStartValue!,
+                                      startValue,
                                       v,
                                     );
                                     _EQParamStartValue = null;

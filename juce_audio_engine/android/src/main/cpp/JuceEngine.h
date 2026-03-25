@@ -676,6 +676,9 @@ public:
         sourcePrimed = false;
         lastReadTimelineEndSec = std::numeric_limits<double>::quiet_NaN();
         lastFileOffsetSec = fileOffsetSec.load(std::memory_order_relaxed);
+        lastClipStartSec = clipStartSec.load(std::memory_order_relaxed);
+        lastReverseState = reversed.load(std::memory_order_relaxed);
+        lastTimelineSpeedRatio = getTempoPlaybackRatio();
 
         setPlayConfigDetails(0, 2, deviceSampleRate, samplesPerBlock);
     }
@@ -754,8 +757,21 @@ public:
         const bool fileOffsetChanged =
             !sourcePrimed ||
             (std::abs(inFile - lastFileOffsetSec) > (0.5 / fileSampleRate));
-        const bool needsReposition = timelineDiscontinuity || fileOffsetChanged;
+        const bool clipStartChanged =
+            !sourcePrimed ||
+            (std::abs(cs - lastClipStartSec) > (0.5 / sr));
         const bool shouldReverse = reversed.load(std::memory_order_relaxed);
+        const bool reverseModeChanged =
+            !sourcePrimed || (shouldReverse != lastReverseState);
+        const bool speedRatioChanged =
+            !sourcePrimed ||
+            (std::abs(speedRatio - lastTimelineSpeedRatio) > 1.0e-9);
+        const bool needsReposition =
+            timelineDiscontinuity ||
+            fileOffsetChanged ||
+            clipStartChanged ||
+            reverseModeChanged ||
+            speedRatioChanged;
 
         if (shouldReverse)
         {
@@ -773,6 +789,9 @@ public:
             sourcePrimed = true;
             lastReadTimelineEndSec = readTimelineStart + ((double)framesToRead / sr);
             lastFileOffsetSec = inFile;
+            lastClipStartSec = cs;
+            lastReverseState = shouldReverse;
+            lastTimelineSpeedRatio = speedRatio;
             return;
         }
 
@@ -801,6 +820,9 @@ public:
 
         lastReadTimelineEndSec = readTimelineStart + ((double)framesToRead / sr);
         lastFileOffsetSec = inFile;
+        lastClipStartSec = cs;
+        lastReverseState = shouldReverse;
+        lastTimelineSpeedRatio = speedRatio;
     }
 
     // boilerplate
@@ -980,6 +1002,9 @@ private:
     double lastAppliedRatio = 1.0;
     double lastReadTimelineEndSec = std::numeric_limits<double>::quiet_NaN();
     double lastFileOffsetSec = 0.0;
+    double lastClipStartSec = 0.0;
+    bool lastReverseState = false;
+    double lastTimelineSpeedRatio = 1.0;
 };
 
 class TimelineMidiClipProcessor : public juce::AudioProcessor, public TimelineClipProcessorBase
@@ -2856,6 +2881,7 @@ public:
     juce::StringArray getAvailableInputDevices();
     bool selectInputDevice(const juce::String &name);
     juce::String getCurrentInputDeviceName() const;
+    juce::String getCurrentOutputDeviceName() const;
     int getNumInputChannels() const;
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
     bool prepareRecordingInputs(int desiredInputChannels,
@@ -3189,6 +3215,10 @@ private:
     void resetTrackEffectAutomationLatchesForRow(int row);
     void compactRowFxChain(int row);
     void compactMasterFxChain();
+    bool isGraphConnectionPresent(juce::AudioProcessorGraph::NodeID src,
+                                  juce::AudioProcessorGraph::NodeID dst,
+                                  int ch) const;
+    void ensureMasterOutputRouting();
     bool applyPreferredAudioDeviceSetup(int desiredInputChannels,
                                         bool forceReopen,
                                         const juce::String &reason);
@@ -3252,10 +3282,19 @@ public:
         // 2️⃣ CLEAR OUTPUT
         // ===============================
         for (int ch = 0; ch < numOutputChannels; ++ch)
-            juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
+        {
+            if (outputChannelData[ch] != nullptr)
+                juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
+        }
 
         if (!engine.tryLockGraphRender())
+        {
+            engine.advanceTransportBySamples(numSamples);
+            if (enabled && isPlaying && sampleRate > 0.0)
+                transportMs += (1000.0 / sampleRate) * (double)numSamples;
+            engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
             return;
+        }
         struct _RenderUnlock
         {
             JuceEngine &engineRef;

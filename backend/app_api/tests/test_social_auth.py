@@ -58,6 +58,20 @@ if "jwt" not in sys.modules:
     )
     sys.modules["jwt"] = jwt_stub
 
+if "botocore.exceptions" not in sys.modules:
+    botocore_stub = ModuleType("botocore")
+    exceptions_stub = ModuleType("botocore.exceptions")
+
+    class _ClientError(Exception):
+        def __init__(self, response: dict, operation_name: str = "") -> None:
+            super().__init__(operation_name)
+            self.response = response
+
+    exceptions_stub.ClientError = _ClientError
+    botocore_stub.exceptions = exceptions_stub
+    sys.modules["botocore"] = botocore_stub
+    sys.modules["botocore.exceptions"] = exceptions_stub
+
 if "google" not in sys.modules:
     google_stub = ModuleType("google")
     auth_stub = ModuleType("google.auth")
@@ -230,6 +244,75 @@ class CompleteSocialSignInTests(unittest.TestCase):
         self.assertEqual(error.code, "AUTH_METHOD_CONFLICT")
         self.assertEqual(error.status_code, 409)
         self.assertEqual(error.details.get("existing_provider"), "email")
+
+    def test_verify_apple_identity_accepts_matching_nonce(self) -> None:
+        claims = {
+            "sub": "apple-subject",
+            "email": "user@example.com",
+            "email_verified": True,
+            "nonce": "nonce-123",
+        }
+
+        with mock.patch.object(
+            social_auth.config,
+            "APPLE_BUNDLE_ID",
+            "com.mixroom.mixroomapp",
+        ), mock.patch.object(
+            social_auth.jwt,
+            "get_unverified_header",
+            return_value={"kid": "kid-1"},
+        ), mock.patch.object(
+            social_auth,
+            "_apple_signing_key",
+            return_value=object(),
+        ), mock.patch.object(
+            social_auth.jwt,
+            "decode",
+            return_value=claims,
+        ):
+            identity = social_auth._verify_apple_identity(  # noqa: SLF001
+                {
+                    "id_token": "token",
+                    "nonce": "nonce-123",
+                }
+            )
+
+        self.assertEqual(identity.provider, "apple")
+        self.assertEqual(identity.subject, "apple-subject")
+        self.assertEqual(identity.email, "user@example.com")
+
+    def test_verify_apple_identity_rejects_mismatched_nonce(self) -> None:
+        claims = {
+            "sub": "apple-subject",
+            "email": "user@example.com",
+            "email_verified": True,
+            "nonce": "unexpected",
+        }
+
+        with mock.patch.object(
+            social_auth.config,
+            "APPLE_BUNDLE_ID",
+            "com.mixroom.mixroomapp",
+        ), mock.patch.object(
+            social_auth.jwt,
+            "get_unverified_header",
+            return_value={"kid": "kid-1"},
+        ), mock.patch.object(
+            social_auth,
+            "_apple_signing_key",
+            return_value=object(),
+        ), mock.patch.object(
+            social_auth.jwt,
+            "decode",
+            return_value=claims,
+        ):
+            with self.assertRaisesRegex(ValueError, "nonce is invalid"):
+                social_auth._verify_apple_identity(  # noqa: SLF001
+                    {
+                        "id_token": "token",
+                        "nonce": "nonce-123",
+                    }
+                )
 
 
 if __name__ == "__main__":

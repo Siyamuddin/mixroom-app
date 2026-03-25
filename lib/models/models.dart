@@ -494,7 +494,7 @@ class RowStateSnapshot {
         .toList(growable: false);
 
     return RowStateSnapshot(
-      row: (json["row"] as int?) ?? 0,
+      row: (json["row"] as num?)?.toInt() ?? 0,
       gain: ((json["gain"] as num?) ?? kDefaultGainUi).toDouble(),
       pan: ((json["pan"] as num?) ?? 0.5).toDouble(),
       volumeAutomation: ((json["volumeAutomation"] as List?) ?? [])

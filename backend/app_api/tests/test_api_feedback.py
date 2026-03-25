@@ -2,6 +2,7 @@ import importlib
 import os
 import sys
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest import mock
@@ -208,6 +209,45 @@ class FeedbackSanitizerTests(unittest.TestCase):
         )
 
         self.assertEqual(value, "Hello there\n\nthis works")
+
+    def test_create_submission_coerces_floats_for_dynamodb(self):
+        class _FakeTable:
+            def __init__(self):
+                self.last_item = None
+
+            def put_item(self, *, Item):
+                self.last_item = Item
+                return {"ResponseMetadata": {"HTTPStatusCode": 200}}
+
+        class _FakeBillingRepo:
+            def get_user_profile(self, user_id):
+                return {}
+
+        repo = feedback_repo_module.FeedbackRepository()
+        repo._table = _FakeTable()
+        repo._billing_repo = _FakeBillingRepo()
+
+        repo.create_submission(
+            user_id="user-1",
+            claims={"email": "user@example.com"},
+            payload={
+                "category": "feedback",
+                "source": "daw_chat",
+                "message": "test",
+                "context": {
+                    "project_settings": {
+                        "gain": 0.75,
+                        "nested": {"pan": -0.125},
+                    }
+                },
+            },
+        )
+
+        written = repo._table.last_item
+        self.assertIsNotNone(written)
+        project_settings = written["context"]["project_settings"]
+        self.assertEqual(project_settings["gain"], Decimal("0.75"))
+        self.assertEqual(project_settings["nested"]["pan"], Decimal("-0.125"))
 
 
 if __name__ == "__main__":

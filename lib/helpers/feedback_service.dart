@@ -29,8 +29,53 @@ class FeedbackService {
     final body = jsonEncode(
       request.toJson(client: _buildClientContext()),
     );
+    final response = await _submitWithRetry(auth: auth, body: body);
 
-    final response = await auth.authorizedRequest(
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw StateError('Session expired. Please sign in again and resend feedback.');
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      if (_isGatewayFailure(response.statusCode)) {
+        throw StateError(
+          'Feedback service is temporarily unavailable. Please try again in a moment.',
+        );
+      }
+      throw StateError(
+        _extractErrorMessage(
+              response.body,
+              fallback: 'Feedback submission failed (${response.statusCode}).',
+            ) ??
+            'Feedback submission failed (${response.statusCode}).',
+      );
+    }
+  }
+
+  Future<http.Response> _submitWithRetry({
+    required AuthService auth,
+    required String body,
+  }) async {
+    const maxAttempts = 2;
+    var lastResponse = await _send(auth: auth, body: body);
+    if (!_isRetriableFailure(lastResponse.statusCode)) {
+      return lastResponse;
+    }
+
+    for (var attempt = 2; attempt <= maxAttempts; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      lastResponse = await _send(auth: auth, body: body);
+      if (!_isRetriableFailure(lastResponse.statusCode)) {
+        return lastResponse;
+      }
+    }
+    return lastResponse;
+  }
+
+  Future<http.Response> _send({
+    required AuthService auth,
+    required String body,
+  }) {
+    return auth.authorizedRequest(
       (token) => _httpClient
           .post(
             _buildUri('/v1/feedback'),
@@ -43,16 +88,14 @@ class FeedbackService {
           )
           .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
     );
+  }
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(
-        _extractErrorMessage(
-              response.body,
-              fallback: 'Feedback submission failed (${response.statusCode}).',
-            ) ??
-            'Feedback submission failed (${response.statusCode}).',
-      );
-    }
+  bool _isRetriableFailure(int statusCode) {
+    return _isGatewayFailure(statusCode) || statusCode == 429;
+  }
+
+  bool _isGatewayFailure(int statusCode) {
+    return statusCode == 502 || statusCode == 503 || statusCode == 504;
   }
 
   Uri _buildUri(String path) {

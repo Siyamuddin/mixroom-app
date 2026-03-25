@@ -854,9 +854,59 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Future<void> _devBypassLogin(AuthService auth) async {
+  Future<void> _devRealLogin(AuthService auth) async {
     FocusScope.of(context).unfocus();
-    await auth.devBypassSignIn();
+
+    final configuredIdentifier = kDevLoginEmail.trim();
+    final configuredPassword = kDevLoginPassword;
+    final identifier = configuredIdentifier.isNotEmpty
+        ? configuredIdentifier
+        : _emailController.text.trim();
+    final password = configuredPassword.isNotEmpty
+        ? configuredPassword
+        : _passwordController.text;
+
+    if (identifier.isEmpty || password.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _mode = _AuthMode.signIn;
+        _signInStep = _SignInStep.password;
+        _signInEmailError = identifier.isEmpty
+            ? 'Please provide a dev login email/username.'
+            : null;
+        _signInPasswordError =
+            password.isEmpty ? 'Please provide a dev login password.' : null;
+        _signInInlineError =
+            'Dev Login needs real credentials. Set DEV_LOGIN_EMAIL and DEV_LOGIN_PASSWORD via --dart-define, or type them above.';
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _mode = _AuthMode.signIn;
+      _signInStep = _SignInStep.password;
+      _emailController.text = identifier;
+      _signInEmailError = null;
+      _signInPasswordError = null;
+      _signInInlineError = null;
+    });
+
+    try {
+      await auth.signInWithEmail(email: identifier, password: password);
+    } on AuthEmailConfirmationRequiredException catch (e) {
+      if (!mounted) return;
+      if (auth.isSignedIn) return;
+      setState(() {
+        _signInInlineError = e.message;
+      });
+      await _openEmailVerificationFlow(auth);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _signInInlineError = _normalizeError(e);
+      });
+    }
   }
 
   Widget _slideFadeTransition(Widget child, Animation<double> animation) {
@@ -883,7 +933,9 @@ class _LoginScreenState extends State<LoginScreen> {
         (defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS);
     final showGoogle = supportsSocialSignIn && CognitoConfig.enableGoogleSignIn;
-    final showApple = supportsSocialSignIn && CognitoConfig.enableAppleSignIn;
+    final showApple = supportsSocialSignIn &&
+        defaultTargetPlatform == TargetPlatform.iOS &&
+        CognitoConfig.enableAppleSignIn;
     final showKakao = supportsSocialSignIn && CognitoConfig.enableKakaoSignIn;
     final showAnySocial = showGoogle || showApple || showKakao;
 
@@ -995,12 +1047,16 @@ class _LoginScreenState extends State<LoginScreen> {
                                     child: TextButton.icon(
                                       onPressed: busy
                                           ? null
-                                          : () => _devBypassLogin(auth),
+                                          : () => _devRealLogin(auth),
                                       icon: const Icon(
                                         Icons.developer_mode_rounded,
                                         size: 16,
                                       ),
-                                      label: const Text('Dev Login (Temp)'),
+                                      label: Text(
+                                        hasConfiguredDevLoginCredentials
+                                            ? 'Dev Login (Real)'
+                                            : 'Dev Login (Use Typed)',
+                                      ),
                                       style: TextButton.styleFrom(
                                         foregroundColor:
                                             Colors.white.withOpacity(0.72),

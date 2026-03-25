@@ -9,7 +9,6 @@ import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
-import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../helpers/youtube_upload.dart';
 
@@ -41,7 +40,6 @@ import 'package:fftea/fftea.dart';
 import 'package:better_player/better_player.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:mixroom/screens/home.dart';
@@ -469,32 +467,21 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
       });
 
       String? filePath;
-      if (Platform.isIOS) {
-        final XFile? pickedFile = await ImagePicker().pickVideo(
-          source: ImageSource.gallery, // Direct Photos app access
-          maxDuration: Duration(minutes: 15), // LIMIT OF VIDEO DURATION
-        );
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.video,
+        // allowCompression: true,
+        // withData: false,
+        // allowedExtensions: ['mp4'], // NOTE: if it is .MOV file, it'll be much slower than .mp4 file
+      );
 
-        if (pickedFile != null) {
-          filePath = pickedFile.path;
-        }
-      } else {
-        FilePickerResult? result = await FilePicker.platform.pickFiles(
-          type: FileType.video,
-          // allowCompression: true,
-          // withData: false,
-          // allowedExtensions: ['mp4'], // NOTE: if it is .MOV file, it'll be much slower than .mp4 file
-        );
-
-        // Handle cancellation or no file selected
-        if (result == null || result.files.isEmpty) {
-          print("File picker canceled or no file selected.");
-          return;
-        }
-
-        // Get the selected file path
-        filePath = result.files.single.path;
+      // Handle cancellation or no file selected
+      if (result == null || result.files.isEmpty) {
+        print("File picker canceled or no file selected.");
+        return;
       }
+
+      // Get the selected file path
+      filePath = result.files.single.path;
 
       if (filePath == null) {
         print("Selected file path is null.");
@@ -4522,30 +4509,14 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
 
                             // 1) Pick a background video
                             String? bgPath;
-                            if (Platform.isIOS) {
-                              final XFile? pickedFile =
-                                  await ImagePicker().pickVideo(
-                                source: ImageSource
-                                    .gallery, // Direct Photos app access
-                                maxDuration: Duration(
-                                    minutes: 15), // LIMIT OF VIDEO DURATION
-                              );
+                            final picked = await FilePicker.platform.pickFiles(
+                              type: FileType.video,
+                              allowMultiple: false,
+                            );
+                            if (picked == null || picked.files.isEmpty) return;
 
-                              if (pickedFile == null) return;
-
-                              bgPath = pickedFile.path;
-                            } else {
-                              final picked =
-                                  await FilePicker.platform.pickFiles(
-                                type: FileType.video,
-                                allowMultiple: false,
-                              );
-                              if (picked == null || picked.files.isEmpty)
-                                return;
-
-                              bgPath = picked.files.single.path;
-                              if (bgPath == null) return;
-                            }
+                            bgPath = picked.files.single.path;
+                            if (bgPath == null) return;
 
                             await applyGreenScreen(
                               i: i,
@@ -6992,16 +6963,12 @@ class ExportSuccessScreen extends StatelessWidget {
               const SizedBox(height: 16),
               ElevatedButton.icon(
                 icon: const Icon(Icons.download),
-                label: Text(L10n.translate(context, 'Save Image')),
+                label: Text(L10n.translate(context, 'Share Image')),
                 onPressed: () async {
-                  final result = await ImageGallerySaver.saveFile(qrImage.path);
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text(result['isSuccess'] == true
-                            ? L10n.translate(context, 'Saved to gallery!')
-                            : L10n.translate(context, 'Failed to save'))),
-                  );
+                  await Share.shareXFiles(<XFile>[
+                    XFile(qrImage.path, name: p.basename(qrImage.path))
+                  ]);
                 },
               ),
             ],

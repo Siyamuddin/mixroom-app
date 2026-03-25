@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.8+10
+version: 1.0.8+11
 
 environment:
   sdk: ^3.6.0
@@ -82,7 +82,6 @@ dependencies:
   in_app_purchase: ^3.2.2
   in_app_purchase_android: ^0.4.0+8
   in_app_purchase_storekit: ^0.4.8
-  image_picker: ^1.1.2
   video_thumbnail: ^0.5.3
   easy_video_editor: ^0.1.2
 
@@ -141,7 +140,9 @@ flutter_native_splash:
   ios: true
   background_image: assets/mixroom_launch_screen.png
   android_12:
-    image: assets/mixroom_launch_screen.png
+    # Android 12+ requires a centered splash icon. Use a transparent 1x1 icon
+    # so the full-screen background remains visible without a center mark.
+    image: assets/android12_transparent.png
   # background_image: assets/home_background.png  # Blurred guitar background
 
 # command to refresh: dart run flutter_launcher_icons
@@ -149,7 +150,7 @@ flutter_icons:
   android: "launcher_icon"
   ios: true
   remove_alpha_ios: true
-  image_path: "assets/mixroom_app_icon_square.png" # "assets/mixroom_logo_202.png" #mixroom_icon_logo_noword.jpg"
+  image_path: "assets/app_icon_shadow.png" # "assets/mixroom_logo_202.png" #mixroom_icon_logo_noword.jpg"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

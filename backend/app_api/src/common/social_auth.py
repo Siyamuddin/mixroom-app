@@ -128,7 +128,8 @@ def _verify_apple_identity(payload: Dict[str, Any]) -> SocialIdentity:
     token = str(payload.get("id_token") or "").strip()
     if not token:
         raise ValueError("Apple sign-in did not return an identity token.")
-    if not config.APPLE_BUNDLE_ID:
+    allowed_audiences = _allowed_apple_audiences()
+    if not allowed_audiences:
         raise ValueError("Apple sign-in is not configured on the backend.")
 
     try:
@@ -141,11 +142,21 @@ def _verify_apple_identity(payload: Dict[str, Any]) -> SocialIdentity:
             token,
             signing_key,
             algorithms=["RS256"],
-            audience=config.APPLE_BUNDLE_ID,
+            audience=allowed_audiences,
             issuer="https://appleid.apple.com",
         )
+    except jwt.InvalidAudienceError as exc:
+        raise ValueError("Apple sign-in token audience is not allowed.") from exc
     except Exception as exc:
         raise ValueError("Apple sign-in token is invalid.") from exc
+
+    expected_nonce = str(payload.get("nonce") or "").strip()
+    if expected_nonce:
+        token_nonce = str(claims.get("nonce") or "").strip()
+        if not token_nonce:
+            raise ValueError("Apple sign-in token nonce is missing.")
+        if token_nonce not in (expected_nonce, _sha256_hex(expected_nonce)):
+            raise ValueError("Apple sign-in token nonce is invalid.")
 
     subject = str(claims.get("sub") or "").strip()
     email = str(claims.get("email") or payload.get("email") or "").strip().lower()
@@ -160,6 +171,18 @@ def _verify_apple_identity(payload: Dict[str, Any]) -> SocialIdentity:
         email=email,
         email_verified=email_verified or not email,
         display_name=display_name,
+    )
+
+
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+def _allowed_apple_audiences() -> tuple[str, ...]:
+    return tuple(
+        value.strip()
+        for value in str(config.APPLE_BUNDLE_ID or "").split(",")
+        if value.strip()
     )
 
 

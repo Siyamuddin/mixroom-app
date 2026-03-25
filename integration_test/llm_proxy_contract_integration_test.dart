@@ -70,7 +70,7 @@ void main() {
       expect(result.toolName, 'informational_response');
       expect(
         result.text,
-        'I hit an internal formatting issue while preparing that response. Please try again.',
+        "I couldn't complete that request just now. Please try again.",
       );
       expect(result.meta?['soft_error']?['usage_refunded'], isTrue);
       expect(result.meta?['prompt_rate_limit']?['daily']?['remaining'], 43);

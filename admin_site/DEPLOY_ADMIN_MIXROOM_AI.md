@@ -6,9 +6,10 @@ This is the shortest complete runbook for getting the Mixroom admin site live.
 
 - Admin URL: `https://admin.mixroom.ai/`
 - Cognito region: `ap-northeast-2`
-- Existing Cognito user pool: `ap-northeast-2_NkxXsFx8Q`
-- Existing Cognito Hosted UI domain:
-  `https://ap-northeast-2nkxxsfx8q.auth.ap-northeast-2.amazoncognito.com`
+- App user pool: `ap-northeast-2_NkxXsFx8Q`
+- Admin user pool: `ap-northeast-2_WPQPElcMA`
+- Admin Cognito Hosted UI domain:
+  `https://ap-northeast-2wpqpelcma.auth.ap-northeast-2.amazoncognito.com`
 - Production app API stack name: `mixroom-app-api-prod`
 - Production admin site stack name: `mixroom-admin-site-prod`
 - Production AI usage tables:
@@ -19,7 +20,7 @@ This is the shortest complete runbook for getting the Mixroom admin site live.
 This setup stays intentionally small:
 
 - `CloudFront + private S3` for the static site
-- existing Cognito user pool for employee login
+- dedicated Cognito admin user pool for employee login
 - existing app API for admin data
 - DynamoDB allowlist for approved employee emails
 - no Route53
@@ -45,17 +46,17 @@ Wait until the certificate is issued, then note the certificate ARN.
 
 ## 2. Create the admin Cognito app client
 
-In user pool `ap-northeast-2_NkxXsFx8Q`, create a new app client:
+In admin user pool `ap-northeast-2_WPQPElcMA`, create a new app client:
 
-- name: `mixroom-admin-site`
+- name: `mixroom-admin-prod`
 - callback URL: `https://admin.mixroom.ai/`
 - logout URL: `https://admin.mixroom.ai/`
-- scopes: `openid`, `email`, `profile`
+- scopes: `openid`, `email`
 - client type: public, no client secret
 
-Keep using the existing Hosted UI domain:
+Use the admin Hosted UI domain:
 
-- `https://ap-northeast-2nkxxsfx8q.auth.ap-northeast-2.amazoncognito.com`
+- `https://ap-northeast-2wpqpelcma.auth.ap-northeast-2.amazoncognito.com`
 
 After creation, note the new admin app client ID.
 
@@ -67,6 +68,7 @@ If you already deploy production with saved SAM parameters, keep using that and 
 
 - `StageName=prod`
 - `CognitoUserPoolId=ap-northeast-2_NkxXsFx8Q`
+- `AdminCognitoUserPoolId=ap-northeast-2_WPQPElcMA`
 - `AdminCognitoAppClientId=YOUR_ADMIN_APP_CLIENT_ID`
 - `AiUsageStateTableName=mixroom-ai-usage-metrics-prod`
 - `AiUsageEventsTableName=mixroom-ai-usage-events-prod`
@@ -82,6 +84,7 @@ sam deploy \
     StageName=prod \
     CognitoUserPoolId=ap-northeast-2_NkxXsFx8Q \
     CognitoAppClientId=6c7nkqmrrjvkjibpjurmehpa52 \
+    AdminCognitoUserPoolId=ap-northeast-2_WPQPElcMA \
     AdminCognitoAppClientId=YOUR_ADMIN_APP_CLIENT_ID \
     AiUsageStateTableName=mixroom-ai-usage-metrics-prod \
     AiUsageEventsTableName=mixroom-ai-usage-events-prod
@@ -142,16 +145,17 @@ aws cloudformation describe-stacks \
 Deploy the site:
 
 ```bash
-admin_site/scripts/deploy_site.sh \
-  --bucket mixroom-admin-site-prod \
-  --distribution-id YOUR_CLOUDFRONT_DISTRIBUTION_ID \
-  --site-url https://admin.mixroom.ai/ \
-  --api-base-url https://YOUR_API_ID.execute-api.ap-northeast-2.amazonaws.com/prod \
-  --cognito-domain-url https://ap-northeast-2nkxxsfx8q.auth.ap-northeast-2.amazoncognito.com \
-  --cognito-client-id YOUR_ADMIN_APP_CLIENT_ID
+admin_site/scripts/deploy_prod_mixroom_admin_site.sh
 ```
 
-That command generates the live `config.js` during upload.
+That wrapper generates the live `config.js` during upload and bakes in the production bucket, distribution ID, site URL, Cognito domain, and Cognito client ID.
+
+If you need to override the API URL for a one-off deploy:
+
+```bash
+MIXROOM_ADMIN_API_BASE_URL=https://YOUR_API_ID.execute-api.ap-northeast-2.amazonaws.com/prod \
+admin_site/scripts/deploy_prod_mixroom_admin_site.sh
+```
 
 ## 6. Invite employees
 
@@ -161,7 +165,7 @@ Allowlist an employee and create the Cognito account:
 cd backend/app_api
 python3 scripts/invite_admin_employee.py \
   --stage prod \
-  --user-pool-id ap-northeast-2_NkxXsFx8Q \
+  --user-pool-id ap-northeast-2_WPQPElcMA \
   --region ap-northeast-2 \
   --email employee@mixroom.ai \
   --invited-by you@mixroom.ai
@@ -190,11 +194,5 @@ Check these:
 For normal site updates, just rerun:
 
 ```bash
-admin_site/scripts/deploy_site.sh \
-  --bucket mixroom-admin-site-prod \
-  --distribution-id YOUR_CLOUDFRONT_DISTRIBUTION_ID \
-  --site-url https://admin.mixroom.ai/ \
-  --api-base-url https://YOUR_API_ID.execute-api.ap-northeast-2.amazonaws.com/prod \
-  --cognito-domain-url https://ap-northeast-2nkxxsfx8q.auth.ap-northeast-2.amazoncognito.com \
-  --cognito-client-id YOUR_ADMIN_APP_CLIENT_ID
+admin_site/scripts/deploy_prod_mixroom_admin_site.sh
 ```

@@ -48,6 +48,24 @@ inline void copyToFixedStereoBuffer(const juce::AudioBuffer<float> &source,
         destination.copyFrom(1, 0, destination, 0, 0, numSamples);
 }
 
+inline double sanitiseEffectSampleRate(double sampleRate)
+{
+    return std::isfinite(sampleRate) ? juce::jmax(8000.0, sampleRate) : 44100.0;
+}
+
+inline float clampFilterFrequencyForSampleRate(float hz,
+                                               double sampleRate,
+                                               float minHz = 20.0f,
+                                               float guardHz = 50.0f)
+{
+    const double effectiveRate = sanitiseEffectSampleRate(sampleRate);
+    const double nyquist = effectiveRate * 0.5;
+    const float maxHz = static_cast<float>(juce::jmax(
+        static_cast<double>(minHz) + 10.0,
+        nyquist - static_cast<double>(guardHz)));
+    return juce::jlimit(minHz, maxHz, hz);
+}
+
 // ****REVERB****
 
 struct ReverbParams
@@ -74,25 +92,34 @@ public:
         parameters.predelay = apvts.getRawParameterValue("predelay")->load();
         parameters.modDepth = apvts.getRawParameterValue("modDepth")->load() * 0.005f;
         parameters.modRate = apvts.getRawParameterValue("modRate")->load();
-        parameters.hpfFreq = apvts.getRawParameterValue("hpfFreq")->load();
-        parameters.lpfFreq = apvts.getRawParameterValue("lpfFreq")->load();
+        parameters.hpfFreq = clampFilterFrequencyForSampleRate(
+            apvts.getRawParameterValue("hpfFreq")->load(),
+            sampleRate);
+        parameters.lpfFreq = clampFilterFrequencyForSampleRate(
+            apvts.getRawParameterValue("lpfFreq")->load(),
+            sampleRate,
+            20.0f,
+            10.0f);
     }
 
     void prepare(double inputSampleRate, int maxBlockSize)
     {
-        sampleRate = inputSampleRate;
-        bufferSize = maxBlockSize;
+        sampleRate = sanitiseEffectSampleRate(inputSampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
         dryBuffer.setSize(numOutputs, bufferSize);
         wetBuffer.setSize(numOutputs, bufferSize);
-        juce::dsp::ProcessSpec spec;
-        spec.sampleRate = sampleRate;
-        spec.maximumBlockSize = bufferSize;
-        spec.numChannels = numOutputs;
-        processChain.prepare(spec);
+        lastHpfFreq = -1.0f;
+        lastLpfFreq = -1.0f;
+        prepareProcessChain();
     }
 
     void process(juce::AudioBuffer<float> &inputBuffer)
     {
+        const int blockSamples = inputBuffer.getNumSamples();
+        if (blockSamples <= 0)
+            return;
+
+        ensureCapacity(blockSamples);
         copyToFixedStereoBuffer(inputBuffer, dryBuffer);
         copyToFixedStereoBuffer(inputBuffer, wetBuffer);
         setupDelay();
@@ -100,13 +127,36 @@ public:
         setupModulation();
         setupReverb();
         wetBuffer.applyGain(0.5f); // reverb is loud
-        juce::dsp::AudioBlock<float> wetBlock(wetBuffer);
+        auto wetBlock = juce::dsp::AudioBlock<float>(wetBuffer)
+                            .getSubBlock(0, (size_t)blockSamples);
         juce::dsp::ProcessContextReplacing<float> wetContext(wetBlock);
         processChain.process(wetContext);
-        mixToOutput(inputBuffer);
+        mixToOutput(inputBuffer, blockSamples);
     }
 
 private:
+    void prepareProcessChain()
+    {
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = (juce::uint32)bufferSize;
+        spec.numChannels = (juce::uint32)numOutputs;
+        processChain.prepare(spec);
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
+        prepareProcessChain();
+        lastHpfFreq = -1.0f;
+        lastLpfFreq = -1.0f;
+    }
+
     void setupDelay()
     {
         processChain.get<ChainIndex::Delay>().setDelay(
@@ -115,10 +165,17 @@ private:
 
     void setupFilters()
     {
+        constexpr float kFreqEpsilon = 0.01f;
+        if (std::abs(parameters.hpfFreq - lastHpfFreq) < kFreqEpsilon &&
+            std::abs(parameters.lpfFreq - lastLpfFreq) < kFreqEpsilon)
+            return;
+
         *processChain.get<ChainIndex::HPF>().state = *juce::dsp::FilterDesign<float>::
                                                          designIIRHighpassHighOrderButterworthMethod(parameters.hpfFreq, sampleRate, 2)[0];
         *processChain.get<ChainIndex::LPF>().state = *juce::dsp::FilterDesign<float>::
                                                          designIIRLowpassHighOrderButterworthMethod(parameters.lpfFreq, sampleRate, 2)[0];
+        lastHpfFreq = parameters.hpfFreq;
+        lastLpfFreq = parameters.lpfFreq;
     }
 
     void setupModulation()
@@ -141,7 +198,7 @@ private:
         processChain.get<ChainIndex::Verb>().setParameters(reverbParameters);
     }
 
-    void mixToOutput(juce::AudioBuffer<float> &buffer)
+    void mixToOutput(juce::AudioBuffer<float> &buffer, int blockSamples)
     {
         const float dryMix = std::sin(0.5f * juce::float_Pi * (1.0f - parameters.mix));
         const float wetMix = std::sin(0.5f * juce::float_Pi * parameters.mix);
@@ -149,7 +206,7 @@ private:
             numOutputs,
             juce::jmin(buffer.getNumChannels(), dryBuffer.getNumChannels()));
         const int samples = juce::jmin(
-            bufferSize,
+            blockSamples,
             juce::jmin(buffer.getNumSamples(), dryBuffer.getNumSamples()));
         for (int sample = 0; sample < samples; sample++)
         {
@@ -164,6 +221,8 @@ private:
 
     double sampleRate{0.0};
     int bufferSize{0};
+    float lastHpfFreq{-1.0f};
+    float lastLpfFreq{-1.0f};
     juce::AudioBuffer<float> dryBuffer, wetBuffer;
     ReverbParams parameters;
     juce::Reverb::Parameters reverbParameters;
@@ -441,43 +500,59 @@ public:
         bpm = inputBPM;
         const float inputDelay = apvts.getRawParameterValue("delayTime")->load();
         const float inputWidth = apvts.getRawParameterValue("width")->load();
-        parameters.width = static_cast<float>(inputWidth * sampleRate * 0.001f);
+        parameters.width = static_cast<float>(inputWidth * sanitiseEffectSampleRate(sampleRate) * 0.001f);
         parameters.feedback = apvts.getRawParameterValue("feedback")->load();
         parameters.mix = apvts.getRawParameterValue("mix")->load() * 0.01f;
         parameters.modDepth = apvts.getRawParameterValue("modDepth")->load() * 0.005f;
         parameters.modRate = apvts.getRawParameterValue("modRate")->load();
-        parameters.hpfFreq = apvts.getRawParameterValue("hpfFreq")->load();
-        parameters.lpfFreq = apvts.getRawParameterValue("lpfFreq")->load();
+        parameters.hpfFreq = clampFilterFrequencyForSampleRate(
+            apvts.getRawParameterValue("hpfFreq")->load(),
+            sampleRate);
+        parameters.lpfFreq = clampFilterFrequencyForSampleRate(
+            apvts.getRawParameterValue("lpfFreq")->load(),
+            sampleRate,
+            20.0f,
+            10.0f);
         parameters.drive = apvts.getRawParameterValue("drive")->load();
         parameters.bpmSync = apvts.getRawParameterValue("bpmSync")->load();
         parameters.subdivisionIndex = static_cast<int>(
             apvts.getRawParameterValue("subdivisionIndex")->load());
         setDelayTime(apvts, inputDelay);
         // ensure delay time doesn't exceed delayBufferSize
-        parameters.delayTime = juce::jmin(parameters.delayTime,
-                                          static_cast<float>(delayBufferSize - bufferSize));
+        const int maxDelaySamples = juce::jmax(1, delayBufferSize - currentBlockSize);
+        parameters.delayTime = juce::jlimit(0.0f,
+                                            static_cast<float>(maxDelaySamples),
+                                            parameters.delayTime);
     }
 
     void prepare(double inputSampleRate, int maxBlockSize)
     {
-        sampleRate = inputSampleRate;
-        bufferSize = maxBlockSize;
-        dryBuffer.setSize(numOutputs, maxBlockSize);
-        wetBuffer.setSize(numOutputs, maxBlockSize);
+        sampleRate = sanitiseEffectSampleRate(inputSampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        currentBlockSize = bufferSize;
+        writePosition = 0;
+        lastHpfFreq = -1.0f;
+        lastLpfFreq = -1.0f;
+        lastModDepth = -1.0f;
+        lastModRate = -1.0f;
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
         wetBuffer.clear();
         delayBufferSize = static_cast<int>(2.0 * (bufferSize + sampleRate));
         delayBuffer.setSize(numOutputs, delayBufferSize);
         delayBuffer.clear();
-        juce::dsp::ProcessSpec spec;
-        spec.sampleRate = sampleRate;
-        spec.maximumBlockSize = bufferSize;
-        spec.numChannels = numOutputs;
-        modChain.prepare(spec);
-        filterChain.prepare(spec);
+        prepareDspChains();
     }
 
     void process(juce::AudioBuffer<float> &inputBuffer)
     {
+        const int blockSamples = inputBuffer.getNumSamples();
+        if (blockSamples <= 0)
+            return;
+
+        ensureCapacity(blockSamples);
+        currentBlockSize = juce::jmin(blockSamples, bufferSize);
+
         copyToFixedStereoBuffer(inputBuffer, dryBuffer);
         fillDelayBuffer();
         readDelayBuffer();
@@ -486,32 +561,59 @@ public:
         applyModulation();
         applyFeedback();
         incrementWritePosition();
-        mixToOutput(inputBuffer);
+        mixToOutput(inputBuffer, currentBlockSize);
     }
 
 private:
+    void prepareDspChains()
+    {
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = (juce::uint32)bufferSize;
+        spec.numChannels = (juce::uint32)numOutputs;
+        modChain.prepare(spec);
+        filterChain.prepare(spec);
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        currentBlockSize = requiredSamples;
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.clear();
+
+        delayBufferSize = static_cast<int>(2.0 * (bufferSize + sampleRate));
+        delayBuffer.setSize(numOutputs, delayBufferSize);
+        delayBuffer.clear();
+        writePosition = 0;
+        prepareDspChains();
+        lastHpfFreq = -1.0f;
+        lastLpfFreq = -1.0f;
+        lastModDepth = -1.0f;
+        lastModRate = -1.0f;
+    }
+
     void incrementWritePosition()
     {
-        writePosition = (writePosition + bufferSize) % delayBufferSize;
+        writePosition = (writePosition + currentBlockSize) % delayBufferSize;
     }
 
     void setDelayTime(const juce::AudioProcessorValueTreeState &apvts, float inputDelay)
     {
+        juce::ignoreUnused(apvts);
         // convert delay time to samples based on sync status
         if (parameters.bpmSync)
         {
             parameters.delayTime = static_cast<float>(
                 subdivisions[parameters.subdivisionIndex] * sampleRate * 60.0 / bpm);
-            const float delayTimeInMilliseconds = static_cast<float>(
-                parameters.delayTime / sampleRate * 1000.0);
-            // set delayTime parameter to millisecond value of subdivision
-            apvts.getParameter("delayTime")->beginChangeGesture();
-            apvts.getParameter("delayTime")->setValueNotifyingHost(juce::NormalisableRange<float>(1.0f, 2000.0f, 1.0f).convertTo0to1(delayTimeInMilliseconds));
-            apvts.getParameter("delayTime")->endChangeGesture();
         }
         else
         {
-            parameters.delayTime = static_cast<float>(inputDelay * sampleRate * 0.001f);
+            parameters.delayTime = static_cast<float>(inputDelay * sanitiseEffectSampleRate(sampleRate) * 0.001f);
         }
     }
 
@@ -520,10 +622,10 @@ private:
     {
         for (int channel = 0; channel < numOutputs; channel++)
         {
-            if (bufferSize + writePosition <= delayBufferSize)
+            if (currentBlockSize + writePosition <= delayBufferSize)
             {
                 delayBuffer.copyFrom(channel, writePosition,
-                                     dryBuffer.getReadPointer(channel), bufferSize);
+                                     dryBuffer.getReadPointer(channel), currentBlockSize);
             }
             else
             {
@@ -531,7 +633,7 @@ private:
                 delayBuffer.copyFrom(channel, writePosition,
                                      dryBuffer.getReadPointer(channel), bufferRemaining);
                 delayBuffer.copyFrom(channel, 0, dryBuffer.getReadPointer(channel, bufferRemaining),
-                                     bufferSize - bufferRemaining);
+                                     currentBlockSize - bufferRemaining);
             }
         }
     }
@@ -548,10 +650,10 @@ private:
                 delayBufferSize};
         for (int channel = 0; channel < numOutputs; channel++)
         {
-            if (bufferSize + readPosition[channel] <= delayBufferSize)
+            if (currentBlockSize + readPosition[channel] <= delayBufferSize)
             {
                 wetBuffer.copyFrom(channel, 0,
-                                   delayBuffer.getReadPointer(channel, readPosition[channel]), bufferSize);
+                                   delayBuffer.getReadPointer(channel, readPosition[channel]), currentBlockSize);
             }
             else
             {
@@ -559,7 +661,7 @@ private:
                 wetBuffer.copyFrom(channel, 0,
                                    delayBuffer.getReadPointer(channel, readPosition[channel]), bufferRemaining);
                 wetBuffer.copyFrom(channel, bufferRemaining,
-                                   delayBuffer.getReadPointer(channel), bufferSize - bufferRemaining);
+                                   delayBuffer.getReadPointer(channel), currentBlockSize - bufferRemaining);
             }
         }
     }
@@ -570,10 +672,10 @@ private:
         const float feedbackGain = parameters.feedback * 0.01f;
         for (int channel = 0; channel < numOutputs; channel++)
         {
-            if (delayBufferSize > bufferSize + writePosition)
+            if (delayBufferSize > currentBlockSize + writePosition)
             {
                 delayBuffer.addFromWithRamp(channel, writePosition,
-                                            wetBuffer.getWritePointer(channel), bufferSize, feedbackGain, feedbackGain);
+                                            wetBuffer.getWritePointer(channel), currentBlockSize, feedbackGain, feedbackGain);
             }
             else
             {
@@ -581,25 +683,35 @@ private:
                 delayBuffer.addFromWithRamp(channel, writePosition,
                                             wetBuffer.getWritePointer(channel), bufferRemaining, feedbackGain, feedbackGain);
                 delayBuffer.addFromWithRamp(channel, 0, wetBuffer.getWritePointer(channel),
-                                            bufferSize - bufferRemaining, feedbackGain, feedbackGain);
+                                            currentBlockSize - bufferRemaining, feedbackGain, feedbackGain);
             }
         }
     }
 
     void applyFilters()
     {
+        constexpr float kFreqEpsilon = 0.01f;
+        const bool needsFilterUpdate =
+            std::abs(parameters.hpfFreq - lastHpfFreq) >= kFreqEpsilon ||
+            std::abs(parameters.lpfFreq - lastLpfFreq) >= kFreqEpsilon;
+        if (needsFilterUpdate)
+        {
         *filterChain.get<0>().state = *juce::dsp::FilterDesign<float>::
                                           designIIRHighpassHighOrderButterworthMethod(parameters.hpfFreq, sampleRate, 2)[0];
         *filterChain.get<1>().state = *juce::dsp::FilterDesign<float>::
                                           designIIRLowpassHighOrderButterworthMethod(parameters.lpfFreq, sampleRate, 2)[0];
-        juce::dsp::AudioBlock<float> filterBlock(wetBuffer);
+            lastHpfFreq = parameters.hpfFreq;
+            lastLpfFreq = parameters.lpfFreq;
+        }
+        auto filterBlock = juce::dsp::AudioBlock<float>(wetBuffer)
+                               .getSubBlock(0, (size_t)currentBlockSize);
         juce::dsp::ProcessContextReplacing<float> filterContext(filterBlock);
         filterChain.process(filterContext);
     }
 
     void applyDistortion()
     {
-        for (int sample = 0; sample < bufferSize; sample++)
+        for (int sample = 0; sample < currentBlockSize; sample++)
         {
             for (int channel = 0; channel < numOutputs; channel++)
             {
@@ -614,17 +726,25 @@ private:
 
     void applyModulation()
     {
-        modChain.setCentreDelay(1.0f);
-        modChain.setFeedback(0.0f);
-        modChain.setMix(1.0f);
-        modChain.setDepth(parameters.modDepth);
-        modChain.setRate(parameters.modRate);
-        juce::dsp::AudioBlock<float> modBlock(wetBuffer);
+        constexpr float kModEpsilon = 0.0001f;
+        if (std::abs(parameters.modDepth - lastModDepth) >= kModEpsilon ||
+            std::abs(parameters.modRate - lastModRate) >= kModEpsilon)
+        {
+            modChain.setCentreDelay(1.0f);
+            modChain.setFeedback(0.0f);
+            modChain.setMix(1.0f);
+            modChain.setDepth(parameters.modDepth);
+            modChain.setRate(parameters.modRate);
+            lastModDepth = parameters.modDepth;
+            lastModRate = parameters.modRate;
+        }
+        auto modBlock = juce::dsp::AudioBlock<float>(wetBuffer)
+                            .getSubBlock(0, (size_t)currentBlockSize);
         juce::dsp::ProcessContextReplacing<float> modContext(modBlock);
         modChain.process(modContext);
     }
 
-    void mixToOutput(juce::AudioBuffer<float> &buffer)
+    void mixToOutput(juce::AudioBuffer<float> &buffer, int blockSamples)
     {
         const float dryMix = std::sin(0.5f * juce::float_Pi * (1.0f - parameters.mix));
         const float wetMix = std::sin(0.5f * juce::float_Pi * parameters.mix);
@@ -632,7 +752,7 @@ private:
             numOutputs,
             juce::jmin(buffer.getNumChannels(), dryBuffer.getNumChannels()));
         const int samples = juce::jmin(
-            bufferSize,
+            blockSamples,
             juce::jmin(buffer.getNumSamples(), dryBuffer.getNumSamples()));
         for (int sample = 0; sample < samples; sample++)
         {
@@ -648,8 +768,13 @@ private:
     double sampleRate{0.0};
     int bufferSize{0};
     int delayBufferSize{0};
+    int currentBlockSize{0};
     int writePosition{0};
     double bpm{0.0};
+    float lastHpfFreq{-1.0f};
+    float lastLpfFreq{-1.0f};
+    float lastModDepth{-1.0f};
+    float lastModRate{-1.0f};
     DelayParameters parameters;
     const std::array<float, 13> subdivisions{0.25f, (0.5f / 3.0f), 0.375f, 0.5f,
                                              (1.0f / 3.0f), 0.75f, 1.0f, (2.0f / 3.0f), 1.5f, 2.0f, (4.0f / 3.0f), 3.0f, 4.0f};
@@ -794,8 +919,14 @@ public:
         parameters.mix = apvts.getRawParameterValue("mix")->load() * 0.01f;
         parameters.anger = apvts.getRawParameterValue("anger")->load();
         parameters.distortionType = static_cast<int>(apvts.getRawParameterValue("type")->load());
-        parameters.hpfFreq = apvts.getRawParameterValue("hpf")->load();
-        parameters.lpfFreq = apvts.getRawParameterValue("lpf")->load();
+        parameters.hpfFreq = clampFilterFrequencyForSampleRate(
+            apvts.getRawParameterValue("hpf")->load(),
+            sampleRate);
+        parameters.lpfFreq = clampFilterFrequencyForSampleRate(
+            apvts.getRawParameterValue("lpf")->load(),
+            sampleRate,
+            20.0f,
+            10.0f);
         parameters.shape = apvts.getRawParameterValue("shape")->load();
         parameters.shapeTilt = apvts.getRawParameterValue("shapeTilt")->load();
     }
@@ -803,7 +934,7 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         const int up = oversampler.getOversamplingFactor();
-        sampleRate = inputSampleRate * up;
+        sampleRate = sanitiseEffectSampleRate(inputSampleRate) * up;
         bufferSize = maxBlockSize * up;
         dryBuffer.setSize(numOutputs, bufferSize);
         juce::dsp::ProcessSpec spec;
@@ -1018,7 +1149,7 @@ public:
 
     void prepare(double newSampleRate, int maxBlockSize)
     {
-        sampleRate = newSampleRate;
+        sampleRate = sanitiseEffectSampleRate(newSampleRate);
         bufferSize = maxBlockSize;
         lowBuffer.setSize(numOutputs, maxBlockSize);
         highBuffer.setSize(numOutputs, maxBlockSize);
@@ -1385,7 +1516,11 @@ public:
         params.slope = 1.0f - (1.0f / ratio);
 
         params.makeUpGain = apvts.getRawParameterValue("makeUp")->load();
-        params.sidechainFreq = apvts.getRawParameterValue("scFreq")->load();
+        params.sidechainFreq = clampFilterFrequencyForSampleRate(
+            apvts.getRawParameterValue("scFreq")->load(),
+            sampleRate,
+            20.0f,
+            10.0f);
         params.sidechainBypass = apvts.getRawParameterValue("scBypass")->load();
         params.stereo = apvts.getRawParameterValue("stereo")->load();
         params.mix = apvts.getRawParameterValue("mix")->load() * 0.01f;
@@ -1943,26 +2078,21 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         juce::ignoreUnused(inputSampleRate);
-        const int minDelay = juce::jmax(512, maxBlockSize * 4);
-        ringSize = minDelay + 2;
-
-        for (int ch = 0; ch < numOutputs; ++ch)
-        {
-            ringBuffers[ch].assign((size_t)ringSize, 0.0f);
-            writePos[ch] = 0;
-            phase[ch] = 0.0f;
-        }
+        ensureCapacity(maxBlockSize);
     }
 
     void process(juce::AudioBuffer<float> &buffer)
     {
         const int n = buffer.getNumSamples();
+        ensureCapacity(n);
         const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
         if (n <= 0 || channels <= 0 || ringSize <= 2)
             return;
 
         const float ratio = std::pow(2.0f, params.semitones / 12.0f);
         const float phaseInc = (1.0f - ratio) / (float)(ringSize - 2);
+        const float ringSpan = (float)(ringSize - 2);
+        const float halfSpan = 0.5f * ringSpan;
 
         const float dryMix = std::pow(std::sin(0.5f * juce::float_Pi * (1.0f - params.mix)), 2.0f);
         const float wetMix = std::pow(std::sin(0.5f * juce::float_Pi * params.mix), 2.0f);
@@ -1979,15 +2109,18 @@ public:
                 const float in = io[i];
                 ring[(size_t)w] = in;
 
-                const float d1 = ph * (float)(ringSize - 2);
-                const float d2 = std::fmod(d1 + 0.5f * (float)(ringSize - 2),
-                                           (float)(ringSize - 2));
+                const float d1 = ph * ringSpan;
+                float d2 = d1 + halfSpan;
+                if (d2 >= ringSpan)
+                    d2 -= ringSpan;
 
                 const float a = readDelayedSample(ring, w, d1);
                 const float b = readDelayedSample(ring, w, d2);
 
                 const float p1 = ph;
-                const float p2 = std::fmod(ph + 0.5f, 1.0f);
+                float p2 = ph + 0.5f;
+                if (p2 >= 1.0f)
+                    p2 -= 1.0f;
                 const float g1 = 1.0f - std::abs(2.0f * p1 - 1.0f);
                 const float g2 = 1.0f - std::abs(2.0f * p2 - 1.0f);
                 const float norm = g1 + g2 + 1.0e-6f;
@@ -1996,9 +2129,9 @@ public:
                 io[i] = in * dryMix + wet * wetMix;
 
                 ph += phaseInc;
-                while (ph >= 1.0f)
+                if (ph >= 1.0f)
                     ph -= 1.0f;
-                while (ph < 0.0f)
+                else if (ph < 0.0f)
                     ph += 1.0f;
 
                 ++w;
@@ -2012,6 +2145,22 @@ public:
     }
 
 private:
+    void ensureCapacity(int blockSize)
+    {
+        const int minDelay = juce::jmax(512, juce::jmax(1, blockSize) * 4);
+        const int requiredRingSize = minDelay + 2;
+        if (requiredRingSize <= ringSize)
+            return;
+
+        ringSize = requiredRingSize;
+        for (int ch = 0; ch < numOutputs; ++ch)
+        {
+            ringBuffers[ch].assign((size_t)ringSize, 0.0f);
+            writePos[ch] = 0;
+            phase[ch] = 0.0f;
+        }
+    }
+
     static float readDelayedSample(const std::vector<float> &ring,
                                    int writeIdx,
                                    float delaySamples)
@@ -2021,9 +2170,9 @@ private:
             return 0.0f;
 
         float readPos = (float)writeIdx - delaySamples;
-        while (readPos < 0.0f)
+        if (readPos < 0.0f)
             readPos += (float)n;
-        while (readPos >= (float)n)
+        else if (readPos >= (float)n)
             readPos -= (float)n;
 
         const int i0 = (int)readPos;
@@ -2104,15 +2253,15 @@ public:
 
     void prepare(double sampleRate, int maxBlockSize)
     {
-        dryBuffer.setSize(numOutputs, maxBlockSize);
-        wetBuffer.setSize(numOutputs, maxBlockSize);
-
-        juce::dsp::ProcessSpec spec;
-        spec.sampleRate = sampleRate;
-        spec.maximumBlockSize = (juce::uint32)maxBlockSize;
-        spec.numChannels = (juce::uint32)numOutputs;
-        chorus.prepare(spec);
-        chorus.reset();
+        this->sampleRate = sanitiseEffectSampleRate(sampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
+        prepareChorus();
+        lastRateHz = -1.0f;
+        lastDepth = -1.0f;
+        lastCentreDelayMs = -1.0f;
+        lastFeedback = -2.0f;
     }
 
     void process(juce::AudioBuffer<float> &buffer)
@@ -2121,16 +2270,29 @@ public:
         if (n <= 0)
             return;
 
+        ensureCapacity(n);
         copyToFixedStereoBuffer(buffer, dryBuffer);
         copyToFixedStereoBuffer(buffer, wetBuffer);
 
-        chorus.setRate(params.rateHz);
-        chorus.setDepth(params.depth);
-        chorus.setCentreDelay(params.centreDelayMs);
-        chorus.setFeedback(params.feedback);
-        chorus.setMix(1.0f);
+        constexpr float kParamEpsilon = 0.0001f;
+        if (std::abs(params.rateHz - lastRateHz) >= kParamEpsilon ||
+            std::abs(params.depth - lastDepth) >= kParamEpsilon ||
+            std::abs(params.centreDelayMs - lastCentreDelayMs) >= kParamEpsilon ||
+            std::abs(params.feedback - lastFeedback) >= kParamEpsilon)
+        {
+            chorus.setRate(params.rateHz);
+            chorus.setDepth(params.depth);
+            chorus.setCentreDelay(params.centreDelayMs);
+            chorus.setFeedback(params.feedback);
+            chorus.setMix(1.0f);
+            lastRateHz = params.rateHz;
+            lastDepth = params.depth;
+            lastCentreDelayMs = params.centreDelayMs;
+            lastFeedback = params.feedback;
+        }
 
-        juce::dsp::AudioBlock<float> wetBlock(wetBuffer);
+        auto wetBlock = juce::dsp::AudioBlock<float>(wetBuffer)
+                            .getSubBlock(0, (size_t)n);
         juce::dsp::ProcessContextReplacing<float> ctx(wetBlock);
         chorus.process(ctx);
 
@@ -2149,7 +2311,38 @@ public:
     }
 
 private:
+    void prepareChorus()
+    {
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = (juce::uint32)bufferSize;
+        spec.numChannels = (juce::uint32)numOutputs;
+        chorus.prepare(spec);
+        chorus.reset();
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
+        prepareChorus();
+        lastRateHz = -1.0f;
+        lastDepth = -1.0f;
+        lastCentreDelayMs = -1.0f;
+        lastFeedback = -2.0f;
+    }
+
     ChorusParameters params{0.8f, 0.35f, 7.0f, 0.1f, 0.35f};
+    double sampleRate{44100.0};
+    int bufferSize{0};
+    float lastRateHz{-1.0f};
+    float lastDepth{-1.0f};
+    float lastCentreDelayMs{-1.0f};
+    float lastFeedback{-2.0f};
     juce::AudioBuffer<float> dryBuffer, wetBuffer;
     juce::dsp::Chorus<float> chorus;
 };

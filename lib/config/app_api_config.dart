@@ -32,7 +32,7 @@ class AppApiConfig {
 
   static const int requestTimeoutSeconds = int.fromEnvironment(
     'SUBSCRIPTION_REQUEST_TIMEOUT_SECONDS',
-    defaultValue: 8,
+    defaultValue: 20,
   );
 
   static const int entitlementCacheTtlMinutes = int.fromEnvironment(
