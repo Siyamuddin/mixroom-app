@@ -29,6 +29,9 @@ void setFlutterChannel(JNIEnv *env, jobject channel)
 
 void juceLogToFlutter(const char *msg)
 {
+    if (msg != nullptr)
+        __android_log_print(ANDROID_LOG_INFO, "JUCE", "%s", msg);
+
     if (g_JavaVM == nullptr || g_FlutterChannel == nullptr || msg == nullptr)
     {
         __android_log_print(ANDROID_LOG_WARN, "JUCE", "Log skipped (JNI not ready or message null)");

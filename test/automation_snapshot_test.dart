@@ -71,6 +71,7 @@ void main() {
     test('round trips clip-first automation state for save and load', () {
       final snapshot = RowStateSnapshot(
         row: 2,
+        rowId: 17,
         gain: 1.25,
         pan: 0.35,
         volumeAutomation: <AutomationPoint>[
@@ -127,6 +128,7 @@ void main() {
       final restored = RowStateSnapshot.fromJson(snapshot.toJson());
 
       expect(restored.row, snapshot.row);
+      expect(restored.rowId, snapshot.rowId);
       expect(restored.gain, closeTo(snapshot.gain, 0.001));
       expect(restored.pan, closeTo(snapshot.pan, 0.001));
       expect(restored.volumeAutomation, hasLength(2));
@@ -139,6 +141,26 @@ void main() {
       expect(restored.automationClips.last.lane, 1);
       expect(restored.automationClips.last.muted, isTrue);
       expect(restored.selectedAutomationTargetId, 'master:gain');
+    });
+  });
+
+  group('RowEffectsSnapshot', () {
+    test('round trips stable row identity for fx restore', () {
+      final snapshot = RowEffectsSnapshot(
+        3,
+        <EffectSnapshot>[
+          EffectSnapshot('EQ', false, <String, dynamic>{'gain': 0.5}),
+        ],
+        rowId: 29,
+      );
+
+      final restored = RowEffectsSnapshotJson.fromJson(snapshot.toJson());
+
+      expect(restored.row, 3);
+      expect(restored.rowId, 29);
+      expect(restored.effects, hasLength(1));
+      expect(restored.effects.single.effectId, 'EQ');
+      expect(restored.effects.single.params['gain'], closeTo(0.5, 0.001));
     });
   });
 }

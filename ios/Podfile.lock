@@ -399,7 +399,7 @@ SPEC CHECKSUMS:
   image_gallery_saver: 14711d79da40581063e8842a11acf1969d781ed7
   in_app_purchase_storekit: 22cca7d08eebca9babdf4d07d0baccb73325d3c8
   integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
-  juce_audio_engine: e42eb91658f14e771136a72eeba6845dea76b2fe
+  juce_audio_engine: e2de7a1dd97265f4de031bf7f96d17cc0727f79d
   just_audio: 4e391f57b79cad2b0674030a00453ca5ce817eed
   kakao_flutter_sdk_common: 682b3606698f87467788598dc2dc09d4e6867fbd
   large_file_handler: b37481e9b4972562ffcdc8f75700f47cd592bcec

@@ -43,6 +43,67 @@ class JuceEngineCapabilities {
   }
 }
 
+enum AudioRouteKind {
+  unknown,
+  speaker,
+  wired,
+  usb,
+  bluetoothOutput,
+  bluetoothHeadsetMic,
+}
+
+AudioRouteKind _audioRouteKindFromString(String value) {
+  switch (value) {
+    case 'speaker':
+      return AudioRouteKind.speaker;
+    case 'wired':
+      return AudioRouteKind.wired;
+    case 'usb':
+      return AudioRouteKind.usb;
+    case 'bluetoothOutput':
+      return AudioRouteKind.bluetoothOutput;
+    case 'bluetoothHeadsetMic':
+      return AudioRouteKind.bluetoothHeadsetMic;
+    default:
+      return AudioRouteKind.unknown;
+  }
+}
+
+class AudioRouteInfo {
+  const AudioRouteInfo({
+    required this.outputRouteKind,
+    required this.outputRouteName,
+    required this.inputDeviceName,
+    required this.inputIsBluetoothHeadset,
+  });
+
+  final AudioRouteKind outputRouteKind;
+  final String outputRouteName;
+  final String inputDeviceName;
+  final bool inputIsBluetoothHeadset;
+
+  bool get isBluetoothOutput =>
+      outputRouteKind == AudioRouteKind.bluetoothOutput;
+
+  factory AudioRouteInfo.fromMap(Map<String, dynamic> map) {
+    return AudioRouteInfo(
+      outputRouteKind: _audioRouteKindFromString(
+        map['outputRouteKind']?.toString() ?? '',
+      ),
+      outputRouteName: map['outputRouteName']?.toString() ?? '',
+      inputDeviceName: map['inputDeviceName']?.toString() ?? '',
+      inputIsBluetoothHeadset: map['inputIsBluetoothHeadset'] == true,
+    );
+  }
+
+  static const unknown = AudioRouteInfo(
+    outputRouteKind: AudioRouteKind.unknown,
+    outputRouteName: '',
+    inputDeviceName: '',
+    inputIsBluetoothHeadset: false,
+  );
+}
+
 class JuceAudioEngine {
   static const _ch = MethodChannel('juce_audio_engine');
   static const _eventCh = EventChannel('juce_audio_engine/events');
@@ -1607,6 +1668,44 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<AudioRouteInfo> getAudioRouteInfo() async {
+    try {
+      final res =
+          await _ch.invokeMapMethod<String, dynamic>('getAudioRouteInfo');
+      if (res == null) return AudioRouteInfo.unknown;
+      return AudioRouteInfo.fromMap(Map<String, dynamic>.from(res));
+    } on MissingPluginException {
+      return AudioRouteInfo.unknown;
+    } on PlatformException catch (e) {
+      _logError('getAudioRouteInfo', e);
+      return AudioRouteInfo.unknown;
+    }
+  }
+
+  static Future<void> setLiveInputMonitoringEnabled(bool enabled) async {
+    try {
+      await _ch.invokeMethod('setLiveInputMonitoringEnabled', {
+        'enabled': enabled,
+      });
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('setLiveInputMonitoringEnabled', e);
+    }
+  }
+
+  static Future<bool> preferNonBluetoothRecordingInput() async {
+    try {
+      final res = await _ch.invokeMethod<bool>('preferNonBluetoothRecordingInput');
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException catch (e) {
+      _logError('preferNonBluetoothRecordingInput', e);
+      return false;
+    }
+  }
+
   static Future<bool> startRecording(
     String path,
     int channelStart,
@@ -1630,6 +1729,26 @@ class JuceAudioEngine {
       await _ch.invokeMethod('stopRecording');
     } on PlatformException catch (e) {
       _logError('stopRecording', e);
+    }
+  }
+
+  static Future<void> stopRecordingWithoutPlaybackRestore() async {
+    try {
+      await _ch.invokeMethod('stopRecordingWithoutPlaybackRestore');
+    } on MissingPluginException {
+      await stopRecording();
+    } on PlatformException catch (e) {
+      _logError('stopRecordingWithoutPlaybackRestore', e);
+    }
+  }
+
+  static Future<void> restoreBluetoothPlaybackAfterRecordingStop() async {
+    try {
+      await _ch.invokeMethod('restoreBluetoothPlaybackAfterRecordingStop');
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('restoreBluetoothPlaybackAfterRecordingStop', e);
     }
   }
 

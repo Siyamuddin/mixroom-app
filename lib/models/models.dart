@@ -259,9 +259,10 @@ class EffectSnapshot {
 
 class RowEffectsSnapshot {
   final int row;
+  final int rowId;
   final List<EffectSnapshot> effects;
 
-  RowEffectsSnapshot(this.row, this.effects);
+  RowEffectsSnapshot(this.row, this.effects, {this.rowId = -1});
 }
 
 class MasterEffectsSnapshot {
@@ -454,6 +455,7 @@ extension AudioTrackSerialization on AudioTrack {
 
 class RowStateSnapshot {
   final int row;
+  final int rowId;
   final double gain; // row/bus gain
   final double pan; // row/bus pan (-1..1 or 0..1 depending on your app)
   final List<AutomationPoint> volumeAutomation; // row-level automation
@@ -463,6 +465,7 @@ class RowStateSnapshot {
 
   RowStateSnapshot({
     required this.row,
+    this.rowId = -1,
     required this.gain,
     required this.pan,
     required this.volumeAutomation,
@@ -474,6 +477,7 @@ class RowStateSnapshot {
   Map<String, dynamic> toJson() {
     return {
       "row": row,
+      "rowId": rowId,
       "gain": gain,
       "pan": pan,
       "volumeAutomation": volumeAutomation.map((e) => e.toJson()).toList(),
@@ -495,6 +499,7 @@ class RowStateSnapshot {
 
     return RowStateSnapshot(
       row: (json["row"] as num?)?.toInt() ?? 0,
+      rowId: (json["rowId"] as num?)?.toInt() ?? -1,
       gain: ((json["gain"] as num?) ?? kDefaultGainUi).toDouble(),
       pan: ((json["pan"] as num?) ?? 0.5).toDouble(),
       volumeAutomation: ((json["volumeAutomation"] as List?) ?? [])
@@ -538,16 +543,18 @@ extension EffectSnapshotJson on EffectSnapshot {
 extension RowEffectsSnapshotJson on RowEffectsSnapshot {
   Map<String, dynamic> toJson() => {
         "row": row,
+        "rowId": rowId,
         "effects": effects.map((e) => e.toJson()).toList(),
       };
 
   static RowEffectsSnapshot fromJson(Map<String, dynamic> json) {
     return RowEffectsSnapshot(
-      json["row"] as int,
+      (json["row"] as num?)?.toInt() ?? 0,
       (json["effects"] as List)
           .map((e) =>
               EffectSnapshotJson.fromJson((e as Map).cast<String, dynamic>()))
           .toList(),
+      rowId: (json["rowId"] as num?)?.toInt() ?? -1,
     );
   }
 }

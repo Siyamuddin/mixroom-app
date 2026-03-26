@@ -185,11 +185,70 @@ class NativeAuthFlowTests(unittest.TestCase):
         self.assertEqual(entitlement["tier"], "free")
         self.assertEqual(entitlement["status"], "active")
 
+    def test_email_signup_uses_korean_template_when_locale_is_korean(self) -> None:
+        repo = _FakeRepo()
+
+        with mock.patch.object(native_auth, "send_auth_email") as send_email, mock.patch.object(
+            native_auth,
+            "_generate_numeric_code",
+            return_value="123456",
+        ):
+            native_auth.register_email_account(
+                repo,
+                email="user@example.com",
+                password="CorrectHorseBatteryStaple1!",
+                display_name="Native User",
+                locale="ko-KR",
+            )
+
+        self.assertEqual(send_email.call_count, 1)
+        kwargs = send_email.call_args.kwargs
+        self.assertEqual(kwargs.get("subject"), "Mixroom 계정 이메일 인증")
+        self.assertIn("인증 코드는 123456", str(kwargs.get("text_body") or ""))
+
+    def test_password_reset_uses_english_template_for_non_korean_locale(self) -> None:
+        repo = _FakeRepo()
+
+        with mock.patch.object(native_auth, "send_auth_email"), mock.patch.object(
+            native_auth,
+            "_generate_numeric_code",
+            return_value="123456",
+        ):
+            native_auth.register_email_account(
+                repo,
+                email="user@example.com",
+                password="CorrectHorseBatteryStaple1!",
+                display_name="Native User",
+            )
+            native_auth.confirm_email_account(
+                repo,
+                email="user@example.com",
+                code="123456",
+            )
+
+        with mock.patch.object(native_auth, "send_auth_email") as send_email, mock.patch.object(
+            native_auth,
+            "_generate_numeric_code",
+            return_value="654321",
+        ):
+            native_auth.request_password_reset(
+                repo,
+                email="user@example.com",
+                locale="ja-JP",
+            )
+
+        self.assertEqual(send_email.call_count, 1)
+        kwargs = send_email.call_args.kwargs
+        self.assertEqual(kwargs.get("subject"), "Reset your Mixroom password")
+        self.assertIn(
+            "Your Mixroom password reset code is 654321.",
+            str(kwargs.get("text_body") or ""),
+        )
+
     def test_email_signup_confirm_signin_refresh_and_signout_flow(self) -> None:
         repo = _FakeRepo()
         refresh_token_1 = "rt_session-1_secret"
         refresh_token_2 = "rt_session-2_secret"
-        refresh_token_3 = "rt_session-3_secret"
 
         with mock.patch.object(native_auth, "send_auth_email") as send_email, mock.patch.object(
             native_auth,
@@ -213,7 +272,6 @@ class NativeAuthFlowTests(unittest.TestCase):
             side_effect=[
                 (refresh_token_1, native_auth._hash_value(refresh_token_1)),  # noqa: SLF001
                 (refresh_token_2, native_auth._hash_value(refresh_token_2)),  # noqa: SLF001
-                (refresh_token_3, native_auth._hash_value(refresh_token_3)),  # noqa: SLF001
             ],
         ), mock.patch.object(
             native_auth,
@@ -246,13 +304,14 @@ class NativeAuthFlowTests(unittest.TestCase):
         self.assertTrue(confirm["user"]["emailVerified"])
         self.assertEqual(repo.get_entitlement(confirm["user"]["userId"])["tier"], "free")
         self.assertEqual(sign_in["tokens"]["accessToken"], "access-token-2")
-        self.assertEqual(refreshed["tokens"]["refreshToken"], refresh_token_3)
+        self.assertEqual(refreshed["tokens"]["refreshToken"], refresh_token_2)
         self.assertEqual(len(repo.sessions), 2)
         for session in repo.sessions.values():
-            self.assertIsInstance(session.get("expires_at_ttl"), int)
-            self.assertGreater(session["expires_at_ttl"], 0)
+            self.assertEqual(str(session.get("expires_at") or "").strip(), "")
+            self.assertNotIn("expires_at_ttl", session)
+            self.assertTrue(str(session.get("last_refreshed_at") or "").strip())
 
-        session_id = "session-3"
+        session_id = "session-2"
         sign_out = native_auth.sign_out_session(repo, session_id=session_id)
         self.assertTrue(sign_out["signedOut"])
         self.assertEqual(len(repo.sessions), 1)
@@ -587,7 +646,7 @@ class NativeAuthFlowTests(unittest.TestCase):
 
         self.assertEqual(sign_in["tokens"]["accessToken"], "access-token-reset")
 
-    def test_refresh_session_rejects_reuse_of_rotated_refresh_token(self) -> None:
+    def test_refresh_session_reuses_stable_refresh_token(self) -> None:
         repo = _FakeRepo()
 
         with mock.patch.object(native_auth, "send_auth_email"), mock.patch.object(
@@ -605,24 +664,20 @@ class NativeAuthFlowTests(unittest.TestCase):
         with mock.patch.object(
             native_auth,
             "new_refresh_token",
-            side_effect=[
-                (
-                    "rt_session-initial_secret",
-                    native_auth._hash_value("rt_session-initial_secret"),  # noqa: SLF001
-                ),
-                (
-                    "rt_session-rotated_secret",
-                    native_auth._hash_value("rt_session-rotated_secret"),  # noqa: SLF001
-                ),
-            ],
+            return_value=(
+                "rt_session-initial_secret",
+                native_auth._hash_value("rt_session-initial_secret"),  # noqa: SLF001
+            ),
         ), mock.patch.object(
             native_auth,
             "mint_token",
             side_effect=[
                 "access-token-initial",
                 "id-token-initial",
-                "access-token-rotated",
-                "id-token-rotated",
+                "access-token-refresh-1",
+                "id-token-refresh-1",
+                "access-token-refresh-2",
+                "id-token-refresh-2",
             ],
         ):
             confirmed = native_auth.confirm_email_account(
@@ -630,18 +685,20 @@ class NativeAuthFlowTests(unittest.TestCase):
                 email="user@example.com",
                 code="123456",
             )
-            rotated = native_auth.refresh_session(
+            refreshed_once = native_auth.refresh_session(
+                repo,
+                refresh_token=confirmed["tokens"]["refreshToken"],
+            )
+            refreshed_twice = native_auth.refresh_session(
                 repo,
                 refresh_token=confirmed["tokens"]["refreshToken"],
             )
 
-        self.assertEqual(rotated["tokens"]["refreshToken"], "rt_session-rotated_secret")
-        with self.assertRaises(native_auth.AppUserAuthError) as raised:
-            native_auth.refresh_session(
-                repo,
-                refresh_token=confirmed["tokens"]["refreshToken"],
-            )
-        self.assertEqual(raised.exception.code, "SESSION_INVALID")
+        self.assertEqual(refreshed_once["tokens"]["refreshToken"], "rt_session-initial_secret")
+        self.assertEqual(refreshed_twice["tokens"]["refreshToken"], "rt_session-initial_secret")
+        self.assertEqual(refreshed_once["tokens"]["accessToken"], "access-token-refresh-1")
+        self.assertEqual(refreshed_twice["tokens"]["accessToken"], "access-token-refresh-2")
+        self.assertEqual(len(repo.sessions), 1)
 
     def test_legacy_cognito_password_sign_in_backfills_native_account(self) -> None:
         repo = _FakeRepo()

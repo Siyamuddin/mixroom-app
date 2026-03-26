@@ -188,11 +188,14 @@ object JuceBridge {
     @JvmStatic external fun getNumInputChannelsJNI(): Int
     @JvmStatic external fun prepareRecordingInputsJNI(desiredInputChannels: Int, reason: String): Boolean
     @JvmStatic external fun refreshAudioRouteJNI(reason: String)
+    @JvmStatic external fun hardResetPlaybackOnlyRouteJNI(reason: String): Boolean
     @JvmStatic external fun getRecordingPeakJNI(): Double
     @JvmStatic external fun getCurrentDeviceNameJNI(): String
     @JvmStatic external fun getCurrentOutputDeviceNameJNI(): String
+    @JvmStatic external fun setLiveInputMonitoringEnabledJNI(enabled: Boolean)
     @JvmStatic external fun startRecordingJNI(path: String, channelStart: Int, channelCount: Int): Boolean
     @JvmStatic external fun stopRecordingJNI()
+    @JvmStatic external fun stopRecordingWithoutPlaybackRestoreJNI()
     @JvmStatic external fun isRecordingJNI(): Boolean
 
     // Meters and analysis

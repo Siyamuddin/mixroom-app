@@ -53,6 +53,18 @@ APP_AUTH_EMAIL_FROM_ADDRESS = os.environ.get(
 APP_AUTH_EMAIL_REPLY_TO_ADDRESS = os.environ.get(
     "APP_AUTH_EMAIL_REPLY_TO_ADDRESS", ""
 ).strip()
+POSTMARK_SERVER_TOKEN = os.environ.get(
+    "POSTMARK_SERVER_TOKEN", ""
+).strip()
+POSTMARK_SERVER_TOKEN_SECRET_ARN = os.environ.get(
+    "POSTMARK_SERVER_TOKEN_SECRET_ARN", ""
+).strip()
+POSTMARK_API_BASE_URL = os.environ.get(
+    "POSTMARK_API_BASE_URL", "https://api.postmarkapp.com"
+).strip() or "https://api.postmarkapp.com"
+POSTMARK_MESSAGE_STREAM = os.environ.get(
+    "POSTMARK_MESSAGE_STREAM", ""
+).strip()
 GOOGLE_OAUTH_CLIENT_IDS = [
     value.strip()
     for value in os.environ.get("GOOGLE_OAUTH_CLIENT_IDS", "").split(",")

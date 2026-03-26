@@ -226,6 +226,48 @@ class ProjectManager {
     return next;
   }
 
+  static Map<int, int> persistedRowOrderIndexById(
+      List<Map<String, dynamic>> rows) {
+    final byId = <int, int>{};
+    for (var i = 0; i < rows.length; i++) {
+      final rowId = (rows[i]['rowId'] as num?)?.toInt() ?? -1;
+      if (rowId >= 0) {
+        byId[rowId] = i;
+      }
+    }
+    return byId;
+  }
+
+  static int resolveSavedTrackRowIndex({
+    required Map<String, dynamic> track,
+    required Map<int, int> persistedRowIndexById,
+  }) {
+    final fallbackRowIndex = (track['rowIndex'] as num?)?.toInt() ?? 0;
+    final storedRowId = (track['rowId'] as num?)?.toInt() ?? -1;
+    if (persistedRowIndexById.isEmpty || storedRowId < 0) {
+      return fallbackRowIndex;
+    }
+    return persistedRowIndexById[storedRowId] ?? fallbackRowIndex;
+  }
+
+  static String uniqueAudioFileName({
+    required String preferredName,
+    required Set<String> usedNamesLower,
+  }) {
+    final ext = p.extension(preferredName);
+    final stem = ext.isEmpty
+        ? preferredName
+        : preferredName.substring(0, preferredName.length - ext.length);
+    var candidate = preferredName;
+    var suffix = 1;
+    while (usedNamesLower.contains(candidate.toLowerCase())) {
+      candidate = '$stem #$suffix$ext';
+      suffix++;
+    }
+    usedNamesLower.add(candidate.toLowerCase());
+    return candidate;
+  }
+
   static Future<String> ensureProjectId(Directory dir) async {
     final json = await readProjectJson(dir);
     final before =

@@ -40,11 +40,12 @@ class AuthService extends ChangeNotifier {
   CognitoTokens? _tokens;
   String? _pendingEmailUsername;
   bool _lastSocialSignInRequiresSignupCompletion = false;
+  Future<CognitoSession?>? _sessionRefreshInFlight;
 
   bool get isInitializing => _isInitializing;
   bool get isBusy => _isBusy;
   bool get isSignedIn => signedInUser != null;
-  bool get hasActiveSessionTokens => _hasUsableSessionTokens(_tokens);
+  bool get hasActiveSessionTokens => _hasRecoverableSessionTokens(_tokens);
   bool get lastSocialSignInRequiresSignupCompletion =>
       _lastSocialSignInRequiresSignupCompletion;
   AuthUserProfile? get currentUser => _currentUser;
@@ -55,23 +56,15 @@ class AuthService extends ChangeNotifier {
       !(_currentUser?.emailVerified ?? true);
 
   Future<String?> getIdTokenOrNull() async {
-    final user = signedInUser;
+    final user = _sessionUserOrNull();
     final tokens = _tokens;
     if (user == null || tokens == null) return null;
     final fallbackIdToken = tokens.idToken.trim();
     final canUseFallbackToken =
-        fallbackIdToken.isNotEmpty && tokens.expiresAtUtc.isAfter(DateTime.now().toUtc());
+        fallbackIdToken.isNotEmpty && _hasUsableAccessTokens(tokens);
 
     try {
-      final refreshed = await _refreshSessionIfNeeded(provider: user.provider);
-      if (refreshed != null) {
-        _setSession(
-          refreshed,
-          provider: user.provider,
-          createdAt: user.createdAt,
-        );
-        await _persistSession();
-      }
+      await _refreshSessionIfNeeded(provider: user.provider);
     } catch (_) {
       if (canUseFallbackToken) {
         return fallbackIdToken;
@@ -84,22 +77,14 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<String?> refreshIdTokenOrNull() async {
-    final user = signedInUser;
+    final user = _sessionUserOrNull();
     if (user == null) return null;
 
     try {
-      final refreshed = await _refreshSessionIfNeeded(
+      await _refreshSessionIfNeeded(
         provider: user.provider,
         forceRefresh: true,
       );
-      if (refreshed != null) {
-        _setSession(
-          refreshed,
-          provider: user.provider,
-          createdAt: user.createdAt,
-        );
-        await _persistSession();
-      }
     } catch (_) {
       return null;
     }
@@ -192,20 +177,14 @@ class AuthService extends ChangeNotifier {
         final tokens = _tokens;
         if (current != null && tokens != null) {
           try {
-            final refreshed = await _refreshSessionIfNeeded(
+            await _refreshSessionIfNeeded(
               provider: current.provider,
             ).timeout(
               const Duration(seconds: 5),
               onTimeout: () => null,
             );
-            if (refreshed != null) {
-              _setSession(
-                refreshed,
-                provider: current.provider,
-                createdAt: current.createdAt,
-              );
-              await _persistSession();
-            } else if (_needsNativeSessionUpgrade(tokens)) {
+            if (_needsNativeSessionUpgrade(tokens) &&
+                !_isNativeRefreshToken(_tokens?.refreshToken ?? '')) {
               await _clearSession();
             }
           } catch (_) {
@@ -422,6 +401,7 @@ class AuthService extends ChangeNotifier {
     String? birthdate,
     required String email,
     required String password,
+    String? localeCode,
   }) async {
     final safeName = (name ?? '').trim();
     final safeGivenName = (givenName ?? '').trim();
@@ -446,6 +426,7 @@ class AuthService extends ChangeNotifier {
           givenName: safeGivenName,
           familyName: safeFamilyName,
           birthdate: safeBirthdate,
+          locale: localeCode,
         );
         if (signUp.userConfirmed) {
           final session = await _cognito.signInWithEmail(
@@ -550,6 +531,7 @@ class AuthService extends ChangeNotifier {
 
   Future<void> resendSignUpCode({
     required String email,
+    String? localeCode,
   }) async {
     final safeEmail = email.trim().toLowerCase();
     if (safeEmail.isEmpty) {
@@ -560,6 +542,7 @@ class AuthService extends ChangeNotifier {
       try {
         await _cognito.resendSignUpCode(
           username: _resolvePendingEmailUsername(safeEmail),
+          locale: localeCode,
         );
       } on CognitoApiException catch (e) {
         throw StateError(_friendlyErrorMessage(e));
@@ -689,6 +672,7 @@ class AuthService extends ChangeNotifier {
 
   Future<void> requestPasswordReset({
     required String email,
+    String? localeCode,
   }) async {
     final safeEmail = email.trim().toLowerCase();
     if (safeEmail.isEmpty) {
@@ -697,7 +681,10 @@ class AuthService extends ChangeNotifier {
 
     await _runBusyTask(() async {
       try {
-        await _cognito.requestPasswordReset(email: safeEmail);
+        await _cognito.requestPasswordReset(
+          email: safeEmail,
+          locale: localeCode,
+        );
       } on CognitoApiException catch (e) {
         if (e.code == 'PASSWORD_RESET_UNAVAILABLE' ||
             _looksLikeSocialPasswordFlowError(e)) {
@@ -790,7 +777,7 @@ class AuthService extends ChangeNotifier {
     });
   }
 
-  Future<void> resendEmailVerification() async {
+  Future<void> resendEmailVerification({String? localeCode}) async {
     final user = _currentUser;
     if (user == null) {
       throw StateError('No active account.');
@@ -807,11 +794,15 @@ class AuthService extends ChangeNotifier {
         if (_tokens == null) {
           await _cognito.resendSignUpCode(
             username: _resolvePendingEmailUsername(user.email),
+            locale: localeCode,
           );
           return;
         }
         final accessToken = await _requireAccessToken();
-        await _cognito.resendEmailVerification(accessToken: accessToken);
+        await _cognito.resendEmailVerification(
+          accessToken: accessToken,
+          locale: localeCode,
+        );
       } on CognitoApiException catch (e) {
         throw StateError(_friendlyErrorMessage(e));
       }
@@ -851,17 +842,9 @@ class AuthService extends ChangeNotifier {
         final tokens = _tokens;
         if (user != null && tokens != null) {
           try {
-            final refreshed = await _refreshSessionIfNeeded(
+            await _refreshSessionIfNeeded(
               provider: user.provider,
             );
-            if (refreshed != null) {
-              _setSession(
-                refreshed,
-                provider: user.provider,
-                createdAt: user.createdAt,
-              );
-              await _persistSession();
-            }
           } catch (_) {
             // Continue with best-effort sign-out using existing tokens.
           }
@@ -1044,24 +1027,16 @@ class AuthService extends ChangeNotifier {
 
   Future<String> _requireAccessToken() async {
     final tokens = _tokens;
-    final user = signedInUser;
+    final user = _sessionUserOrNull();
     if (tokens == null || user == null) {
       throw StateError('No active account.');
     }
     final fallbackAccessToken = tokens.accessToken.trim();
-    final canUseFallbackToken = fallbackAccessToken.isNotEmpty &&
-        tokens.expiresAtUtc.isAfter(DateTime.now().toUtc());
+    final canUseFallbackToken =
+        fallbackAccessToken.isNotEmpty && _hasUsableAccessTokens(tokens);
 
     try {
-      final refreshed = await _refreshSessionIfNeeded(provider: user.provider);
-      if (refreshed != null) {
-        _setSession(
-          refreshed,
-          provider: user.provider,
-          createdAt: user.createdAt,
-        );
-        await _persistSession();
-      }
+      await _refreshSessionIfNeeded(provider: user.provider);
     } catch (_) {
       if (canUseFallbackToken) {
         return fallbackAccessToken;
@@ -1081,24 +1056,74 @@ class AuthService extends ChangeNotifier {
     bool forceRefresh = false,
   }) async {
     final tokens = _tokens;
-    if (tokens == null) return null;
+    final user = _sessionUserOrNull();
+    if (tokens == null || user == null) return null;
     final requiresNativeUpgrade = _needsNativeSessionUpgrade(tokens);
-    if (!forceRefresh && !requiresNativeUpgrade && !tokens.isExpiringSoon) {
+    final accessTokensExpired = !_hasUsableAccessTokens(tokens);
+    if (!forceRefresh &&
+        !requiresNativeUpgrade &&
+        !tokens.isExpiringSoon &&
+        !accessTokensExpired) {
       return null;
     }
     if (tokens.refreshToken.trim().isEmpty) {
       throw StateError('Session expired. Please sign in again.');
     }
 
-    final refreshed = await _cognito.refreshSession(
-      refreshToken: tokens.refreshToken,
+    final inFlight = _sessionRefreshInFlight;
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final expectedUserId = user.userId;
+    final expectedRefreshToken = tokens.refreshToken;
+    final expectedCreatedAt = user.createdAt;
+    final refreshFuture = _performSessionRefresh(
+      provider: provider,
+      expectedUserId: expectedUserId,
+      expectedRefreshToken: expectedRefreshToken,
+      expectedCreatedAt: expectedCreatedAt,
       fallbackIdToken: tokens.idToken,
     );
-
-    // Preserve provider in local profile.
-    if (signedInUser != null && signedInUser!.provider != provider) {
-      _currentUser = signedInUser!.copyWith(provider: provider);
+    _sessionRefreshInFlight = refreshFuture;
+    try {
+      return await refreshFuture;
+    } finally {
+      if (identical(_sessionRefreshInFlight, refreshFuture)) {
+        _sessionRefreshInFlight = null;
+      }
     }
+  }
+
+  Future<CognitoSession?> _performSessionRefresh({
+    required AuthProviderType provider,
+    required String expectedUserId,
+    required String expectedRefreshToken,
+    required DateTime expectedCreatedAt,
+    required String fallbackIdToken,
+  }) async {
+    final refreshed = await _cognito.refreshSession(
+      refreshToken: expectedRefreshToken,
+      fallbackIdToken: fallbackIdToken,
+    );
+
+    final currentUser = _currentUser;
+    final currentTokens = _tokens;
+    if (currentUser == null || currentTokens == null) {
+      return null;
+    }
+    final stillRefreshingSameSession = currentUser.userId == expectedUserId &&
+        currentTokens.refreshToken == expectedRefreshToken;
+    if (!stillRefreshingSameSession) {
+      return null;
+    }
+
+    _setSession(
+      refreshed,
+      provider: provider,
+      createdAt: expectedCreatedAt,
+    );
+    await _persistSession();
     return refreshed;
   }
 
@@ -1285,16 +1310,13 @@ class AuthService extends ChangeNotifier {
     required AuthUserProfile? user,
     required CognitoTokens? tokens,
   }) {
-    if (user == null) {
+    if (!_hasSessionUserAccess(user)) {
       return false;
     }
-    if (user.userId == _debugUser.userId) {
+    if (user!.userId == _debugUser.userId) {
       return true;
     }
-    if (!_hasUsableSessionTokens(tokens)) {
-      return false;
-    }
-    if (user.provider == AuthProviderType.email && !user.emailVerified) {
+    if (!_hasRecoverableSessionTokens(tokens)) {
       return false;
     }
     return true;
@@ -1305,6 +1327,22 @@ class AuthService extends ChangeNotifier {
     return tokens.accessToken.trim().isNotEmpty &&
         tokens.idToken.trim().isNotEmpty &&
         tokens.expiresAtUtc.isAfter(DateTime.now().toUtc());
+  }
+
+  bool _hasRecoverableSessionTokens(CognitoTokens? tokens) {
+    if (tokens == null) return false;
+    final hasAccessPayload = tokens.accessToken.trim().isNotEmpty;
+    final hasIdPayload = tokens.idToken.trim().isNotEmpty;
+    if (!hasAccessPayload || !hasIdPayload) {
+      return false;
+    }
+    return _hasUsableAccessTokens(tokens) ||
+        tokens.refreshToken.trim().isNotEmpty;
+  }
+
+  bool _hasUsableAccessTokens(CognitoTokens? tokens) {
+    if (tokens == null) return false;
+    return tokens.expiresAtUtc.isAfter(DateTime.now().toUtc());
   }
 
   bool _needsNativeSessionUpgrade(CognitoTokens tokens) {
@@ -1335,7 +1373,7 @@ class AuthService extends ChangeNotifier {
   Future<List<String>> _collectAuthTokenCandidates({
     bool forceRefresh = false,
   }) async {
-    final user = signedInUser;
+    final user = _sessionUserOrNull();
     final existingTokens = _tokens;
     if (user == null || existingTokens == null) {
       return const <String>[];
@@ -1343,19 +1381,11 @@ class AuthService extends ChangeNotifier {
 
     var activeTokens = existingTokens;
     try {
-      final refreshed = await _refreshSessionIfNeeded(
+      await _refreshSessionIfNeeded(
         provider: user.provider,
         forceRefresh: forceRefresh,
       );
-      if (refreshed != null) {
-        _setSession(
-          refreshed,
-          provider: user.provider,
-          createdAt: user.createdAt,
-        );
-        await _persistSession();
-        activeTokens = refreshed.tokens;
-      }
+      activeTokens = _tokens ?? existingTokens;
     } catch (_) {
       if (forceRefresh) {
         return _tokenCandidates(existingTokens);
@@ -1366,7 +1396,7 @@ class AuthService extends ChangeNotifier {
   }
 
   List<String> _tokenCandidates(CognitoTokens tokens) {
-    if (tokens.expiresAtUtc.isBefore(DateTime.now().toUtc())) {
+    if (!_hasUsableAccessTokens(tokens)) {
       return const <String>[];
     }
     final idToken = tokens.idToken.trim();
@@ -1386,6 +1416,27 @@ class AuthService extends ChangeNotifier {
     await _syncObservabilityUser();
     notifyListeners();
     throw StateError('Session expired. Please sign in again.');
+  }
+
+  AuthUserProfile? _sessionUserOrNull() {
+    final user = _currentUser;
+    if (!_hasSessionUserAccess(user)) {
+      return null;
+    }
+    return user;
+  }
+
+  bool _hasSessionUserAccess(AuthUserProfile? user) {
+    if (user == null) {
+      return false;
+    }
+    if (user.userId == _debugUser.userId) {
+      return true;
+    }
+    if (user.provider == AuthProviderType.email && !user.emailVerified) {
+      return false;
+    }
+    return true;
   }
 
   _ParsedSocialSignInPayload? _parseSocialSignInPayload(

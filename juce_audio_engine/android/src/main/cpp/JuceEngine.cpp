@@ -103,6 +103,13 @@ int resolveStableAndroidBufferSize(juce::AudioIODevice *device, int currentBuffe
         return currentBufferSize > 0 ? juce::jmax(currentBufferSize, kTargetStableBufferSize)
                                      : kTargetStableBufferSize;
 
+    const int reportedBufferSize = device->getCurrentBufferSizeSamples();
+    if (reportedBufferSize > 0 && sizes.contains(reportedBufferSize))
+        return reportedBufferSize;
+
+    if (currentBufferSize > 0 && sizes.contains(currentBufferSize))
+        return currentBufferSize;
+
     int fallback = sizes[0];
     for (const auto size : sizes)
     {
@@ -242,6 +249,7 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
 
     auto setup = deviceManager.getAudioDeviceSetup();
     const auto currentSetup = setup;
+    captureRecordingRestorePlaybackSetupIfNeeded(desiredInputChannels, currentSetup);
 
     // Preserve the existing output route when possible, but recover from stale
     // zero-output configurations caused by route churn.
@@ -256,6 +264,7 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         setup.useDefaultOutputChannels = true;
 
 #if JUCE_ANDROID
+    if (desiredInputChannels > 0)
     {
         auto *device = deviceManager.getCurrentAudioDevice();
         const int stableBufferSize = resolveStableAndroidBufferSize(device, setup.bufferSize);
@@ -290,12 +299,12 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
             setup.inputChannels.setBit(ch);
     }
 
-    const bool channelSetupChanged =
+    const bool nonBufferSetupChanged =
         currentSetup.useDefaultOutputChannels != setup.useDefaultOutputChannels ||
         currentSetup.outputChannels != setup.outputChannels ||
         currentSetup.useDefaultInputChannels != setup.useDefaultInputChannels ||
-        currentSetup.inputChannels != setup.inputChannels ||
-        currentSetup.bufferSize != setup.bufferSize;
+        currentSetup.inputChannels != setup.inputChannels;
+    const bool bufferSizeChanged = currentSetup.bufferSize != setup.bufferSize;
 
     const auto routeMatchesDesiredInputs = [&]() -> bool
     {
@@ -321,8 +330,15 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         return activeInputs >= expectedInputs;
     };
 
-    if (!channelSetupChanged && routeMatchesDesiredInputs())
+    if (!nonBufferSetupChanged && routeMatchesDesiredInputs())
     {
+        if (bufferSizeChanged)
+        {
+            juceLogToFlutter(("Skipping Android buffer-only reopen [" + reason +
+                              "] current=" + juce::String(currentSetup.bufferSize) +
+                              " target=" + juce::String(setup.bufferSize))
+                                 .toRawUTF8());
+        }
         const double sr =
             getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
         if (sr > 1000.0)
@@ -331,7 +347,6 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         return true;
     }
 
-    // Fast path first: avoid forcing a full device reopen unless we truly need it.
     juce::String error = deviceManager.setAudioDeviceSetup(setup, false);
     if (error.isEmpty())
         ignoredDeviceChangeCallbacks.fetch_add(1, std::memory_order_relaxed);
@@ -392,6 +407,84 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
     return true;
 }
 
+void JuceEngine::captureRecordingRestorePlaybackSetupIfNeeded(
+    int desiredInputChannels,
+    const juce::AudioDeviceManager::AudioDeviceSetup &currentSetup)
+{
+    if (desiredInputChannels <= 0 || recordingActive)
+        return;
+
+    const int previousDesiredInputs =
+        desiredInputOpenChannels.load(std::memory_order_relaxed);
+    if (previousDesiredInputs > 0 || hasRecordingRestorePlaybackSetup)
+        return;
+
+    auto setup = currentSetup;
+    if (!setup.useDefaultOutputChannels && setup.outputChannels.isZero())
+        setup.useDefaultOutputChannels = true;
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+
+    recordingRestorePlaybackSetup = setup;
+    hasRecordingRestorePlaybackSetup = true;
+}
+
+bool JuceEngine::restoreRecordingPlaybackSetup(const juce::String &reason)
+{
+    if (!hasRecordingRestorePlaybackSetup)
+        return false;
+
+    auto setup = recordingRestorePlaybackSetup;
+
+    const auto availableOutputNames = getAvailableOutputDeviceNamesForManager(deviceManager);
+    if (!availableOutputNames.isEmpty() && !availableOutputNames.contains(setup.outputDeviceName))
+    {
+        const auto defaultOutputName = getDefaultOutputDeviceNameForManager(deviceManager);
+        setup.outputDeviceName = defaultOutputName.isNotEmpty() ? defaultOutputName
+                                                                : availableOutputNames[0];
+    }
+    if (!setup.useDefaultOutputChannels && setup.outputChannels.isZero())
+        setup.useDefaultOutputChannels = true;
+
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+
+    deviceManager.removeChangeListener(this);
+    deviceManager.closeAudioDevice();
+    const juce::String error = deviceManager.setAudioDeviceSetup(setup, true);
+    deviceManager.addChangeListener(this);
+
+    if (!error.isEmpty())
+    {
+        juceLogToFlutter(("restoreRecordingPlaybackSetup failed [" + reason + "]: " + error).toRawUTF8());
+        logCurrentAudioDeviceState(reason + "-error");
+        return false;
+    }
+
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const int activeOutputs = device != nullptr
+                                  ? device->getActiveOutputChannels().countNumberOfSetBits()
+                                  : 0;
+    if (activeOutputs <= 0)
+    {
+        juceLogToFlutter(("restoreRecordingPlaybackSetup missing output route [" + reason + "]").toRawUTF8());
+        logCurrentAudioDeviceState(reason + "-post-verify-mismatch");
+        return false;
+    }
+
+    const double sr =
+        getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
+    if (sr > 1000.0)
+        hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
+
+    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+    recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
+    hasRecordingRestorePlaybackSetup = false;
+    armOutputSafetyForCurrentRoute();
+    logCurrentAudioDeviceState(reason);
+    return true;
+}
+
 void JuceEngine::requestAudioDeviceRefreshAsync(const juce::String &reason)
 {
     bool expected = false;
@@ -442,6 +535,51 @@ bool JuceEngine::prepareRecordingInputs(int desiredInputChannels,
 void JuceEngine::refreshAudioRouteAsync(const juce::String &reason)
 {
     requestAudioDeviceRefreshAsync("manual-refresh:" + reason);
+}
+
+bool JuceEngine::hardResetPlaybackOnlyRoute(const juce::String &reason)
+{
+    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+    recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
+
+    if (restoreRecordingPlaybackSetup(reason + "-snapshot"))
+        return true;
+
+    auto setup = deviceManager.getAudioDeviceSetup();
+
+    const auto availableOutputNames = getAvailableOutputDeviceNamesForManager(deviceManager);
+    if (!availableOutputNames.isEmpty() && !availableOutputNames.contains(setup.outputDeviceName))
+    {
+        const auto defaultOutputName = getDefaultOutputDeviceNameForManager(deviceManager);
+        setup.outputDeviceName = defaultOutputName.isNotEmpty() ? defaultOutputName
+                                                                : availableOutputNames[0];
+    }
+    if (!setup.useDefaultOutputChannels && setup.outputChannels.isZero())
+        setup.useDefaultOutputChannels = true;
+
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+
+    deviceManager.removeChangeListener(this);
+    deviceManager.closeAudioDevice();
+    const juce::String error = deviceManager.setAudioDeviceSetup(setup, true);
+    deviceManager.addChangeListener(this);
+
+    if (!error.isEmpty())
+    {
+        juceLogToFlutter(("hardResetPlaybackOnlyRoute failed [" + reason + "]: " + error).toRawUTF8());
+        logCurrentAudioDeviceState(reason + "-error");
+        return false;
+    }
+
+    const double sr =
+        getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
+    if (sr > 1000.0)
+        hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
+
+    armOutputSafetyForCurrentRoute();
+    logCurrentAudioDeviceState(reason);
+    return true;
 }
 
 void JuceEngine::changeListenerCallback(juce::ChangeBroadcaster *source)
@@ -498,7 +636,7 @@ void JuceEngine::changeListenerCallback(juce::ChangeBroadcaster *source)
 
 void JuceEngine::armOutputSafetyForCurrentRoute() noexcept
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     armOutputSafetyFadeIn(getKnownDeviceSampleRate(
         deviceManager,
         hostSampleRateAtomic.load(std::memory_order_relaxed)));
@@ -569,6 +707,7 @@ void JuceEngine::initialiseEngine()
 
     desiredInputOpenChannels.store(0, std::memory_order_relaxed);
     recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
+    hasRecordingRestorePlaybackSetup = false;
     ignoredDeviceChangeCallbacks.store(0, std::memory_order_relaxed);
 
     if (!formatsRegistered)
@@ -670,8 +809,7 @@ void JuceEngine::shutdownEngine()
     clearMidiInputCallbacks();
 
     audioPlayer.setProcessor(nullptr);
-    // deviceManager.removeAudioCallback(&audioPlayer);
-    // deviceManager.closeAudioDevice();
+    deviceManager.closeAudioDevice();
 
     graph.clear();
 
@@ -744,6 +882,7 @@ void JuceEngine::shutdownEngine()
 
     desiredInputOpenChannels.store(0, std::memory_order_relaxed);
     recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
+    hasRecordingRestorePlaybackSetup = false;
     audioRouteRefreshPending.store(false, std::memory_order_relaxed);
     liveMidiInputTargetClip.store(-1, std::memory_order_relaxed);
     {
@@ -941,7 +1080,7 @@ void JuceEngine::loadTrack(int idx, const File &file)
 bool JuceEngine::loadClip(int clipId, int rowId, const juce::File &file,
                           double startSec, double lengthSec, double inFileOffsetSec)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (clipId < 0 || clipId >= kMaxClips)
         return false;
@@ -1040,7 +1179,7 @@ bool JuceEngine::loadMidiClip(int clipId,
                               double lengthSec,
                               double inFileOffsetSec)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (clipId < 0 || clipId >= kMaxClips)
         return false;
@@ -1240,7 +1379,7 @@ void JuceEngine::handleIncomingMidiMessage(juce::MidiInput *source,
 
 bool JuceEngine::unloadClip(int clipId)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
         return false;
@@ -1396,7 +1535,7 @@ double JuceEngine::getTrackDuration(int trackIndex)
 
 bool JuceEngine::setClipTime(int clipId, double startSec, double lengthSec, double inFileOffsetSec)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
         return false;
@@ -1417,7 +1556,7 @@ bool JuceEngine::setClipTime(int clipId, double startSec, double lengthSec, doub
 
 bool JuceEngine::moveClipToRow(int clipId, int newRowId)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
         return false;
@@ -1611,7 +1750,7 @@ juce::String JuceEngine::exportMix(const juce::File &outFile)
 
 juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOptions &rawOptions)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     const auto options = sanitiseExportOptions(rawOptions);
 
     if (options.format == "mp3")
@@ -1726,7 +1865,7 @@ juce::String JuceEngine::exportTrack(int trackIndex,
                                      const juce::File &outFile,
                                      const ExportOptions &rawOptions)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     const auto options = sanitiseExportOptions(rawOptions);
 
     if (options.format == "mp3")
@@ -1889,7 +2028,7 @@ juce::String JuceEngine::exportTrack(int trackIndex,
 void JuceEngine::play()
 {
     {
-        std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+        GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
         ensureMasterOutputRouting();
     }
 
@@ -2047,7 +2186,7 @@ juce::Array<juce::PluginDescription> JuceEngine::getKnownPlugins()
 // ============================================================
 void JuceEngine::loadVideoAudio(const juce::File &file)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     juceLogToFlutter("loadVideoAudio()");
     unloadVideoAudio();
@@ -2116,7 +2255,7 @@ void JuceEngine::loadVideoAudio(const juce::File &file)
 
 void JuceEngine::unloadVideoAudio()
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (!hasVideoAudio)
         return;
@@ -2487,7 +2626,7 @@ bool resolveKnownPluginDescription(const juce::KnownPluginList &list,
 
 bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     // juceLogToFlutter("Hello from JuceEngine::insertTrackEffect");
 
@@ -2607,7 +2746,7 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
 
 void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     // juceLogToFlutter("Hello from JuceEngine::removeTrackEffect");
 
@@ -2647,7 +2786,7 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
 
 void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     // juceLogToFlutter("Hello from JuceEngine::reorderTrackEffects");
 
@@ -2850,7 +2989,7 @@ void JuceEngine::setTrackEffectParameter(int trackRow,
 
 void JuceEngine::bypassRowEffect(int trackRow, int effectIndex, bool shouldBypass)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
@@ -2884,7 +3023,7 @@ bool JuceEngine::getRowEffectBypassState(int trackRow, int effectIndex)
 void JuceEngine::setTrackAutomationPoints(int trackRow,
                                           const std::vector<AutomationPoint> &points)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
@@ -2904,7 +3043,7 @@ void JuceEngine::setTrackEffectAutomationPoints(
     float maxValue,
     const std::vector<AutomationPoint> &points)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
@@ -2960,7 +3099,7 @@ void JuceEngine::setTrackEffectAutomationPoints(
 
 void JuceEngine::clearTrackEffectAutomationForRow(int trackRow)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
@@ -2971,7 +3110,7 @@ void JuceEngine::setRowGainAutomationPoints(
     int row,
     const std::vector<AutomationPoint> &points)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (row < 0 || row >= (int)rows.size())
         return;
@@ -2985,7 +3124,7 @@ void JuceEngine::setRowPanAutomationPoints(
     int row,
     const std::vector<AutomationPoint> &points)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (row < 0 || row >= (int)rows.size())
         return;
@@ -3002,7 +3141,7 @@ void JuceEngine::setMasterEffectAutomationPoints(
     float maxValue,
     const std::vector<AutomationPoint> &points)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (effectIndex < 0)
         return;
@@ -3055,14 +3194,14 @@ void JuceEngine::setMasterEffectAutomationPoints(
 
 void JuceEngine::clearMasterEffectAutomation()
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     masterEffectAutomationLanes.clear();
 }
 
 void JuceEngine::setMasterGainAutomationPoints(
     const std::vector<AutomationPoint> &points)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     auto safePoints = points;
     sanitiseAutomationPoints(safePoints, 1.0f);
@@ -3072,7 +3211,7 @@ void JuceEngine::setMasterGainAutomationPoints(
 void JuceEngine::setMasterPanAutomationPoints(
     const std::vector<AutomationPoint> &points)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     auto safePoints = points;
     sanitiseAutomationPoints(safePoints, 1.0f);
@@ -3255,7 +3394,7 @@ void JuceEngine::setRowPan(int row, float pan)
 // ============================================================
 bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     // juceLogToFlutter("Hello from JuceEngine::insertMasterEffect");
 
@@ -3369,7 +3508,7 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
 
 void JuceEngine::removeMasterEffect(int effectIndex)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (!masterEffectChain)
         return;
@@ -3404,7 +3543,7 @@ void JuceEngine::removeMasterEffect(int effectIndex)
 
 void JuceEngine::reorderMasterEffects(int fromIndex, int toIndex)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (!masterEffectChain)
         return;
@@ -3573,7 +3712,7 @@ void JuceEngine::setMasterEffectParameter(int effectIndex,
 
 void JuceEngine::bypassMasterEffect(int effectIndex, bool bypass)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (!masterEffectChain)
         return;
@@ -4188,9 +4327,8 @@ bool JuceEngine::selectInputDevice(const juce::String &name)
         return false;
     }
 
-    int desiredInputs = desiredInputOpenChannels.load(std::memory_order_relaxed);
-    if (desiredInputs <= 0)
-        desiredInputs = 1;
+    const int desiredInputs =
+        juce::jmax(0, desiredInputOpenChannels.load(std::memory_order_relaxed));
     if (applyPreferredAudioDeviceSetup(desiredInputs, false, "selectInputDevice"))
         return true;
     return applyPreferredAudioDeviceSetup(desiredInputs, true, "selectInputDevice-reopen");
@@ -4228,40 +4366,70 @@ int JuceEngine::getNumInputChannels() const
     return 0;
 }
 
-void JuceEngine::routeLiveInputToRow(int row, int channelCount, int channelStart)
+void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
-
-    if (!inputNode)
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+    if (liveInputMonitoringEnabled == enabled)
         return;
 
-    if (rows.empty())
+    liveInputMonitoringEnabled = enabled;
+    syncLiveInputMonitorRoutingLocked();
+}
+
+bool JuceEngine::isLiveInputMonitoringEnabled() const noexcept
+{
+    return liveInputMonitoringEnabled;
+}
+
+void JuceEngine::clearLiveInputMonitorConnectionsLocked()
+{
+    for (auto &connection : liveMonitorConnections)
+        graph.removeConnection(connection);
+    liveMonitorConnections.clear();
+}
+
+void JuceEngine::syncLiveInputMonitorRoutingLocked()
+{
+    clearLiveInputMonitorConnectionsLocked();
+
+    if (!liveInputMonitoringEnabled || !inputNode || rows.empty())
+    {
+        armOutputSafetyForCurrentRoute();
         return;
-    row = juce::jlimit(0, (int)rows.size() - 1, row);
+    }
+
+    const int row = juce::jlimit(0, (int)rows.size() - 1, liveMonitorTargetRow);
     ensureRowBusNodesAttached(row);
     auto rowInput = rows[(size_t)row].inputNode;
     if (!rowInput)
+    {
+        armOutputSafetyForCurrentRoute();
         return;
+    }
 
-    // remove old input connections
-    juce::Array<juce::AudioProcessorGraph::Connection> toRemove;
-    for (auto &c : graph.getConnections())
-        if (c.source.nodeID == inputNode->nodeID)
-            toRemove.add(c);
-
-    for (auto &c : toRemove)
-        graph.removeConnection(c);
-
-    const int start = juce::jmax(0, channelStart);
-    const int chCount = juce::jlimit(0, 2, channelCount);
-
+    const int start = juce::jmax(0, liveMonitorChannelStart);
+    const int chCount = juce::jlimit(0, 2, liveMonitorChannelCount);
     for (int ch = 0; ch < chCount; ++ch)
     {
-        graph.addConnection({{inputNode->nodeID, start + ch},
-                             {rowInput->nodeID, ch}});
+        juce::AudioProcessorGraph::Connection connection{
+            {inputNode->nodeID, start + ch},
+            {rowInput->nodeID, ch},
+        };
+        if (graph.addConnection(connection))
+            liveMonitorConnections.add(connection);
     }
 
     armOutputSafetyForCurrentRoute();
+}
+
+void JuceEngine::routeLiveInputToRow(int row, int channelCount, int channelStart)
+{
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+
+    liveMonitorTargetRow = row;
+    liveMonitorChannelCount = channelCount;
+    liveMonitorChannelStart = channelStart;
+    syncLiveInputMonitorRoutingLocked();
 }
 
 bool JuceEngine::startRecordingToWav(const juce::File &file,
@@ -4272,11 +4440,15 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
         return false;
 
     const int previousDesiredInputs = desiredInputOpenChannels.load(std::memory_order_relaxed);
-    recordingRestoreDesiredInputs.store(previousDesiredInputs, std::memory_order_relaxed);
+    juce::ignoreUnused(previousDesiredInputs);
+    // Recording input prewarm intentionally opens inputs before capture starts.
+    // Restoring that prewarm target after stop can leave Bluetooth in duplex
+    // mode, so post-record should return to playback-only instead.
+    recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
 
-    const auto failAndRestorePlaybackMode = [this, previousDesiredInputs]()
+    const auto failAndRestorePlaybackMode = [this]()
     {
-        applyPreferredAudioDeviceSetup(previousDesiredInputs, false, "startRecording-restore");
+        applyPreferredAudioDeviceSetup(0, true, "startRecording-restore");
         return false;
     };
 
@@ -4350,7 +4522,7 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     return true;
 }
 
-void JuceEngine::stopRecording()
+void JuceEngine::stopRecording(bool restorePlaybackRoute)
 {
     recordingActive = false;
 
@@ -4365,7 +4537,20 @@ void JuceEngine::stopRecording()
         0,
         recordingRestoreDesiredInputs.exchange(0, std::memory_order_relaxed));
     desiredInputOpenChannels.store(restoreInputs, std::memory_order_relaxed);
-    if (!applyPreferredAudioDeviceSetup(restoreInputs, false, "stopRecording"))
+    if (!restorePlaybackRoute)
+    {
+        logCurrentAudioDeviceState("recording-stopped-deferredRestore");
+        return;
+    }
+
+    if (restoreInputs <= 0 &&
+        restoreRecordingPlaybackSetup("stopRecording-restorePlaybackSetup"))
+    {
+        logCurrentAudioDeviceState("recording-stopped");
+        return;
+    }
+
+    if (!applyPreferredAudioDeviceSetup(restoreInputs, true, "stopRecording"))
         requestAudioDeviceRefreshAsync("stopRecording");
     else
         logCurrentAudioDeviceState("recording-stopped");
@@ -4799,7 +4984,7 @@ std::vector<float> JuceEngine::getMasterEqWaveform(int effectIndex, int sampleCo
 
 int JuceEngine::addRow(const juce::String &name, int iconId)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if ((int)rows.size() >= kMaxRows)
         return -1;
@@ -4837,7 +5022,7 @@ bool JuceEngine::renameRow(int rowId, const juce::String &newName)
 
 int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int iconId)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if ((int)rows.size() >= kMaxRows)
         return -1;
@@ -4865,7 +5050,7 @@ int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int
 
 int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int iconId)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if ((int)rows.size() >= kMaxRows)
         return -1;
@@ -4893,7 +5078,7 @@ int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int
 
 bool JuceEngine::moveRowOrder(int fromIndex, int toIndex)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     const int n = (int)rows.size();
     if (n <= 1)
@@ -4950,7 +5135,7 @@ juce::Array<juce::NamedValueSet> JuceEngine::getRows() const
 // remove row: delete any clips that belong to it
 bool JuceEngine::removeRow(int rowId)
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if ((int)rows.size() <= 1)
         return false; // always keep at least 1 row
@@ -5028,7 +5213,7 @@ juce::AudioProcessorGraph::Node::Ptr JuceEngine::getRowInputNodeById(int rowId)
 // Full rebuild of row/master bus nodes while keeping clip nodes
 void JuceEngine::rebuildBusesAndRewireClips()
 {
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     // 1) Remove connections that touch any row/master nodes
     // 2) Remove row bus nodes and master gain/pan nodes (keep FX nodes/chains)

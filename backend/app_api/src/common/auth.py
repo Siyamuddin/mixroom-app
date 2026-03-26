@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, Iterable
 
@@ -188,27 +186,9 @@ def _verify_native_session_claims(token: str) -> Dict[str, Any]:
     session = _repo.get_auth_session(session_id)
     if not session:
         raise AppAuthTokenError("Session no longer exists.")
-    if _is_expired(session.get("expires_at")):
-        _repo.delete_auth_session(session_id)
-        raise AppAuthTokenError("Session has expired.")
     if str(session.get("user_id") or "").strip() != user_id:
         raise AppAuthTokenError("Session user is invalid.")
     if not _repo.get_auth_account(user_id):
         _repo.delete_auth_session(session_id)
         raise AppAuthTokenError("Account no longer exists.")
     return payload
-
-
-def _is_expired(value: Any) -> bool:
-    raw = str(value or "").strip()
-    if not raw:
-        return True
-    try:
-        expires_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return True
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    else:
-        expires_at = expires_at.astimezone(timezone.utc)
-    return expires_at <= datetime.now(timezone.utc)

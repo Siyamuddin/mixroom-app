@@ -1570,6 +1570,12 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
     return [NSString stringWithUTF8String:s.toRawUTF8()];
 }
 
++ (NSString *)getCurrentOutputDeviceNameObjC
+{
+    auto s = JuceEngine::get().getCurrentOutputDeviceName();
+    return [NSString stringWithUTF8String:s.toRawUTF8()];
+}
+
 + (BOOL)prepareRecordingInputsObjC:(NSInteger)desiredInputChannels
                             reason:(NSString *)reason
 {
@@ -1580,7 +1586,19 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 + (void)refreshAudioRouteObjC:(NSString *)reason
 {
     const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);
-    JuceEngine::get().refreshAudioRouteAsync(why);
+    JuceEngine::get().requestAudioDeviceRefreshAsync(why);
+}
+
++ (void)setLiveInputMonitoringEnabledObjC:(BOOL)enabled
+{
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([enabled]
+                     { JuceEngine::get().setLiveInputMonitoringEnabled(enabled); });
+        return;
+    }
+
+    JuceEngine::get().setLiveInputMonitoringEnabled(enabled);
 }
 
 + (BOOL)startRecordingObjC:(NSString *)path

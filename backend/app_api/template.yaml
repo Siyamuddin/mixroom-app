@@ -53,6 +53,19 @@ Parameters:
   AppAuthEmailReplyToAddress:
     Type: String
     Default: ''
+  PostmarkServerToken:
+    Type: String
+    NoEcho: true
+    Default: ''
+  PostmarkServerTokenSecretArn:
+    Type: String
+    Default: ''
+  PostmarkApiBaseUrl:
+    Type: String
+    Default: 'https://api.postmarkapp.com'
+  PostmarkMessageStream:
+    Type: String
+    Default: ''
   AppAuthAccessTokenTtlSeconds:
     Type: Number
     Default: 3600
@@ -134,6 +147,7 @@ Conditions:
   HasAdminCognitoUserPoolId: !Not [!Equals [!Ref AdminCognitoUserPoolId, '']]
   HasSocialAuthSecretArn: !Not [!Equals [!Ref SocialAuthSecretArn, '']]
   HasAppAuthSecretArn: !Not [!Equals [!Ref AppAuthSecretArn, '']]
+  HasPostmarkServerTokenSecretArn: !Not [!Equals [!Ref PostmarkServerTokenSecretArn, '']]
   HasAppleRootCaSecretArn: !Not [!Equals [!Ref AppleRootCaSecretArn, '']]
   HasAppleSharedSecretSecretArn: !Not [!Equals [!Ref AppleSharedSecretSecretArn, '']]
   HasGoogleServiceAccountSecretArn: !Not [!Equals [!Ref GoogleServiceAccountSecretArn, '']]
@@ -191,6 +205,10 @@ Globals:
         APP_AUTH_AUDIENCE: !Ref AppAuthAudience
         APP_AUTH_EMAIL_FROM_ADDRESS: !Ref AppAuthEmailFromAddress
         APP_AUTH_EMAIL_REPLY_TO_ADDRESS: !Ref AppAuthEmailReplyToAddress
+        POSTMARK_SERVER_TOKEN: !Ref PostmarkServerToken
+        POSTMARK_SERVER_TOKEN_SECRET_ARN: !Ref PostmarkServerTokenSecretArn
+        POSTMARK_API_BASE_URL: !Ref PostmarkApiBaseUrl
+        POSTMARK_MESSAGE_STREAM: !Ref PostmarkMessageStream
         APP_AUTH_ACCESS_TOKEN_TTL_SECONDS: !Ref AppAuthAccessTokenTtlSeconds
         APP_AUTH_REFRESH_TOKEN_TTL_SECONDS: !Ref AppAuthRefreshTokenTtlSeconds
         GOOGLE_OAUTH_CLIENT_IDS: !Ref GoogleOauthClientIds
@@ -708,6 +726,14 @@ Resources:
                 Resource: !Ref AppAuthSecretArn
           - !Ref AWS::NoValue
         - !If
+          - HasPostmarkServerTokenSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref PostmarkServerTokenSecretArn
+          - !Ref AWS::NoValue
+        - !If
           - HasCognitoUserPool
           - Statement:
               - Effect: Allow
@@ -720,15 +746,6 @@ Resources:
                   - cognito-idp:ListUsers
                 Resource: '*'
           - !Ref AWS::NoValue
-        - Statement:
-            - Effect: Allow
-              Action:
-                - ses:SendEmail
-                - ses:SendRawEmail
-                - ses:SendTemplatedEmail
-                - ses:SendBulkTemplatedEmail
-                - ses:SendBulkEmail
-              Resource: '*'
       Events:
         EmailSignUp:
           Type: Api

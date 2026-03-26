@@ -334,7 +334,9 @@ class _AccountBodyState extends State<_AccountBody> {
             },
             onResend: () async {
               try {
-                await context.read<AuthService>().resendEmailVerification();
+                await context.read<AuthService>().resendEmailVerification(
+                      localeCode: Localizations.localeOf(context).languageCode,
+                    );
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(

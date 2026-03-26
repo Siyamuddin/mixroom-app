@@ -63,7 +63,26 @@ class ProxyAuthTests(unittest.TestCase):
                 "session-1": {
                     "session_id": "session-1",
                     "user_id": "user-1",
-                    "expires_at": "2099-01-01T00:00:00+00:00",
+                }
+            }
+        )
+        auth_module._auth_accounts = _FakeTable({"user-1": {"user_id": "user-1"}})
+
+        with mock.patch.object(auth_module, "_load_secret", return_value="secret"):
+            token = _mint_test_token({"sub": "user-1", "sid": "session-1"})
+            claims = auth_module.extract_claims_from_event(
+                {"headers": {"Authorization": f"Bearer {token}"}}
+            )
+
+        self.assertEqual(claims["sub"], "user-1")
+
+    def test_extract_claims_accepts_session_without_expiry(self) -> None:
+        auth_module._auth_sessions = _FakeTable(
+            {
+                "session-1": {
+                    "session_id": "session-1",
+                    "user_id": "user-1",
+                    "created_at": "2026-03-26T00:00:00+00:00",
                 }
             }
         )

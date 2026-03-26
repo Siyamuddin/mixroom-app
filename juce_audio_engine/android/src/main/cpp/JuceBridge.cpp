@@ -1955,6 +1955,20 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_refreshAudioRouteJNI(JNIEnv *env
                                                   { JuceEngine::get().refreshAudioRouteAsync(juceReason); });
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_hardResetPlaybackOnlyRouteJNI(JNIEnv *env,
+                                                                               jclass,
+                                                                               jstring reason)
+{
+    const juce::String juceReason = reason == nullptr
+                                        ? juce::String("dart")
+                                        : juceStringFromJString(env, reason);
+    std::atomic<bool> ok{false};
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { ok = JuceEngine::get().hardResetPlaybackOnlyRoute(juceReason); });
+    return ok.load() ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jdouble JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRecordingPeakJNI(JNIEnv *, jclass)
 {
@@ -1982,6 +1996,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getCurrentOutputDeviceNameJNI(JN
     return env->NewStringUTF(name.toRawUTF8());
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLiveInputMonitoringEnabledJNI(JNIEnv *,
+                                                                                 jclass,
+                                                                                 jboolean enabled)
+{
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { JuceEngine::get().setLiveInputMonitoringEnabled(enabled == JNI_TRUE); });
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_startRecordingJNI(JNIEnv *env,
                                                                    jclass,
@@ -2002,7 +2025,14 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingJNI(JNIEnv *, jclass)
 {
     juce::MessageManager::getInstance()->callSync([]
-                                                  { JuceEngine::get().stopRecording(); });
+                                                  { JuceEngine::get().stopRecording(true); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingWithoutPlaybackRestoreJNI(JNIEnv *, jclass)
+{
+    juce::MessageManager::getInstance()->callSync([]
+                                                  { JuceEngine::get().stopRecording(false); });
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

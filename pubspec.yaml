@@ -143,6 +143,7 @@ flutter_native_splash:
     # Android 12+ requires a centered splash icon. Use a transparent 1x1 icon
     # so the full-screen background remains visible without a center mark.
     image: assets/android12_transparent.png
+    icon_background_color: "#000000"
   # background_image: assets/home_background.png  # Blurred guitar background
 
 # command to refresh: dart run flutter_launcher_icons

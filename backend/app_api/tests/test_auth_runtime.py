@@ -108,7 +108,28 @@ class AuthRuntimeTests(unittest.TestCase):
         repo.sessions["session-1"] = {
             "session_id": "session-1",
             "user_id": "user-1",
-            "expires_at": "2099-01-01T00:00:00+00:00",
+        }
+        repo.accounts["user-1"] = {"user_id": "user-1"}
+        auth_module._repo = repo
+
+        with mock.patch.object(
+            auth_module,
+            "verify_token",
+            return_value={"sub": "user-1", "sid": "session-1", "token_use": "access"},
+        ):
+            claims = auth_module.extract_claims_from_event(
+                {"headers": {"Authorization": "Bearer native-token"}},
+                allow_native=True,
+            )
+
+        self.assertEqual(claims["sub"], "user-1")
+
+    def test_extract_claims_accepts_native_session_without_expiry(self) -> None:
+        repo = _FakeRepo()
+        repo.sessions["session-1"] = {
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "created_at": "2026-03-26T00:00:00+00:00",
         }
         repo.accounts["user-1"] = {"user_id": "user-1"}
         auth_module._repo = repo

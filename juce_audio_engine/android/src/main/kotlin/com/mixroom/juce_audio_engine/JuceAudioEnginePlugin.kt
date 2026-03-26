@@ -1,8 +1,11 @@
 package com.mixroom.juce_audio_engine
 
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.Build
 import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
@@ -22,6 +25,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   private val heavyWorkExecutor: ExecutorService = Executors.newSingleThreadExecutor()
   private val mainHandler = Handler(Looper.getMainLooper())
   private var instrumentExtractionFuture: Future<*>? = null
+  private lateinit var applicationContext: Context
 
   private var eventsSink: EventChannel.EventSink? = null
   private var logsSink: EventChannel.EventSink? = null
@@ -45,6 +49,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
   override fun onAttachedToEngine(binding: FlutterPluginBinding) {
     sharedInstance = this
+    applicationContext = binding.applicationContext
 
     JuceBridge.setAndroidContextJNI(binding.applicationContext)
 
@@ -278,6 +283,125 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
   }
 
+  private fun normalizeRouteToken(value: String?): String {
+    return value
+      ?.trim()
+      ?.lowercase()
+      ?.replace(Regex("[^a-z0-9]+"), " ")
+      ?.replace(Regex("\\s+"), " ")
+      ?.trim()
+      .orEmpty()
+  }
+
+  private fun namesMatch(nativeName: String?, engineName: String): Boolean {
+    val left = normalizeRouteToken(nativeName)
+    val right = normalizeRouteToken(engineName)
+    if (left.isEmpty() || right.isEmpty()) return false
+    return left == right || left.contains(right) || right.contains(left)
+  }
+
+  private fun classifyOutputRoute(device: AudioDeviceInfo?): String {
+    val routeType = device?.type
+    return when {
+      routeType == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+          routeType == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+          routeType == AudioDeviceInfo.TYPE_LINE_ANALOG ||
+          routeType == AudioDeviceInfo.TYPE_LINE_DIGITAL ||
+          routeType == AudioDeviceInfo.TYPE_AUX_LINE -> "wired"
+      routeType == AudioDeviceInfo.TYPE_USB_DEVICE ||
+          routeType == AudioDeviceInfo.TYPE_USB_HEADSET ||
+          routeType == AudioDeviceInfo.TYPE_USB_ACCESSORY ||
+          routeType == AudioDeviceInfo.TYPE_DOCK -> "usb"
+      routeType == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+          routeType == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+          routeType == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+          routeType == AudioDeviceInfo.TYPE_BLE_SPEAKER ||
+          routeType == AudioDeviceInfo.TYPE_BLE_BROADCAST -> "bluetoothOutput"
+      routeType == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ||
+          routeType == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE ||
+          routeType == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "speaker"
+      else -> "unknown"
+    }
+  }
+
+  private fun isBluetoothOutputDevice(device: AudioDeviceInfo?): Boolean {
+    val routeType = device?.type
+    return routeType == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+      routeType == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+      routeType == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+      routeType == AudioDeviceInfo.TYPE_BLE_SPEAKER ||
+      routeType == AudioDeviceInfo.TYPE_BLE_BROADCAST
+  }
+
+  private fun isBluetoothInput(device: AudioDeviceInfo?): Boolean {
+    val routeType = device?.type
+    return routeType == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+      routeType == AudioDeviceInfo.TYPE_BLE_HEADSET
+  }
+
+  @Suppress("DEPRECATION")
+  private fun buildAudioRouteInfo(): Map<String, Any> {
+    val juceOutputName = JuceBridge.getCurrentOutputDeviceNameJNI().trim()
+    val inputName = JuceBridge.getCurrentDeviceNameJNI().trim()
+    val audioManager =
+      applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+    val inputs = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+    val matchedOutput = outputs.firstOrNull { namesMatch(it.productName?.toString(), juceOutputName) }
+    val matchedInput = inputs.firstOrNull { namesMatch(it.productName?.toString(), inputName) }
+    val inferredBluetoothOutput =
+      outputs.firstOrNull { isBluetoothOutputDevice(it) && !it.productName.isNullOrBlank() }
+    val isBluetoothA2dpActive = audioManager.isBluetoothA2dpOn
+    val effectiveOutput =
+      matchedOutput ?: if (isBluetoothA2dpActive) inferredBluetoothOutput else null
+    val effectiveOutputName =
+      effectiveOutput?.productName?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+        ?: juceOutputName
+    return mapOf(
+      "outputRouteKind" to classifyOutputRoute(effectiveOutput),
+      "outputRouteName" to effectiveOutputName,
+      "inputDeviceName" to inputName,
+      "inputIsBluetoothHeadset" to isBluetoothInput(matchedInput),
+    )
+  }
+
+  @Suppress("DEPRECATION")
+  private fun normalizeAudioModeAfterRecordingStop() {
+    val audioManager =
+      applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+    val previousMode = audioManager.mode
+    if (previousMode != AudioManager.MODE_NORMAL) {
+      audioManager.mode = AudioManager.MODE_NORMAL
+    }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      try {
+        audioManager.clearCommunicationDevice()
+      } catch (_: SecurityException) {
+      } catch (_: IllegalStateException) {
+      }
+    } else if (audioManager.isBluetoothScoOn) {
+      try {
+        audioManager.stopBluetoothSco()
+      } catch (_: SecurityException) {
+      } catch (_: IllegalStateException) {
+      }
+      audioManager.isBluetoothScoOn = false
+    }
+
+    Log.i(
+      "JuceAudioEngine",
+      "post-record normalize mode: before=$previousMode after=${audioManager.mode}",
+    )
+  }
+
+  private fun restoreBluetoothPlaybackAfterRecordingStop() {
+    normalizeAudioModeAfterRecordingStop()
+    JuceBridge.hardResetPlaybackOnlyRouteJNI("postRecordBluetoothReset")
+    normalizeAudioModeAfterRecordingStop()
+  }
+
   override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
     val args = argsFrom(call)
 
@@ -291,7 +415,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(null)
         }
         "shutdown" -> {
+          normalizeAudioModeAfterRecordingStop()
           JuceBridge.shutdownEngineJNI()
+          normalizeAudioModeAfterRecordingStop()
           result.success(null)
         }
         "loadTrack" -> {
@@ -966,6 +1092,13 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "getCurrentOutputDeviceName" -> {
           result.success(JuceBridge.getCurrentOutputDeviceNameJNI())
         }
+        "getAudioRouteInfo" -> {
+          result.success(buildAudioRouteInfo())
+        }
+        "setLiveInputMonitoringEnabled" -> {
+          JuceBridge.setLiveInputMonitoringEnabledJNI(args.boolValue("enabled"))
+          result.success(null)
+        }
         "startRecording" -> {
           result.success(
             JuceBridge.startRecordingJNI(
@@ -976,7 +1109,24 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           )
         }
         "stopRecording" -> {
+          // Reset Android out of communication/SCO mode before JUCE tries to
+          // reopen playback-only output, otherwise the reopen can latch onto
+          // the degraded duplex Bluetooth route.
+          normalizeAudioModeAfterRecordingStop()
           JuceBridge.stopRecordingJNI()
+          normalizeAudioModeAfterRecordingStop()
+          mainHandler.postDelayed({
+            normalizeAudioModeAfterRecordingStop()
+          }, 250L)
+          result.success(null)
+        }
+        "stopRecordingWithoutPlaybackRestore" -> {
+          JuceBridge.stopRecordingWithoutPlaybackRestoreJNI()
+          normalizeAudioModeAfterRecordingStop()
+          result.success(null)
+        }
+        "restoreBluetoothPlaybackAfterRecordingStop" -> {
+          restoreBluetoothPlaybackAfterRecordingStop()
           result.success(null)
         }
         "isRecording" -> {

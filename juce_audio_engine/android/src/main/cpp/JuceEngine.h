@@ -290,15 +290,9 @@ public:
         if (currentSampleRate <= 0.0)
             return;
 
-        // --- Acquire automation data safely ---
-        std::vector<AutomationPoint> localPoints;
-        {
-            juce::SpinLock::ScopedTryLockType lock(pointsLock);
-            if (!lock.isLocked() || points.empty())
-                return;
-
-            localPoints = points; // copy is safe
-        }
+        auto localPoints = std::atomic_load_explicit(&pointsSnapshot, std::memory_order_acquire);
+        if (!localPoints || localPoints->empty())
+            return;
 
         // --- Transport (atomic) ---
         double startMs = 0.0;
@@ -310,7 +304,7 @@ public:
         for (int sample = 0; sample < numSamples; ++sample)
         {
             const double tMs = startMs + stepMs * sample;
-            const float g = getGainAt(localPoints, tMs);
+            const float g = getGainAt(*localPoints, tMs);
 
             for (int ch = 0; ch < numChannels; ++ch)
                 buffer.getWritePointer(ch)[sample] *= g;
@@ -332,17 +326,22 @@ public:
     // Public API for UI
     void setAutomationPoints(const std::vector<AutomationPoint> &newPoints)
     {
-        juce::SpinLock::ScopedLockType lock(pointsLock);
-        points = newPoints;
-        std::sort(points.begin(), points.end(),
+        auto nextPoints = std::make_shared<std::vector<AutomationPoint>>(newPoints);
+        std::sort(nextPoints->begin(), nextPoints->end(),
                   [](const AutomationPoint &a, const AutomationPoint &b)
                   { return a.timeMs < b.timeMs; });
+        std::atomic_store_explicit(
+            &pointsSnapshot,
+            std::static_pointer_cast<const std::vector<AutomationPoint>>(nextPoints),
+            std::memory_order_release);
     }
 
     void clearAutomation()
     {
-        juce::SpinLock::ScopedLockType lock(pointsLock);
-        points.clear();
+        std::atomic_store_explicit(
+            &pointsSnapshot,
+            std::make_shared<const std::vector<AutomationPoint>>(),
+            std::memory_order_release);
     }
 
     void setBlockTransportPtr(std::atomic<double> *ptr) { blockTransportStartSecPtr = ptr; }
@@ -397,8 +396,8 @@ private:
     }
 
     //==============================================================================
-    std::vector<AutomationPoint> points;
-    juce::SpinLock pointsLock;
+    std::shared_ptr<const std::vector<AutomationPoint>> pointsSnapshot =
+        std::make_shared<const std::vector<AutomationPoint>>();
 
     double currentSampleRate = 44100.0;
 
@@ -2788,9 +2787,6 @@ public:
             transportSec.load(std::memory_order_relaxed) + delta,
             std::memory_order_relaxed);
     }
-    bool tryLockGraphRender() { return graphRenderMutex.try_lock(); }
-    void unlockGraphRender() { graphRenderMutex.unlock(); }
-
     // (deprecated/unused) special functions for "video audio" lane
     void loadVideoAudio(const juce::File &file);
     void unloadVideoAudio();
@@ -2883,19 +2879,26 @@ public:
     juce::String getCurrentInputDeviceName() const;
     juce::String getCurrentOutputDeviceName() const;
     int getNumInputChannels() const;
+    void setLiveInputMonitoringEnabled(bool enabled);
+    bool isLiveInputMonitoringEnabled() const noexcept;
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
     bool prepareRecordingInputs(int desiredInputChannels,
                                 const juce::String &reason);
     void prepareRecordingInputsAsync(int desiredInputChannels,
                                      const juce::String &reason);
     void refreshAudioRouteAsync(const juce::String &reason);
+    bool hardResetPlaybackOnlyRoute(const juce::String &reason);
     void requestAudioDeviceRefreshAsync(const juce::String &reason);
+    void captureRecordingRestorePlaybackSetupIfNeeded(
+        int desiredInputChannels,
+        const juce::AudioDeviceManager::AudioDeviceSetup &currentSetup);
+    bool restoreRecordingPlaybackSetup(const juce::String &reason);
 
     // Recording
     bool startRecordingToWav(const juce::File &file,
                              int channelStart,
                              int channelCount);
-    void stopRecording();
+    void stopRecording(bool restorePlaybackRoute = true);
     bool isRecording() const;
     void captureInput(const float *const *input,
                       int numInputChannels,
@@ -3195,13 +3198,33 @@ private:
     int recordChannelCount = 1;
     int recordChannelOffset = 0;
     std::atomic<int> recordingRestoreDesiredInputs{0};
+    juce::AudioDeviceManager::AudioDeviceSetup recordingRestorePlaybackSetup;
+    bool hasRecordingRestorePlaybackSetup = false;
     std::atomic<int> desiredInputOpenChannels{0};
     std::atomic<bool> audioRouteRefreshPending{false};
     std::atomic<int> ignoredDeviceChangeCallbacks{0};
+    bool liveInputMonitoringEnabled = true;
+    int liveMonitorTargetRow = 0;
+    int liveMonitorChannelCount = 0;
+    int liveMonitorChannelStart = 0;
+    juce::Array<juce::AudioProcessorGraph::Connection> liveMonitorConnections;
 
     juce::LinearSmoothedValue<float> recPeak; // optional amplitude meter
     // Recursive because public graph mutation entrypoints can call one another.
     std::recursive_mutex graphRenderMutex;
+    struct GraphMutationScope
+    {
+        GraphMutationScope(juce::CriticalSection &audioCallbackLock,
+                           std::recursive_mutex &renderMutex)
+            : callbackLock(audioCallbackLock),
+              renderLock(renderMutex)
+        {
+        }
+
+    private:
+        juce::GenericScopedLock<juce::CriticalSection> callbackLock;
+        std::unique_lock<std::recursive_mutex> renderLock;
+    };
 
     void rebuildBusesAndRewireClips();
     void attachRowBusNodes(RowState &r);
@@ -3225,6 +3248,8 @@ private:
     void refreshMidiInputCallbacks();
     void clearMidiInputCallbacks();
     void logCurrentAudioDeviceState(const juce::String &reason) const;
+    void syncLiveInputMonitorRoutingLocked();
+    void clearLiveInputMonitorConnectionsLocked();
 };
 
 class MetronomeAudioCallback : public juce::AudioIODeviceCallback
@@ -3286,20 +3311,6 @@ public:
             if (outputChannelData[ch] != nullptr)
                 juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
         }
-
-        if (!engine.tryLockGraphRender())
-        {
-            engine.advanceTransportBySamples(numSamples);
-            if (enabled && isPlaying && sampleRate > 0.0)
-                transportMs += (1000.0 / sampleRate) * (double)numSamples;
-            engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
-            return;
-        }
-        struct _RenderUnlock
-        {
-            JuceEngine &engineRef;
-            ~_RenderUnlock() { engineRef.unlockGraphRender(); }
-        } renderUnlock{engine};
 
         // set block transport start time for all processors (clips, automation)
         engine.setBlockTransportStartFromCurrent();

@@ -5,7 +5,6 @@ import hashlib
 import hmac
 import json
 import time
-from datetime import datetime, timezone
 from typing import Any, Dict
 
 try:
@@ -124,9 +123,6 @@ def _verify_native_token(token: str) -> Dict[str, Any]:
     session = _auth_sessions.get_item(Key={"session_id": session_id}).get("Item")
     if not isinstance(session, dict):
         raise ValueError("Session no longer exists.")
-    if _is_expired(session.get("expires_at")):
-        _auth_sessions.delete_item(Key={"session_id": session_id})
-        raise ValueError("Session has expired.")
     if str(session.get("user_id") or "").strip() != user_id:
         raise ValueError("Session user is invalid.")
     account = _auth_accounts.get_item(Key={"user_id": user_id}).get("Item")
@@ -172,18 +168,3 @@ def _load_secret() -> str:
         raise ValueError("App auth secret is empty.")
     _secret_cache = value
     return value
-
-
-def _is_expired(value: Any) -> bool:
-    raw = str(value or "").strip()
-    if not raw:
-        return True
-    try:
-        expires_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return True
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    else:
-        expires_at = expires_at.astimezone(timezone.utc)
-    return expires_at <= datetime.now(timezone.utc)

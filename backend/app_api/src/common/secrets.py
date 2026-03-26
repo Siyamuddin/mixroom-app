@@ -176,6 +176,35 @@ def load_app_auth_secret() -> str:
     return value
 
 
+def load_postmark_server_token() -> str:
+    if config.POSTMARK_SERVER_TOKEN:
+        return config.POSTMARK_SERVER_TOKEN
+    if not config.POSTMARK_SERVER_TOKEN_SECRET_ARN:
+        raise ValueError(
+            "POSTMARK_SERVER_TOKEN or POSTMARK_SERVER_TOKEN_SECRET_ARN must be configured."
+        )
+
+    raw = get_secret_string(config.POSTMARK_SERVER_TOKEN_SECRET_ARN)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = raw
+
+    if isinstance(parsed, dict):
+        for key in ("token", "server_token", "postmark_server_token", "POSTMARK_SERVER_TOKEN"):
+            value = str(parsed.get(key) or "").strip()
+            if value:
+                return value
+        raise ValueError(
+            "Postmark token secret JSON must include one of: token, server_token, postmark_server_token, POSTMARK_SERVER_TOKEN."
+        )
+
+    value = str(parsed).strip()
+    if not value:
+        raise ValueError("Postmark server token is empty.")
+    return value
+
+
 def _split_pem_bundle(bundle: str) -> List[bytes]:
     blocks: List[bytes] = []
     current: List[str] = []

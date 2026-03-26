@@ -61,6 +61,7 @@ def register_email_account(
     given_name: str = "",
     family_name: str = "",
     birthdate: str = "",
+    locale: str = "",
 ) -> Dict[str, Any]:
     safe_email = _normalize_email(email)
     if not safe_email or not password:
@@ -163,6 +164,7 @@ def register_email_account(
             email=safe_email,
             code=verification_code,
             display_name=display_name or given_name or safe_email.split("@")[0],
+            locale=locale,
         )
     except Exception:
         _restore_signup_bootstrap_state(
@@ -247,6 +249,7 @@ def resend_email_verification_code(
     *,
     email: str = "",
     user_id: str = "",
+    locale: str = "",
 ) -> Dict[str, Any]:
     account = None
     if user_id.strip():
@@ -289,6 +292,7 @@ def resend_email_verification_code(
             email=str(account.get("email") or "").strip().lower(),
             code=verification_code,
             display_name=str(profile.get("display_name") or "").strip(),
+            locale=locale,
         )
     except Exception:
         repo.put_auth_account(previous_account)
@@ -401,6 +405,7 @@ def request_password_reset(
     repo: BillingRepository,
     *,
     email: str,
+    locale: str = "",
 ) -> Dict[str, Any]:
     safe_email = _normalize_email(email)
     if not safe_email:
@@ -455,6 +460,7 @@ def request_password_reset(
             email=safe_email,
             code=reset_code,
             display_name=str(profile.get("display_name") or "").strip(),
+            locale=locale,
         )
     except Exception:
         repo.put_auth_account(previous_account)
@@ -596,17 +602,15 @@ def issue_session(
 
     refresh_token, refresh_token_hash = new_refresh_token()
     session_id, _ = parse_refresh_token(refresh_token)
-    expires_at = _future_iso(seconds=config.APP_AUTH_REFRESH_TOKEN_TTL_SECONDS)
-    expires_at_ttl = _iso_to_epoch_seconds(expires_at)
+    now = _utc_now_iso()
     repo.put_auth_session(
         {
             "session_id": session_id,
             "user_id": safe_user_id,
             "refresh_token_hash": refresh_token_hash,
             "provider": str(account.get("auth_provider") or "email").strip().lower() or "email",
-            "expires_at": expires_at,
-            "expires_at_ttl": expires_at_ttl,
-            "created_at": _utc_now_iso(),
+            "created_at": now,
+            "last_refreshed_at": now,
         }
     )
     tokens = _build_token_payload(
@@ -644,20 +648,11 @@ def refresh_session(
             status_code=401,
         )
     if str(session.get("refresh_token_hash") or "").strip() != refresh_token_hash:
-        repo.delete_auth_session(session_id)
         raise AppUserAuthError(
             "Session expired. Please sign in again.",
             code="SESSION_INVALID",
             status_code=401,
         )
-    if _is_expired(session.get("expires_at")):
-        repo.delete_auth_session(session_id)
-        raise AppUserAuthError(
-            "Session expired. Please sign in again.",
-            code="SESSION_EXPIRED",
-            status_code=401,
-        )
-
     user_id = str(session.get("user_id") or "").strip()
     account = repo.get_auth_account(user_id)
     if not account:
@@ -669,26 +664,21 @@ def refresh_session(
         )
     profile = repo.get_user_profile(user_id) or {}
 
-    next_refresh_token, next_refresh_hash = new_refresh_token()
-    next_session_id, _ = parse_refresh_token(next_refresh_token)
-    next_expires_at = _future_iso(seconds=config.APP_AUTH_REFRESH_TOKEN_TTL_SECONDS)
-    repo.delete_auth_session(session_id)
     repo.put_auth_session(
         {
-            "session_id": next_session_id,
+            "session_id": session_id,
             "user_id": user_id,
-            "refresh_token_hash": next_refresh_hash,
+            "refresh_token_hash": refresh_token_hash,
             "provider": str(account.get("auth_provider") or "email").strip().lower() or "email",
-            "expires_at": next_expires_at,
-            "expires_at_ttl": _iso_to_epoch_seconds(next_expires_at),
-            "created_at": _utc_now_iso(),
+            "created_at": str(session.get("created_at") or "").strip() or _utc_now_iso(),
+            "last_refreshed_at": _utc_now_iso(),
         }
     )
     tokens = _build_token_payload(
         account=account,
         profile=profile,
-        session_id=next_session_id,
-        refresh_token=next_refresh_token,
+        session_id=session_id,
+        refresh_token=refresh_token,
     )
     return {
         "tokens": tokens,
@@ -1387,18 +1377,30 @@ def _restore_signup_bootstrap_state(
         repo.put_entitlement(previous_entitlement)
 
 
-def _send_verification_email(*, email: str, code: str, display_name: str) -> None:
+def _send_verification_email(*, email: str, code: str, display_name: str, locale: str = "") -> None:
     safe_name = display_name.strip() or "Mixroom User"
+    email_locale = _auth_email_locale(locale)
+    if email_locale == "ko":
+        subject = "Mixroom 계정 이메일 인증"
+        text_body = (
+            f"안녕하세요 {safe_name}님,\n\n"
+            f"Mixroom 인증 코드는 {code}입니다.\n"
+            "이 코드는 20분 후 만료됩니다.\n\n"
+            "요청하지 않았다면 이 메일을 무시해 주세요."
+        )
+    else:
+        subject = "Verify your Mixroom account"
+        text_body = (
+            f"Hello {safe_name},\n\n"
+            f"Your Mixroom verification code is {code}.\n"
+            "It expires in 20 minutes.\n\n"
+            "If you did not request this, you can ignore this email."
+        )
     try:
         send_auth_email(
             to_email=email,
-            subject="Verify your Mixroom account",
-            text_body=(
-                f"Hello {safe_name},\n\n"
-                f"Your Mixroom verification code is {code}.\n"
-                "It expires in 20 minutes.\n\n"
-                "If you did not request this, you can ignore this email."
-            ),
+            subject=subject,
+            text_body=text_body,
         )
     except EmailSuppressedError as exc:
         details = {"reason": exc.reason} if exc.reason else None
@@ -1416,18 +1418,30 @@ def _send_verification_email(*, email: str, code: str, display_name: str) -> Non
         ) from exc
 
 
-def _send_password_reset_email(*, email: str, code: str, display_name: str) -> None:
+def _send_password_reset_email(*, email: str, code: str, display_name: str, locale: str = "") -> None:
     safe_name = display_name.strip() or "Mixroom User"
+    email_locale = _auth_email_locale(locale)
+    if email_locale == "ko":
+        subject = "Mixroom 비밀번호 재설정"
+        text_body = (
+            f"안녕하세요 {safe_name}님,\n\n"
+            f"Mixroom 비밀번호 재설정 코드는 {code}입니다.\n"
+            "이 코드는 20분 후 만료됩니다.\n\n"
+            "요청하지 않았다면 이 메일을 무시해 주세요."
+        )
+    else:
+        subject = "Reset your Mixroom password"
+        text_body = (
+            f"Hello {safe_name},\n\n"
+            f"Your Mixroom password reset code is {code}.\n"
+            "It expires in 20 minutes.\n\n"
+            "If you did not request this, you can ignore this email."
+        )
     try:
         send_auth_email(
             to_email=email,
-            subject="Reset your Mixroom password",
-            text_body=(
-                f"Hello {safe_name},\n\n"
-                f"Your Mixroom password reset code is {code}.\n"
-                "It expires in 20 minutes.\n\n"
-                "If you did not request this, you can ignore this email."
-            ),
+            subject=subject,
+            text_body=text_body,
         )
     except EmailSuppressedError as exc:
         details = {"reason": exc.reason} if exc.reason else None
@@ -1451,6 +1465,13 @@ def _invalid_credentials() -> AppUserAuthError:
         code="INVALID_CREDENTIALS",
         status_code=401,
     )
+
+
+def _auth_email_locale(locale: str) -> str:
+    safe = str(locale or "").strip().lower()
+    if not safe:
+        return "en"
+    return "ko" if safe.startswith("ko") else "en"
 
 
 def _auth_method_conflict(

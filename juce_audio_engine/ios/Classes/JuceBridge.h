@@ -207,9 +207,11 @@
 
 + (NSNumber *)getNumInputChannelsObjC;
 + (NSString *)getCurrentDeviceNameObjC;
++ (NSString *)getCurrentOutputDeviceNameObjC;
 + (BOOL)prepareRecordingInputsObjC:(NSInteger)desiredInputChannels
                             reason:(NSString *)reason;
 + (void)refreshAudioRouteObjC:(NSString *)reason;
++ (void)setLiveInputMonitoringEnabledObjC:(BOOL)enabled;
 
 + (BOOL)startRecordingObjC:(NSString *)path
               channelStart:(NSInteger)start

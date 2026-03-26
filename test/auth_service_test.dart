@@ -196,6 +196,44 @@ void main() {
       expect(auth.isSignedIn, isTrue);
     });
 
+    test('keeps a refreshable session signed in after access tokens expire',
+        () async {
+      final fakeClient = _FakeCognitoAuthClient(
+        refreshedSession: _session(
+          userId: 'google-user',
+          email: 'google@example.com',
+          provider: AuthProviderType.google,
+          refreshToken: 'rt_stable_refresh_secret',
+        ),
+      );
+      final auth = AuthService(
+        cognitoClient: fakeClient,
+        restoreSessionOnInit: false,
+      );
+      final user = AuthUserProfile(
+        userId: 'google-user',
+        email: 'google@example.com',
+        displayName: 'Google User',
+        provider: AuthProviderType.google,
+        emailVerified: true,
+        createdAt: DateTime.utc(2026, 3, 13),
+      );
+      final expiredTokens = CognitoTokens(
+        accessToken: 'expired-access-token',
+        idToken: 'expired-id-token',
+        refreshToken: 'rt_stable_refresh_secret',
+        expiresAtUtc:
+            DateTime.now().toUtc().subtract(const Duration(minutes: 5)),
+      );
+
+      auth.debugPrimeSession(user: user, tokens: expiredTokens);
+
+      expect(auth.isSignedIn, isTrue);
+      expect(await auth.getIdTokenOrNull(), 'id-token-google-user');
+      expect(fakeClient.refreshCallCount, 1);
+      expect(auth.signedInUser?.userId, 'google-user');
+    });
+
     test('retries authenticated requests once after a 401 response', () async {
       final fakeClient = _FakeCognitoAuthClient(
         refreshedSession: _session(
@@ -236,8 +274,58 @@ void main() {
       });
 
       expect(response.statusCode, 200);
-      expect(seenTokens, <String>['cached-id-token', 'id-token-google-user']);
+      expect(seenTokens, <String>['cached-id-token', 'access-token']);
+      expect(fakeClient.refreshCallCount, 0);
+    });
+
+    test('shares one refresh request across concurrent authenticated calls',
+        () async {
+      final fakeClient = _FakeCognitoAuthClient(
+        refreshedSession: _session(
+          userId: 'google-user',
+          email: 'google@example.com',
+          provider: AuthProviderType.google,
+          refreshToken: 'rt_shared_refresh_secret',
+        ),
+        refreshDelay: const Duration(milliseconds: 15),
+      );
+      final auth = AuthService(
+        cognitoClient: fakeClient,
+        restoreSessionOnInit: false,
+      );
+      final user = AuthUserProfile(
+        userId: 'google-user',
+        email: 'google@example.com',
+        displayName: 'Google User',
+        provider: AuthProviderType.google,
+        emailVerified: true,
+        createdAt: DateTime.utc(2026, 3, 13),
+      );
+      final expiringTokens = CognitoTokens(
+        accessToken: 'soon-expiring-access-token',
+        idToken: 'soon-expiring-id-token',
+        refreshToken: 'rt_shared_refresh_secret',
+        expiresAtUtc: DateTime.now().toUtc().add(const Duration(seconds: 30)),
+      );
+
+      auth.debugPrimeSession(user: user, tokens: expiringTokens);
+
+      final seenTokens = <String>[];
+      final responses = await Future.wait(<Future<http.Response>>[
+        auth.authorizedRequest((token) async {
+          seenTokens.add(token);
+          return http.Response('ok', 200);
+        }),
+        auth.authorizedRequest((token) async {
+          seenTokens.add(token);
+          return http.Response('ok', 200);
+        }),
+      ]);
+
+      expect(responses.every((response) => response.statusCode == 200), isTrue);
       expect(fakeClient.refreshCallCount, 1);
+      expect(
+          seenTokens, <String>['id-token-google-user', 'id-token-google-user']);
     });
   });
 
@@ -279,10 +367,12 @@ class _FakeCognitoAuthClient extends CognitoAuthClient {
   _FakeCognitoAuthClient({
     this.refreshedSession,
     this.refreshError,
+    this.refreshDelay = Duration.zero,
   });
 
   final CognitoSession? refreshedSession;
   final CognitoApiException? refreshError;
+  final Duration refreshDelay;
   int refreshCallCount = 0;
 
   @override
@@ -291,6 +381,9 @@ class _FakeCognitoAuthClient extends CognitoAuthClient {
     required String fallbackIdToken,
   }) async {
     refreshCallCount += 1;
+    if (refreshDelay > Duration.zero) {
+      await Future<void>.delayed(refreshDelay);
+    }
     if (refreshError != null) {
       throw refreshError!;
     }

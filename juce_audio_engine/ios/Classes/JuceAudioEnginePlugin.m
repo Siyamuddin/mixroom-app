@@ -1,6 +1,7 @@
 #import "JuceAudioEnginePlugin.h"
 #import "JuceBridge.h"
 #import "JuceLogBridge.h"  // Add this import
+#import <AVFoundation/AVFoundation.h>
 #import <TargetConditionals.h>
 
 #if __has_include(<Flutter/Flutter.h>)
@@ -23,6 +24,98 @@
 @end
 
 @implementation JuceAudioEnginePlugin
+
+static NSString *MixroomRouteKindForPortType(NSString *portType) {
+    if (portType == nil) {
+        return @"unknown";
+    }
+    if ([portType isEqualToString:AVAudioSessionPortBluetoothA2DP] ||
+        [portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
+        [portType isEqualToString:AVAudioSessionPortBluetoothLE]) {
+        return @"bluetoothOutput";
+    }
+    if ([portType isEqualToString:AVAudioSessionPortHeadphones] ||
+        [portType isEqualToString:AVAudioSessionPortHeadsetMic] ||
+        [portType isEqualToString:AVAudioSessionPortLineOut]) {
+        return @"wired";
+    }
+    if ([portType isEqualToString:AVAudioSessionPortUSBAudio]) {
+        return @"usb";
+    }
+    if ([portType isEqualToString:AVAudioSessionPortBuiltInSpeaker] ||
+        [portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
+        return @"speaker";
+    }
+    return @"unknown";
+}
+
+- (NSDictionary<NSString *, id> *)buildAudioRouteInfo {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    AVAudioSessionRouteDescription *route = session.currentRoute;
+    AVAudioSessionPortDescription *output = route.outputs.firstObject;
+    AVAudioSessionPortDescription *input = route.inputs.firstObject ?: session.preferredInput;
+    NSString *inputPortType = input.portType ?: @"";
+    BOOL inputIsBluetoothHeadset =
+        [inputPortType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
+        [inputPortType isEqualToString:AVAudioSessionPortBluetoothLE];
+
+    return @{
+        @"outputRouteKind": MixroomRouteKindForPortType(output.portType),
+        @"outputRouteName": output.portName ?: @"",
+        @"inputDeviceName": input.portName ?: ([JuceBridge getCurrentDeviceNameObjC] ?: @""),
+        @"inputIsBluetoothHeadset": @(inputIsBluetoothHeadset),
+    };
+}
+
+- (BOOL)preferNonBluetoothRecordingInput {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    NSError *error = nil;
+
+    AVAudioSessionPortDescription *preferred = nil;
+    for (AVAudioSessionPortDescription *input in session.availableInputs) {
+        NSString *portType = input.portType ?: @"";
+        if ([portType isEqualToString:AVAudioSessionPortBuiltInMic]) {
+            preferred = input;
+            break;
+        }
+        if ([portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
+            [portType isEqualToString:AVAudioSessionPortBluetoothLE]) {
+            continue;
+        }
+        if (preferred == nil) {
+            preferred = input;
+        }
+    }
+
+    if (preferred == nil) {
+        return NO;
+    }
+
+    BOOL ok = [session setPreferredInput:preferred error:&error];
+    if (!ok || error != nil) {
+        NSLog(@"preferNonBluetoothRecordingInput setPreferredInput failed: %@", error);
+        return NO;
+    }
+
+    [session overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:nil];
+    [JuceBridge refreshAudioRouteObjC:@"preferNonBluetoothRecordingInput"];
+    return YES;
+}
+
+- (void)restoreBluetoothPlaybackAfterRecordingStop {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    NSError *error = nil;
+
+    [session setPreferredInput:nil error:nil];
+    [session overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:nil];
+    [session setActive:YES error:&error];
+
+    if (error != nil) {
+        NSLog(@"restoreBluetoothPlaybackAfterRecordingStop failed: %@", error);
+    }
+
+    [JuceBridge refreshAudioRouteObjC:@"restoreBluetoothPlaybackAfterRecordingStop"];
+}
 
 
 // for printing logs
@@ -48,6 +141,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 
 - (void)clearEventSink {
     self.eventSink = nil;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)handlePluginLoadedNotification:(NSNotification *)notification {
@@ -92,7 +189,6 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                              selector:@selector(handlePluginLoadedNotification:)
                                                  name:@"JUCEPluginLoaded"
                                                object:nil];
-
     // [JuceBridge initialiseEngineObjC];
 }
 
@@ -112,7 +208,8 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     NSDictionary* args = call.arguments;
 
     if ([call.method isEqualToString:@"initialise"]) {
-        [JuceBridge initialiseEngineObjC]; result(nil);
+        [JuceBridge initialiseEngineObjC];
+        result(nil);
     } else if ([call.method isEqualToString:@"getPlatformVersion"]) {
 #if TARGET_OS_OSX
         result([@"macOS " stringByAppendingString:NSProcessInfo.processInfo.operatingSystemVersionString]);
@@ -250,6 +347,9 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result(@"testing blabla success");
     } else if ([call.method isEqualToString:@"shutdown"]) {
         [JuceBridge shutdownEngineObjC];
+        [self restoreBluetoothPlaybackAfterRecordingStop];
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        [session setActive:NO error:nil];
         result(nil);
 
     // ----------------------------------------
@@ -763,6 +863,19 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     else if ([call.method isEqualToString:@"getCurrentDeviceName"]) {
         result([JuceBridge getCurrentDeviceNameObjC]);
     }
+    else if ([call.method isEqualToString:@"getCurrentOutputDeviceName"]) {
+        result([JuceBridge getCurrentOutputDeviceNameObjC]);
+    }
+    else if ([call.method isEqualToString:@"getAudioRouteInfo"]) {
+        result([self buildAudioRouteInfo]);
+    }
+    else if ([call.method isEqualToString:@"preferNonBluetoothRecordingInput"]) {
+        result(@([self preferNonBluetoothRecordingInput]));
+    }
+    else if ([call.method isEqualToString:@"setLiveInputMonitoringEnabled"]) {
+        [JuceBridge setLiveInputMonitoringEnabledObjC:[args[@"enabled"] boolValue]];
+        result(nil);
+    }
     else if ([call.method isEqualToString:@"startRecording"]) {
         result(@([JuceBridge startRecordingObjC:args[@"path"]
                                 channelStart:[args[@"channelStart"] integerValue]
@@ -770,6 +883,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     }
     else if ([call.method isEqualToString:@"stopRecording"]) {
         [JuceBridge stopRecordingObjC];
+        result(nil);
+    }
+    else if ([call.method isEqualToString:@"restoreBluetoothPlaybackAfterRecordingStop"]) {
+        [self restoreBluetoothPlaybackAfterRecordingStop];
         result(nil);
     }
     else if ([call.method isEqualToString:@"isRecording"]) {

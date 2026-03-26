@@ -631,6 +631,7 @@ class _LoginScreenState extends State<LoginScreen> {
     FocusScope.of(context).unfocus();
     final appUserService = context.read<AppUserService>();
     final safeEmail = _emailController.text.trim().toLowerCase();
+    final localeCode = Localizations.localeOf(context).languageCode;
 
     if (!_validateRegisterProfileStep()) return;
 
@@ -656,6 +657,7 @@ class _LoginScreenState extends State<LoginScreen> {
         birthdate: _birthdateController.text.trim(),
         email: _emailController.text,
         password: _passwordController.text,
+        localeCode: localeCode,
       );
       await appUserService.stageSignupConsents(
         email: safeEmail,
@@ -1628,7 +1630,10 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
     }
 
     try {
-      await widget.auth.requestPasswordReset(email: email);
+      await widget.auth.requestPasswordReset(
+        email: email,
+        localeCode: Localizations.localeOf(context).languageCode,
+      );
       if (!mounted) return;
       setState(() => _step = _ResetStep.confirmReset);
       _showSnack('Verification code sent.');

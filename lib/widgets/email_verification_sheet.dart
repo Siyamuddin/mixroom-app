@@ -126,10 +126,14 @@ class _EmailVerificationSheetState extends State<EmailVerificationSheet> {
     try {
       final currentUserEmail =
           widget.auth.currentUser?.email.trim().toLowerCase() ?? '';
+      final localeCode = Localizations.localeOf(context).languageCode;
       if (currentUserEmail == email) {
-        await widget.auth.resendEmailVerification();
+        await widget.auth.resendEmailVerification(localeCode: localeCode);
       } else {
-        await widget.auth.resendSignUpCode(email: email);
+        await widget.auth.resendSignUpCode(
+          email: email,
+          localeCode: localeCode,
+        );
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -114,6 +114,7 @@ class CognitoAuthClient {
     String? givenName,
     String? familyName,
     String? birthdate,
+    String? locale,
   }) async {
     final result = await _post(
       path: '/v1/auth/sign-up',
@@ -124,6 +125,7 @@ class CognitoAuthClient {
         'given_name': givenName,
         'family_name': familyName,
         'birthdate': birthdate,
+        if ((locale ?? '').trim().isNotEmpty) 'locale': locale!.trim(),
       },
     );
     final user = _asMap(result['user']);
@@ -151,11 +153,13 @@ class CognitoAuthClient {
 
   Future<void> resendSignUpCode({
     required String username,
+    String? locale,
   }) async {
     await _post(
       path: '/v1/auth/resend-sign-up-code',
       body: {
         'email': username,
+        if ((locale ?? '').trim().isNotEmpty) 'locale': locale!.trim(),
       },
     );
   }
@@ -191,11 +195,13 @@ class CognitoAuthClient {
 
   Future<void> requestPasswordReset({
     required String email,
+    String? locale,
   }) async {
     await _post(
       path: '/v1/auth/password-reset/request',
       body: {
         'email': email,
+        if ((locale ?? '').trim().isNotEmpty) 'locale': locale!.trim(),
       },
     );
   }
@@ -232,11 +238,14 @@ class CognitoAuthClient {
 
   Future<void> resendEmailVerification({
     required String accessToken,
+    String? locale,
   }) async {
     await _post(
       path: '/v1/auth/resend-email-verification',
       authToken: accessToken,
-      body: const <String, dynamic>{},
+      body: <String, dynamic>{
+        if ((locale ?? '').trim().isNotEmpty) 'locale': locale!.trim(),
+      },
     );
   }
 
@@ -282,8 +291,8 @@ class CognitoAuthClient {
     return CognitoUserAttributes(
       sub: (result['user_id'] ?? result['userId'] ?? '').toString().trim(),
       email: (result['email'] ?? '').toString().trim().toLowerCase(),
-      emailVerified: result['email_verified'] == true ||
-          result['emailVerified'] == true,
+      emailVerified:
+          result['email_verified'] == true || result['emailVerified'] == true,
       name: _nullIfBlank((result['display_name'] ?? result['displayName'] ?? '')
           .toString()
           .trim()),
@@ -420,8 +429,8 @@ class CognitoAuthClient {
   }
 
   String _extractErrorCode(Map<String, dynamic> payload) {
-    final raw =
-        (payload['code'] ?? payload['Code'] ?? payload['__type'] ?? '').toString();
+    final raw = (payload['code'] ?? payload['Code'] ?? payload['__type'] ?? '')
+        .toString();
     if (raw.isEmpty) return 'UnknownException';
     final hashIndex = raw.lastIndexOf('#');
     return hashIndex >= 0 ? raw.substring(hashIndex + 1) : raw;

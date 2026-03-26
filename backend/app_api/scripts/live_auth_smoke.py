@@ -181,16 +181,20 @@ def main() -> int:
     refresh_payload = _require_json(refresh, "refresh")
     refreshed_tokens = _extract_tokens(refresh_payload, "refresh")
 
-    if refreshed_tokens["refreshToken"] == initial_tokens["refreshToken"]:
-        raise SystemExit("[fail] refresh did not rotate the refresh token")
-    print("[ok] refresh rotated the refresh token")
+    if refreshed_tokens["refreshToken"] != initial_tokens["refreshToken"]:
+        raise SystemExit("[fail] refresh unexpectedly changed the device refresh token")
+    print("[ok] refresh kept the device refresh token stable")
 
-    stale_me = _request_json(
+    initial_me_after_refresh = _request_json(
         method="GET",
         url=_join_url(app_api_base_url, "/v1/users/me"),
         bearer_token=initial_tokens["idToken"],
     )
-    _expect_status(stale_me, (401, 403), "users/me rejects stale token after refresh")
+    _expect_status(
+        initial_me_after_refresh,
+        (200,),
+        "users/me still accepts the pre-refresh access token until it expires",
+    )
 
     refreshed_me = _request_json(
         method="GET",
@@ -200,15 +204,15 @@ def main() -> int:
     _expect_status(refreshed_me, (200,), "users/me with refreshed token")
 
     if llm_proxy_base_url:
-        stale_limits = _request_json(
+        initial_limits_after_refresh = _request_json(
             method="GET",
             url=_join_url(llm_proxy_base_url, "/v1/llm/limits"),
             bearer_token=initial_tokens["idToken"],
         )
         _expect_status(
-            stale_limits,
-            (401, 403),
-            "llm limits rejects stale token after refresh",
+            initial_limits_after_refresh,
+            (200,),
+            "llm limits still accepts the pre-refresh access token until it expires",
         )
 
         refreshed_limits = _request_json(

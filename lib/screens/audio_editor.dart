@@ -75,6 +75,7 @@ import 'package:fftea/fftea.dart';
 // import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 // import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 import 'package:mixroom/screens/home.dart';
@@ -3711,6 +3712,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   MediaDeviceInfo? _selectedOutput;
   String? _androidOutputRouteName;
   String? _macOutputDeviceName;
+  AudioRouteInfo _audioRouteInfo = AudioRouteInfo.unknown;
 
   List<String> _inputDevices = [];
   String? _selectedDevice;
@@ -3722,11 +3724,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int? _lastPreparedRecordingInputOpenChannels;
   bool _recordingInputPrewarmInFlight = false;
   Future<bool>? _recordingInputPrewarmFuture;
+  bool _recordTransitionInFlight = false;
+  Future<void>? _pendingIosRecordingRouteRestore;
 
   bool _loadingDevices = false;
   bool _microphoneAccessBlocked = false;
   PermissionStatus _microphonePermissionStatus = PermissionStatus.denied;
   bool _dawEntryMicPromptHandled = false;
+  bool _advancedBluetoothMonitorOverride = false;
+  final Set<String> _allowedBluetoothMicKeys = <String>{};
+  Timer? _recordingRoutePolicyTimer;
+  bool? _liveInputMonitoringEffective;
+  static const String _kBluetoothMonitorOverridePref =
+      'audio_editor.bluetooth_monitor_override';
+  static const String _kAllowedBluetoothMicKeysPref =
+      'audio_editor.allowed_bluetooth_mic_keys';
 
   bool _metronomeEnabled = false;
   double _metronomeVolume = 0.5; // 0–1
@@ -4317,6 +4329,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(_setIOSSystemGestureDeferral(true));
     WidgetsBinding.instance.addObserver(this);
     unawaited(_refreshPlatformCapabilities());
+    unawaited(_loadBluetoothRecordingPrefs());
     // prewarmFFT(); // so that AI sync first run is not heavy (this was for video/audio sync)
 
     _transportTicker = Ticker((_) {
@@ -4434,7 +4447,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _refreshMicrophonePermissionState();
       await _maybePromptMicrophonePermissionOnDawEntry();
       await _loadInputDevicesFromJuce();
-      await _refreshAndroidOutputRouteLabel();
+      await _refreshAudioRouteInfo();
       await _loadBundledInstrumentCatalog();
       _liveMidiEventPlaybackSupported =
           await JuceAudioEngine.supportsLiveMidiClipPlayback();
@@ -5695,6 +5708,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _promptRateLimitRefreshTimer = null;
     _samplePreviewStateSub?.cancel();
     _samplePreviewPlayer.dispose();
+    _recordingRoutePolicyTimer?.cancel();
+    _recordingRoutePolicyTimer = null;
     _stopAllSecurityScopedAccess();
     _stopMidiDeviceConnectionPolling();
     _midiInputPollTimer?.cancel();
@@ -5732,7 +5747,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         debugPrint("App Resumed on Android - Re-initializing.");
         unawaited(JuceAudioEngine.refreshAudioRoute(reason: 'appResumed'));
         unawaited(_refreshMicrophonePermissionAndInputs());
-        unawaited(_refreshAndroidOutputRouteLabel());
+        unawaited(_refreshAudioRouteInfo());
       } else if (state == AppLifecycleState.paused ||
           state == AppLifecycleState.inactive) {
         _scheduleChatHistoryPersist(immediate: true);
@@ -5744,8 +5759,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       if (state == AppLifecycleState.resumed) {
-        unawaited(JuceAudioEngine.refreshAudioRoute(reason: 'appResumed'));
         unawaited(_refreshMicrophonePermissionAndInputs());
+        unawaited(_refreshAudioRouteInfo());
       } else if (state == AppLifecycleState.paused) {
         //} || state == AppLifecycleState.inactive) {
         // debugPrint("App Paused or Inactive on iOS");
@@ -5796,6 +5811,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           .whereType<Map>()
           .map((e) => e.cast<String, dynamic>())
           .toList();
+      final persistedRowIndexById =
+          ProjectManager.persistedRowOrderIndexById(rowsJson);
       final tracks = (json["tracks"] as List?) ?? [];
       await _restoreRowsFromProjectJson(rowsJson, tracks);
 
@@ -5808,12 +5825,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           continue;
         }
         final label = (map["label"] as String?) ?? '';
-        final storedRowId = (map["rowId"] as num?)?.toInt() ?? -1;
-        int rowIndex = (map["rowIndex"] as num?)?.toInt() ?? 0;
-        if (storedRowId >= 0) {
-          final idx = _rowIndexForId(storedRowId);
-          if (idx >= 0) rowIndex = idx;
-        }
+        int rowIndex = ProjectManager.resolveSavedTrackRowIndex(
+          track: map,
+          persistedRowIndexById: persistedRowIndexById,
+        );
 
         final clipKind =
             ClipKindWire.fromWire((map['clipType'] as String?) ?? 'audio');
@@ -6012,7 +6027,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (final rs in rowStatesList) {
         final snap =
             RowStateSnapshot.fromJson((rs as Map).cast<String, dynamic>());
-        final r = snap.row;
+        var r = snap.rowId >= 0 ? _rowIndexForId(snap.rowId) : -1;
+        if (r < 0) {
+          r = snap.row;
+        }
 
         // Safety check
         if (r < 0 || r >= _rowCount) continue;
@@ -6045,7 +6063,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (final rf in rowFxList) {
         final snap = RowEffectsSnapshotJson.fromJson(
             (rf as Map).cast<String, dynamic>());
-        await restoreRowSnapshot(snap);
+        final resolvedRow =
+            snap.rowId >= 0 ? _rowIndexForId(snap.rowId) : snap.row;
+        if (resolvedRow < 0 || resolvedRow >= _rowCount) {
+          continue;
+        }
+        await restoreRowSnapshot(
+          RowEffectsSnapshot(
+            resolvedRow,
+            snap.effects,
+            rowId: snap.rowId,
+          ),
+        );
       }
       await _refreshAutomationTargetsForAllRows();
 
@@ -6160,6 +6189,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       // Copy audio sources into project/audio
       final tracksJson = <Map<String, dynamic>>[];
+      final assignedFileNameBySourcePath = <String, String>{};
+      final usedSavedFileNamesLower = <String>{};
       for (int i = 0; i < _audioTracks.length; i++) {
         final tr = _audioTracks[i];
 
@@ -6168,8 +6199,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         if (!src.existsSync()) continue;
 
-        // Keep original filename
-        final fileName = p.basename(src.path);
+        final normalizedSourcePath = p.normalize(src.path);
+        final existingAssigned =
+            assignedFileNameBySourcePath[normalizedSourcePath];
+        final fileName = existingAssigned ??
+            ProjectManager.uniqueAudioFileName(
+              preferredName: p.basename(src.path),
+              usedNamesLower: usedSavedFileNamesLower,
+            );
+        assignedFileNameBySourcePath[normalizedSourcePath] = fileName;
         final dst = File(p.join(audioDir.path, fileName));
 
         // Copy only if not already inside project
@@ -6203,9 +6241,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       // Garbage collect unreferenced audio files
-      final referenced = _audioTracks
-          .map((t) => p.basename(t.file.path))
-          .whereType<String>()
+      final referenced = tracksJson
+          .map((t) => (t['fileName'] as String?)?.trim() ?? '')
+          .where((name) => name.isNotEmpty)
           .toSet();
       final files = audioDir.listSync().whereType<File>();
       for (final f in files) {
@@ -6223,7 +6261,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       final rowFx = <Map<String, dynamic>>[];
       for (final r in usedRows) {
-        final snap = await captureRowSnapshot(r);
+        final snap = await captureRowSnapshot(r, rowId: _rowIdAt(r));
         rowFx.add(snap.toJson());
       }
 
@@ -6231,6 +6269,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (final r in usedRows) {
         final snap = RowStateSnapshot(
           row: r,
+          rowId: _rowIdAt(r),
           gain: _rowGain[r],
           pan: _rowPan[r],
           volumeAutomation:
@@ -6256,6 +6295,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final now = DateTime.now().millisecondsSinceEpoch;
       final rowsJson = _rows
           .map((r) => {
+                "rowId": r.rowId,
                 "name": r.name,
                 "iconId": r.iconId,
               })
@@ -6537,7 +6577,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (var track in _audioTracks) {
         track.audioStartTimer?.cancel();
       }
-      JuceAudioEngine.shutdown();
+      await JuceAudioEngine.shutdown();
       Navigator.of(context).pop();
     }
   }
@@ -6738,7 +6778,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await JuceAudioEngine.play();
     _syncTransportClock(_globalAudioClock, playing: true);
 
-    _transportTicker?.start();
+    if (!(_transportTicker?.isActive ?? false)) {
+      _transportTicker?.start();
+    }
 
     _startMeterPolling();
 
@@ -8278,86 +8320,107 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _startAudioRecordingJuce() async {
-    _midiInputPollTimer?.cancel();
-    _midiInputPollTimer = null;
-    _midiHeldNotesByKey.clear();
+    if (_recordTransitionInFlight) return;
+    _recordTransitionInFlight = true;
+    try {
+      if (Platform.isIOS) {
+        final pendingRestore = _pendingIosRecordingRouteRestore;
+        if (pendingRestore != null) {
+          await pendingRestore;
+        }
+      }
+      _midiInputPollTimer?.cancel();
+      _midiInputPollTimer = null;
+      _midiHeldNotesByKey.clear();
 
-    // 1) Require a selected row
-    if (_rowCount <= 0 || _selectedRow < 0 || _selectedRow >= _rowCount) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Select a track to record on first.')));
-      return;
-    }
+      // 1) Require a selected row
+      if (_rowCount <= 0 || _selectedRow < 0 || _selectedRow >= _rowCount) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Select a track to record on first.')));
+        return;
+      }
 
-    if (_loopEnabled) {
-      await _restartAudio(_safeAudioEditorStateSetter);
-    }
+      if (_loopEnabled) {
+        await _restartAudio(_safeAudioEditorStateSetter);
+      }
 
-    // 2) Determine where in the project we start recording (UNCHANGED)
-    _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
+      // 2) Determine where in the project we start recording (UNCHANGED)
+      _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
 
-    if (!await _ensureMicrophonePermissionForRecording()) {
-      return;
-    }
+      if (!await _ensureMicrophonePermissionForRecording()) {
+        return;
+      }
 
-    // Keep record-start deterministic even if background prewarm has not
-    // finished yet.
-    await _ensureMobileRecordingRouteReady();
+      await _refreshAudioRouteInfo();
+      if (!await _confirmBluetoothMicMode(_audioRouteInfo)) {
+        return;
+      }
+      // Keep record-start deterministic once the input route has been resolved.
+      await _ensureMobileRecordingRouteReady();
+      await _applyCurrentLiveMonitoringPolicy(
+        info: _audioRouteInfo,
+        force: true,
+      );
 
-    final startPlaybackAfterRecorder = Platform.isIOS;
+      final startPlaybackAfterRecorder = Platform.isIOS;
 
-    // 3) Keep Android's working order: start transport before arming the native
-    // recorder. iOS uses the opposite order to avoid route churn between input
-    // arm and recorder start.
-    if (!startPlaybackAfterRecorder && !_isPlaying) {
-      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
-    }
+      // 3) Keep Android's working order: start transport before arming the native
+      // recorder. iOS uses the opposite order to avoid route churn between input
+      // arm and recorder start.
+      if (!startPlaybackAfterRecorder && !_isPlaying) {
+        await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      }
 
-    // 4) Prepare file path (CHANGE → WAV)
-    final audioDir = ProjectManager.audioDir(_projectDir);
-    if (!await audioDir.exists()) await audioDir.create(recursive: true);
-    final filePath = p.join(audioDir.path,
-        'mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav');
+      // 4) Prepare file path (CHANGE → WAV)
+      final audioDir = ProjectManager.audioDir(_projectDir);
+      if (!await audioDir.exists()) await audioDir.create(recursive: true);
+      final filePath = p.join(audioDir.path,
+          'mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav');
 
-    // 5) Arm the native recorder.
-    final ok = await JuceAudioEngine.startRecording(
-      filePath,
-      _selectedChannelStart,
-      _selectedChannelCount,
-    );
+      // 5) Arm the native recorder.
+      final ok = await JuceAudioEngine.startRecording(
+        filePath,
+        _selectedChannelStart,
+        _selectedChannelCount,
+      );
 
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to start recording')));
-      return;
-    }
+      if (!ok) {
+        _liveInputMonitoringEffective = null;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to start recording')));
+        return;
+      }
 
-    // 6) iOS starts playback after the recorder is armed so route/input state is
-    // not invalidated between arm and first capture.
-    if (startPlaybackAfterRecorder && !_isPlaying) {
-      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
-    }
+      // 6) iOS starts playback after the recorder is armed so route/input state is
+      // not invalidated between arm and first capture.
+      if (startPlaybackAfterRecorder && !_isPlaying) {
+        await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      }
 
-    // 7) UI state (UNCHANGED)
-    setState(() {
-      _recordingFilePath = filePath;
-      _isRecording = true;
-      _isMidiClipRecording = false;
-      _midiRecordingClipEngineId = null;
-    });
-
-    _recordingPeaks.clear();
-
-    _recordingPeakTimer?.cancel();
-    _recordingPeakTimer =
-        Timer.periodic(const Duration(milliseconds: 50), (_) async {
-      if (!_isRecording) return;
-
-      final peak = await JuceAudioEngine.getRecordingPeak();
+      // 7) UI state (UNCHANGED)
       setState(() {
-        _recordingPeaks.add(peak.clamp(0.0, 1.0).toDouble());
+        _recordingFilePath = filePath;
+        _isRecording = true;
+        _isMidiClipRecording = false;
+        _midiRecordingClipEngineId = null;
       });
-    });
+
+      _recordingPeaks.clear();
+
+      _recordingPeakTimer?.cancel();
+      _recordingPeakTimer =
+          Timer.periodic(const Duration(milliseconds: 50), (_) async {
+        if (!_isRecording) return;
+
+        final peak = await JuceAudioEngine.getRecordingPeak();
+        setState(() {
+          _recordingPeaks.add(peak.clamp(0.0, 1.0).toDouble());
+        });
+      });
+      _startRecordingRoutePolicyPolling();
+    } finally {
+      _recordTransitionInFlight = false;
+    }
   }
 
   Future<bool> _ensureMicrophonePermissionForRecording() async {
@@ -8409,74 +8472,144 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _stopAudioRecordingJuce({bool keepPlaying = true}) async {
-    if (!_isRecording) return;
-    _midiHeldNotesByKey.clear();
-
-    _recordingPeakTimer?.cancel();
-    _recordingPeakTimer = null;
-
-    // 1) Stop JUCE recorder
-    await JuceAudioEngine.stopRecording();
-    _lastPreparedRecordingDevice = null;
-    _lastPreparedRecordingInputOpenChannels = null;
-
-    if (_recordingFilePath == null || !File(_recordingFilePath!).existsSync()) {
-      setState(() {
-        _isRecording = false;
-        _isMidiClipRecording = false;
-        _midiRecordingClipEngineId = null;
-        _recordingFilePath = null;
-      });
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(
-          content: Text('Recording failed or no data captured.')));
-      return;
-    }
-
-    final int row =
-        (_selectedRow >= 0 && _selectedRow < _rowCount) ? _selectedRow : 0;
-    final double startMs = _recordingStartMs;
-
-    setState(() {
-      _isRecording = false;
-      _isMidiClipRecording = false;
-      _midiRecordingClipEngineId = null;
-    });
-
-    // 2) Insert recorded clip (UNCHANGED)
+    if (!_isRecording || _recordTransitionInFlight) return;
+    _recordTransitionInFlight = true;
     try {
-      await _undoManager.execute(
-        AddAudioTrackAction(
-          addTrack: ({
-            required File file,
-            required int row,
-            required double timeMs,
-            Duration? trimStartRequested,
-            Duration? trimEndRequested,
-          }) =>
-              _addAudioTrackFromFile(
-            file,
-            row,
-            timeMs,
-            transcodeTo48k: false,
-          ),
-          tracks: _audioTracks,
-          file: File(_recordingFilePath!),
-          row: row,
-          timeMs: startMs,
-        ),
-      );
-    } catch (e) {
-      debugPrint("Error adding recorded track: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to add recorded track.')));
-    }
+      _midiHeldNotesByKey.clear();
+      final resumePlaybackAfterStop = keepPlaying && _isPlaying;
+      final hadBluetoothInputRoute = _audioRouteInfo.inputIsBluetoothHeadset;
+      final needsBluetoothStopRecovery = Platform.isAndroid
+          ? hadBluetoothInputRoute
+          : (_audioRouteInfo.isBluetoothOutput || hadBluetoothInputRoute);
+      Future<void>? deferredBluetoothRestore;
 
-    // 3) Optionally stop playback (UNCHANGED)
-    if (!keepPlaying && _isPlaying) {
-      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      _recordingPeakTimer?.cancel();
+      _recordingPeakTimer = null;
+      _stopRecordingRoutePolicyPolling();
+      _liveInputMonitoringEffective = null;
+
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+          _isMidiClipRecording = false;
+          _midiRecordingClipEngineId = null;
+        });
+      }
+
+      // Stop transport before native record-stop and clip insertion. This keeps
+      // the record-stop transition and subsequent graph rebuild out of the live
+      // playback path on both Android and iOS.
+      if (_isPlaying) {
+        await _pausePlayback();
+        if (mounted) {
+          setState(() {
+            _isPlaying = false;
+          });
+        }
+      }
+
+      // 1) Stop JUCE recorder
+      if (needsBluetoothStopRecovery && Platform.isAndroid) {
+        await JuceAudioEngine.stopRecordingWithoutPlaybackRestore();
+      } else {
+        await JuceAudioEngine.stopRecording();
+      }
+      _lastPreparedRecordingDevice = null;
+      _lastPreparedRecordingInputOpenChannels = null;
+      if (needsBluetoothStopRecovery) {
+        if (Platform.isAndroid) {
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+        if (Platform.isIOS) {
+          deferredBluetoothRestore =
+              JuceAudioEngine.restoreBluetoothPlaybackAfterRecordingStop()
+                  .then((_) {
+            return _refreshAudioRouteInfo(refreshNativeRoute: false);
+          });
+          _pendingIosRecordingRouteRestore = deferredBluetoothRestore;
+          deferredBluetoothRestore.whenComplete(() {
+            if (identical(
+                _pendingIosRecordingRouteRestore, deferredBluetoothRestore)) {
+              _pendingIosRecordingRouteRestore = null;
+            }
+          });
+          unawaited(deferredBluetoothRestore);
+        } else {
+          await JuceAudioEngine.restoreBluetoothPlaybackAfterRecordingStop();
+        }
+        if (Platform.isAndroid) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        if (!Platform.isIOS) {
+          await _refreshAudioRouteInfo(refreshNativeRoute: false);
+        }
+      } else if (Platform.isAndroid) {
+        // The native stop-record path already restores playback routing. Forcing
+        // another immediate native refresh here can reopen Android's Bluetooth
+        // stream again and destabilize post-record playback.
+        await _refreshAudioRouteInfo(refreshNativeRoute: false);
+      }
+
+      if (_recordingFilePath == null ||
+          !File(_recordingFilePath!).existsSync()) {
+        setState(() {
+          _isRecording = false;
+          _isMidiClipRecording = false;
+          _midiRecordingClipEngineId = null;
+          _recordingFilePath = null;
+        });
+
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(
+            content: Text('Recording failed or no data captured.')));
+        return;
+      }
+
+      final int row =
+          (_selectedRow >= 0 && _selectedRow < _rowCount) ? _selectedRow : 0;
+      final double startMs = _recordingStartMs;
+
+      // 2) Insert recorded clip (UNCHANGED)
+      try {
+        await _undoManager.execute(
+          AddAudioTrackAction(
+            addTrack: ({
+              required File file,
+              required int row,
+              required double timeMs,
+              Duration? trimStartRequested,
+              Duration? trimEndRequested,
+            }) =>
+                _addAudioTrackFromFile(
+              file,
+              row,
+              timeMs,
+              transcodeTo48k: false,
+            ),
+            tracks: _audioTracks,
+            file: File(_recordingFilePath!),
+            row: row,
+            timeMs: startMs,
+          ),
+        );
+      } catch (e) {
+        debugPrint("Error adding recorded track: $e");
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to add recorded track.')));
+      }
+
+      // 3) Restore the intended playback state after the clip is inserted.
+      if (deferredBluetoothRestore != null) {
+        await deferredBluetoothRestore;
+      }
+      if (resumePlaybackAfterStop && mounted && !_isPlaying) {
+        await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      } else if (!keepPlaying && _isPlaying) {
+        await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      }
+    } finally {
+      _recordTransitionInFlight = false;
     }
   }
 
@@ -8486,6 +8619,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     double timeMs, {
     Duration? trimStartRequested,
     Duration? trimEndRequested,
+    bool pausePlaybackBeforeInsert = true,
     bool transcodeTo48k = true,
   }) async {
     if (_audioTracks.length >= kNumClips) {
@@ -8495,7 +8629,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    _pausePlayback();
+    if (pausePlaybackBeforeInsert && _isPlaying) {
+      await _pausePlayback();
+    }
     await _ensureRowIndexExists(row);
     await _ensureRowExistsForClipInsertion();
     final safeRow = _rowCount == 0 ? 0 : row.clamp(0, _rowCount - 1);
@@ -13852,7 +13988,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_inputDevices.isEmpty && !_loadingDevices) {
       unawaited(_loadInputDevicesFromJuce(scheduleRecordingPrewarm: true));
     }
-    unawaited(_refreshAndroidOutputRouteLabel());
+    unawaited(_refreshAudioRouteInfo());
     String draftProjectName = _projectName;
     bool reopenDawTour = false;
     Future<void> commitProjectName() async {
@@ -13946,6 +14082,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           if (!Platform.isIOS) ...[
                             _buildOutputSelector(),
                             const SizedBox(height: 20)
+                          ],
+                          if (_supportsNativeBluetoothMonitorPolicy() &&
+                              (_audioRouteInfo.isBluetoothOutput ||
+                                  _audioRouteInfo.inputIsBluetoothHeadset ||
+                                  _allowedBluetoothMicKeys.isNotEmpty)) ...[
+                            _buildBluetoothRecordingPolicyCard(),
+                            const SizedBox(height: 20),
                           ],
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -14229,6 +14372,293 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _lastPreparedRecordingInputOpenChannels == desiredInputChannels;
   }
 
+  bool _supportsNativeBluetoothMonitorPolicy() {
+    return Platform.isAndroid || Platform.isIOS;
+  }
+
+  bool _sameAudioRouteInfo(AudioRouteInfo a, AudioRouteInfo b) {
+    return a.outputRouteKind == b.outputRouteKind &&
+        a.outputRouteName == b.outputRouteName &&
+        a.inputDeviceName == b.inputDeviceName &&
+        a.inputIsBluetoothHeadset == b.inputIsBluetoothHeadset;
+  }
+
+  String _normalizeBluetoothRouteKeyToken(String raw) {
+    return raw
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  String _bluetoothMicOptInKey([AudioRouteInfo? info]) {
+    final routeInfo = info ?? _audioRouteInfo;
+    final inputName = routeInfo.inputDeviceName.isNotEmpty
+        ? routeInfo.inputDeviceName
+        : (_selectedDevice ?? '');
+    final normalized = _normalizeBluetoothRouteKeyToken(inputName);
+    if (normalized.isEmpty) return 'bluetooth headset mic';
+    return '$normalized::bluetooth headset mic';
+  }
+
+  bool _looksLikeBluetoothDeviceName(String name) {
+    final normalized = _normalizeBluetoothRouteKeyToken(name);
+    if (normalized.isEmpty) return false;
+    return normalized.contains('airpods') ||
+        normalized.contains('bluetooth') ||
+        normalized.contains('buds') ||
+        normalized.contains('beats') ||
+        normalized.contains('headset');
+  }
+
+  Future<void> _loadBluetoothRecordingPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    _setStateAndRefreshProjectSettings(() {
+      _advancedBluetoothMonitorOverride =
+          prefs.getBool(_kBluetoothMonitorOverridePref) ?? false;
+      _allowedBluetoothMicKeys
+        ..clear()
+        ..addAll(
+            prefs.getStringList(_kAllowedBluetoothMicKeysPref) ?? const []);
+    });
+  }
+
+  Future<void> _persistBluetoothMonitorOverride() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(
+      _kBluetoothMonitorOverridePref,
+      _advancedBluetoothMonitorOverride,
+    );
+  }
+
+  Future<void> _persistBluetoothMicOptInKeys() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _kAllowedBluetoothMicKeysPref,
+      _allowedBluetoothMicKeys.toList()..sort(),
+    );
+  }
+
+  bool _isBluetoothMicOptedIn([AudioRouteInfo? info]) {
+    return _allowedBluetoothMicKeys.contains(_bluetoothMicOptInKey(info));
+  }
+
+  String? _recommendedNonBluetoothInputDevice() {
+    for (final device in _inputDevices) {
+      if (!_looksLikeBluetoothDeviceName(device)) {
+        return device;
+      }
+    }
+    return null;
+  }
+
+  bool _shouldEnableLiveInputMonitoring(AudioRouteInfo info) {
+    if (info.isBluetoothOutput && !_advancedBluetoothMonitorOverride) {
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _applyCurrentLiveMonitoringPolicy({
+    AudioRouteInfo? info,
+    bool force = false,
+  }) async {
+    if (!_supportsNativeBluetoothMonitorPolicy()) return;
+    final routeInfo = info ?? _audioRouteInfo;
+    final shouldEnable = _shouldEnableLiveInputMonitoring(routeInfo);
+    if (!force && _liveInputMonitoringEffective == shouldEnable) {
+      return;
+    }
+    _liveInputMonitoringEffective = shouldEnable;
+    await JuceAudioEngine.setLiveInputMonitoringEnabled(shouldEnable);
+  }
+
+  Future<void> _refreshAudioRouteInfo({
+    bool refreshNativeRoute = false,
+  }) async {
+    if (!_supportsNativeBluetoothMonitorPolicy()) return;
+    if (refreshNativeRoute) {
+      await JuceAudioEngine.refreshAudioRoute(reason: 'editorRouteInfo');
+    }
+    final info = await JuceAudioEngine.getAudioRouteInfo();
+    if (!mounted) return;
+
+    final routeLabel = info.outputRouteName.trim();
+    final changed = !_sameAudioRouteInfo(_audioRouteInfo, info) ||
+        _androidOutputRouteName != (routeLabel.isEmpty ? null : routeLabel);
+    if (changed) {
+      _setStateAndRefreshProjectSettings(() {
+        _audioRouteInfo = info;
+        if (Platform.isAndroid) {
+          _androidOutputRouteName = routeLabel.isEmpty ? null : routeLabel;
+        }
+      });
+    } else {
+      _audioRouteInfo = info;
+    }
+
+    if (_isRecording && !_isMidiClipRecording) {
+      await _applyCurrentLiveMonitoringPolicy(info: info);
+    }
+  }
+
+  Future<void> _refreshAndroidOutputRouteLabel({
+    bool refreshNativeRoute = false,
+  }) async {
+    await _refreshAudioRouteInfo(refreshNativeRoute: refreshNativeRoute);
+  }
+
+  Future<bool> _confirmBluetoothMicMode(AudioRouteInfo info) async {
+    final fallbackDevice = _recommendedNonBluetoothInputDevice();
+    final selectedDeviceName = (_selectedDevice ?? '').trim();
+    final selectedInputLooksBluetooth = selectedDeviceName.isNotEmpty &&
+        _looksLikeBluetoothDeviceName(selectedDeviceName);
+
+    final shouldAutoFallbackToNonBluetoothInput = info.isBluetoothOutput &&
+        (info.inputIsBluetoothHeadset ||
+            selectedInputLooksBluetooth ||
+            selectedDeviceName.isEmpty);
+
+    if (Platform.isAndroid &&
+        shouldAutoFallbackToNonBluetoothInput &&
+        fallbackDevice != null) {
+      final ok = await JuceAudioEngine.selectInputDevice(fallbackDevice);
+      if (!ok) return false;
+      final channels = await JuceAudioEngine.getNumInputChannels();
+      if (!mounted) return false;
+      _setStateAndRefreshProjectSettings(() {
+        _selectedDevice = fallbackDevice;
+        _numInputChannels = channels;
+        _normalizeInputChannelSelection();
+      });
+      _lastPreparedRecordingDevice = null;
+      _lastPreparedRecordingInputOpenChannels = null;
+      await _refreshAudioRouteInfo();
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Using built-in/default mic while Bluetooth output is active.',
+          ),
+        ),
+      );
+      return true;
+    }
+
+    if (Platform.isIOS && shouldAutoFallbackToNonBluetoothInput) {
+      final ok = await JuceAudioEngine.preferNonBluetoothRecordingInput();
+      if (!ok) return false;
+      final channels = await JuceAudioEngine.getNumInputChannels();
+      if (!mounted) return false;
+      _setStateAndRefreshProjectSettings(() {
+        _numInputChannels = channels;
+        _normalizeInputChannelSelection();
+      });
+      _lastPreparedRecordingDevice = null;
+      _lastPreparedRecordingInputOpenChannels = null;
+      await _refreshAudioRouteInfo();
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Using built-in/default mic while Bluetooth output is active.',
+          ),
+        ),
+      );
+      return true;
+    }
+
+    if (!info.inputIsBluetoothHeadset || _isBluetoothMicOptedIn(info)) {
+      return true;
+    }
+
+    final decision = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF181B24),
+          title: const Text(
+            'Bluetooth headset mic',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Text(
+            fallbackDevice == null
+                ? 'Bluetooth headset mic can reduce audio quality and increase latency. Continue with this mic?'
+                : 'Bluetooth headset mic can reduce audio quality and increase latency. Use your built-in/default mic instead, or continue with this mic?',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop('cancel'),
+              child: const Text('Cancel'),
+            ),
+            if (fallbackDevice != null)
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop('fallback'),
+                child: const Text('Use default mic'),
+              ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop('continue'),
+              child: const Text('Continue'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted || decision == null || decision == 'cancel') {
+      return false;
+    }
+
+    if (decision == 'fallback') {
+      final fallbackDeviceName = fallbackDevice;
+      if (fallbackDeviceName == null) return false;
+      final ok = Platform.isIOS
+          ? await JuceAudioEngine.preferNonBluetoothRecordingInput()
+          : await JuceAudioEngine.selectInputDevice(fallbackDeviceName);
+      if (!ok) return false;
+      final channels = await JuceAudioEngine.getNumInputChannels();
+      if (!mounted) return false;
+      _setStateAndRefreshProjectSettings(() {
+        if (!Platform.isIOS) {
+          _selectedDevice = fallbackDeviceName;
+        }
+        _numInputChannels = channels;
+        _normalizeInputChannelSelection();
+      });
+      _lastPreparedRecordingDevice = null;
+      _lastPreparedRecordingInputOpenChannels = null;
+      await _refreshAudioRouteInfo();
+      return !_audioRouteInfo.inputIsBluetoothHeadset ||
+          _isBluetoothMicOptedIn();
+    }
+
+    _allowedBluetoothMicKeys.add(_bluetoothMicOptInKey(info));
+    await _persistBluetoothMicOptInKeys();
+    return true;
+  }
+
+  void _startRecordingRoutePolicyPolling() {
+    _recordingRoutePolicyTimer?.cancel();
+    if (!_supportsNativeBluetoothMonitorPolicy()) return;
+    _recordingRoutePolicyTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!_isRecording || _isMidiClipRecording) {
+        _recordingRoutePolicyTimer?.cancel();
+        _recordingRoutePolicyTimer = null;
+        return;
+      }
+      unawaited(_refreshAudioRouteInfo());
+    });
+  }
+
+  void _stopRecordingRoutePolicyPolling() {
+    _recordingRoutePolicyTimer?.cancel();
+    _recordingRoutePolicyTimer = null;
+  }
+
   Future<bool> _prepareRecordingInputs({
     required int desiredInputChannels,
     required String selectedDevice,
@@ -14281,7 +14711,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _ensureMobileRecordingRouteReady() async {
     if (!mounted || _isRecording) return;
     if (!(Platform.isAndroid || Platform.isIOS)) return;
-    if (Platform.isIOS) return;
 
     final desiredInputChannels = _desiredRecordingInputOpenChannels();
     if (desiredInputChannels <= 0) return;
@@ -14315,7 +14744,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _scheduleRecordingInputPrewarm({required String reason}) {
     if (!mounted || _isRecording) return;
-    if (Platform.isIOS) return;
     final desiredInputChannels = _desiredRecordingInputOpenChannels();
     final selectedDevice = (_selectedDevice ?? '').trim();
 
@@ -14323,6 +14751,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _lastPreparedRecordingDevice = null;
       _lastPreparedRecordingInputOpenChannels = null;
       _recordingInputPrewarmFuture = null;
+      return;
+    }
+
+    // Avoid audible route churn while playback is already active on iOS.
+    if (Platform.isIOS && _isPlaying) {
       return;
     }
 
@@ -14352,21 +14785,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     ));
   }
 
-  Future<void> _refreshAndroidOutputRouteLabel({
-    bool refreshNativeRoute = false,
-  }) async {
-    if (!Platform.isAndroid) return;
-    if (refreshNativeRoute) {
-      await JuceAudioEngine.refreshAudioRoute(reason: 'projectSettingsOutput');
-    }
-    final rawName = await JuceAudioEngine.getCurrentOutputDeviceName();
-    if (!mounted) return;
-    _setStateAndRefreshProjectSettings(() {
-      final name = rawName.trim();
-      _androidOutputRouteName = name.isEmpty ? null : name;
-    });
-  }
-
   Future<void> _loadInputDevicesFromJuce({
     bool scheduleRecordingPrewarm = false,
   }) async {
@@ -14394,7 +14812,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _normalizeInputChannelSelection();
         _loadingDevices = false;
       });
-      unawaited(_refreshAndroidOutputRouteLabel());
+      unawaited(_refreshAudioRouteInfo());
       if (scheduleRecordingPrewarm) {
         _scheduleRecordingInputPrewarm(reason: 'loadInputDevices');
       }
@@ -14414,6 +14832,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
       _lastPreparedRecordingDevice = null;
       _lastPreparedRecordingInputOpenChannels = null;
+      _audioRouteInfo = AudioRouteInfo.unknown;
       if (Platform.isAndroid) {
         unawaited(JuceAudioEngine.prepareRecordingInputs(
           0,
@@ -14671,9 +15090,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             tooltip: "Refresh output route",
             icon: const Icon(Icons.refresh, color: Colors.white70),
             onPressed: () {
-              unawaited(
-                _refreshAndroidOutputRouteLabel(refreshNativeRoute: true),
-              );
+              unawaited(_refreshAndroidOutputRouteLabel());
+            },
+          ),
+        ),
+        child: Text(
+          effectiveLabel,
+          style: const TextStyle(color: Colors.white),
+        ),
+      );
+    }
+
+    if (Platform.isIOS) {
+      final routeLabel = _audioRouteInfo.outputRouteName.trim();
+      final effectiveLabel = routeLabel.isEmpty
+          ? 'System default (speaker / Bluetooth / audio interface)'
+          : routeLabel;
+      return InputDecorator(
+        decoration: InputDecoration(
+          labelText: "Output Route",
+          labelStyle: const TextStyle(color: Colors.white70),
+          enabledBorder:
+              OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
+          focusedBorder:
+              OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+          suffixIcon: IconButton(
+            tooltip: "Refresh output route",
+            icon: const Icon(Icons.refresh, color: Colors.white70),
+            onPressed: () {
+              unawaited(_refreshAudioRouteInfo());
             },
           ),
         ),
@@ -14742,6 +15187,104 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _setStateAndRefreshProjectSettings(() => _selectedOutput = d);
         _selectOutputDevice(d);
       },
+    );
+  }
+
+  Future<void> _setAdvancedBluetoothMonitorOverride(bool enabled) async {
+    _setStateAndRefreshProjectSettings(() {
+      _advancedBluetoothMonitorOverride = enabled;
+    });
+    await _persistBluetoothMonitorOverride();
+    if (_isRecording && !_isMidiClipRecording) {
+      await _applyCurrentLiveMonitoringPolicy(force: true);
+    }
+  }
+
+  Future<void> _resetBluetoothMicOptIns() async {
+    _setStateAndRefreshProjectSettings(() {
+      _allowedBluetoothMicKeys.clear();
+    });
+    await _persistBluetoothMicOptInKeys();
+  }
+
+  Widget _buildBluetoothRecordingPolicyCard() {
+    final showBluetoothOutput = _audioRouteInfo.isBluetoothOutput;
+    final showBluetoothMic = _audioRouteInfo.inputIsBluetoothHeadset;
+    final hasOptIns = _allowedBluetoothMicKeys.isNotEmpty;
+
+    if (!showBluetoothOutput && !showBluetoothMic && !hasOptIns) {
+      return const SizedBox.shrink();
+    }
+
+    final routeName = _audioRouteInfo.outputRouteName.trim();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Bluetooth recording policy',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (showBluetoothOutput) ...[
+            const SizedBox(height: 8),
+            Text(
+              routeName.isEmpty
+                  ? 'Bluetooth playback and recording are supported. Real-time monitoring is off by default.'
+                  : '$routeName is using Bluetooth output. Real-time monitoring is off by default.',
+              style: const TextStyle(color: Colors.white70, height: 1.35),
+            ),
+            const SizedBox(height: 10),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: _advancedBluetoothMonitorOverride,
+              activeColor: const Color(0xFF4C8DFF),
+              title: const Text(
+                'Advanced: monitor anyway',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: const Text(
+                'May sound choppy or unstable on Bluetooth earphones.',
+                style: TextStyle(color: Colors.white60),
+              ),
+              onChanged: (value) {
+                unawaited(_setAdvancedBluetoothMonitorOverride(value));
+              },
+            ),
+          ],
+          if (showBluetoothMic) ...[
+            const SizedBox(height: 8),
+            Text(
+              _isBluetoothMicOptedIn()
+                  ? 'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.'
+                  : 'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.',
+              style: const TextStyle(color: Colors.white70, height: 1.35),
+            ),
+          ],
+          if (hasOptIns) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () {
+                  unawaited(_resetBluetoothMicOptIns());
+                },
+                child: const Text('Reset Bluetooth mic approvals'),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -32343,7 +32886,10 @@ class CompoundUndoAction extends EditorUndoAction {
 // SNAPSHOT HISTORY
 // ----------------------------------------------------------------
 
-Future<RowEffectsSnapshot> captureRowSnapshot(int row) async {
+Future<RowEffectsSnapshot> captureRowSnapshot(
+  int row, {
+  int rowId = -1,
+}) async {
   var effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
   final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
   if (effectIds.length != effects.length) {
@@ -32359,7 +32905,7 @@ Future<RowEffectsSnapshot> captureRowSnapshot(int row) async {
         {for (final p in params) p['name']: p['value']}));
   }
 
-  return RowEffectsSnapshot(row, snapshots);
+  return RowEffectsSnapshot(row, snapshots, rowId: rowId);
 }
 
 Future<void> _waitUntilAsync(

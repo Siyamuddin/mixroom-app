@@ -326,6 +326,7 @@ def _handle_email_sign_up(event: Dict[str, Any], aws_context: Any) -> Dict[str, 
             given_name=str(body.get("given_name") or ""),
             family_name=str(body.get("family_name") or ""),
             birthdate=str(body.get("birthdate") or ""),
+            locale=str(body.get("locale") or body.get("language") or ""),
         )
     except AppUserAuthError as exc:
         response = json_response(
@@ -387,6 +388,7 @@ def _handle_resend_sign_up_code(event: Dict[str, Any], aws_context: Any) -> Dict
         action=lambda body, claims: resend_email_verification_code(
             repo,
             email=str(body.get("email") or ""),
+            locale=str(body.get("locale") or body.get("language") or ""),
         ),
     )
 
@@ -399,6 +401,7 @@ def _handle_request_password_reset(event: Dict[str, Any], aws_context: Any) -> D
         action=lambda body, claims: request_password_reset(
             repo,
             email=str(body.get("email") or ""),
+            locale=str(body.get("locale") or body.get("language") or ""),
         ),
     )
 
@@ -460,6 +463,7 @@ def _handle_resend_email_verification(event: Dict[str, Any], aws_context: Any) -
         action=lambda body, claims: resend_email_verification_code(
             repo,
             user_id=str(claims.get("sub") or ""),
+            locale=str(body.get("locale") or body.get("language") or ""),
         ),
     )
 
