@@ -4,9 +4,17 @@ import json
 import os
 import re
 from functools import lru_cache
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from pathlib import Path
 from typing import Any, Mapping
+
+from . import config
+
+try:
+    import boto3
+except ModuleNotFoundError:  # pragma: no cover - local dev/test fallback
+    boto3 = None
 
 _FEATURE_ALIASES = {
     "ai_chat": "ai_chat",
@@ -28,6 +36,11 @@ _FEATURE_ALIASES = {
 _TIER_ALIASES = {
     "studio": "pro",
 }
+_PROMPT_LIMIT_SETTINGS_KEY = "ai_prompt_limits"
+_PROMPT_LIMITS_CACHE_TTL_SECONDS = 60
+_prompt_limits_cache: dict[str, Any] | None = None
+_prompt_limits_cache_loaded_at: datetime | None = None
+_prompt_limits_table = None
 
 
 def _limits_path() -> Path:
@@ -50,6 +63,92 @@ def load_ai_limits() -> dict[str, Any]:
     return parsed
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalized_tier_name(tier: str) -> str:
+    raw_value = (tier or "").strip().lower()
+    normalized = _TIER_ALIASES.get(raw_value, raw_value or "free")
+    configured_tiers = load_ai_limits().get("tiers") or {}
+    if normalized in configured_tiers:
+        return normalized
+    return "free"
+
+
+def _default_prompt_limits_for_tier(tier: str) -> dict[str, int]:
+    prompt_limits = load_ai_limits().get("prompt_limits") or {}
+    normalized_tier = _normalized_tier_name(tier)
+
+    if "daily" in prompt_limits or "weekly" in prompt_limits:
+        return {
+            "daily_prompts": int(prompt_limits.get("daily") or 0),
+            "weekly_prompts": int(prompt_limits.get("weekly") or 0),
+        }
+
+    tier_limits = (
+        prompt_limits.get(normalized_tier)
+        or prompt_limits.get("free")
+        or prompt_limits.get("default")
+        or {}
+    )
+    return {
+        "daily_prompts": int(tier_limits.get("daily") or 0),
+        "weekly_prompts": int(tier_limits.get("weekly") or 0),
+    }
+
+
+def _prompt_limits_table():
+    global _prompt_limits_table
+    if _prompt_limits_table is not None:
+        return _prompt_limits_table
+    if boto3 is None or not config.AI_PROMPT_LIMIT_SETTINGS_TABLE:
+        return None
+    _prompt_limits_table = boto3.resource("dynamodb").Table(
+        config.AI_PROMPT_LIMIT_SETTINGS_TABLE
+    )
+    return _prompt_limits_table
+
+
+def _load_remote_prompt_limits() -> dict[str, Any]:
+    table = _prompt_limits_table()
+    if table is None:
+        return {}
+    return (
+        table.get_item(
+            Key={"setting_key": _PROMPT_LIMIT_SETTINGS_KEY},
+            ConsistentRead=True,
+        ).get("Item")
+        or {}
+    )
+
+
+def _get_cached_remote_prompt_limits() -> dict[str, Any]:
+    global _prompt_limits_cache, _prompt_limits_cache_loaded_at
+    current = _utc_now()
+    if (
+        _prompt_limits_cache is not None
+        and _prompt_limits_cache_loaded_at is not None
+        and current - _prompt_limits_cache_loaded_at
+        < timedelta(seconds=_PROMPT_LIMITS_CACHE_TTL_SECONDS)
+    ):
+        return dict(_prompt_limits_cache)
+    try:
+        _prompt_limits_cache = _load_remote_prompt_limits()
+        _prompt_limits_cache_loaded_at = current
+    except Exception:
+        _prompt_limits_cache = {}
+        _prompt_limits_cache_loaded_at = current
+    return dict(_prompt_limits_cache or {})
+
+
+def clear_prompt_limits_cache() -> None:
+    global _prompt_limits_cache, _prompt_limits_cache_loaded_at, _prompt_limits_table
+    _prompt_limits_cache = None
+    _prompt_limits_cache_loaded_at = None
+    _prompt_limits_table = None
+
+
 def normalize_feature_name(feature: str) -> str:
     value = (feature or "").strip().lower()
     return _FEATURE_ALIASES.get(value, value)
@@ -65,14 +164,8 @@ def validate_feature(feature: str) -> str:
 
 def get_user_tier(user: Mapping[str, Any] | None) -> str:
     user_data = user or {}
-    raw_tier = str(
-        user_data.get("subscription_tier") or user_data.get("tier") or "free"
-    ).strip().lower()
-    normalized = _TIER_ALIASES.get(raw_tier, raw_tier or "free")
-    configured_tiers = load_ai_limits().get("tiers") or {}
-    if normalized in configured_tiers:
-        return normalized
-    return "free"
+    raw_tier = str(user_data.get("subscription_tier") or user_data.get("tier") or "free")
+    return _normalized_tier_name(raw_tier)
 
 
 def get_tier_limits(tier: str) -> dict[str, int]:
@@ -85,12 +178,27 @@ def get_tier_limits(tier: str) -> dict[str, int]:
     }
 
 
-def get_prompt_limits() -> dict[str, int]:
-    prompt_limits = load_ai_limits().get("prompt_limits") or {}
-    return {
-        "daily_prompts": int(prompt_limits.get("daily") or 0),
-        "weekly_prompts": int(prompt_limits.get("weekly") or 0),
-    }
+def get_prompt_limits(tier: str = "free") -> dict[str, int]:
+    limits = _default_prompt_limits_for_tier(tier)
+    normalized_tier = _normalized_tier_name(tier)
+    if normalized_tier != "free":
+        return limits
+
+    remote_limits = _get_cached_remote_prompt_limits()
+    if remote_limits:
+        daily_prompts = int(
+            remote_limits.get("free_daily_prompt_limit", limits["daily_prompts"]) or 0
+        )
+        weekly_prompts = int(
+            remote_limits.get("free_weekly_prompt_limit", limits["weekly_prompts"]) or 0
+        )
+        if weekly_prompts < daily_prompts:
+            weekly_prompts = daily_prompts
+        return {
+            "daily_prompts": max(daily_prompts, 0),
+            "weekly_prompts": max(weekly_prompts, 0),
+        }
+    return limits
 
 
 def get_feature_base_cost(feature: str) -> int:

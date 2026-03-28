@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
@@ -16,6 +18,7 @@ import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/screens/audio_editor.dart';
 import 'package:mixroom/widgets/app_responsive_body.dart';
+import 'package:mixroom/widgets/app_shell_figma.dart';
 import 'package:provider/provider.dart';
 
 class _NoSwipeMaterialPageRoute<T> extends MaterialPageRoute<T> {
@@ -34,6 +37,11 @@ class ProjectsScreen extends StatefulWidget {
 
 const double kActionCardHeight = 72;
 
+enum _ProjectSortMode {
+  recent,
+  alphabetical,
+}
+
 class _ProjectsScreenState extends State<ProjectsScreen> {
   static const Key _projectsScreenKey = Key('projects_screen');
   static const Key _newProjectCardKey = Key('projects_new_project_card');
@@ -50,6 +58,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   bool _filePickerInFlight = false;
   StreamSubscription<String>? _importSub;
   String? _loadError;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode(debugLabel: 'projects_search');
+  final GlobalKey _projectToolsButtonKey = GlobalKey();
+  _ProjectSortMode _sortMode = _ProjectSortMode.recent;
+  final Set<String> _selectedProjectPaths = <String>{};
 
   String _projectActionKeyToken(String name) =>
       Uri.encodeComponent(name.trim());
@@ -68,6 +81,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   @override
   void initState() {
     super.initState();
+    _searchFocusNode.addListener(() {
+      if (!mounted) return;
+      setState(() {});
+    });
     _refresh();
 
     // Cold start
@@ -89,6 +106,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   @override
   void dispose() {
     _importSub?.cancel();
+    _searchFocusNode.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -128,6 +147,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     // 2. Let UI render the dialog
     // TODO: also an arbitrary delay to hide the blocking UI lag involved in opening the project
     await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
 
     // 3. Push editor
     await Navigator.push(
@@ -141,6 +161,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         ),
       ),
     );
+    if (!mounted) return;
 
     // 4. Close spinner (safe even if already closed)
     if (Navigator.of(context).canPop()) {
@@ -153,6 +174,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _newProject() async {
     if (!await ProjectManager.canCreateNew()) return;
+    if (!mounted) return;
     final resolvedMode = _resolvedEditorMode();
     final isProEntitled = _isProEntitled();
 
@@ -163,6 +185,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
     // TODO: arbitrary delay to prevent bad UX from (probably) unavoidable blocking UI lag when going to DAW screen
     await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
 
     final dir = await ProjectManager.createNewProjectDir(
       name: L10n.translate(context, 'Untitled Project'),
@@ -179,6 +202,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     await AnalyticsService.instance.trackFirstProjectCreated(
       projectId: projectId,
     );
+    if (!mounted) return;
 
     await Navigator.push(
       context,
@@ -190,6 +214,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         ),
       ),
     );
+    if (!mounted) return;
 
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
@@ -230,124 +255,515 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _renameProject(ProjectMeta meta) async {
     final controller = TextEditingController(text: meta.name);
-    final res = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
-        final cs = theme.colorScheme;
-        return MediaQuery.removeViewInsets(
-          context: ctx,
-          removeBottom: true,
-          child: Dialog(
-            key: _renameDialogKey,
-            alignment: Alignment.topCenter,
-            insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.drive_file_rename_outline,
-                            color: cs.primary),
-                        const SizedBox(width: 8),
-                        Text(
-                          L10n.translate(ctx, 'Rename Project'),
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(12),
-                        border:
-                            Border.all(color: Colors.white.withOpacity(0.12)),
-                      ),
-                      child: TextField(
-                        key: _renameFieldKey,
-                        controller: controller,
-                        autofocus: true,
-                        textInputAction: TextInputAction.done,
-                        onSubmitted: (_) =>
-                            Navigator.pop(ctx, controller.text.trim()),
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          hintText: L10n.translate(ctx, 'Project name'),
-                          hintStyle: const TextStyle(color: Colors.white54),
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 12),
-                          suffixIconColor: cs.primary,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Wrap(
-                      alignment: WrapAlignment.end,
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        TextButton(
-                          key: _renameCancelKey,
-                          onPressed: () => Navigator.pop(ctx),
-                          child: Text(L10n.translate(ctx, 'Cancel')),
-                        ),
-                        ElevatedButton(
-                          key: _renameSaveKey,
-                          onPressed: () =>
-                              Navigator.pop(ctx, controller.text.trim()),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: cs.primary,
-                            foregroundColor: cs.onPrimary,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10)),
+    final focusNode = FocusNode(debugLabel: 'projects_rename');
+    var focusScheduled = false;
+
+    void closeWithResult(BuildContext ctx, String? result) {
+      focusNode.unfocus();
+      Navigator.pop(ctx, result);
+    }
+
+    try {
+      final res = await showDialog<String>(
+        context: context,
+        barrierColor: Colors.black.withValues(alpha: 0.58),
+        builder: (ctx) {
+          final cs = Theme.of(ctx).colorScheme;
+          if (!focusScheduled) {
+            focusScheduled = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!focusNode.canRequestFocus) return;
+              focusNode.requestFocus();
+            });
+          }
+          return MediaQuery.removeViewInsets(
+            context: ctx,
+            removeBottom: true,
+            child: Dialog(
+              key: _renameDialogKey,
+              alignment: Alignment.topCenter,
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: MixroomShellSurface(
+                  radius: 30,
+                  strong: true,
+                  color: const Color.fromRGBO(244, 244, 244, 0.14),
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: const Color.fromRGBO(164, 194, 255, 0.16),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            alignment: Alignment.center,
+                            child: const Icon(
+                              Icons.drive_file_rename_outline_rounded,
+                              color: Color(0xFFA4C2FF),
+                              size: 20,
+                            ),
                           ),
-                          child: Text(L10n.translate(ctx, 'Save')),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  L10n.translate(ctx, 'Rename Project'),
+                                  style: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Color(0xFFF4F4F4),
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  L10n.translate(
+                                    ctx,
+                                    'Update the project title shown in your library.',
+                                  ),
+                                  style: TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Colors.white.withValues(alpha: 0.68),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: const Color.fromRGBO(244, 244, 244, 0.10),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.10),
+                          ),
                         ),
-                      ],
-                    ),
-                  ],
+                        child: TextField(
+                          key: _renameFieldKey,
+                          controller: controller,
+                          focusNode: focusNode,
+                          autofocus: false,
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) {
+                            final value = controller.text.trim();
+                            if (value.isNotEmpty) {
+                              closeWithResult(ctx, value);
+                            }
+                          },
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: L10n.translate(ctx, 'Project name'),
+                            hintStyle: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Colors.white.withValues(alpha: 0.46),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.folder_open_rounded,
+                              size: 18,
+                              color: Color(0xFFA4C2FF),
+                            ),
+                            prefixIconConstraints: const BoxConstraints(
+                              minWidth: 46,
+                              minHeight: 20,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              key: _renameCancelKey,
+                              onPressed: () => closeWithResult(ctx, null),
+                              style: TextButton.styleFrom(
+                                foregroundColor: const Color(0xFFF4F4F4),
+                                backgroundColor:
+                                    const Color.fromRGBO(244, 244, 244, 0.08),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  side: BorderSide(
+                                    color: Colors.white.withValues(alpha: 0.10),
+                                  ),
+                                ),
+                              ),
+                              child: Text(L10n.translate(ctx, 'Cancel')),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton(
+                              key: _renameSaveKey,
+                              onPressed: () => closeWithResult(
+                                ctx,
+                                controller.text.trim(),
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: cs.primary.withValues(
+                                  alpha: 0.94,
+                                ),
+                                foregroundColor: cs.onPrimary,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                              child: Text(L10n.translate(ctx, 'Save')),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
+          );
+        },
+      );
+
+      if (res == null) return;
+      final newName = res.trim();
+      if (newName.isEmpty) return;
+
+      try {
+        await ProjectManager.renameProject(meta.dir, newName);
+        await _refresh();
+
+        if (!mounted) return;
+        showAppSnackBar(
+          context,
+          L10n.translate(context, 'Project renamed'),
+          tone: AppPopupTone.success,
+        );
+      } catch (e) {
+        if (!mounted) return;
+        showAppSnackBar(
+          context,
+          '${L10n.translate(context, 'Rename failed')}: $e',
+          tone: AppPopupTone.error,
+        );
+      }
+    } finally {
+      Future<void>.delayed(const Duration(milliseconds: 300), () {
+        controller.dispose();
+        focusNode.dispose();
+      });
+    }
+  }
+
+  String _projectSelectionKey(ProjectMeta meta) => meta.dir.path;
+
+  bool _isSelected(ProjectMeta meta) =>
+      _selectedProjectPaths.contains(_projectSelectionKey(meta));
+
+  bool get _selectionMode => _selectedProjectPaths.isNotEmpty;
+
+  List<ProjectMeta> _visibleProjects() {
+    final query = _searchController.text.trim().toLowerCase();
+    final filtered = _projects.where((project) {
+      if (query.isEmpty) return true;
+      return project.name.toLowerCase().contains(query);
+    }).toList();
+    switch (_sortMode) {
+      case _ProjectSortMode.alphabetical:
+        filtered.sort((a, b) => a.name.toLowerCase().compareTo(
+              b.name.toLowerCase(),
+            ));
+        break;
+      case _ProjectSortMode.recent:
+        filtered.sort((a, b) => b.lastOpenedAt.compareTo(a.lastOpenedAt));
+        break;
+    }
+    return filtered;
+  }
+
+  void _toggleSelection(ProjectMeta meta) {
+    final key = _projectSelectionKey(meta);
+    setState(() {
+      if (_selectedProjectPaths.contains(key)) {
+        _selectedProjectPaths.remove(key);
+      } else {
+        _selectedProjectPaths.add(key);
+      }
+    });
+  }
+
+  void _clearSelection() {
+    if (_selectedProjectPaths.isEmpty) return;
+    setState(_selectedProjectPaths.clear);
+  }
+
+  void _selectAllVisible() {
+    final visible = _visibleProjects();
+    setState(() {
+      _selectedProjectPaths
+        ..clear()
+        ..addAll(visible.map(_projectSelectionKey));
+    });
+  }
+
+  Rect? _anchorRectFor(GlobalKey key) {
+    final context = key.currentContext;
+    if (context == null) return null;
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return null;
+    final overlay =
+        Navigator.of(this.context).overlay?.context.findRenderObject();
+    if (overlay is! RenderBox) return null;
+    final origin = box.localToGlobal(Offset.zero, ancestor: overlay);
+    return origin & box.size;
+  }
+
+  Future<String?> _showAnchoredShellMenu({
+    required GlobalKey anchorKey,
+    required Widget child,
+    required double width,
+    required double estimatedHeight,
+  }) {
+    final anchor = _anchorRectFor(anchorKey);
+    if (anchor == null) {
+      return Future<String?>.value(null);
+    }
+    final media = MediaQuery.of(context);
+    final screen = media.size;
+    final left = (anchor.right - width).clamp(12.0, screen.width - width - 12);
+    double top = anchor.bottom + 10;
+    final maxTop = screen.height - estimatedHeight - media.padding.bottom - 24;
+    if (top > maxTop) {
+      top = (anchor.top - estimatedHeight - 10).clamp(24.0, maxTop);
+    }
+
+    return showGeneralDialog<String>(
+      context: context,
+      barrierLabel: 'menu',
+      barrierDismissible: true,
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 160),
+      pageBuilder: (_, __, ___) {
+        return Stack(
+          children: [
+            Positioned(
+              left: left,
+              top: top,
+              width: width,
+              child: child,
+            ),
+          ],
+        );
+      },
+      transitionBuilder: (_, animation, __, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.96, end: 1.0).animate(curved),
+            alignment: Alignment.topRight,
+            child: child,
           ),
         );
       },
     );
-    Future<void>.delayed(const Duration(milliseconds: 400), () {
-      controller.dispose();
-    });
+  }
 
-    if (res == null) return;
-    final newName = res.trim();
-    if (newName.isEmpty) return;
-
-    try {
-      await ProjectManager.renameProject(meta.dir, newName);
-      await _refresh();
-
-      if (!mounted) return;
-      showAppSnackBar(
-        context,
-        L10n.translate(context, 'Project renamed'),
-        tone: AppPopupTone.success,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      showAppSnackBar(
-        context,
-        '${L10n.translate(context, 'Rename failed')}: $e',
-        tone: AppPopupTone.error,
-      );
+  Future<void> _deleteSelectedProjects() async {
+    final selected = _projects
+        .where((project) => _selectedProjectPaths.contains(project.dir.path))
+        .toList();
+    if (selected.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1D2430),
+        title: Text(
+          L10n.translate(context, 'Delete project?'),
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          '${selected.length} ${L10n.translate(context, 'Projects')} ${L10n.translate(context, 'will be permanently deleted.')}',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(L10n.translate(context, 'Cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(L10n.translate(context, 'Delete')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    for (final project in selected) {
+      await ProjectManager.deleteProject(project.dir);
     }
+    _clearSelection();
+    await _refresh();
+  }
+
+  Future<void> _showProjectTools() async {
+    final allVisibleSelected = _visibleProjects().isNotEmpty &&
+        _visibleProjects().every(
+            (project) => _selectedProjectPaths.contains(project.dir.path));
+    final selected = await _showAnchoredShellMenu(
+      anchorKey: _projectToolsButtonKey,
+      width: 228,
+      estimatedHeight: 204,
+      child: Material(
+        color: Colors.transparent,
+        child: MixroomShellSurface(
+          radius: 28,
+          strong: true,
+          color: const Color.fromRGBO(244, 244, 244, 0.16),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                L10n.translate(context, 'Projects'),
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _ProjectToolAction(
+                icon: Icons.schedule_rounded,
+                label: L10n.translate(context, 'Sort by recent'),
+                onTap: () => Navigator.of(context).pop('sort_recent'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
+                icon: Icons.sort_by_alpha_rounded,
+                label: L10n.translate(context, 'Sort alphabetically'),
+                onTap: () => Navigator.of(context).pop('sort_alpha'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
+                icon: allVisibleSelected
+                    ? Icons.deselect_rounded
+                    : Icons.select_all_rounded,
+                label: L10n.translate(
+                  context,
+                  allVisibleSelected ? 'Clear selection' : 'Select all',
+                ),
+                onTap: () => Navigator.of(context)
+                    .pop(allVisibleSelected ? 'clear' : 'select_all'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    switch (selected) {
+      case 'sort_recent':
+        setState(() => _sortMode = _ProjectSortMode.recent);
+        return;
+      case 'sort_alpha':
+        setState(() => _sortMode = _ProjectSortMode.alphabetical);
+        return;
+      case 'clear':
+        _clearSelection();
+        return;
+      case 'select_all':
+        _selectAllVisible();
+        return;
+    }
+  }
+
+  Future<void> _showProjectItemMenu({
+    required GlobalKey anchorKey,
+    required ProjectMeta project,
+  }) async {
+    final selected = await _showAnchoredShellMenu(
+      anchorKey: anchorKey,
+      width: 216,
+      estimatedHeight: 272,
+      child: Material(
+        color: Colors.transparent,
+        child: MixroomShellSurface(
+          radius: 28,
+          strong: true,
+          color: const Color.fromRGBO(244, 244, 244, 0.16),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ProjectToolAction(
+                icon: Icons.drive_file_rename_outline_rounded,
+                label: L10n.translate(context, 'Rename'),
+                onTap: () => Navigator.of(context).pop('rename'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
+                icon: Icons.delete_outline_rounded,
+                label: L10n.translate(context, 'Delete'),
+                onTap: () => Navigator.of(context).pop('delete'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
+                icon: Icons.ios_share_rounded,
+                label: L10n.translate(context, 'Share (.mixroom)'),
+                onTap: () => Navigator.of(context).pop('share_mixroom'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
+                icon: Icons.audio_file_outlined,
+                label: L10n.translate(context, 'Export WAV'),
+                onTap: () => Navigator.of(context).pop('export_wav'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
+                icon: Icons.graphic_eq_rounded,
+                label: L10n.translate(context, 'Export MP3'),
+                onTap: () => Navigator.of(context).pop('export_mp3'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null) return;
+    await _handleCompactProjectMenuAction(selected, project);
   }
 
   Future<void> _deleteProject(ProjectMeta meta) async {
@@ -386,11 +802,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         message: L10n.translate(context, 'Exporting…'),
       );
       await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
 
       final bundlePath = await ProjectBundle.exportMixroomBundle(
         projectDir: meta.dir,
         audioMode: BundleAudioMode.flacLossless,
       );
+      if (!mounted) return;
 
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
 
@@ -402,7 +820,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
       await SharePlus.instance.share(params);
     } catch (e) {
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
       showAppSnackBar(
         context,
         '${L10n.translate(context, 'Export failed')}: $e',
@@ -420,6 +841,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _importProjectFromIncomingFile(File bundleFile) async {
     final canCreate = await ProjectManager.canCreateNew();
+    if (!mounted) return;
 
     if (!canCreate) {
       _showProjectLimitDialog();
@@ -444,6 +866,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         message: L10n.translate(context, 'Importing…'),
       );
       await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
 
       // If your engine expects WAV only, use convertFlacToWav48k.
       // If you later add FLAC support end-to-end, switch to keepAsBundled.
@@ -451,6 +874,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         bundleFile: File(path),
         audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
       );
+      if (!mounted) return;
 
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
 
@@ -467,10 +891,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           ),
         ),
       );
+      if (!mounted) return;
 
       await _refresh();
     } catch (e) {
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
       showAppSnackBar(
         context,
         '${L10n.translate(context, 'Import failed')}: $e',
@@ -527,121 +955,36 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     required bool compact,
   }) {
     if (compact) {
-      return PopupMenuButton<String>(
-        key: ValueKey('project_actions_$keyToken'),
-        tooltip: L10n.translate(context, 'Project actions'),
+      final anchorKey = GlobalObjectKey('project_actions_$keyToken');
+      return MixroomShellRoundButton(
+        key: anchorKey,
+        size: 40,
+        iconExtent: 18,
         icon: const Icon(
           Icons.more_horiz_rounded,
-          color: Colors.white70,
+          color: Colors.white,
+          size: 22,
         ),
-        onSelected: (value) => _handleCompactProjectMenuAction(value, project),
-        itemBuilder: (_) => [
-          PopupMenuItem(
-            value: 'rename',
-            child: Text(L10n.translate(context, 'Rename')),
-          ),
-          PopupMenuItem(
-            value: 'delete',
-            child: Text(L10n.translate(context, 'Delete')),
-          ),
-          const PopupMenuDivider(),
-          PopupMenuItem(
-            value: 'share_mixroom',
-            child: Text(L10n.translate(context, 'Share (.mixroom)')),
-          ),
-          PopupMenuItem(
-            value: 'export_wav',
-            child: Text(L10n.translate(context, 'Export WAV')),
-          ),
-          PopupMenuItem(
-            value: 'export_mp3',
-            child: Text(L10n.translate(context, 'Export MP3')),
-          ),
-        ],
+        onTap: () => _showProjectItemMenu(
+          anchorKey: anchorKey,
+          project: project,
+        ),
       );
     }
 
-    return SizedBox(
-      width: 108,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          PopupMenuButton<String>(
-            key: ValueKey('project_edit_$keyToken'),
-            tooltip: L10n.translate(context, 'Edit'),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            constraints: const BoxConstraints(minWidth: 40),
-            icon: const Icon(
-              Icons.edit_outlined,
-              size: 23,
-              color: Colors.white70,
-            ),
-            iconSize: 23,
-            onSelected: (value) async {
-              if (value == 'rename') {
-                await _renameProject(project);
-              }
-              if (value == 'delete') {
-                await _deleteProject(project);
-              }
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: 'rename',
-                child: Text(L10n.translate(context, 'Rename')),
-              ),
-              PopupMenuItem(
-                value: 'delete',
-                child: Text(L10n.translate(context, 'Delete')),
-              ),
-            ],
-          ),
-          const SizedBox(width: 8),
-          PopupMenuButton<String>(
-            key: ValueKey('project_share_$keyToken'),
-            tooltip: L10n.translate(context, 'Share / Export'),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            constraints: const BoxConstraints(minWidth: 40),
-            icon: const Icon(
-              Icons.ios_share_rounded,
-              size: 23,
-              color: Colors.white70,
-            ),
-            iconSize: 23,
-            onSelected: (value) async {
-              if (value == 'share_mixroom') {
-                await _shareProject(project);
-              }
-              if (value == 'export_wav') {
-                await _startProjectExport(
-                  project,
-                  AudioEditorInitialAction.exportWav,
-                );
-              }
-              if (value == 'export_mp3') {
-                await _startProjectExport(
-                  project,
-                  AudioEditorInitialAction.exportMp3,
-                );
-              }
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: 'share_mixroom',
-                child: Text(L10n.translate(context, 'Share (.mixroom)')),
-              ),
-              PopupMenuItem(
-                value: 'export_wav',
-                child: Text(L10n.translate(context, 'Export WAV')),
-              ),
-              PopupMenuItem(
-                value: 'export_mp3',
-                child: Text(L10n.translate(context, 'Export MP3')),
-              ),
-            ],
-          ),
-        ],
+    final anchorKey = GlobalObjectKey('project_actions_$keyToken');
+    return MixroomShellRoundButton(
+      key: anchorKey,
+      size: 40,
+      iconExtent: 18,
+      icon: const Icon(
+        Icons.more_horiz_rounded,
+        color: Colors.white,
+        size: 22,
+      ),
+      onTap: () => _showProjectItemMenu(
+        anchorKey: anchorKey,
+        project: project,
       ),
     );
   }
@@ -725,119 +1068,137 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   @override
   Widget build(BuildContext context) {
     final canCreate = _projects.length < ProjectManager.maxProjects;
-
+    final visibleProjects = _visibleProjects();
+    final hasSearchQuery = _searchController.text.trim().isNotEmpty;
+    final searchFocused = _searchFocusNode.hasFocus;
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final dockOverlayBottom =
+        mixroomShellDockBottomInset(context) + kMixroomMainDockHeight;
+    final listBottomBaseline = dockOverlayBottom + 14;
+    final floatingControlsBottom = dockOverlayBottom + 14;
+    final searchBarBottom = searchFocused && keyboardInset > 0
+        ? keyboardInset + 14
+        : floatingControlsBottom;
     return Scaffold(
       key: _projectsScreenKey,
       resizeToAvoidBottomInset: false,
-      // appBar: AppBar(
-      //   title: const Text("Projects"),
-      // ),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0C1A32),
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        toolbarHeight: 62,
-        title: Padding(
-          padding: const EdgeInsets.only(top: 2),
-          child: Image.asset('assets/short_white.png',
-              height: 28, fit: BoxFit.contain),
-        ),
-        centerTitle: true,
-      ),
-
-      body: AppResponsiveBody(
-        maxWidth: 980,
-        expandToHeight: true,
-        padding: const EdgeInsets.all(16),
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : LayoutBuilder(
-                builder: (context, constraints) {
-                  final useCompactProjectMenus = constraints.maxWidth < 520;
-
-                  final newProjectCard = SizedBox(
-                    height: kActionCardHeight,
-                    child: _compactActionCard(
-                      key: _newProjectCardKey,
-                      icon: Icons.add_circle_outline,
-                      title: L10n.translate(
-                        context,
-                        canCreate ? 'New Project' : 'Project limit reached',
-                      ),
-                      subtitle: L10n.translate(
-                        context,
-                        canCreate
-                            ? 'Create a new project'
-                            : 'Delete one to continue',
-                      ),
-                      onTap: () {
-                        if (!canCreate) {
-                          _showProjectLimitDialog();
-                          return;
-                        }
-                        _newProject();
-                      },
-                    ),
-                  );
-
-                  final importCard = SizedBox(
-                    height: kActionCardHeight,
-                    child: _compactActionCard(
-                      icon: Icons.file_download_outlined,
-                      title: L10n.translate(context, 'Import'),
-                      subtitle: null,
-                      onTap: () async {
-                        if (!canCreate) {
-                          _showProjectLimitDialog();
-                          return;
-                        }
-
-                        final res = await _pickFilesSafely(
-                          type: FileType.any,
-                          withData: false,
-                        );
-                        if (res == null || res.files.isEmpty) return;
-
-                        final path = res.files.single.path;
-                        if (path == null) return;
-                        _importProjectFromFile(path);
-                      },
-                    ),
-                  );
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        children: [
+          const Positioned.fill(child: MixroomShellBackground()),
+          SafeArea(
+            bottom: false,
+            child: AppResponsiveBody(
+              maxWidth: 980,
+              expandToHeight: true,
+              padding: EdgeInsets.fromLTRB(
+                16,
+                14,
+                16,
+                listBottomBaseline + 64,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
                     children: [
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(flex: 2, child: newProjectCard),
-                          const SizedBox(width: 10),
-                          Expanded(child: importCard),
-                        ],
+                      MixroomShellRoundButton(
+                        key: _projectToolsButtonKey,
+                        size: 44,
+                        iconExtent: 17,
+                        assetPath: kMixroomShellFilterAsset,
+                        onTap: _showProjectTools,
                       ),
-                      const SizedBox(height: 12),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: Text(
-                          L10n.translate(
-                              context, 'Projects are saved locally.'),
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.62),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: MixroomShellSegmentedControl<int>(
+                          value: 0,
+                          options: const [0, 1],
+                          labelBuilder: (value) => L10n.translate(
+                            context,
+                            value == 0 ? 'Music project' : 'Video projects',
                           ),
+                          onChanged: (value) {
+                            if (value == 1) {
+                              showAppSnackBar(
+                                context,
+                                L10n.translate(
+                                  context,
+                                  'Video projects are coming soon.',
+                                ),
+                              );
+                            }
+                          },
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: (_loadError ?? '').trim().isNotEmpty
+                      const SizedBox(width: 8),
+                      MixroomShellRoundButton(
+                        size: 44,
+                        iconExtent: 17,
+                        assetPath: kMixroomShellImportAsset,
+                        onTap: () async {
+                          if (!canCreate) {
+                            _showProjectLimitDialog();
+                            return;
+                          }
+                          final res = await _pickFilesSafely(
+                            type: FileType.any,
+                            withData: false,
+                          );
+                          if (res == null || res.files.isEmpty) return;
+                          final path = res.files.single.path;
+                          if (path == null) return;
+                          _importProjectFromFile(path);
+                        },
+                      ),
+                    ],
+                  ),
+                  if (_selectionMode) ...[
+                    const SizedBox(height: 12),
+                    MixroomShellSurface(
+                      radius: 24,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      color: const Color.fromRGBO(244, 244, 244, 0.18),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${_selectedProjectPaths.length} ${L10n.translate(context, 'Projects')}',
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _clearSelection,
+                            child: Text(L10n.translate(context, 'Cancel')),
+                          ),
+                          const SizedBox(width: 4),
+                          ElevatedButton(
+                            onPressed: _deleteSelectedProjects,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF56708F),
+                              foregroundColor: Colors.white,
+                            ),
+                            child: Text(L10n.translate(context, 'Delete')),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                  Expanded(
+                    child: _loading
+                        ? const Center(child: CircularProgressIndicator())
+                        : (_loadError ?? '').trim().isNotEmpty
                             ? Center(
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 24,
-                                  ),
+                                      horizontal: 24),
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -852,7 +1213,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           context,
                                           'Could not load projects.',
                                         ),
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           color: Colors.white,
                                           fontSize: 16,
                                           fontWeight: FontWeight.w700,
@@ -878,81 +1239,300 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                   ),
                                 ),
                               )
-                            : _projects.isEmpty
+                            : visibleProjects.isEmpty
                                 ? Center(
                                     child: Text(
                                       L10n.translate(
                                         context,
-                                        'No saved projects yet.',
+                                        _projects.isEmpty
+                                            ? 'No saved projects yet.'
+                                            : 'No matching projects.',
                                       ),
                                       style: const TextStyle(
-                                          color: Colors.white70),
+                                        color: Colors.white70,
+                                      ),
                                     ),
                                   )
-                                : ListView.separated(
-                                    key: _projectsListKey,
-                                    itemCount: _projects.length,
-                                    separatorBuilder: (_, __) =>
-                                        const SizedBox(height: 10),
-                                    itemBuilder: (_, i) {
-                                      final project = _projects[i];
-                                      final keyToken =
-                                          _projectActionKeyToken(project.name);
-                                      return _GlassCard(
-                                        child: ListTile(
-                                          key: ValueKey(
-                                            'project_tile_$keyToken',
-                                          ),
-                                          contentPadding:
-                                              const EdgeInsetsDirectional.only(
-                                            start: 10,
-                                            end: 8,
-                                          ),
-                                          horizontalTitleGap: 10,
-                                          minLeadingWidth: 30,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(18),
-                                          ),
-                                          leading: const Icon(
-                                            Icons.folder_open_rounded,
-                                            color: Colors.white,
-                                          ),
-                                          title: Text(
-                                            project.name,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                          subtitle: Text(
-                                            '${L10n.translate(context, 'Last opened')}: ${_formatLastOpened(project.lastOpenedAt)}',
-                                            maxLines: 1,
-                                            softWrap: false,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: Colors.white60,
-                                              fontSize: 11,
-                                            ),
-                                          ),
-                                          onTap: () =>
-                                              _openProject(project.dir),
-                                          trailing:
-                                              _buildProjectTrailingActions(
-                                            context: context,
-                                            project: project,
-                                            keyToken: keyToken,
-                                            compact: useCompactProjectMenus,
-                                          ),
+                                : LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final useCompactProjectMenus =
+                                          constraints.maxWidth < 520;
+                                      return ShaderMask(
+                                        shaderCallback: (Rect bounds) {
+                                          const fadeHeight = 32.0;
+                                          final fadeStart =
+                                              ((bounds.height - fadeHeight)
+                                                      .clamp(0.0, bounds.height)
+                                                      .toDouble()) /
+                                                  bounds.height;
+                                          return LinearGradient(
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            colors: const <Color>[
+                                              Color(0xFFFFFFFF),
+                                              Color(0xFFFFFFFF),
+                                              Color(0x00FFFFFF),
+                                            ],
+                                            stops: <double>[
+                                              0.0,
+                                              fadeStart,
+                                              1.0,
+                                            ],
+                                          ).createShader(bounds);
+                                        },
+                                        blendMode: BlendMode.dstIn,
+                                        child: ListView.separated(
+                                          key: _projectsListKey,
+                                          itemCount: visibleProjects.length,
+                                          separatorBuilder: (_, __) =>
+                                              const SizedBox(height: 14),
+                                          itemBuilder: (_, i) {
+                                            final project = visibleProjects[i];
+                                            final keyToken =
+                                                _projectActionKeyToken(
+                                              project.name,
+                                            );
+                                            final selected =
+                                                _isSelected(project);
+                                            return GestureDetector(
+                                              onLongPress: () =>
+                                                  _toggleSelection(project),
+                                              onTap: () {
+                                                if (_selectionMode) {
+                                                  _toggleSelection(project);
+                                                  return;
+                                                }
+                                                _openProject(project.dir);
+                                              },
+                                              child: MixroomShellSurface(
+                                                padding:
+                                                    const EdgeInsets.fromLTRB(
+                                                  18,
+                                                  16,
+                                                  12,
+                                                  16,
+                                                ),
+                                                color: selected
+                                                    ? const Color.fromRGBO(
+                                                        193,
+                                                        221,
+                                                        249,
+                                                        0.34,
+                                                      )
+                                                    : const Color.fromRGBO(
+                                                        244,
+                                                        244,
+                                                        244,
+                                                        0.30,
+                                                      ),
+                                                child: Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          Text(
+                                                            project.name,
+                                                            maxLines: 1,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                            style:
+                                                                const TextStyle(
+                                                              fontFamily:
+                                                                  'Pretendard',
+                                                              color: Color(
+                                                                  0xFFF4F4F4),
+                                                              fontSize: 15,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                              height: 22 / 15,
+                                                            ),
+                                                          ),
+                                                          const SizedBox(
+                                                              height: 8),
+                                                          Container(
+                                                            height: 1,
+                                                            color: Colors.white
+                                                                .withValues(
+                                                                    alpha:
+                                                                        0.22),
+                                                          ),
+                                                          const SizedBox(
+                                                              height: 8),
+                                                          Text(
+                                                            '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}',
+                                                            style: TextStyle(
+                                                              fontFamily:
+                                                                  'Pretendard',
+                                                              color: Colors
+                                                                  .white
+                                                                  .withValues(
+                                                                      alpha:
+                                                                          0.80),
+                                                              fontSize: 12,
+                                                              height: 22 / 12,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    if (_selectionMode)
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .only(top: 12),
+                                                        child: selected
+                                                            ? SvgPicture.asset(
+                                                                kMixroomShellCheckboxCheckedAsset,
+                                                                width: 22,
+                                                                height: 22,
+                                                              )
+                                                            : Container(
+                                                                width: 22,
+                                                                height: 22,
+                                                                decoration:
+                                                                    BoxDecoration(
+                                                                  shape: BoxShape
+                                                                      .circle,
+                                                                  border: Border
+                                                                      .all(
+                                                                    color: Colors
+                                                                        .white
+                                                                        .withValues(
+                                                                            alpha:
+                                                                                0.6),
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                      )
+                                                    else
+                                                      _buildProjectTrailingActions(
+                                                        context: context,
+                                                        project: project,
+                                                        keyToken: keyToken,
+                                                        compact:
+                                                            useCompactProjectMenus,
+                                                      ),
+                                                  ],
+                                                ),
+                                              ),
+                                            );
+                                          },
                                         ),
                                       );
                                     },
                                   ),
-                      ),
-                    ],
-                  );
-                },
+                  ),
+                ],
               ),
+            ),
+          ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            left: 27,
+            right: 85,
+            bottom: searchBarBottom,
+            child: MixroomShellSurface(
+              radius: 24,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+              color: searchFocused
+                  ? const Color.fromRGBO(76, 101, 130, 0.96)
+                  : const Color.fromRGBO(108, 132, 160, 0.76),
+              strong: true,
+              child: Row(
+                children: [
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 140),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) {
+                      return FadeTransition(opacity: animation, child: child);
+                    },
+                    child: hasSearchQuery
+                        ? Padding(
+                            key: const ValueKey('search-clear-visible'),
+                            padding: const EdgeInsets.only(right: 8),
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                _searchController.clear();
+                                setState(() {});
+                              },
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: Icon(
+                                  Icons.close_rounded,
+                                  size: 16,
+                                  color: Colors.white.withValues(alpha: 0.86),
+                                ),
+                              ),
+                            ),
+                          )
+                        : const SizedBox(
+                            key: ValueKey('search-clear-hidden'),
+                            width: 0,
+                            height: 20,
+                          ),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      onChanged: (_) => setState(() {}),
+                      scrollPadding: const EdgeInsets.only(bottom: 120),
+                      style: const TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Color(0xFFF4F4F4),
+                        fontSize: 15,
+                      ),
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        isCollapsed: true,
+                        hintText: L10n.translate(context, 'Search'),
+                        hintStyle: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.68),
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            right: 27,
+            bottom: floatingControlsBottom,
+            child: MixroomShellRoundButton(
+              iconExtent: 17,
+              assetPath: kMixroomShellImportAsset,
+              onTap: () async {
+                if (!canCreate) {
+                  _showProjectLimitDialog();
+                  return;
+                }
+                final res = await _pickFilesSafely(
+                  type: FileType.any,
+                  withData: false,
+                );
+                if (res == null || res.files.isEmpty) return;
+                final path = res.files.single.path;
+                if (path == null) return;
+                _importProjectFromFile(path);
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -969,17 +1549,60 @@ class _GlassCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
+        color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.25),
+              color: Colors.black.withValues(alpha: 0.25),
               blurRadius: 18,
               offset: const Offset(0, 10))
         ],
       ),
       child: child,
+    );
+  }
+}
+
+class _ProjectToolAction extends StatelessWidget {
+  const _ProjectToolAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          child: Row(
+            children: [
+              Icon(icon, color: Colors.white, size: 17),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -990,42 +1613,43 @@ Future<void> showLoadingDialog(BuildContext context,
   return showDialog(
     context: context,
     barrierDismissible: false,
-    barrierColor: Colors.black.withOpacity(0.55),
+    barrierColor: Colors.black.withValues(alpha: 0.55),
     builder: (_) {
       return Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          decoration: BoxDecoration(
-            color: const Color(0xFF13233D),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withOpacity(0.1)),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 20)
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 26,
-                height: 26,
-                child: CircularProgressIndicator(
-                  strokeWidth: 3,
-                  valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: MixroomShellSurface(
+            radius: 28,
+            strong: true,
+            color: const Color.fromRGBO(244, 244, 244, 0.16),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.8,
+                    valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 16),
-              Text(
-                message,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                  decoration: TextDecoration.none,
+                const SizedBox(width: 14),
+                Flexible(
+                  child: Text(
+                    L10n.translate(context, message),
+                    maxLines: 2,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
                 ),
-                selectionColor: Colors.transparent,
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );

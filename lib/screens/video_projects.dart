@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/video_project_manager.dart';
+import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/screens/video_editor_sequencer.dart';
 import 'package:path/path.dart' as p;
@@ -40,9 +41,15 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
         raw.contains('getapplicationdocumentspath') ||
         raw.contains('shared_preferences') ||
         raw.contains('channel-error')) {
-      return 'Video projects are temporarily unavailable on this device. Please try again in a moment.';
+      return L10n.translate(
+        context,
+        'Video projects are temporarily unavailable on this device. Please try again in a moment.',
+      );
     }
-    return 'We couldn\'t load your video projects right now. Please try again.';
+    return L10n.translate(
+      context,
+      'We couldn\'t load your video projects right now. Please try again.',
+    );
   }
 
   @override
@@ -74,7 +81,10 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
   }) async {
     if (!_ensureCanAccessVideoProjects()) return;
 
-    showVideoLoadingDialog(context, message: 'Opening video project...');
+    showVideoLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Opening video project...'),
+    );
     await Future.delayed(const Duration(milliseconds: 220));
     await VideoProjectManager.touchProject(dir);
 
@@ -99,7 +109,10 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
     if (!_ensureCanAccessVideoProjects()) return;
     if (!await VideoProjectManager.canCreateNew()) return;
     if (!mounted) return;
-    showVideoLoadingDialog(context, message: 'Creating video project...');
+    showVideoLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Creating video project...'),
+    );
     await Future.delayed(const Duration(milliseconds: 220));
     final dir = await VideoProjectManager.createNewProjectDir();
 
@@ -169,8 +182,9 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
     if (path == null || path.isEmpty) return;
 
     final guessedName = p.basenameWithoutExtension(path).trim();
-    final projectName =
-        guessedName.isEmpty ? 'Untitled Video Project' : '$guessedName Project';
+    final projectName = guessedName.isEmpty
+        ? L10n.translate(context, 'Untitled Video Project')
+        : '$guessedName ${L10n.translate(context, 'Project')}';
     final dir =
         await VideoProjectManager.createNewProjectDir(name: projectName);
     await _openProject(dir, initialImportPath: path);
@@ -207,8 +221,8 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                     children: [
                       Icon(Icons.drive_file_rename_outline, color: cs.primary),
                       const SizedBox(width: 8),
-                      const Text(
-                        'Rename Video Project',
+                      Text(
+                        L10n.translate(context, 'Rename Video Project'),
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 18,
@@ -233,12 +247,14 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                       onSubmitted: (_) =>
                           Navigator.pop(ctx, controller.text.trim()),
                       style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        hintText: 'Project name',
-                        hintStyle: TextStyle(color: Colors.white54),
+                      decoration: InputDecoration(
+                        hintText: L10n.translate(context, 'Project name'),
+                        hintStyle: const TextStyle(color: Colors.white54),
                         border: InputBorder.none,
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
                       ),
                     ),
                   ),
@@ -248,7 +264,7 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                     children: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Cancel'),
+                        child: Text(L10n.translate(context, 'Cancel')),
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton(
@@ -261,7 +277,7 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        child: const Text('Save'),
+                        child: Text(L10n.translate(context, 'Save')),
                       ),
                     ],
                   ),
@@ -282,14 +298,14 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
       if (!mounted) return;
       showAppSnackBar(
         context,
-        'Video project renamed',
+        L10n.translate(context, 'Video project renamed'),
         tone: AppPopupTone.success,
       );
     } catch (e) {
       if (!mounted) return;
       showAppSnackBar(
         context,
-        'Rename failed: $e',
+        '${L10n.translate(context, 'Rename failed')}: $e',
         tone: AppPopupTone.error,
       );
     }
@@ -300,20 +316,22 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF0C1A32),
-        title: const Text('Delete video project?',
-            style: TextStyle(color: Colors.white)),
+        title: Text(
+          L10n.translate(context, 'Delete video project?'),
+          style: const TextStyle(color: Colors.white),
+        ),
         content: Text(
-          '“${meta.name}” will be permanently deleted.',
+          '“${meta.name}” ${L10n.translate(context, 'will be permanently deleted.')}',
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(L10n.translate(context, 'Cancel')),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text(L10n.translate(context, 'Delete')),
           ),
         ],
       ),
@@ -327,9 +345,10 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
   void _showProjectLimitDialog() {
     showAppMessageDialog(
       context: context,
-      title: 'Project limit reached',
-      message: 'Delete a project to create or import a new one.',
-      buttonLabel: 'OK',
+      title: L10n.translate(context, 'Project limit reached'),
+      message: L10n.translate(
+          context, 'Delete a project to create or import a new one.'),
+      buttonLabel: L10n.translate(context, 'OK'),
       icon: Icons.folder_off_outlined,
     );
   }
@@ -353,9 +372,12 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
   void _showVideoAccessLockedDialog() {
     showAppMessageDialog(
       context: context,
-      title: 'Subscription required',
-      message: 'Your current plan does not include video projects.',
-      buttonLabel: 'OK',
+      title: L10n.translate(context, 'Subscription required'),
+      message: L10n.translate(
+        context,
+        'Your current plan does not include video projects.',
+      ),
+      buttonLabel: L10n.translate(context, 'OK'),
       icon: Icons.lock_outline_rounded,
     );
   }
@@ -438,10 +460,10 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
           padding: const EdgeInsets.only(top: 2),
           child: Row(
             mainAxisSize: MainAxisSize.min,
-            children: const [
+            children: [
               Text(
-                'Video Projects',
-                style: TextStyle(
+                L10n.translate(context, 'Video Projects'),
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w700,
                   fontSize: 16,
@@ -469,11 +491,16 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                           child: _compactActionCard(
                             icon: Icons.add_circle_outline,
                             title: canCreate
-                                ? 'New Project'
-                                : 'Project limit reached',
+                                ? L10n.translate(context, 'New Project')
+                                : L10n.translate(
+                                    context, 'Project limit reached'),
                             subtitle: canCreate
-                                ? 'Create a new video project'
-                                : 'Delete one to continue',
+                                ? L10n.translate(
+                                    context,
+                                    'Create a new video project',
+                                  )
+                                : L10n.translate(
+                                    context, 'Delete one to continue'),
                             onTap: () {
                               if (!hasVideoAccess) {
                                 _showVideoAccessLockedDialog();
@@ -495,7 +522,7 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                           height: kVideoActionCardHeight,
                           child: _compactActionCard(
                             icon: Icons.file_upload_outlined,
-                            title: 'Import',
+                            title: L10n.translate(context, 'Import'),
                             subtitle: null,
                             onTap: _importVideoIntoNewProject,
                           ),
@@ -519,10 +546,13 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                                     size: 36,
                                   ),
                                   const SizedBox(height: 12),
-                                  const Text(
-                                    'Could not load video projects.',
+                                  Text(
+                                    L10n.translate(
+                                      context,
+                                      'Could not load video projects.',
+                                    ),
                                     textAlign: TextAlign.center,
-                                    style: TextStyle(
+                                    style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 16,
                                       fontWeight: FontWeight.w700,
@@ -540,17 +570,21 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                                   const SizedBox(height: 14),
                                   ElevatedButton(
                                     onPressed: _refresh,
-                                    child: const Text('Retry'),
+                                    child:
+                                        Text(L10n.translate(context, 'Retry')),
                                   ),
                                 ],
                               ),
                             ),
                           )
                         : _projects.isEmpty
-                            ? const Center(
+                            ? Center(
                                 child: Text(
-                                  'No saved video projects yet.',
-                                  style: TextStyle(color: Colors.white70),
+                                  L10n.translate(
+                                    context,
+                                    'No saved video projects yet.',
+                                  ),
+                                  style: const TextStyle(color: Colors.white70),
                                 ),
                               )
                             : ListView.separated(
@@ -576,7 +610,7 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                                         ),
                                       ),
                                       subtitle: Text(
-                                        'Last opened: ${_formatTimestamp(p.lastOpenedAt)}',
+                                        '${L10n.translate(context, 'Last opened')}: ${_formatTimestamp(p.lastOpenedAt)}',
                                         maxLines: 1,
                                         softWrap: false,
                                         overflow: TextOverflow.ellipsis,
@@ -609,16 +643,25 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                                             await _deleteProject(p);
                                           }
                                         },
-                                        itemBuilder: (_) => const [
+                                        itemBuilder: (_) => [
                                           PopupMenuItem(
-                                              value: 'open',
-                                              child: Text('Open')),
+                                            value: 'open',
+                                            child: Text(
+                                              L10n.translate(context, 'Open'),
+                                            ),
+                                          ),
                                           PopupMenuItem(
-                                              value: 'rename',
-                                              child: Text('Rename')),
+                                            value: 'rename',
+                                            child: Text(
+                                              L10n.translate(context, 'Rename'),
+                                            ),
+                                          ),
                                           PopupMenuItem(
-                                              value: 'delete',
-                                              child: Text('Delete')),
+                                            value: 'delete',
+                                            child: Text(
+                                              L10n.translate(context, 'Delete'),
+                                            ),
+                                          ),
                                         ],
                                       ),
                                     ),

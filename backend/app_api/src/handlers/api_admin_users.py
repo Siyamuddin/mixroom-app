@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from common import config
 from common.admin_access_repository import AdminAccessRepository
+from common.admin_ai_access import can_edit_ai_settings
 from common.admin_user_repository import (
     AdminDeleteRequiresForceError,
     AdminUserNotFoundError,
@@ -113,11 +114,20 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 deleted_by_user_id=admin_user_id,
                 deleted_by_email=admin_email,
                 reason=str(body.get("reason") or ""),
+                confirm_email=str(body.get("confirm_email") or body.get("confirmEmail") or ""),
                 force=bool(body.get("force")),
             )
             return _finalize(json_response(200, deletion))
 
         if method == "POST" and path.endswith("/v1/internal/admin/users/grant-prompts"):
+            if not can_edit_ai_settings(admin_email):
+                return _finalize(
+                    json_response(
+                        403,
+                        {"error": "Only andrew@mixroom.ai can edit AI settings or grant AI prompts."},
+                    ),
+                    error="ai_editor_required",
+                )
             try:
                 body = parse_json_body(event)
             except RequestBodyError as exc:

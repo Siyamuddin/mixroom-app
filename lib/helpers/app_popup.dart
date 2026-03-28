@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mixroom/widgets/app_shell_figma.dart';
 
 enum AppPopupTone { info, success, warning, error }
 
@@ -36,12 +37,39 @@ void showAppSnackBar(
   messenger.hideCurrentSnackBar();
   messenger.showSnackBar(
     SnackBar(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: const Color.fromRGBO(70, 80, 95, 0.86),
+      elevation: 0,
+      showCloseIcon: true,
+      closeIconColor: const Color(0xFFF4F4F4),
+      margin: EdgeInsets.fromLTRB(
+        16,
+        0,
+        16,
+        mixroomShellBottomPadding(context) + 16,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+      ),
       duration: duration,
       content: Row(
         children: [
           Icon(icon, size: 18, color: stripe),
           const SizedBox(width: 10),
-          Expanded(child: Text(message)),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                fontFamily: 'Pretendard',
+                color: Color(0xFFF4F4F4),
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+                height: 1.2,
+                letterSpacing: -0.05,
+              ),
+            ),
+          ),
         ],
       ),
     ),

@@ -17,6 +17,10 @@
 -keep class io.flutter.plugins.** { *; }
 -keep class ** implements io.flutter.embedding.engine.plugins.FlutterPlugin { *; }
 
+# flutter_onnxruntime / onnxruntime-android use JNI lookups against these Java
+# classes in release builds, so R8 must not rename or strip them.
+-keep class ai.onnxruntime.** { *; }
+
 # MediaPipe proto symbols are referenced by optional profiler/template APIs.
 # These classes are not packaged in this app build and can be safely ignored.
 -dontwarn com.google.mediapipe.proto.CalculatorProfileProto$CalculatorProfile

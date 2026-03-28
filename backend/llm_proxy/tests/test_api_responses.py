@@ -253,6 +253,50 @@ class ApiResponsesTests(unittest.TestCase):
             {"role": "user", "content": "Make the vocals clearer."},
         )
 
+    def test_handler_applies_remote_ai_runtime_overrides(self) -> None:
+        provider = _FakeProvider()
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "Make the vocals clearer.",
+                    "project_snapshot": "Track 1: Lead Vocal",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                with mock.patch.object(
+                    api_responses,
+                    "get_ai_feature_runtime",
+                    return_value={
+                        "feature": "ai_chat",
+                        "model": "gpt-5-mini",
+                        "system_prompt": "Remote prompt override",
+                        "temperature": 0.4,
+                        "reasoning": {"effort": "medium"},
+                        "max_output_tokens": 777,
+                        "prompt_cache_retention": "24h",
+                        "has_model_override": True,
+                        "has_system_prompt_override": True,
+                        "has_temperature_override": True,
+                        "has_reasoning_override": True,
+                        "has_max_output_tokens_override": True,
+                        "has_prompt_cache_retention_override": True,
+                    },
+                ):
+                    result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        assert provider.request_body is not None
+        self.assertEqual(provider.request_body["model"], "gpt-5-mini")
+        self.assertEqual(provider.request_body["instructions"], "Remote prompt override")
+        self.assertEqual(provider.request_body["max_output_tokens"], 777)
+        self.assertEqual(provider.request_body["reasoning"], {"effort": "medium"})
+        self.assertEqual(provider.request_body["prompt_cache_retention"], "24h")
+        self.assertNotIn("temperature", provider.request_body)
+
     def test_handler_uses_video_contract_for_video_editor_feature(self) -> None:
         provider = _FakeProvider()
         event = _authed_event(

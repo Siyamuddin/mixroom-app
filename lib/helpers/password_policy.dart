@@ -1,3 +1,6 @@
+import 'package:flutter/material.dart';
+import 'package:mixroom/l10n/l10n.dart';
+
 class PasswordPolicy {
   const PasswordPolicy._();
 
@@ -60,5 +63,30 @@ class PasswordPolicy {
     if (requireNumber) parts.add('a number');
     if (requireSymbol) parts.add('a symbol');
     return 'Use ${parts.join(', ')}.';
+  }
+
+  static String requirementsTextLocalized(BuildContext context) {
+    final parts = <String>[
+      L10n.translate(
+        context,
+        'at least {minLength} characters',
+      ).replaceAll('{minLength}', '$minLength'),
+    ];
+    if (requireUppercase) {
+      parts.add(L10n.translate(context, 'an uppercase letter'));
+    }
+    if (requireLowercase) {
+      parts.add(L10n.translate(context, 'a lowercase letter'));
+    }
+    if (requireNumber) {
+      parts.add(L10n.translate(context, 'a number'));
+    }
+    if (requireSymbol) {
+      parts.add(L10n.translate(context, 'a symbol'));
+    }
+    return L10n.translate(
+      context,
+      'Use {requirements}.',
+    ).replaceAll('{requirements}', parts.join(', '));
   }
 }

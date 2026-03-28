@@ -1635,34 +1635,6 @@ Safety and style
     }
   }
 
-  bool _isNonAsciiLetterLikeRune(int rune) {
-    if (rune <= 127) return false;
-    return
-        // Latin Extended / IPA / Greek / Cyrillic
-        (rune >= 0x00C0 && rune <= 0x024F) ||
-            (rune >= 0x0370 && rune <= 0x03FF) ||
-            (rune >= 0x0400 && rune <= 0x052F) ||
-            // Hebrew / Arabic / Devanagari
-            (rune >= 0x0590 && rune <= 0x05FF) ||
-            (rune >= 0x0600 && rune <= 0x06FF) ||
-            (rune >= 0x0900 && rune <= 0x097F) ||
-            // Hiragana / Katakana / Hangul
-            (rune >= 0x3040 && rune <= 0x30FF) ||
-            (rune >= 0xAC00 && rune <= 0xD7AF) ||
-            // CJK Unified Ideographs
-            (rune >= 0x3400 && rune <= 0x4DBF) ||
-            (rune >= 0x4E00 && rune <= 0x9FFF);
-  }
-
-  bool _containsNonAsciiLetters(String text) =>
-      text.runes.any(_isNonAsciiLetterLikeRune);
-
-  bool _isProbablyEnglish(String text) {
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) return false;
-    return !_containsNonAsciiLetters(trimmed);
-  }
-
   String _sanitizeUserFacingText(
     Object? value, {
     required String toolName,
@@ -1681,10 +1653,6 @@ Safety and style
         lowered.contains('"row_index"') ||
         raw.startsWith('{') ||
         raw.startsWith('[')) {
-      return allowFallback ? fallback : '';
-    }
-
-    if (_isProbablyEnglish(userText) && _containsNonAsciiLetters(raw)) {
       return allowFallback ? fallback : '';
     }
 

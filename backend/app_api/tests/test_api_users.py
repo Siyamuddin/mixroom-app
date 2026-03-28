@@ -54,15 +54,51 @@ if "botocore.exceptions" not in sys.modules:
     botocore_stub = ModuleType("botocore")
     exceptions_stub = ModuleType("botocore.exceptions")
 
+    class _BotoCoreError(Exception):
+        pass
+
     class _ClientError(Exception):
         def __init__(self, response: dict, operation_name: str = "") -> None:
             super().__init__(operation_name)
             self.response = response
 
+    exceptions_stub.BotoCoreError = _BotoCoreError
     exceptions_stub.ClientError = _ClientError
     botocore_stub.exceptions = exceptions_stub
     sys.modules["botocore"] = botocore_stub
     sys.modules["botocore.exceptions"] = exceptions_stub
+
+if "jwt" not in sys.modules:
+    jwt_stub = ModuleType("jwt")
+    jwt_stub.get_unverified_header = mock.Mock(return_value={})
+    jwt_stub.decode = mock.Mock(return_value={})
+    jwt_stub.algorithms = SimpleNamespace(
+        RSAAlgorithm=SimpleNamespace(from_jwk=mock.Mock(return_value=object()))
+    )
+    sys.modules["jwt"] = jwt_stub
+
+if "google" not in sys.modules:
+    google_stub = ModuleType("google")
+    auth_stub = ModuleType("google.auth")
+    transport_stub = ModuleType("google.auth.transport")
+    requests_stub = ModuleType("google.auth.transport.requests")
+    requests_stub.Request = mock.Mock(return_value=object())
+    oauth2_stub = ModuleType("google.oauth2")
+    id_token_stub = ModuleType("google.oauth2.id_token")
+    id_token_stub.verify_oauth2_token = mock.Mock(return_value={})
+
+    google_stub.auth = auth_stub
+    google_stub.oauth2 = oauth2_stub
+    auth_stub.transport = transport_stub
+    transport_stub.requests = requests_stub
+    oauth2_stub.id_token = id_token_stub
+
+    sys.modules["google"] = google_stub
+    sys.modules["google.auth"] = auth_stub
+    sys.modules["google.auth.transport"] = transport_stub
+    sys.modules["google.auth.transport.requests"] = requests_stub
+    sys.modules["google.oauth2"] = oauth2_stub
+    sys.modules["google.oauth2.id_token"] = id_token_stub
 
 users_module = importlib.import_module("src.handlers.api_users")
 
@@ -72,6 +108,7 @@ class _FakeRepo:
         self._existing_claim = existing_claim
         self._profile = {}
         self._entitlement = {}
+        self._auth_account = {}
         self.delete_calls = []
         self.upsert_calls = []
 
@@ -85,6 +122,9 @@ class _FakeRepo:
 
     def get_entitlement(self, user_id):
         return dict(self._entitlement)
+
+    def get_auth_account(self, user_id):
+        return dict(self._auth_account)
 
     def upsert_user_profile(self, profile, *, previous_username_lc=None):
         self.upsert_calls.append(
@@ -178,9 +218,37 @@ class UsersApiHandlerTests(unittest.TestCase):
 
     def test_delete_me_blocks_active_paid_subscription(self):
         repo = _FakeRepo()
+        repo._auth_account = {
+            "user_id": "user-1",
+            "auth_provider": "email",
+        }
         repo._entitlement = {
             "tier": "pro",
             "status": "active",
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {"sub": "user-1"}
+
+        with mock.patch.object(users_module, "verify_current_password") as verify_password:
+            result = users_module.handler(
+                {
+                    "rawPath": "/v1/users/me",
+                    "requestContext": {"http": {"method": "DELETE"}},
+                    "body": '{"confirmation_text":"DELETE","current_password":"secret"}',
+                },
+                object(),
+            )
+
+        self.assertEqual(result["statusCode"], 409)
+        self.assertIn("Cancel your active subscription first", result["body"])
+        self.assertEqual(repo.delete_calls, [])
+        verify_password.assert_not_called()
+
+    def test_delete_me_requires_delete_confirmation_text(self):
+        repo = _FakeRepo()
+        repo._auth_account = {
+            "user_id": "user-1",
+            "auth_provider": "email",
         }
         users_module.repo = repo
         users_module.extract_claims_from_event = lambda event: {"sub": "user-1"}
@@ -189,13 +257,156 @@ class UsersApiHandlerTests(unittest.TestCase):
             {
                 "rawPath": "/v1/users/me",
                 "requestContext": {"http": {"method": "DELETE"}},
+                "body": '{"confirmation_text":"remove","current_password":"secret"}',
             },
             object(),
         )
 
-        self.assertEqual(result["statusCode"], 409)
-        self.assertIn("Cancel your active subscription first", result["body"])
+        self.assertEqual(result["statusCode"], 400)
+        self.assertIn("DELETE_CONFIRMATION_REQUIRED", result["body"])
         self.assertEqual(repo.delete_calls, [])
+
+    def test_delete_me_requires_password_for_email_accounts(self):
+        repo = _FakeRepo()
+        repo._auth_account = {
+            "user_id": "user-1",
+            "auth_provider": "email",
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {"sub": "user-1"}
+
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me",
+                "requestContext": {"http": {"method": "DELETE"}},
+                "body": '{"confirmation_text":"DELETE"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 400)
+        self.assertIn("DELETE_PASSWORD_REQUIRED", result["body"])
+        self.assertEqual(repo.delete_calls, [])
+
+    def test_delete_me_rejects_invalid_current_password(self):
+        repo = _FakeRepo()
+        repo._auth_account = {
+            "user_id": "user-1",
+            "auth_provider": "email",
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {"sub": "user-1"}
+
+        with mock.patch.object(
+            users_module,
+            "verify_current_password",
+            side_effect=users_module.AppUserAuthError(
+                "Current password is incorrect.",
+                code="INVALID_CURRENT_PASSWORD",
+                status_code=400,
+            ),
+        ):
+            result = users_module.handler(
+                {
+                    "rawPath": "/v1/users/me",
+                    "requestContext": {"http": {"method": "DELETE"}},
+                    "body": '{"confirmation_text":"DELETE","current_password":"bad"}',
+                },
+                object(),
+            )
+
+        self.assertEqual(result["statusCode"], 400)
+        self.assertIn("INVALID_CURRENT_PASSWORD", result["body"])
+        self.assertEqual(repo.delete_calls, [])
+
+    def test_delete_me_deletes_email_account_after_confirmation_and_password_check(self):
+        repo = _FakeRepo()
+        repo._auth_account = {
+            "user_id": "user-1",
+            "auth_provider": "email",
+        }
+        repo._profile = {
+            "user_id": "user-1",
+            "username_lc": "mixroomer",
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {"sub": "user-1"}
+
+        with mock.patch.object(users_module, "verify_current_password") as verify_password:
+            result = users_module.handler(
+                {
+                    "rawPath": "/v1/users/me",
+                    "requestContext": {"http": {"method": "DELETE"}},
+                    "body": '{"confirmation_text":"DELETE","current_password":"secret"}',
+                },
+                object(),
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        verify_password.assert_called_once_with(
+            repo,
+            user_id="user-1",
+            current_password="secret",
+        )
+        self.assertEqual(
+            repo.delete_calls,
+            [{"user_id": "user-1", "username_lc": "mixroomer"}],
+        )
+
+    def test_delete_me_requires_social_reauth_for_social_accounts(self):
+        repo = _FakeRepo()
+        repo._auth_account = {
+            "user_id": "user-1",
+            "auth_provider": "google",
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {"sub": "user-1"}
+
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me",
+                "requestContext": {"http": {"method": "DELETE"}},
+                "body": '{"confirmation_text":"DELETE"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 400)
+        self.assertIn("SOCIAL_REAUTH_REQUIRED", result["body"])
+        self.assertEqual(repo.delete_calls, [])
+
+    def test_delete_me_deletes_social_account_after_reauth(self):
+        repo = _FakeRepo()
+        repo._auth_account = {
+            "user_id": "user-1",
+            "auth_provider": "google",
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {"sub": "user-1"}
+
+        with mock.patch.object(
+            users_module,
+            "verify_social_reauthentication",
+        ) as verify_social:
+            result = users_module.handler(
+                {
+                    "rawPath": "/v1/users/me",
+                    "requestContext": {"http": {"method": "DELETE"}},
+                    "body": (
+                        '{"confirmation_text":"DELETE","social_reauth":'
+                        '{"id_token":"token"}}'
+                    ),
+                },
+                object(),
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        verify_social.assert_called_once_with(
+            repo,
+            user_id="user-1",
+            payload={"id_token": "token"},
+        )
+        self.assertEqual(len(repo.delete_calls), 1)
 
     def test_get_me_does_not_write_when_profile_is_already_current(self):
         repo = _FakeRepo()
@@ -295,8 +506,58 @@ class UsersApiHandlerTests(unittest.TestCase):
             "user@example.com",
         )
 
+    def test_patch_me_accepts_music_profile(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-1",
+            "email": "user@example.com",
+            "email_lc": "user@example.com",
+            "display_name": "User Example",
+            "email_verified": True,
+            "cognito_username": "user@example.com",
+            "auth_provider": "email",
+            "username": "mixroomer",
+            "username_lc": "mixroomer",
+            "music_profile": None,
+            "profile_status": "active",
+            "onboarding_state": "bootstrap_only",
+            "accepted_terms_version": None,
+            "accepted_privacy_version": None,
+            "accepted_at": None,
+            "newsletter_opt_in": False,
+            "newsletter_opt_in_at": None,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "last_seen_at": "2026-01-01T00:00:00+00:00",
+            "schema_version": 4,
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {
+            "sub": "user-1",
+            "email": "user@example.com",
+            "email_verified": "true",
+            "cognito:username": "user@example.com",
+        }
+
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me",
+                "requestContext": {"http": {"method": "PATCH"}},
+                "body": '{"music_profile":"producer"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(repo.upsert_calls[-1]["profile"]["music_profile"], "producer")
+        self.assertIn('"music_profile": "producer"', result["body"])
+
     def test_delete_me_removes_account_for_free_user(self):
         repo = _FakeRepo()
+        repo._auth_account = {
+            "user_id": "user-1",
+            "auth_provider": "email",
+        }
         repo._profile = {"username_lc": "mixroomer"}
         repo._entitlement = {
             "tier": "free",
@@ -305,15 +566,22 @@ class UsersApiHandlerTests(unittest.TestCase):
         users_module.repo = repo
         users_module.extract_claims_from_event = lambda event: {"sub": "user-1"}
 
-        result = users_module.handler(
-            {
-                "rawPath": "/v1/users/me",
-                "requestContext": {"http": {"method": "DELETE"}},
-            },
-            object(),
-        )
+        with mock.patch.object(users_module, "verify_current_password") as verify_password:
+            result = users_module.handler(
+                {
+                    "rawPath": "/v1/users/me",
+                    "requestContext": {"http": {"method": "DELETE"}},
+                    "body": '{"confirmation_text":"DELETE","current_password":"secret"}',
+                },
+                object(),
+            )
 
         self.assertEqual(result["statusCode"], 200)
+        verify_password.assert_called_once_with(
+            repo,
+            user_id="user-1",
+            current_password="secret",
+        )
         self.assertEqual(
             repo.delete_calls,
             [{"user_id": "user-1", "username_lc": "mixroomer"}],

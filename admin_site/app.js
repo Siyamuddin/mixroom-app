@@ -8,11 +8,44 @@ const ADMIN_USERS_PATH = "/v1/internal/admin/users";
 const ADMIN_USERS_DELETE_PATH = "/v1/internal/admin/users/delete";
 const ADMIN_USERS_GRANT_PROMPTS_PATH = "/v1/internal/admin/users/grant-prompts";
 const ADMIN_FEEDBACK_PATH = "/v1/internal/admin/feedback";
+const ADMIN_AI_PROMPT_LIMITS_PATH = "/v1/internal/admin/settings/ai-prompt-limits";
+const ADMIN_AI_RUNTIME_PATH = "/v1/internal/admin/settings/ai-runtime";
+const DEFAULT_ADMIN_USERS_LIMIT = 8;
+const DEFAULT_FEEDBACK_LIMIT = 8;
+const DEFAULT_OVERVIEW_USERS_LIMIT = 8;
+const DEFAULT_OVERVIEW_PROJECTS_LIMIT = 8;
+const RESULT_LIMIT_STEP = 8;
+const RESULT_LIMIT_MAX = 40;
 const DEFAULT_LOCALE = "en";
 const SUPPORTED_LOCALES = new Set(["en", "ko"]);
 const ADMIN_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 const ADMIN_MAX_SESSION_MS = 8 * 60 * 60 * 1000;
 const ACTIVITY_PERSIST_INTERVAL_MS = 30 * 1000;
+const DEFAULT_TAB = "home";
+const TAB_KEYS = ["home", "users", "feedback", "dev"];
+const ANDREW_ADMIN_EMAIL = "andrew@mixroom.ai";
+const AI_PROMPT_LIMITS_CONFIRM_PHRASE = "APPLY PROMPT LIMITS";
+const ANALYTICS_RANGE_OPTIONS = [
+  { key: "365d", days: 365, labelKey: "analytics.range.1y" },
+  { key: "90d", days: 90, labelKey: "analytics.range.3m" },
+  { key: "30d", days: 30, labelKey: "analytics.range.1m" },
+  { key: "7d", days: 7, labelKey: "analytics.range.1w" },
+];
+const AI_MODEL_OPTIONS = [
+  "",
+  "gpt-4.1",
+  "gpt-4.1-mini",
+  "gpt-5",
+  "gpt-5-mini",
+  "gpt-5-codex",
+  "gpt-5.1",
+  "gpt-5.1-codex",
+  "gpt-5.1-codex-mini",
+  "gpt-5.1-chat-latest",
+  "gpt-5.2",
+];
+const AI_REASONING_EFFORT_OPTIONS = ["", "minimal", "low", "medium", "high"];
+const AI_PROMPT_CACHE_RETENTION_OPTIONS = ["", "in_memory", "24h"];
 
 const MESSAGES = {
   en: {
@@ -24,17 +57,44 @@ const MESSAGES = {
     "action.search": "Search",
     "action.clear": "Clear",
     "action.openPosthog": "Open PostHog",
+    "action.showMore": "Show more",
+    "action.showLess": "Show less",
+    "action.saving": "Saving...",
+    "action.savePromptLimits": "Save prompt limits",
+    "action.saveAiOverride": "Save AI override",
     "auth.kicker": "Employee access",
     "auth.title": "Sign in",
     "auth.copy": "Use your work email.",
+    "welcome.kicker": "Mixroom control surface",
+    "welcome.subtitle": "Live user operations, AI controls, and product monitoring.",
+    "welcome.session": "Session",
+    "welcome.mode": "Mode",
+    "welcome.fallbackName": "Operator",
+    "tab.home": "Home",
+    "tab.users": "Users",
+    "tab.feedback": "Feedback",
+    "tab.dev": "Dev",
     "panel.kpi.label": "KPI Overview",
     "panel.kpi.title": "Product metrics",
     "panel.kpi.meta.default":
-      "Connect a PostHog share or embed URL to surface MAU, retention, funnels, and session trends here.",
+      "Native PostHog metrics appear here when the admin backend has read access configured.",
     "panel.kpi.meta.live":
-      "Live PostHog metrics. Use a shared or embedded dashboard URL for this panel.",
+      "Native product analytics from PostHog identified screen activity.",
     "panel.kpi.meta.empty":
-      "Add a PostHog embed URL to show MAU, retention, funnels, and session trends here.",
+      "PostHog native metrics are not configured yet.",
+    "panel.kpi.meta.error":
+      "PostHog metrics could not be loaded. The rest of the admin dashboard is still available.",
+    "panel.kpi.activityTitle": "Daily active users",
+    "panel.kpi.activityMeta": "Distinct identified people with a screen view each day.",
+    "panel.kpi.hoursTitle": "Daily hours used",
+    "panel.kpi.hoursMeta": "Total app hours from completed sessions each day.",
+    "panel.kpi.countriesTitle": "Top countries",
+    "panel.kpi.countriesMeta": "30-day active identified people by country.",
+    "panel.kpi.loading": "Sign in to load product metrics.",
+    "panel.kpi.unconfigured":
+      "PostHog read access is not configured yet. Add the admin read token to enable native metrics.",
+    "panel.kpi.unavailable":
+      "PostHog metrics are temporarily unavailable.",
     "panel.userAdmin.label": "User Admin",
     "panel.userAdmin.title": "Find user",
     "panel.userAdmin.meta.default": "Email, username, or user ID.",
@@ -42,6 +102,10 @@ const MESSAGES = {
     "search.placeholder": "email, username, display name, or user ID",
     "analytics.label": "Product Analytics",
     "analytics.copy": "Retention, MAU, funnels, and session KPIs live in PostHog.",
+    "analytics.range.1y": "1Y",
+    "analytics.range.3m": "3M",
+    "analytics.range.1m": "1M",
+    "analytics.range.1w": "1W",
     "panel.accounts.label": "Accounts",
     "panel.accounts.title": "Search results",
     "panel.accounts.meta": "Recent accounts show when blank.",
@@ -50,6 +114,12 @@ const MESSAGES = {
     "panel.selectedUser.meta": "Review actions here.",
     "panel.aiUsage.label": "AI Usage",
     "panel.aiUsage.title": "AI activity",
+    "panel.aiPromptLimits.label": "AI Prompt Limits",
+    "panel.aiPromptLimits.title": "Free tier defaults",
+    "panel.aiPromptLimits.meta": "Server-enforced prompt limits for free users.",
+    "panel.aiRuntime.label": "AI Runtime",
+    "panel.aiRuntime.title": "Server prompt and model config",
+    "panel.aiRuntime.meta": "Prompt and runtime overrides for server-owned AI features.",
     "panel.features.title": "Features",
     "panel.tiers.label": "Subscription Tier",
     "panel.tiers.title": "Tiers",
@@ -92,6 +162,8 @@ const MESSAGES = {
     "empty.signInUserData": "Sign in to load user data.",
     "empty.signInProjectData": "Sign in to load project data.",
     "empty.signInFeedback": "Sign in to load user feedback and bug reports.",
+    "empty.signInAiPromptLimits": "Sign in to load AI prompt limit settings.",
+    "empty.signInAiRuntime": "Sign in to load AI runtime settings.",
     "empty.selectFeedback": "Select a feedback item or bug report to review the full submission.",
     "empty.feedbackLoading": "Loading feedback detail...",
     "status.configIncomplete":
@@ -105,12 +177,24 @@ const MESSAGES = {
     "status.searchingUsers": "Searching users...",
     "status.loadingRecentUsers": "Loading recent users...",
     "status.loadingFeedback": "Loading feedback and bug inbox...",
+    "status.loadingAiPromptLimits": "Loading AI prompt limit settings...",
+    "status.loadingAiRuntime": "Loading AI runtime settings...",
+    "status.aiPromptLimitsLoaded": "AI prompt limit settings loaded.",
+    "status.aiRuntimeLoaded": "AI runtime settings loaded.",
     "status.noUsersFound": "No users found.",
     "status.searchUsersFailed": "Could not search users.",
     "status.loadFeedbackFailed": "Could not load user feedback or bug reports.",
+    "status.loadAiPromptLimitsFailed": "Could not load AI prompt limit settings.",
+    "status.loadAiRuntimeFailed": "Could not load AI runtime settings.",
     "status.grantingPrompts": "Granting extra AI prompts to {target}...",
     "status.promptsGranted": "Extra AI prompts granted.",
     "status.grantPromptsFailed": "Could not grant extra AI prompts.",
+    "status.savingAiPromptLimits": "Saving AI prompt limit settings...",
+    "status.aiPromptLimitsSaved": "AI prompt limit settings saved.",
+    "status.saveAiPromptLimitsFailed": "Could not save AI prompt limit settings.",
+    "status.savingAiRuntime": "Saving AI runtime settings...",
+    "status.aiRuntimeSaved": "AI runtime settings saved.",
+    "status.saveAiRuntimeFailed": "Could not save AI runtime settings.",
     "status.deletingUser": "Deleting {target}...",
     "status.userDeleted": "User deleted and tombstoned.",
     "status.deleteRequiresForce": "Delete requires force confirmation.",
@@ -146,6 +230,17 @@ const MESSAGES = {
     "usage.successRate": "Success rate",
     "usage.na": "n/a",
     "usage.noFeatures": "No AI feature events recorded yet.",
+    "analytics.metric.dau": "DAU",
+    "analytics.metric.wau": "WAU",
+    "analytics.metric.mau": "MAU",
+    "analytics.metric.hours24h": "Hours / 24h",
+    "analytics.emptyTrend": "No trend data yet.",
+    "analytics.emptyCountries": "No country data yet.",
+    "analytics.chartUnavailable": "Chart view is temporarily unavailable.",
+    "analytics.countryUsers": "{count} active people",
+    "analytics.countryShare": "{share} of shown countries",
+    "analytics.countryFeatured": "Strongest current region",
+    "analytics.countryListLabel": "Country spread",
     "tiers.noData": "No tier data available.",
     "tiers.usersActive": "{users} users • {active} active",
     "trackedUsers.none": "No users with billing or AI usage data yet.",
@@ -175,12 +270,17 @@ const MESSAGES = {
     "feedback.source.account": "Account",
     "feedback.source.daw_chat": "DAW chat",
     "user.usernameLine": "Username: {value}",
+    "user.musicProfileLine": "Music profile: {value}",
+    "user.birthdateLine": "Birthday: {value}",
     "user.userIdLine": "User ID: {value}",
     "inspector.selectedUser": "Selected user",
     "inspector.noEmail": "No email available",
     "detail.userId": "User ID",
     "detail.name": "Name",
     "detail.username": "Username",
+    "detail.birthdate": "Birthday",
+    "detail.age": "Age",
+    "detail.musicProfile": "Music Profile",
     "detail.appAuth": "App Auth",
     "detail.emailVerification": "Email Verification",
     "detail.nativeSessions": "Native Sessions",
@@ -192,9 +292,34 @@ const MESSAGES = {
     "detail.lastSeen": "Last Seen",
     "detail.created": "Created",
     "detail.updated": "Updated",
+    "settings.currentLimits": "Current effective limits",
+    "settings.currentAiRuntime": "Current AI runtime override",
+    "settings.freeDailyPromptLimit": "Free daily prompt limit",
+    "settings.freeWeeklyPromptLimit": "Free weekly prompt limit",
+    "settings.feature.ai_chat": "DAW chat",
+    "settings.feature.video_editor_chat": "Video editor chat",
+    "settings.modelOverride": "Model override",
+    "settings.systemPromptOverride": "System prompt override",
+    "settings.maxOutputTokensOverride": "Max output tokens override",
+    "settings.temperatureOverride": "Temperature override",
+    "settings.reasoningEffortOverride": "Reasoning effort override",
+    "settings.promptCacheRetentionOverride": "Prompt cache retention override",
+    "settings.currentSavedOverride": "Current saved override",
+    "settings.emptyUsesDefault": "Leave a field empty to keep the current backend default.",
+    "settings.readOnly": "Visible to admins. Edit access is restricted to andrew@mixroom.ai.",
+    "settings.andrewOnlyControl": "Dev surface. Edit access is restricted to andrew@mixroom.ai.",
+    "settings.usingBackendDefault": "(default) {value}",
+    "settings.noPromptOverride": "No prompt override saved",
+    "settings.confirmPromptLimits": "Type APPLY PROMPT LIMITS to confirm",
+    "settings.confirmAiRuntime": "Type APPLY {feature} OVERRIDE to confirm",
+    "settings.source.default": "Deployed default",
+    "settings.source.remote": "Remote override",
+    "settings.updatedAt": "Updated {date}",
+    "settings.updatedBy": "by {email}",
     "support.label": "AI Support",
     "support.title": "Grant extra prompts",
     "support.copy": "Adds a one-time extra prompt bank for support cases.",
+    "support.readOnly": "Visible to admins, editable only by andrew@mixroom.ai.",
     "support.inputLabel": "Extra prompts to add",
     "support.granting": "Granting...",
     "support.button": "Grant Extra Prompts",
@@ -207,11 +332,14 @@ const MESSAGES = {
     "delete.reason": "Reason",
     "delete.reasonPlaceholder": "Why are you deleting this account?",
     "delete.confirm": "Type {value} to confirm",
+    "delete.confirmEmail": "Type the user's login email exactly",
+    "delete.confirmEmailPlaceholder": "{value}",
     "delete.force":
       "Force deletion even if the user still has an active paid subscription.",
     "delete.deleting": "Deleting...",
     "delete.button": "Delete User",
     "delete.typeExact": "Type {value} exactly to confirm deletion.",
+    "delete.typeExactEmail": "Type the login email {value} exactly to confirm deletion.",
     "delete.forceRequired": "This delete requires force confirmation.",
     "detail.na": "n/a",
     "authSource.native": "native",
@@ -229,10 +357,20 @@ const MESSAGES = {
     "value.zeroSessions": "0 sessions",
     "value.nativeSessionsSummary": "{active}/{total} active • latest expiry {expiry}",
     "value.notLinked": "not linked",
+    "value.musicProfile.producer": "Producer",
+    "value.musicProfile.artist": "Artist",
+    "value.musicProfile.songwriter": "Songwriter",
+    "value.musicProfile.audio_engineer": "Audio engineer",
+    "value.musicProfile.music_enthusiast": "Music enthusiast",
+    "value.musicProfile.beginner": "Beginner",
+    "value.musicProfile.music_for_work": "Make music for work",
     "value.migrated": "migrated {date}",
     "value.todayWeek": "{today} today • {week} this week",
     "value.remainingGranted": "{remaining} remaining • {granted} granted total",
     "value.extraPromptsAdded": "Added {count} extra prompt{suffix}.",
+    "value.dailyWeeklyLimits": "{daily} daily • {weekly} weekly",
+    "value.showingCount": "Showing {shown}",
+    "value.showingOfTotal": "Showing {shown} of {total}",
     "value.userLoaded": "{count} user loaded.",
     "value.usersLoaded": "{count} users loaded.",
     "value.free": "free",
@@ -266,17 +404,45 @@ const MESSAGES = {
     "action.search": "검색",
     "action.clear": "지우기",
     "action.openPosthog": "PostHog 열기",
+    "action.showMore": "더 보기",
+    "action.showLess": "줄여 보기",
+    "action.saveLimits": "제한 저장",
+    "action.saving": "저장 중...",
+    "action.savePromptLimits": "프롬프트 제한 저장",
+    "action.saveAiOverride": "AI 재정의 저장",
     "auth.kicker": "직원 접근",
     "auth.title": "로그인",
     "auth.copy": "업무용 이메일로 로그인하세요.",
+    "welcome.kicker": "Mixroom 컨트롤 서피스",
+    "welcome.subtitle": "실시간 사용자 운영, AI 제어, 제품 모니터링.",
+    "welcome.session": "세션",
+    "welcome.mode": "모드",
+    "welcome.fallbackName": "Operator",
+    "tab.home": "홈",
+    "tab.users": "사용자",
+    "tab.feedback": "피드백",
+    "tab.dev": "개발",
     "panel.kpi.label": "KPI 개요",
     "panel.kpi.title": "제품 지표",
     "panel.kpi.meta.default":
-      "여기에 MAU, 리텐션, 퍼널, 세션 추이를 보려면 PostHog 공유 또는 임베드 URL을 연결하세요.",
+      "관리자 백엔드에 읽기 권한이 설정되면 여기에 PostHog 네이티브 지표가 표시됩니다.",
     "panel.kpi.meta.live":
-      "실시간 PostHog 지표입니다. 이 패널에는 공유 또는 임베드 대시보드 URL을 사용하세요.",
+      "PostHog 식별 화면 활동 기반의 네이티브 제품 분석입니다.",
     "panel.kpi.meta.empty":
-      "여기에 MAU, 리텐션, 퍼널, 세션 추이를 표시하려면 PostHog 임베드 URL을 추가하세요.",
+      "PostHog 네이티브 지표가 아직 설정되지 않았습니다.",
+    "panel.kpi.meta.error":
+      "PostHog 지표를 불러오지 못했습니다. 나머지 관리자 대시보드는 계속 사용할 수 있습니다.",
+    "panel.kpi.activityTitle": "일간 활성 사용자",
+    "panel.kpi.activityMeta": "하루 동안 화면을 본 식별 사용자 수입니다.",
+    "panel.kpi.hoursTitle": "일간 사용 시간",
+    "panel.kpi.hoursMeta": "완료된 세션 기준 일별 총 사용 시간입니다.",
+    "panel.kpi.countriesTitle": "상위 국가",
+    "panel.kpi.countriesMeta": "최근 30일 활성 식별 사용자 기준 국가 분포입니다.",
+    "panel.kpi.loading": "로그인하면 제품 지표를 불러옵니다.",
+    "panel.kpi.unconfigured":
+      "아직 PostHog 읽기 권한이 설정되지 않았습니다. 관리자 읽기 토큰을 추가하면 네이티브 지표가 표시됩니다.",
+    "panel.kpi.unavailable":
+      "PostHog 지표를 일시적으로 사용할 수 없습니다.",
     "panel.userAdmin.label": "사용자 관리",
     "panel.userAdmin.title": "사용자 찾기",
     "panel.userAdmin.meta.default": "이메일, 사용자명 또는 사용자 ID.",
@@ -284,6 +450,10 @@ const MESSAGES = {
     "search.placeholder": "이메일, 사용자명, 표시 이름 또는 사용자 ID",
     "analytics.label": "제품 분석",
     "analytics.copy": "리텐션, MAU, 퍼널, 세션 KPI는 PostHog에서 확인합니다.",
+    "analytics.range.1y": "1년",
+    "analytics.range.3m": "3개월",
+    "analytics.range.1m": "1개월",
+    "analytics.range.1w": "1주",
     "panel.accounts.label": "계정",
     "panel.accounts.title": "검색 결과",
     "panel.accounts.meta": "검색어가 없으면 최근 계정을 보여줍니다.",
@@ -292,6 +462,12 @@ const MESSAGES = {
     "panel.selectedUser.meta": "여기서 작업 내용을 검토하세요.",
     "panel.aiUsage.label": "AI 사용량",
     "panel.aiUsage.title": "AI 활동",
+    "panel.aiPromptLimits.label": "AI 프롬프트 제한",
+    "panel.aiPromptLimits.title": "무료 티어 기본값",
+    "panel.aiPromptLimits.meta": "무료 사용자에게 서버에서 강제되는 프롬프트 제한입니다.",
+    "panel.aiRuntime.label": "AI 런타임",
+    "panel.aiRuntime.title": "서버 프롬프트 및 모델 설정",
+    "panel.aiRuntime.meta": "서버가 소유하는 AI 기능의 프롬프트와 런타임 재정의입니다.",
     "panel.features.title": "기능",
     "panel.tiers.label": "구독 티어",
     "panel.tiers.title": "티어",
@@ -334,6 +510,8 @@ const MESSAGES = {
     "empty.signInUserData": "사용자 데이터를 불러오려면 로그인하세요.",
     "empty.signInProjectData": "프로젝트 데이터를 불러오려면 로그인하세요.",
     "empty.signInFeedback": "사용자 피드백과 버그 제보를 불러오려면 로그인하세요.",
+    "empty.signInAiPromptLimits": "AI 프롬프트 제한 설정을 불러오려면 로그인하세요.",
+    "empty.signInAiRuntime": "AI 런타임 설정을 불러오려면 로그인하세요.",
     "empty.selectFeedback": "전체 제출 내용을 보려면 피드백 항목 또는 버그 제보를 선택하세요.",
     "empty.feedbackLoading": "피드백 상세를 불러오는 중...",
     "status.configIncomplete":
@@ -347,12 +525,24 @@ const MESSAGES = {
     "status.searchingUsers": "사용자를 검색하는 중...",
     "status.loadingRecentUsers": "최근 사용자를 불러오는 중...",
     "status.loadingFeedback": "피드백 및 버그 받은 편지함을 불러오는 중...",
+    "status.loadingAiPromptLimits": "AI 프롬프트 제한 설정을 불러오는 중...",
+    "status.loadingAiRuntime": "AI 런타임 설정을 불러오는 중...",
+    "status.aiPromptLimitsLoaded": "AI 프롬프트 제한 설정을 불러왔습니다.",
+    "status.aiRuntimeLoaded": "AI 런타임 설정을 불러왔습니다.",
     "status.noUsersFound": "일치하는 사용자가 없습니다.",
     "status.searchUsersFailed": "사용자 검색에 실패했습니다.",
     "status.loadFeedbackFailed": "사용자 피드백 또는 버그 제보를 불러오지 못했습니다.",
+    "status.loadAiPromptLimitsFailed": "AI 프롬프트 제한 설정을 불러오지 못했습니다.",
+    "status.loadAiRuntimeFailed": "AI 런타임 설정을 불러오지 못했습니다.",
     "status.grantingPrompts": "{target}에 추가 AI 프롬프트를 부여하는 중...",
     "status.promptsGranted": "추가 AI 프롬프트를 부여했습니다.",
     "status.grantPromptsFailed": "추가 AI 프롬프트 부여에 실패했습니다.",
+    "status.savingAiPromptLimits": "AI 프롬프트 제한 설정을 저장하는 중...",
+    "status.aiPromptLimitsSaved": "AI 프롬프트 제한 설정을 저장했습니다.",
+    "status.saveAiPromptLimitsFailed": "AI 프롬프트 제한 설정 저장에 실패했습니다.",
+    "status.savingAiRuntime": "AI 런타임 설정을 저장하는 중...",
+    "status.aiRuntimeSaved": "AI 런타임 설정을 저장했습니다.",
+    "status.saveAiRuntimeFailed": "AI 런타임 설정 저장에 실패했습니다.",
     "status.deletingUser": "{target} 삭제 중...",
     "status.userDeleted": "사용자를 삭제하고 tombstone 처리했습니다.",
     "status.deleteRequiresForce": "삭제하려면 강제 확인이 필요합니다.",
@@ -388,6 +578,17 @@ const MESSAGES = {
     "usage.successRate": "성공률",
     "usage.na": "해당 없음",
     "usage.noFeatures": "기록된 AI 기능 이벤트가 아직 없습니다.",
+    "analytics.metric.dau": "DAU",
+    "analytics.metric.wau": "WAU",
+    "analytics.metric.mau": "MAU",
+    "analytics.metric.hours24h": "24시간 사용",
+    "analytics.emptyTrend": "아직 추이 데이터가 없습니다.",
+    "analytics.emptyCountries": "아직 국가 데이터가 없습니다.",
+    "analytics.chartUnavailable": "차트 보기를 일시적으로 사용할 수 없습니다.",
+    "analytics.countryUsers": "활성 사용자 {count}명",
+    "analytics.countryShare": "표시된 국가 중 {share}",
+    "analytics.countryFeatured": "현재 가장 강한 지역",
+    "analytics.countryListLabel": "국가 분포",
     "tiers.noData": "티어 데이터가 없습니다.",
     "tiers.usersActive": "사용자 {users}명 • 활성 {active}명",
     "trackedUsers.none": "결제 또는 AI 사용 데이터가 있는 사용자가 아직 없습니다.",
@@ -417,12 +618,17 @@ const MESSAGES = {
     "feedback.source.account": "계정",
     "feedback.source.daw_chat": "DAW 채팅",
     "user.usernameLine": "사용자명: {value}",
+    "user.musicProfileLine": "음악 프로필: {value}",
+    "user.birthdateLine": "생년월일: {value}",
     "user.userIdLine": "사용자 ID: {value}",
     "inspector.selectedUser": "선택된 사용자",
     "inspector.noEmail": "이메일 없음",
     "detail.userId": "사용자 ID",
     "detail.name": "이름",
     "detail.username": "사용자명",
+    "detail.birthdate": "생년월일",
+    "detail.age": "나이",
+    "detail.musicProfile": "음악 프로필",
     "detail.appAuth": "앱 인증",
     "detail.emailVerification": "이메일 인증",
     "detail.nativeSessions": "네이티브 세션",
@@ -434,9 +640,34 @@ const MESSAGES = {
     "detail.lastSeen": "마지막 활동",
     "detail.created": "생성일",
     "detail.updated": "수정일",
+    "settings.currentLimits": "현재 적용 중인 제한",
+    "settings.currentAiRuntime": "현재 AI 런타임 재정의",
+    "settings.freeDailyPromptLimit": "무료 일일 프롬프트 제한",
+    "settings.freeWeeklyPromptLimit": "무료 주간 프롬프트 제한",
+    "settings.feature.ai_chat": "DAW 채팅",
+    "settings.feature.video_editor_chat": "비디오 편집 채팅",
+    "settings.modelOverride": "모델 재정의",
+    "settings.systemPromptOverride": "시스템 프롬프트 재정의",
+    "settings.maxOutputTokensOverride": "최대 출력 토큰 재정의",
+    "settings.temperatureOverride": "온도 재정의",
+    "settings.reasoningEffortOverride": "추론 강도 재정의",
+    "settings.promptCacheRetentionOverride": "프롬프트 캐시 유지 재정의",
+    "settings.currentSavedOverride": "현재 저장된 재정의",
+    "settings.emptyUsesDefault": "필드를 비워 두면 현재 백엔드 기본값을 유지합니다.",
+    "settings.readOnly": "관리자에게는 보이지만 수정 권한은 andrew@mixroom.ai 계정으로 제한됩니다.",
+    "settings.andrewOnlyControl": "개발용 설정 화면이며 수정 권한은 andrew@mixroom.ai 계정으로 제한됩니다.",
+    "settings.usingBackendDefault": "(기본값) {value}",
+    "settings.noPromptOverride": "저장된 프롬프트 재정의 없음",
+    "settings.confirmPromptLimits": "확인을 위해 APPLY PROMPT LIMITS 를 입력하세요",
+    "settings.confirmAiRuntime": "확인을 위해 APPLY {feature} OVERRIDE 를 입력하세요",
+    "settings.source.default": "배포된 기본값",
+    "settings.source.remote": "원격 재정의",
+    "settings.updatedAt": "{date}에 수정",
+    "settings.updatedBy": "{email}에 의해 수정",
     "support.label": "AI 지원",
     "support.title": "추가 프롬프트 부여",
     "support.copy": "지원 상황에서 사용할 일회성 추가 프롬프트 뱅크를 더합니다.",
+    "support.readOnly": "관리자에게는 보이지만 andrew@mixroom.ai 계정만 수정할 수 있습니다.",
     "support.inputLabel": "추가할 프롬프트 수",
     "support.granting": "부여 중...",
     "support.button": "추가 프롬프트 부여",
@@ -448,10 +679,13 @@ const MESSAGES = {
     "delete.reason": "사유",
     "delete.reasonPlaceholder": "이 계정을 삭제하는 이유는 무엇인가요?",
     "delete.confirm": "확인을 위해 {value} 입력",
+    "delete.confirmEmail": "사용자의 로그인 이메일을 정확히 입력",
+    "delete.confirmEmailPlaceholder": "{value}",
     "delete.force": "사용자에게 활성 유료 구독이 있어도 강제로 삭제합니다.",
     "delete.deleting": "삭제 중...",
     "delete.button": "사용자 삭제",
     "delete.typeExact": "삭제를 확인하려면 {value}를 정확히 입력하세요.",
+    "delete.typeExactEmail": "삭제를 확인하려면 로그인 이메일 {value}를 정확히 입력하세요.",
     "delete.forceRequired": "이 삭제에는 강제 확인이 필요합니다.",
     "detail.na": "해당 없음",
     "authSource.native": "네이티브",
@@ -469,10 +703,20 @@ const MESSAGES = {
     "value.zeroSessions": "세션 0개",
     "value.nativeSessionsSummary": "활성 {active}/{total} • 최근 만료 {expiry}",
     "value.notLinked": "연결되지 않음",
+    "value.musicProfile.producer": "프로듀서",
+    "value.musicProfile.artist": "아티스트",
+    "value.musicProfile.songwriter": "송라이터",
+    "value.musicProfile.audio_engineer": "오디오 엔지니어",
+    "value.musicProfile.music_enthusiast": "음악 애호가",
+    "value.musicProfile.beginner": "입문자",
+    "value.musicProfile.music_for_work": "업무로 음악 제작",
     "value.migrated": "{date}에 마이그레이션됨",
     "value.todayWeek": "오늘 {today} • 이번 주 {week}",
     "value.remainingGranted": "남음 {remaining} • 총 부여 {granted}",
     "value.extraPromptsAdded": "추가 프롬프트 {count}개를 부여했습니다.",
+    "value.dailyWeeklyLimits": "일일 {daily} • 주간 {weekly}",
+    "value.showingCount": "{shown}개 표시 중",
+    "value.showingOfTotal": "{total}개 중 {shown}개 표시 중",
     "value.userLoaded": "사용자 {count}명을 불러왔습니다.",
     "value.usersLoaded": "사용자 {count}명을 불러왔습니다.",
     "value.free": "무료",
@@ -504,35 +748,80 @@ const elements = {
   signInButtonSecondary: document.querySelector("#sign-in-button-secondary"),
   refreshButton: document.querySelector("#refresh-button"),
   signOutButton: document.querySelector("#sign-out-button"),
-  signedInHero: document.querySelector("#signed-in-hero"),
+  signedInHero: document.querySelector("#welcome-banner"),
   statusPanel: document.querySelector("#status-panel"),
+  signedOutStatusPanel: document.querySelector("#signed-out-status-panel"),
   identityEmail: document.querySelector("#identity-email"),
   identityMeta: document.querySelector("#identity-meta"),
   signedOutPanel: document.querySelector("#signed-out-panel"),
   dashboard: document.querySelector("#dashboard"),
+  welcomeBanner: document.querySelector("#welcome-banner"),
+  welcomeName: document.querySelector("#welcome-name"),
+  tabButtons: Array.from(document.querySelectorAll("[data-tab-button]")),
+  tabPanels: Array.from(document.querySelectorAll("[data-tab-panel]")),
+  tabLoadingStates: Object.fromEntries(
+    Array.from(document.querySelectorAll("[data-tab-loading]")).map((node) => [
+      `${node.dataset.tabLoading || ""}`.trim(),
+      node,
+    ]),
+  ),
+  tabLoadingLabels: Object.fromEntries(
+    Array.from(document.querySelectorAll("[data-tab-loading-label]")).map((node) => [
+      `${node.dataset.tabLoadingLabel || ""}`.trim(),
+      node,
+    ]),
+  ),
   generatedAt: document.querySelector("#generated-at"),
+  aiPromptLimitsMeta: document.querySelector("#ai-prompt-limits-meta"),
+  aiPromptLimitsSummary: document.querySelector("#ai-prompt-limits-summary"),
+  aiPromptLimitsForm: document.querySelector("#ai-prompt-limits-form"),
+  freeDailyPromptLimitInput: document.querySelector("#free-daily-prompt-limit"),
+  freeWeeklyPromptLimitInput: document.querySelector("#free-weekly-prompt-limit"),
+  aiPromptLimitsEditorNote: document.querySelector("#ai-prompt-limits-editor-note"),
+  aiPromptLimitsConfirmWrap: document.querySelector("#ai-prompt-limits-confirm-wrap"),
+  aiPromptLimitsConfirmLabel: document.querySelector("#ai-prompt-limits-confirm-label"),
+  aiPromptLimitsConfirmInput: document.querySelector("#ai-prompt-limits-confirm-input"),
+  aiPromptLimitsSaveButton: document.querySelector("#ai-prompt-limits-save-button"),
+  aiPromptLimitsFeedback: document.querySelector("#ai-prompt-limits-feedback"),
+  aiRuntimePanel: document.querySelector("#ai-runtime-panel"),
+  aiRuntimeMeta: document.querySelector("#ai-runtime-meta"),
+  aiRuntimeSettings: document.querySelector("#ai-runtime-settings"),
   summarySection: document.querySelector("#summary-section"),
   aiUsageMetrics: document.querySelector("#ai-usage-metrics"),
   topFeatures: document.querySelector("#top-features"),
   tierBreakdown: document.querySelector("#tier-breakdown"),
   trackedUsersTableBody: document.querySelector("#users-table-body"),
+  trackedUsersPageMeta: document.querySelector("#tracked-users-page-meta"),
+  trackedUsersShowLessButton: document.querySelector("#tracked-users-show-less-button"),
+  trackedUsersShowMoreButton: document.querySelector("#tracked-users-show-more-button"),
   projectsTableBody: document.querySelector("#projects-table-body"),
+  projectsPageMeta: document.querySelector("#projects-page-meta"),
+  projectsShowLessButton: document.querySelector("#projects-show-less-button"),
+  projectsShowMoreButton: document.querySelector("#projects-show-more-button"),
   userSearchForm: document.querySelector("#user-search-form"),
   userSearchInput: document.querySelector("#user-search-input"),
   userSearchButton: document.querySelector("#user-search-button"),
   userSearchClearButton: document.querySelector("#user-search-clear-button"),
   userSearchMeta: document.querySelector("#user-search-meta"),
   adminUsersTableBody: document.querySelector("#admin-users-table-body"),
+  adminUsersPageMeta: document.querySelector("#admin-users-page-meta"),
+  adminUsersShowLessButton: document.querySelector("#admin-users-show-less-button"),
+  adminUsersShowMoreButton: document.querySelector("#admin-users-show-more-button"),
   userInspector: document.querySelector("#user-inspector"),
   feedbackTableBody: document.querySelector("#feedback-table-body"),
+  feedbackPageMeta: document.querySelector("#feedback-page-meta"),
+  feedbackShowLessButton: document.querySelector("#feedback-show-less-button"),
+  feedbackShowMoreButton: document.querySelector("#feedback-show-more-button"),
   feedbackInspector: document.querySelector("#feedback-inspector"),
   analyticsCallout: document.querySelector("#analytics-callout"),
   posthogLink: document.querySelector("#posthog-link"),
   kpiPanel: document.querySelector("#kpi-panel"),
   kpiMeta: document.querySelector("#kpi-meta"),
-  kpiEmbedShell: document.querySelector("#kpi-embed-shell"),
-  posthogPanelLink: document.querySelector("#posthog-panel-link"),
-  posthogEmbedFrame: document.querySelector("#posthog-embed-frame"),
+  analyticsRangeControls: document.querySelector("#analytics-range-controls"),
+  analyticsSummary: document.querySelector("#analytics-summary"),
+  analyticsActivityTrend: document.querySelector("#analytics-activity-trend"),
+  analyticsHoursTrend: document.querySelector("#analytics-hours-trend"),
+  analyticsCountryList: document.querySelector("#analytics-country-list"),
   languageSelector: document.querySelector("#language-selector"),
   signedOutLanguageSelector: document.querySelector("#signed-out-language-selector"),
 };
@@ -542,20 +831,34 @@ const state = {
   overviewBusy: false,
   userSearchBusy: false,
   feedbackBusy: false,
+  aiPromptLimitsBusy: false,
+  aiRuntimeBusy: false,
   deleteBusy: false,
   grantBusy: false,
+  activeTab: DEFAULT_TAB,
   currentSearchQuery: "",
   overview: null,
+  overviewUserLimit: DEFAULT_OVERVIEW_USERS_LIMIT,
+  overviewProjectLimit: DEFAULT_OVERVIEW_PROJECTS_LIMIT,
   lastUserSearchPayload: null,
+  userSearchLimit: DEFAULT_ADMIN_USERS_LIMIT,
   adminUsers: [],
   selectedUserId: "",
+  lastFeedbackPayload: null,
+  feedbackLimit: DEFAULT_FEEDBACK_LIMIT,
   feedbackList: [],
   selectedFeedbackId: "",
   selectedFeedback: null,
+  aiPromptLimits: null,
+  aiPromptLimitsFeedback: null,
+  aiRuntimeSettings: null,
+  aiRuntimeFeedbackByFeature: {},
+  analyticsRange: "30d",
   feedbackRequestId: 0,
   deleteFeedback: null,
   grantFeedback: null,
   searchRequestId: 0,
+  loadedTabs: buildLoadedTabs(),
 };
 
 let tokens = loadTokens();
@@ -563,6 +866,8 @@ let currentUser = decodeIdToken(tokens?.idToken);
 let sessionMeta = loadSessionMeta();
 let sessionExpiryTimer = null;
 let lastActivityPersistAt = 0;
+let welcomeAnimationPlayed = false;
+const analyticsCharts = {};
 
 bindEvents();
 applyLocale();
@@ -572,11 +877,28 @@ function bindEvents() {
   elements.signInButtonSecondary.addEventListener("click", beginSignIn);
   elements.refreshButton.addEventListener("click", refreshDashboard);
   elements.signOutButton.addEventListener("click", signOut);
+  elements.tabButtons.forEach((button) => {
+    button.addEventListener("click", handleTabClick);
+  });
   elements.userSearchForm.addEventListener("submit", handleUserSearchSubmit);
   elements.userSearchClearButton.addEventListener("click", clearUserSearch);
+  elements.adminUsersShowLessButton.addEventListener("click", handleAdminUsersShowLess);
+  elements.adminUsersShowMoreButton.addEventListener("click", handleAdminUsersShowMore);
   elements.adminUsersTableBody.addEventListener("click", handleAdminUsersTableClick);
+  elements.trackedUsersShowLessButton.addEventListener("click", handleTrackedUsersShowLess);
+  elements.trackedUsersShowMoreButton.addEventListener("click", handleTrackedUsersShowMore);
+  elements.projectsShowLessButton.addEventListener("click", handleProjectsShowLess);
+  elements.projectsShowMoreButton.addEventListener("click", handleProjectsShowMore);
   elements.feedbackTableBody.addEventListener("click", handleFeedbackTableClick);
+  elements.feedbackShowLessButton.addEventListener("click", handleFeedbackShowLess);
+  elements.feedbackShowMoreButton.addEventListener("click", handleFeedbackShowMore);
+  elements.analyticsRangeControls.addEventListener("click", handleAnalyticsRangeClick);
   elements.userInspector.addEventListener("submit", handleInspectorSubmit);
+  elements.aiPromptLimitsForm.addEventListener("submit", handleAiPromptLimitsSubmit);
+  elements.aiPromptLimitsConfirmInput.addEventListener("input", updateBusyState);
+  elements.aiRuntimeSettings.addEventListener("submit", handleAiRuntimeSubmit);
+  elements.aiRuntimeSettings.addEventListener("input", handleAiRuntimeInputChange);
+  elements.aiRuntimeSettings.addEventListener("change", handleAiRuntimeInputChange);
   elements.languageSelector.addEventListener("change", handleLocaleChange);
   elements.signedOutLanguageSelector.addEventListener("change", handleLocaleChange);
   ["pointerdown", "keydown", "scroll", "touchstart"].forEach((eventName) => {
@@ -672,7 +994,85 @@ function rerenderForLocale() {
   renderInspector();
   renderFeedbackTable(state.feedbackList);
   renderFeedbackInspector();
+  renderWelcomeBanner(currentUser);
+  renderAiPromptLimitSettings();
+  renderAiRuntimeSettings();
   renderUserSearchMeta(state.lastUserSearchPayload || {});
+  updateTabView();
+}
+
+function buildLoadedTabs() {
+  return {
+    home: false,
+    users: false,
+    feedback: false,
+    dev: false,
+  };
+}
+
+function handleTabClick(event) {
+  const button = event.currentTarget;
+  const tab = `${button?.dataset?.tabButton || ""}`.trim();
+  if (!tab || tab === state.activeTab) {
+    return;
+  }
+  setActiveTab(tab, { load: true });
+}
+
+function handleAnalyticsRangeClick(event) {
+  const button = event.target.closest("[data-analytics-range]");
+  if (!button || !state.overview?.product_analytics) {
+    return;
+  }
+  const nextRange = `${button.dataset.analyticsRange || ""}`.trim();
+  if (!ANALYTICS_RANGE_OPTIONS.some((option) => option.key === nextRange) || nextRange === state.analyticsRange) {
+    return;
+  }
+  state.analyticsRange = nextRange;
+  renderProductAnalytics(state.overview.product_analytics || {});
+}
+
+function updateTabView() {
+  elements.tabButtons.forEach((button) => {
+    const tab = `${button.dataset.tabButton || ""}`.trim();
+    const active = tab === state.activeTab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  elements.tabPanels.forEach((panel) => {
+    const tab = `${panel.dataset.tabPanel || ""}`.trim();
+    panel.classList.toggle("hidden", tab !== state.activeTab);
+  });
+}
+
+function setTabLoading(tab, loading, message = "") {
+  const panel = elements.tabLoadingStates[tab];
+  const label = elements.tabLoadingLabels[tab];
+  const tabPanel = elements.tabPanels.find((node) => `${node.dataset.tabPanel || ""}`.trim() === tab);
+  if (!panel || !tabPanel) {
+    return;
+  }
+  panel.classList.toggle("hidden", !loading);
+  tabPanel.classList.toggle("is-loading", loading);
+  tabPanel.setAttribute("aria-busy", loading ? "true" : "false");
+  if (label && message) {
+    label.textContent = message;
+  }
+}
+
+function clearTabLoading(tab) {
+  setTabLoading(tab, false);
+}
+
+async function setActiveTab(tab, { load = false, force = false } = {}) {
+  if (!TAB_KEYS.includes(tab)) {
+    return;
+  }
+  state.activeTab = tab;
+  updateTabView();
+  if (load && tokens?.idToken) {
+    await loadActiveTabData({ silent: false, force });
+  }
 }
 
 function handleUserActivity() {
@@ -702,6 +1102,11 @@ function t(key, vars = {}) {
   return template;
 }
 
+function getAnalyticsRangeOption(rangeKey) {
+  return ANALYTICS_RANGE_OPTIONS.find((option) => option.key === rangeKey)
+    || ANALYTICS_RANGE_OPTIONS[2];
+}
+
 function tMaybe(key, fallback, vars = {}) {
   const dictionary = MESSAGES[state.locale] || MESSAGES[DEFAULT_LOCALE];
   const fallbackDictionary = MESSAGES[DEFAULT_LOCALE];
@@ -709,6 +1114,79 @@ function tMaybe(key, fallback, vars = {}) {
     return fallback;
   }
   return t(key, vars);
+}
+
+function getWelcomeName(email) {
+  const normalized = normalizeEmail(email);
+  if (!normalized || !normalized.includes("@")) {
+    return t("welcome.fallbackName");
+  }
+  const localPart = normalized.split("@")[0] || "";
+  const firstToken = localPart.split(/[._+-]+/).find(Boolean) || localPart;
+  if (!firstToken) {
+    return t("welcome.fallbackName");
+  }
+  return firstToken.charAt(0).toUpperCase() + firstToken.slice(1);
+}
+
+function renderWelcomeBanner(user) {
+  const email = user?.email || state.overview?.requested_email || "";
+  elements.welcomeName.textContent = getWelcomeName(email);
+}
+
+function animateWelcomeBanner({ force = false } = {}) {
+  const banner = elements.welcomeBanner;
+  if (!banner || (!force && welcomeAnimationPlayed)) {
+    return;
+  }
+
+  const nameNode = elements.welcomeName;
+  const topbarNode = banner.querySelector(".welcome-topbar");
+  const scanNode = banner.querySelector(".welcome-scan");
+  const gsapApi = window.gsap;
+
+  if (gsapApi && typeof gsapApi.timeline === "function") {
+    gsapApi.set([topbarNode, nameNode], { opacity: 0, y: 14 });
+    gsapApi.set(scanNode, { xPercent: -120, opacity: 0.9 });
+    gsapApi.set(".welcome-grid", { backgroundPosition: "0px 0px" });
+    const timeline = gsapApi.timeline({ defaults: { ease: "power3.out" } });
+    timeline
+      .fromTo(
+        banner,
+        { opacity: 0, y: 18, scale: 0.985 },
+        { opacity: 1, y: 0, scale: 1, duration: 0.58 },
+      )
+      .to(topbarNode, { opacity: 1, y: 0, duration: 0.36 }, "-=0.22")
+      .to(nameNode, { opacity: 1, y: 0, duration: 0.42 }, "-=0.16")
+      .to(scanNode, { xPercent: 120, duration: 1.25, ease: "power2.out" }, 0.1)
+      .to(scanNode, { opacity: 0, duration: 0.2 }, "-=0.18")
+      .to(".welcome-grid", { backgroundPosition: "14px 8px", duration: 2.2, ease: "sine.out" }, 0);
+  } else {
+    banner.style.opacity = "1";
+  }
+
+  welcomeAnimationPlayed = true;
+}
+
+function canEditAiSettings() {
+  return state.overview?.permissions?.can_edit_ai_settings === true;
+}
+
+function normalizeEmail(value) {
+  return `${value || ""}`.trim().toLowerCase();
+}
+
+function isAndrewAdmin() {
+  const email = normalizeEmail(currentUser?.email || state.overview?.requested_email || "");
+  return email === ANDREW_ADMIN_EMAIL;
+}
+
+function canViewAiRuntimeSettings() {
+  return canEditAiSettings() && isAndrewAdmin();
+}
+
+function canGrantAiPrompts() {
+  return state.overview?.permissions?.can_grant_ai_prompts === true;
 }
 
 async function bootstrap() {
@@ -757,9 +1235,7 @@ function isConfigured() {
 
 function configureAnalyticsCallout() {
   const posthogUrl = `${config.posthogDashboardUrl || ""}`.trim();
-  const posthogEmbedUrl = `${config.posthogEmbedUrl || ""}`.trim();
   const hasDashboardUrl = posthogUrl && posthogUrl.includes("http");
-  const hasEmbedUrl = posthogEmbedUrl && posthogEmbedUrl.includes("http");
 
   if (!hasDashboardUrl) {
     elements.analyticsCallout.classList.add("hidden");
@@ -767,34 +1243,6 @@ function configureAnalyticsCallout() {
   } else {
     elements.analyticsCallout.classList.remove("hidden");
     elements.posthogLink.href = posthogUrl;
-  }
-
-  if (!hasDashboardUrl && !hasEmbedUrl) {
-    elements.kpiPanel.classList.add("hidden");
-    elements.kpiEmbedShell.classList.add("hidden");
-    elements.posthogPanelLink.classList.add("hidden");
-    elements.posthogEmbedFrame.removeAttribute("src");
-    return;
-  }
-
-  elements.kpiPanel.classList.remove("hidden");
-
-  if (hasDashboardUrl) {
-    elements.posthogPanelLink.classList.remove("hidden");
-    elements.posthogPanelLink.href = posthogUrl;
-  } else {
-    elements.posthogPanelLink.classList.add("hidden");
-    elements.posthogPanelLink.removeAttribute("href");
-  }
-
-  if (hasEmbedUrl) {
-    elements.kpiMeta.textContent = t("panel.kpi.meta.live");
-    elements.kpiEmbedShell.classList.remove("hidden");
-    elements.posthogEmbedFrame.src = posthogEmbedUrl;
-  } else {
-    elements.kpiMeta.textContent = t("panel.kpi.meta.empty");
-    elements.kpiEmbedShell.classList.add("hidden");
-    elements.posthogEmbedFrame.removeAttribute("src");
   }
 }
 
@@ -932,10 +1380,79 @@ async function signOut() {
 
 async function refreshDashboard() {
   await refreshOverview();
-  await Promise.all([
-    searchUsers({ query: state.currentSearchQuery, silent: true, autoSelect: true }),
-    loadFeedback({ silent: true, autoSelect: true }),
-  ]);
+  state.loadedTabs.home = true;
+  await loadActiveTabData({ silent: true, force: true });
+}
+
+async function loadActiveTabData({ silent = false, force = false } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+  if (state.activeTab === "users") {
+    await loadUsersTabData({ silent, force });
+    return;
+  }
+  if (state.activeTab === "feedback") {
+    await loadFeedbackTabData({ silent, force });
+    return;
+  }
+  if (state.activeTab === "dev") {
+    await loadDevTabData({ silent, force });
+    return;
+  }
+  state.loadedTabs.home = true;
+}
+
+async function loadUsersTabData({ silent = false, force = false } = {}) {
+  if (force || !state.loadedTabs.users) {
+    setTabLoading(
+      "users",
+      true,
+      state.currentSearchQuery ? t("status.searchingUsers") : t("status.loadingRecentUsers"),
+    );
+    try {
+      await searchUsers({ query: state.currentSearchQuery, silent, autoSelect: true });
+      state.loadedTabs.users = true;
+    } finally {
+      clearTabLoading("users");
+    }
+  }
+}
+
+async function loadFeedbackTabData({ silent = false, force = false } = {}) {
+  if (force || !state.loadedTabs.feedback) {
+    setTabLoading("feedback", true, t("status.loadingFeedback"));
+    try {
+      await loadFeedback({ silent, autoSelect: true });
+      state.loadedTabs.feedback = true;
+    } finally {
+      clearTabLoading("feedback");
+    }
+  }
+}
+
+async function loadDevTabData({ silent = false, force = false } = {}) {
+  const requests = [];
+  if (force || !state.loadedTabs.dev || !state.aiPromptLimits) {
+    requests.push(loadAiPromptLimitSettings({ silent }));
+  }
+  if (canViewAiRuntimeSettings() && (force || !state.loadedTabs.dev || !state.aiRuntimeSettings)) {
+    requests.push(loadAiRuntimeSettings({ silent }));
+  } else if (!canViewAiRuntimeSettings()) {
+    state.aiRuntimeSettings = null;
+    renderAiRuntimeSettings();
+  }
+  if (!requests.length) {
+    state.loadedTabs.dev = true;
+    return;
+  }
+  setTabLoading("dev", true, t("status.loadingAiRuntime"));
+  try {
+    await Promise.all(requests);
+    state.loadedTabs.dev = true;
+  } finally {
+    clearTabLoading("dev");
+  }
 }
 
 async function refreshOverview() {
@@ -947,6 +1464,7 @@ async function refreshOverview() {
 
   state.overviewBusy = true;
   updateBusyState();
+  setTabLoading("home", true, t("status.loadingAdminOverview"));
   setStatus(t("status.loadingAdminOverview"), "info");
   try {
     currentUser = decodeIdToken(tokens?.idToken);
@@ -955,7 +1473,11 @@ async function refreshOverview() {
       throw new Error(t("status.sessionMissingEmail"));
     }
 
-    const payload = await fetchAdminJson(OVERVIEW_PATH);
+    const params = new URLSearchParams({
+      user_limit: `${state.overviewUserLimit}`,
+      project_limit: `${state.overviewProjectLimit}`,
+    });
+    const payload = await fetchAdminJson(`${OVERVIEW_PATH}?${params.toString()}`);
     state.overview = payload;
     setSignedInState(currentUser);
     renderOverview(payload);
@@ -965,6 +1487,7 @@ async function refreshOverview() {
   } finally {
     state.overviewBusy = false;
     updateBusyState();
+    clearTabLoading("home");
   }
 }
 
@@ -990,7 +1513,7 @@ async function searchUsers({
 
   try {
     const params = new URLSearchParams({
-      limit: "24",
+      limit: `${state.userSearchLimit}`,
     });
     if (state.currentSearchQuery) {
       params.set("query", state.currentSearchQuery);
@@ -1045,10 +1568,13 @@ async function loadFeedback({
   }
 
   try {
-    const payload = await fetchAdminJson(`${ADMIN_FEEDBACK_PATH}?limit=50`);
+    const payload = await fetchAdminJson(
+      `${ADMIN_FEEDBACK_PATH}?limit=${encodeURIComponent(`${state.feedbackLimit}`)}`,
+    );
     if (requestId !== state.feedbackRequestId) {
       return;
     }
+    state.lastFeedbackPayload = payload;
     state.feedbackList = Array.isArray(payload.submissions) ? payload.submissions : [];
     syncSelectedFeedback(autoSelect);
     renderFeedbackTable(state.feedbackList);
@@ -1063,6 +1589,58 @@ async function loadFeedback({
       state.feedbackBusy = false;
       updateBusyState();
     }
+  }
+}
+
+async function loadAiPromptLimitSettings({ silent = false } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+
+  state.aiPromptLimitsBusy = true;
+  updateBusyState();
+  if (!silent) {
+    setStatus(t("status.loadingAiPromptLimits"), "info");
+  }
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_AI_PROMPT_LIMITS_PATH);
+    state.aiPromptLimits = payload.settings || null;
+    renderAiPromptLimitSettings();
+    if (!silent) {
+      setStatus(t("status.aiPromptLimitsLoaded"), "success");
+    }
+  } catch (error) {
+    handleAdminRequestError(error, t("status.loadAiPromptLimitsFailed"));
+  } finally {
+    state.aiPromptLimitsBusy = false;
+    updateBusyState();
+  }
+}
+
+async function loadAiRuntimeSettings({ silent = false } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+
+  state.aiRuntimeBusy = true;
+  updateBusyState();
+  if (!silent) {
+    setStatus(t("status.loadingAiRuntime"), "info");
+  }
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_AI_RUNTIME_PATH);
+    state.aiRuntimeSettings = payload.settings || null;
+    renderAiRuntimeSettings();
+    if (!silent) {
+      setStatus(t("status.aiRuntimeLoaded"), "success");
+    }
+  } catch (error) {
+    handleAdminRequestError(error, t("status.loadAiRuntimeFailed"));
+  } finally {
+    state.aiRuntimeBusy = false;
+    updateBusyState();
   }
 }
 
@@ -1094,6 +1672,7 @@ async function loadSelectedFeedbackDetail({ silent = false } = {}) {
 
 function renderOverview(overview) {
   renderSummary(overview.summary || {});
+  renderProductAnalytics(overview.product_analytics || {});
   renderUsage(overview);
   renderTiers(overview.subscription_tiers || []);
   renderTrackedUsers(overview.users || []);
@@ -1111,6 +1690,295 @@ function renderOverview(overview) {
       email: overview.requested_email,
     });
   }
+  renderWelcomeBanner({ email: overview.requested_email || currentUser?.email || "" });
+}
+
+function renderAiPromptLimitSettings() {
+  const settings = state.aiPromptLimits;
+  const canEdit = canViewAiRuntimeSettings();
+  if (!settings) {
+    elements.aiPromptLimitsMeta.textContent = t("panel.aiPromptLimits.meta");
+    elements.aiPromptLimitsSummary.innerHTML = `
+      <div class="detail-label">${escapeHtml(t("settings.currentLimits"))}</div>
+      <div class="detail-value">${escapeHtml(t("empty.signInAiPromptLimits"))}</div>
+    `;
+    elements.freeDailyPromptLimitInput.value = "";
+    elements.freeWeeklyPromptLimitInput.value = "";
+    elements.aiPromptLimitsConfirmInput.value = "";
+    elements.aiPromptLimitsForm.classList.add("hidden");
+    elements.aiPromptLimitsEditorNote.classList.add("hidden");
+    elements.aiPromptLimitsConfirmWrap.classList.add("hidden");
+    elements.aiPromptLimitsFeedback.textContent = "";
+    elements.aiPromptLimitsFeedback.className = "panel-meta";
+    updateBusyState();
+    return;
+  }
+
+  const sourceKey =
+    settings.source === "remote" ? "settings.source.remote" : "settings.source.default";
+  const metaParts = [t(sourceKey)];
+  if (settings.updated_at) {
+    metaParts.push(t("settings.updatedAt", { date: formatDate(settings.updated_at) }));
+  }
+  if (settings.updated_by_email) {
+    metaParts.push(t("settings.updatedBy", { email: settings.updated_by_email }));
+  }
+  elements.aiPromptLimitsMeta.textContent = metaParts.join(" • ");
+  elements.aiPromptLimitsSummary.innerHTML = `
+    <div class="detail-label">${escapeHtml(t("settings.currentLimits"))}</div>
+    <div class="detail-value">${escapeHtml(
+      t("value.dailyWeeklyLimits", {
+        daily: formatWholeNumber(settings.free_daily_prompt_limit || 0),
+        weekly: formatWholeNumber(settings.free_weekly_prompt_limit || 0),
+      }),
+    )}</div>
+  `;
+  elements.freeDailyPromptLimitInput.value = `${Number(settings.free_daily_prompt_limit || 0)}`;
+  elements.freeWeeklyPromptLimitInput.value = `${Number(settings.free_weekly_prompt_limit || 0)}`;
+  elements.aiPromptLimitsForm.classList.toggle("hidden", !canEdit);
+  elements.aiPromptLimitsEditorNote.classList.toggle("hidden", !canEdit);
+  elements.aiPromptLimitsConfirmWrap.classList.toggle("hidden", !canEdit);
+  elements.aiPromptLimitsConfirmLabel.textContent = t("settings.confirmPromptLimits");
+  elements.aiPromptLimitsFeedback.textContent = state.aiPromptLimitsFeedback?.message || "";
+  elements.aiPromptLimitsFeedback.className = state.aiPromptLimitsFeedback?.tone
+    ? `panel-meta status-${state.aiPromptLimitsFeedback.tone}`
+    : "panel-meta";
+  updateBusyState();
+}
+
+function renderAiRuntimeSettings() {
+  const settings = state.aiRuntimeSettings;
+  const canEdit = canViewAiRuntimeSettings();
+  elements.aiRuntimePanel.classList.toggle("hidden", !canEdit);
+  if (!canEdit) {
+    return;
+  }
+  if (!settings || !Array.isArray(settings.features)) {
+    elements.aiRuntimeMeta.textContent = t("panel.aiRuntime.meta");
+    elements.aiRuntimeSettings.className = "inspector-empty";
+    elements.aiRuntimeSettings.textContent = t("empty.signInAiRuntime");
+    return;
+  }
+
+  const forms = settings.features
+    .map((featureConfig) => {
+      const feature = `${featureConfig.feature || ""}`.trim();
+      if (!feature) {
+        return "";
+      }
+      const defaultRuntime = featureConfig.default_runtime || {};
+      const feedback = state.aiRuntimeFeedbackByFeature[feature];
+      const sourceKey =
+        featureConfig.source === "remote" ? "settings.source.remote" : "settings.source.default";
+      const metaParts = [t(sourceKey)];
+      if (featureConfig.updated_at) {
+        metaParts.push(t("settings.updatedAt", { date: formatDate(featureConfig.updated_at) }));
+      }
+      if (featureConfig.updated_by_email) {
+        metaParts.push(t("settings.updatedBy", { email: featureConfig.updated_by_email }));
+      }
+      const confirmPhrase = aiRuntimeConfirmPhrase(feature);
+      return `
+        <form class="delete-card support-card ai-runtime-form" data-feature="${escapeHtml(feature)}">
+          <p class="panel-label">${escapeHtml(t(`settings.feature.${feature}`))}</p>
+          <h3>${escapeHtml(t("settings.currentAiRuntime"))}</h3>
+          <p class="delete-copy">${escapeHtml(metaParts.join(" • "))}</p>
+          <p class="delete-copy">${escapeHtml(t("settings.emptyUsesDefault"))}</p>
+          <div class="detail-grid">
+            ${detailCardHtml(
+              t("settings.modelOverride"),
+              featureConfig.model_override
+                || defaultValueLabel(formatDefaultRuntimeValue(defaultRuntime.model)),
+              featureConfig.model_override ? { monospace: true } : {},
+            )}
+            ${detailCardHtml(
+              t("settings.maxOutputTokensOverride"),
+              featureConfig.max_output_tokens_override == null
+                ? defaultValueLabel(formatDefaultRuntimeValue(defaultRuntime.max_output_tokens))
+                : `${featureConfig.max_output_tokens_override}`,
+            )}
+            ${detailCardHtml(
+              t("settings.temperatureOverride"),
+              featureConfig.temperature_override == null
+                ? defaultValueLabel(formatDefaultRuntimeValue(defaultRuntime.temperature))
+                : `${featureConfig.temperature_override}`,
+            )}
+            ${detailCardHtml(
+              t("settings.reasoningEffortOverride"),
+              featureConfig.reasoning_effort_override
+                || defaultValueLabel(formatDefaultRuntimeValue(defaultRuntime.reasoning_effort)),
+            )}
+            ${detailCardHtml(
+              t("settings.promptCacheRetentionOverride"),
+              featureConfig.prompt_cache_retention_override
+                || defaultValueLabel(
+                  formatDefaultRuntimeValue(defaultRuntime.prompt_cache_retention),
+                ),
+            )}
+            ${detailCardHtml(
+              t("settings.systemPromptOverride"),
+              featureConfig.system_prompt_override || t("settings.noPromptOverride"),
+              { monospace: true },
+            )}
+          </div>
+          <div class="form-stack">
+            <label class="search-input-wrap">
+                <span class="search-label">${escapeHtml(t("settings.modelOverride"))}</span>
+              <select class="select-input" name="model_override">
+                ${buildSelectOptions(AI_MODEL_OPTIONS, featureConfig.model_override || "", {
+                  emptyLabel: defaultValueLabel(formatDefaultRuntimeValue(defaultRuntime.model)),
+                })}
+              </select>
+            </label>
+            <div class="inspector-grid">
+              <label class="search-input-wrap">
+                <span class="search-label">${escapeHtml(t("settings.maxOutputTokensOverride"))}</span>
+                <input class="text-input" type="number" min="1" step="1" name="max_output_tokens_override" value="${escapeHtml(
+                  featureConfig.max_output_tokens_override == null
+                    ? ""
+                    : `${featureConfig.max_output_tokens_override}`,
+                )}" />
+              </label>
+              <label class="search-input-wrap">
+                <span class="search-label">${escapeHtml(t("settings.temperatureOverride"))}</span>
+                <input class="text-input" type="number" min="0" max="2" step="0.1" name="temperature_override" value="${escapeHtml(
+                  featureConfig.temperature_override == null
+                    ? ""
+                    : `${featureConfig.temperature_override}`,
+                )}" />
+              </label>
+            </div>
+            <div class="inspector-grid">
+              <label class="search-input-wrap">
+                <span class="search-label">${escapeHtml(t("settings.reasoningEffortOverride"))}</span>
+                <select class="select-input" name="reasoning_effort_override">
+                  ${buildSelectOptions(
+                    AI_REASONING_EFFORT_OPTIONS,
+                    featureConfig.reasoning_effort_override || "",
+                    {
+                      emptyLabel: defaultValueLabel(
+                        formatDefaultRuntimeValue(defaultRuntime.reasoning_effort),
+                      ),
+                    },
+                  )}
+                </select>
+              </label>
+              <label class="search-input-wrap">
+                <span class="search-label">${escapeHtml(t("settings.promptCacheRetentionOverride"))}</span>
+                <select class="select-input" name="prompt_cache_retention_override">
+                  ${buildSelectOptions(
+                    AI_PROMPT_CACHE_RETENTION_OPTIONS,
+                    featureConfig.prompt_cache_retention_override || "",
+                    {
+                      emptyLabel: defaultValueLabel(
+                        formatDefaultRuntimeValue(defaultRuntime.prompt_cache_retention),
+                      ),
+                    },
+                  )}
+                </select>
+              </label>
+            </div>
+            <label class="search-input-wrap">
+              <span class="search-label">${escapeHtml(t("settings.systemPromptOverride"))}</span>
+              <textarea class="text-area" name="system_prompt_override">${escapeHtml(
+                featureConfig.system_prompt_override || "",
+              )}</textarea>
+            </label>
+            <label class="search-input-wrap">
+              <span class="search-label">${escapeHtml(
+                t("settings.confirmAiRuntime", {
+                  feature: t(`settings.feature.${feature}`).toUpperCase(),
+                }),
+              )}</span>
+              <input
+                class="text-input ai-runtime-confirm-input"
+                type="text"
+                name="confirm_phrase"
+                data-confirm-phrase="${escapeHtml(confirmPhrase)}"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </label>
+            <div class="search-actions">
+              <button class="button button-secondary ai-runtime-save-button" type="submit" ${
+                state.aiRuntimeBusy ? "disabled" : ""
+              }>
+                ${escapeHtml(state.aiRuntimeBusy ? t("action.saving") : t("action.saveAiOverride"))}
+              </button>
+            </div>
+            ${feedback ? `<div class="status-panel status-${escapeHtml(feedback.tone || "info")}">${escapeHtml(feedback.message || "")}</div>` : ""}
+          </div>
+        </form>
+      `;
+    })
+    .join("");
+
+  elements.aiRuntimeMeta.textContent = t("panel.aiRuntime.meta");
+  elements.aiRuntimeSettings.className = "inspector-stack";
+  elements.aiRuntimeSettings.innerHTML = forms || escapeHtml(t("empty.signInAiRuntime"));
+  updateAiRuntimeConfirmButtons();
+}
+
+function buildSelectOptions(options, selectedValue, { emptyLabel = "" } = {}) {
+  return options
+    .map((option) => {
+      const value = `${option || ""}`;
+      const label = value || emptyLabel;
+      const selected = value === `${selectedValue || ""}` ? "selected" : "";
+      return `<option value="${escapeHtml(value)}" ${selected}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
+}
+
+function detailCardHtml(label, value, { monospace = false } = {}) {
+  const valueClass = monospace ? "detail-value is-monospace" : "detail-value";
+  return `
+    <div class="detail-card compact">
+      <div class="detail-label">${escapeHtml(label)}</div>
+      <div class="${valueClass}">${escapeHtml(value)}</div>
+    </div>
+  `;
+}
+
+function defaultValueLabel(value) {
+  return t("settings.usingBackendDefault", { value: value || t("detail.na") });
+}
+
+function formatDefaultRuntimeValue(value) {
+  if (value == null || value === "") {
+    return t("detail.na");
+  }
+  return `${value}`;
+}
+
+function aiRuntimeConfirmPhrase(feature) {
+  return `APPLY ${t(`settings.feature.${feature}`).toUpperCase()} OVERRIDE`;
+}
+
+function promptLimitsConfirmationMatches() {
+  return `${elements.aiPromptLimitsConfirmInput.value || ""}`.trim() === AI_PROMPT_LIMITS_CONFIRM_PHRASE;
+}
+
+function runtimeConfirmationMatches(form) {
+  const input = form?.querySelector(".ai-runtime-confirm-input");
+  const expected = `${input?.dataset?.confirmPhrase || ""}`.trim();
+  const actual = `${input?.value || ""}`.trim();
+  return !!expected && actual === expected;
+}
+
+function updateAiRuntimeConfirmButtons() {
+  elements.aiRuntimeSettings.querySelectorAll(".ai-runtime-form").forEach((form) => {
+    const button = form.querySelector(".ai-runtime-save-button");
+    if (!button) {
+      return;
+    }
+    button.textContent = state.aiRuntimeBusy ? t("action.saving") : t("action.saveAiOverride");
+    button.disabled = state.aiRuntimeBusy || !runtimeConfirmationMatches(form);
+  });
+}
+
+function handleAiRuntimeInputChange() {
+  updateAiRuntimeConfirmButtons();
 }
 
 function renderSummary(summary) {
@@ -1158,6 +2026,334 @@ function renderSummary(summary) {
       `,
     )
     .join("");
+}
+
+function renderProductAnalytics(productAnalytics) {
+  const status = `${productAnalytics?.status || ""}`.trim() || "unconfigured";
+  const metrics = productAnalytics?.metrics || {};
+  const range = getAnalyticsRangeOption(state.analyticsRange);
+  const emptyLabel = status === "live"
+    ? t("analytics.emptyTrend")
+    : status === "error"
+      ? t("panel.kpi.unavailable")
+      : t("panel.kpi.unconfigured");
+  const emptyCountryLabel = status === "live"
+    ? t("analytics.emptyCountries")
+    : status === "error"
+      ? t("panel.kpi.unavailable")
+      : t("panel.kpi.unconfigured");
+  const cards = [
+    { label: t("analytics.metric.dau"), value: formatNumber(metrics.dau || 0) },
+    { label: t("analytics.metric.wau"), value: formatNumber(metrics.wau || 0) },
+    { label: t("analytics.metric.mau"), value: formatNumber(metrics.mau || 0) },
+    {
+      label: t("analytics.metric.hours24h"),
+      value: formatDecimal(metrics.hours_24h || 0),
+    },
+  ];
+
+  elements.kpiPanel.classList.remove("hidden");
+  renderAnalyticsRangeControls();
+  elements.analyticsSummary.innerHTML = cards
+    .map(
+      (metric) => `
+        <div class="mini-metric">
+          <div class="mini-label">${escapeHtml(metric.label)}</div>
+          <div class="mini-value">${escapeHtml(metric.value)}</div>
+        </div>
+      `,
+    )
+    .join("");
+
+  if (status === "live") {
+    const updatedAt = productAnalytics.updated_at
+      ? formatDate(productAnalytics.updated_at)
+      : "";
+    elements.kpiMeta.textContent = updatedAt
+      ? `${t("panel.kpi.meta.live")} • ${updatedAt}`
+      : t("panel.kpi.meta.live");
+  } else if (status === "error") {
+    elements.kpiMeta.textContent = t("panel.kpi.meta.error");
+  } else {
+    elements.kpiMeta.textContent = productAnalytics.note || t("panel.kpi.unconfigured");
+  }
+
+  renderAnalyticsChart(
+    "activity",
+    elements.analyticsActivityTrend,
+    filterAnalyticsPoints(
+      Array.isArray(productAnalytics.daily_active_users)
+        ? productAnalytics.daily_active_users
+        : [],
+      range.days,
+    ),
+    {
+      valueKey: "active_users",
+      valueFormatter: (value) => formatNumber(value),
+      seriesLabel: t("panel.kpi.activityTitle"),
+      tone: "cool",
+      emptyLabel,
+    },
+  );
+  renderAnalyticsChart(
+    "hours",
+    elements.analyticsHoursTrend,
+    filterAnalyticsPoints(
+      Array.isArray(productAnalytics.daily_hours_used)
+        ? productAnalytics.daily_hours_used
+        : [],
+      range.days,
+    ),
+    {
+      valueKey: "hours_used",
+      valueFormatter: (value) => formatDecimal(value),
+      seriesLabel: t("panel.kpi.hoursTitle"),
+      tone: "mint",
+      emptyLabel,
+    },
+  );
+  renderCountryConstellation(
+    elements.analyticsCountryList,
+    Array.isArray(productAnalytics.top_countries) ? productAnalytics.top_countries : [],
+    {
+      emptyLabel: emptyCountryLabel,
+    },
+  );
+}
+
+function renderAnalyticsRangeControls() {
+  elements.analyticsRangeControls.innerHTML = ANALYTICS_RANGE_OPTIONS
+    .map((option) => {
+      const activeClass = option.key === state.analyticsRange ? " is-active" : "";
+      return `
+        <button
+          class="analytics-range-button${activeClass}"
+          type="button"
+          data-analytics-range="${escapeHtml(option.key)}"
+        >
+          ${escapeHtml(t(option.labelKey))}
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function renderAnalyticsChart(
+  chartKey,
+  container,
+  points,
+  { valueKey, valueFormatter, emptyLabel, seriesLabel, tone = "cool" } = {},
+) {
+  if (!Array.isArray(points) || !points.length) {
+    destroyAnalyticsChart(chartKey);
+    container.textContent = emptyLabel || t("analytics.emptyTrend");
+    container.classList.add("empty-state");
+    return;
+  }
+
+  const ChartApi = window.Chart;
+  if (!ChartApi || typeof ChartApi !== "function") {
+    destroyAnalyticsChart(chartKey);
+    container.textContent = t("analytics.chartUnavailable");
+    container.classList.add("empty-state");
+    return;
+  }
+
+  const labels = points.map((point) => formatShortDate(point?.day || ""));
+  const data = points.map((point) => Number(point?.[valueKey] || 0));
+  const peakValue = Math.max(...data, 0);
+  container.classList.remove("empty-state");
+  container.innerHTML = `
+    <div class="analytics-chart-wrap">
+      <canvas class="analytics-chart-canvas" aria-label="${escapeHtml(seriesLabel || "")}"></canvas>
+    </div>
+    <div class="analytics-chart-footer">
+      <span>${escapeHtml(labels[0] || "")}</span>
+      <span>${escapeHtml(
+        `${seriesLabel || ""} • ${valueFormatter(peakValue)}`,
+      )}</span>
+      <span>${escapeHtml(labels[labels.length - 1] || "")}</span>
+    </div>
+  `;
+
+  destroyAnalyticsChart(chartKey);
+  const canvas = container.querySelector("canvas");
+  const context = canvas?.getContext("2d");
+  if (!context) {
+    container.textContent = t("analytics.chartUnavailable");
+    container.classList.add("empty-state");
+    return;
+  }
+  const gradient = context.createLinearGradient(0, 0, 0, 220);
+  if (tone === "mint") {
+    gradient.addColorStop(0, "rgba(150, 235, 206, 0.34)");
+    gradient.addColorStop(1, "rgba(150, 235, 206, 0.02)");
+  } else {
+    gradient.addColorStop(0, "rgba(148, 216, 255, 0.34)");
+    gradient.addColorStop(1, "rgba(148, 216, 255, 0.02)");
+  }
+  const strokeColor = tone === "mint" ? "#95eecf" : "#94d8ff";
+
+  analyticsCharts[chartKey] = new ChartApi(context, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: seriesLabel,
+          data,
+          tension: 0.34,
+          fill: true,
+          borderColor: strokeColor,
+          backgroundColor: gradient,
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          pointHitRadius: 12,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {
+        duration: 420,
+      },
+      interaction: {
+        mode: "index",
+        intersect: false,
+      },
+      plugins: {
+        legend: {
+          display: false,
+        },
+        tooltip: {
+          displayColors: false,
+          backgroundColor: "rgba(12, 18, 26, 0.94)",
+          borderColor: "rgba(255, 255, 255, 0.08)",
+          borderWidth: 1,
+          padding: 10,
+          callbacks: {
+            label: (tooltipItem) => valueFormatter(tooltipItem.parsed.y),
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: {
+            display: false,
+          },
+          border: {
+            display: false,
+          },
+          ticks: {
+            color: "rgba(206, 214, 224, 0.58)",
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 6,
+          },
+        },
+        y: {
+          beginAtZero: true,
+          border: {
+            display: false,
+          },
+          grid: {
+            color: "rgba(255, 255, 255, 0.06)",
+            drawTicks: false,
+          },
+          ticks: {
+            color: "rgba(206, 214, 224, 0.58)",
+            padding: 8,
+            callback: (tickValue) => valueFormatter(Number(tickValue || 0)),
+          },
+        },
+      },
+    },
+  });
+}
+
+function filterAnalyticsPoints(points, days) {
+  if (!Array.isArray(points) || !points.length || !days || points.length <= 1) {
+    return Array.isArray(points) ? points : [];
+  }
+  const lastPoint = points[points.length - 1];
+  const lastDate = new Date(`${lastPoint?.day || ""}T00:00:00Z`);
+  if (Number.isNaN(lastDate.getTime())) {
+    return points.slice(-days);
+  }
+  const cutoff = new Date(lastDate);
+  cutoff.setUTCDate(cutoff.getUTCDate() - Math.max(days - 1, 0));
+  return points.filter((point) => {
+    const pointDate = new Date(`${point?.day || ""}T00:00:00Z`);
+    return !Number.isNaN(pointDate.getTime()) && pointDate >= cutoff;
+  });
+}
+
+function renderCountryConstellation(container, countries, { emptyLabel } = {}) {
+  if (!Array.isArray(countries) || !countries.length) {
+    container.textContent = emptyLabel || t("analytics.emptyCountries");
+    container.classList.add("empty-state");
+    return;
+  }
+
+  const normalizedCountries = countries.map((item) => ({
+    country: item?.country || t("value.unknown"),
+    users: Number(item?.users || 0),
+  }));
+  const [featuredCountry] = normalizedCountries;
+  const shownTotal = normalizedCountries.reduce((sum, item) => sum + item.users, 0) || 1;
+  const maxUsers = Math.max(...normalizedCountries.map((item) => item.users), 1);
+  container.classList.remove("empty-state");
+  container.innerHTML = `
+    <div class="country-featured-card">
+      <p class="panel-label">${escapeHtml(t("analytics.countryFeatured"))}</p>
+      <div class="country-featured-grid">
+        <div>
+          <div class="country-featured-name">${escapeHtml(featuredCountry.country)}</div>
+          <div class="country-featured-value">${escapeHtml(formatNumber(featuredCountry.users))}</div>
+          <div class="country-featured-copy">${escapeHtml(
+            t("analytics.countryUsers", { count: formatNumber(featuredCountry.users) }),
+          )}</div>
+        </div>
+        <div class="country-featured-share">${escapeHtml(
+          t("analytics.countryShare", {
+            share: formatPercent(featuredCountry.users / shownTotal),
+          }),
+        )}</div>
+      </div>
+    </div>
+    <div class="country-cluster">
+      <p class="panel-label">${escapeHtml(t("analytics.countryListLabel"))}</p>
+      ${normalizedCountries
+        .map((item, index) => {
+          const ratio = `${Math.max((item.users / maxUsers) * 100, 6)}%`;
+          return `
+            <div class="country-signal-row ${index === 0 ? "is-featured" : ""}">
+              <div class="country-rank">${escapeHtml(`${index + 1}`)}</div>
+              <div class="country-signal-copy">
+                <div class="country-head">
+                  <span class="country-name">${escapeHtml(item.country)}</span>
+                  <span class="country-value">${escapeHtml(formatNumber(item.users))}</span>
+                </div>
+                <div class="country-meter"><span style="width:${ratio}"></span></div>
+                <div class="country-foot">
+                  <span>${escapeHtml(
+                    t("analytics.countryUsers", { count: formatNumber(item.users) }),
+                  )}</span>
+                  <span>${escapeHtml(
+                    t("analytics.countryShare", {
+                      share: formatPercent(item.users / shownTotal),
+                    }),
+                  )}</span>
+                </div>
+              </div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
 }
 
 function renderUsage(overview) {
@@ -1252,6 +2448,7 @@ function renderTrackedUsers(users) {
         <td colspan="7" class="table-empty">${escapeHtml(t("trackedUsers.none"))}</td>
       </tr>
     `;
+    renderTrackedUsersPagination(0);
     return;
   }
 
@@ -1286,6 +2483,7 @@ function renderTrackedUsers(users) {
       `;
     })
     .join("");
+  renderTrackedUsersPagination(users.length);
 }
 
 function renderProjects(projects) {
@@ -1295,6 +2493,7 @@ function renderProjects(projects) {
         <td colspan="6" class="table-empty">${escapeHtml(t("projects.none"))}</td>
       </tr>
     `;
+    renderProjectsPagination(0);
     return;
   }
 
@@ -1317,6 +2516,7 @@ function renderProjects(projects) {
       `,
     )
     .join("");
+  renderProjectsPagination(projects.length);
 }
 
 function renderUserSearchMeta(payload) {
@@ -1336,6 +2536,7 @@ function renderAdminUsers(users) {
         <td colspan="5" class="table-empty">${escapeHtml(t("empty.signInSearchUsers"))}</td>
       </tr>
     `;
+    renderAdminUsersPagination(0, 0, false);
     return;
   }
 
@@ -1345,6 +2546,7 @@ function renderAdminUsers(users) {
         <td colspan="5" class="table-empty">${escapeHtml(t("adminUsers.none"))}</td>
       </tr>
     `;
+    renderAdminUsersPagination(0, Number(state.lastUserSearchPayload?.total_matches || 0), false);
     return;
   }
 
@@ -1403,6 +2605,11 @@ function renderAdminUsers(users) {
       `;
     })
     .join("");
+  renderAdminUsersPagination(
+    users.length,
+    Number(state.lastUserSearchPayload?.total_matches || users.length),
+    state.lastUserSearchPayload?.has_more === true,
+  );
 }
 
 function renderFeedbackTable(submissions) {
@@ -1412,6 +2619,7 @@ function renderFeedbackTable(submissions) {
         <td colspan="5" class="table-empty">${escapeHtml(t("empty.signInFeedback"))}</td>
       </tr>
     `;
+    renderFeedbackPagination(0, false);
     return;
   }
 
@@ -1421,6 +2629,7 @@ function renderFeedbackTable(submissions) {
         <td colspan="5" class="table-empty">${escapeHtml(t("feedback.none"))}</td>
       </tr>
     `;
+    renderFeedbackPagination(0, false);
     return;
   }
 
@@ -1469,6 +2678,71 @@ function renderFeedbackTable(submissions) {
       `;
     })
     .join("");
+  renderFeedbackPagination(
+    submissions.length,
+    state.lastFeedbackPayload?.has_more === true,
+  );
+}
+
+function renderAdminUsersPagination(shownCount, totalCount, hasMore) {
+  const signedIn = !!tokens?.idToken;
+  elements.adminUsersPageMeta.textContent = shownCount
+    ? t("value.showingOfTotal", {
+        shown: formatWholeNumber(shownCount),
+        total: formatWholeNumber(Math.max(totalCount || 0, shownCount)),
+      })
+    : "";
+  elements.adminUsersShowLessButton.disabled =
+    !signedIn || state.userSearchBusy || state.userSearchLimit <= DEFAULT_ADMIN_USERS_LIMIT;
+  elements.adminUsersShowMoreButton.disabled =
+    !signedIn || state.userSearchBusy || !hasMore || state.userSearchLimit >= RESULT_LIMIT_MAX;
+}
+
+function renderFeedbackPagination(shownCount, hasMore) {
+  const signedIn = !!tokens?.idToken;
+  elements.feedbackPageMeta.textContent = shownCount
+    ? t("value.showingCount", {
+        shown: formatWholeNumber(shownCount),
+      })
+    : "";
+  elements.feedbackShowLessButton.disabled =
+    !signedIn || state.feedbackBusy || state.feedbackLimit <= DEFAULT_FEEDBACK_LIMIT;
+  elements.feedbackShowMoreButton.disabled =
+    !signedIn || state.feedbackBusy || !hasMore || state.feedbackLimit >= RESULT_LIMIT_MAX;
+}
+
+function renderTrackedUsersPagination(shownCount) {
+  const signedIn = !!tokens?.idToken;
+  const canShowMore =
+    Array.isArray(state.overview?.users)
+    && state.overview.users.length >= state.overviewUserLimit
+    && state.overviewUserLimit < RESULT_LIMIT_MAX;
+  elements.trackedUsersPageMeta.textContent = shownCount
+    ? t("value.showingCount", {
+        shown: formatWholeNumber(shownCount),
+      })
+    : "";
+  elements.trackedUsersShowLessButton.disabled =
+    !signedIn || state.overviewBusy || state.overviewUserLimit <= DEFAULT_OVERVIEW_USERS_LIMIT;
+  elements.trackedUsersShowMoreButton.disabled =
+    !signedIn || state.overviewBusy || !canShowMore;
+}
+
+function renderProjectsPagination(shownCount) {
+  const signedIn = !!tokens?.idToken;
+  const canShowMore =
+    Array.isArray(state.overview?.projects)
+    && state.overview.projects.length >= state.overviewProjectLimit
+    && state.overviewProjectLimit < RESULT_LIMIT_MAX;
+  elements.projectsPageMeta.textContent = shownCount
+    ? t("value.showingCount", {
+        shown: formatWholeNumber(shownCount),
+      })
+    : "";
+  elements.projectsShowLessButton.disabled =
+    !signedIn || state.overviewBusy || state.overviewProjectLimit <= DEFAULT_OVERVIEW_PROJECTS_LIMIT;
+  elements.projectsShowMoreButton.disabled =
+    !signedIn || state.overviewBusy || !canShowMore;
 }
 
 function renderInspector() {
@@ -1487,6 +2761,7 @@ function renderInspector() {
     state.grantFeedback && state.grantFeedback.userId === user.user_id
       ? state.grantFeedback
       : null;
+  const readOnlyAiSupport = !canGrantAiPrompts();
   const confirmValue = inspectorConfirmValue(user);
   const providerBadges = (Array.isArray(user.linked_providers) ? user.linked_providers : [])
     .map((provider) => `<span class="badge">${escapeHtml(formatProviderLabel(provider))}</span>`)
@@ -1527,6 +2802,12 @@ function renderInspector() {
         ${detailCard(t("detail.userId"), user.user_id)}
         ${detailCard(t("detail.name"), user.display_name || t("detail.na"))}
         ${detailCard(t("detail.username"), user.username || t("detail.na"))}
+        ${detailCard(t("detail.birthdate"), formatBirthdateLabel(user.birthdate || ""))}
+        ${detailCard(t("detail.age"), formatAgeLabel(user.birthdate || ""))}
+        ${detailCard(
+          t("detail.musicProfile"),
+          formatMusicProfileLabel(user.music_profile || ""),
+        )}
         ${detailCard(t("detail.appAuth"), formatAppAuthSummary(user))}
         ${detailCard(t("detail.emailVerification"), formatEmailVerification(user))}
         ${detailCard(t("detail.nativeSessions"), formatNativeSessionSummary(user))}
@@ -1561,6 +2842,7 @@ function renderInspector() {
         <p class="panel-label">${escapeHtml(t("support.label"))}</p>
         <h3>${escapeHtml(t("support.title"))}</h3>
         <p class="delete-copy">${escapeHtml(t("support.copy"))}</p>
+        ${readOnlyAiSupport ? `<p class="delete-copy">${escapeHtml(t("support.readOnly"))}</p>` : ""}
         <form id="grant-prompts-form" class="form-stack" data-user-id="${escapeHtml(user.user_id || "")}">
           <label class="search-input-wrap">
             <span class="search-label">${escapeHtml(t("support.inputLabel"))}</span>
@@ -1572,6 +2854,7 @@ function renderInspector() {
               max="500"
               step="1"
               value="25"
+              ${readOnlyAiSupport ? "disabled" : ""}
               required
             />
           </label>
@@ -1579,7 +2862,7 @@ function renderInspector() {
             <button
               class="button button-secondary"
               type="submit"
-              ${state.grantBusy ? "disabled" : ""}
+              ${state.grantBusy || readOnlyAiSupport ? "disabled" : ""}
             >
               ${escapeHtml(state.grantBusy ? t("support.granting") : t("support.button"))}
             </button>
@@ -1624,6 +2907,21 @@ function renderInspector() {
               class="text-input"
               type="text"
               name="confirmText"
+              autocomplete="off"
+              required
+            />
+          </label>
+          <label class="search-input-wrap">
+            <span class="search-label">${escapeHtml(t("delete.confirmEmail"))}</span>
+            <input
+              class="text-input"
+              type="text"
+              name="confirmEmail"
+              placeholder="${escapeHtml(
+                t("delete.confirmEmailPlaceholder", {
+                  value: user.email || user.user_id || "",
+                }),
+              )}"
               autocomplete="off"
               required
             />
@@ -1820,46 +3118,156 @@ function formatLegacyCognitoSummary(user) {
   return parts.join(" • ");
 }
 
+function formatMusicProfileLabel(value) {
+  const normalized = `${value || ""}`.trim().toLowerCase();
+  if (!normalized) {
+    return t("detail.na");
+  }
+  return tMaybe(`value.musicProfile.${normalized}`, normalized.replace(/_/g, " "));
+}
+
+function parseBirthdate(value) {
+  const normalized = `${value || ""}`.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return null;
+  }
+  const parsed = new Date(`${normalized}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function calculateAgeYears(value) {
+  const birthdate = parseBirthdate(value);
+  if (!birthdate) {
+    return null;
+  }
+  const now = new Date();
+  let age = now.getUTCFullYear() - birthdate.getUTCFullYear();
+  const monthDelta = now.getUTCMonth() - birthdate.getUTCMonth();
+  const dayDelta = now.getUTCDate() - birthdate.getUTCDate();
+  if (monthDelta < 0 || (monthDelta === 0 && dayDelta < 0)) {
+    age -= 1;
+  }
+  return age >= 0 ? age : null;
+}
+
+function formatBirthdateLabel(value) {
+  const normalized = `${value || ""}`.trim();
+  return normalized || t("detail.na");
+}
+
+function formatAgeLabel(value) {
+  const age = calculateAgeYears(value);
+  return age == null ? t("detail.na") : formatWholeNumber(age);
+}
+
+function formatBirthdateSummary(value) {
+  const birthdate = formatBirthdateLabel(value);
+  if (birthdate === t("detail.na")) {
+    return birthdate;
+  }
+  const age = formatAgeLabel(value);
+  return age === t("detail.na") ? birthdate : `${birthdate} • ${age}`;
+}
+
 function setSignedInState(user) {
   elements.signedInHero.classList.remove("hidden");
   elements.dashboard.classList.remove("hidden");
   elements.signedOutPanel.classList.add("hidden");
   elements.identityEmail.textContent = user.email || t("identity.employee");
   elements.identityMeta.textContent = t("identity.employeeAccess");
+  renderWelcomeBanner(user);
+  updateTabView();
   updateBusyState();
+  animateWelcomeBanner();
 }
 
 function setSignedOutState() {
+  welcomeAnimationPlayed = false;
   elements.signedInHero.classList.add("hidden");
   elements.dashboard.classList.add("hidden");
   elements.signedOutPanel.classList.remove("hidden");
   elements.identityEmail.textContent = t("identity.notSignedIn");
   elements.identityMeta.textContent = t("identity.employeeEmailsOnly");
+  renderWelcomeBanner(null);
   resetAdminState();
+  updateTabView();
   updateBusyState();
 }
 
 function updateBusyState() {
-  const busy =
-    state.overviewBusy ||
-    state.userSearchBusy ||
-    state.feedbackBusy ||
-    state.deleteBusy ||
-    state.grantBusy;
   const signedIn = !!tokens?.idToken;
-  elements.refreshButton.disabled = busy || !signedIn;
-  elements.signInButtonSecondary.disabled = busy || signedIn;
-  elements.signOutButton.disabled = busy || !signedIn;
-  elements.userSearchButton.disabled = busy || !signedIn;
-  elements.userSearchClearButton.disabled = busy || !signedIn;
-  elements.userSearchInput.disabled = state.deleteBusy || state.grantBusy || !signedIn;
+  const destructiveBusy = state.deleteBusy || state.grantBusy;
+  elements.refreshButton.disabled = !signedIn || state.overviewBusy;
+  elements.signInButtonSecondary.disabled = signedIn;
+  elements.signOutButton.disabled = !signedIn;
+  elements.tabButtons.forEach((button) => {
+    button.disabled = !signedIn;
+  });
+  elements.userSearchButton.disabled = !signedIn || state.userSearchBusy || destructiveBusy;
+  elements.userSearchClearButton.disabled = !signedIn || state.userSearchBusy || destructiveBusy;
+  elements.userSearchInput.disabled = !signedIn || destructiveBusy;
+  elements.adminUsersShowLessButton.disabled =
+    !signedIn || state.userSearchBusy || state.userSearchLimit <= DEFAULT_ADMIN_USERS_LIMIT;
+  elements.adminUsersShowMoreButton.disabled =
+    !signedIn
+    || state.userSearchBusy
+    || state.userSearchLimit >= RESULT_LIMIT_MAX
+    || state.lastUserSearchPayload?.has_more !== true;
+  elements.trackedUsersShowLessButton.disabled =
+    !signedIn || state.overviewBusy || state.overviewUserLimit <= DEFAULT_OVERVIEW_USERS_LIMIT;
+  elements.trackedUsersShowMoreButton.disabled =
+    !signedIn
+    || state.overviewBusy
+    || !Array.isArray(state.overview?.users)
+    || state.overview.users.length < state.overviewUserLimit
+    || state.overviewUserLimit >= RESULT_LIMIT_MAX;
+  elements.projectsShowLessButton.disabled =
+    !signedIn || state.overviewBusy || state.overviewProjectLimit <= DEFAULT_OVERVIEW_PROJECTS_LIMIT;
+  elements.projectsShowMoreButton.disabled =
+    !signedIn
+    || state.overviewBusy
+    || !Array.isArray(state.overview?.projects)
+    || state.overview.projects.length < state.overviewProjectLimit
+    || state.overviewProjectLimit >= RESULT_LIMIT_MAX;
+  elements.feedbackShowLessButton.disabled =
+    !signedIn || state.feedbackBusy || state.feedbackLimit <= DEFAULT_FEEDBACK_LIMIT;
+  elements.feedbackShowMoreButton.disabled =
+    !signedIn
+    || state.feedbackBusy
+    || state.feedbackLimit >= RESULT_LIMIT_MAX
+    || state.lastFeedbackPayload?.has_more !== true;
+  elements.freeDailyPromptLimitInput.disabled =
+    state.aiPromptLimitsBusy || !signedIn || !canViewAiRuntimeSettings();
+  elements.freeWeeklyPromptLimitInput.disabled =
+    state.aiPromptLimitsBusy || !signedIn || !canViewAiRuntimeSettings();
+  elements.aiPromptLimitsConfirmInput.disabled =
+    state.aiPromptLimitsBusy || !signedIn || !canViewAiRuntimeSettings();
+  elements.aiPromptLimitsSaveButton.disabled =
+    state.aiPromptLimitsBusy
+    || !signedIn
+    || !canViewAiRuntimeSettings()
+    || !promptLimitsConfirmationMatches();
+  elements.aiPromptLimitsSaveButton.textContent = state.aiPromptLimitsBusy
+    ? t("action.saving")
+    : t("action.savePromptLimits");
+  updateAiRuntimeConfirmButtons();
 }
 
 function setStatus(message, tone = "info") {
-  elements.statusPanel.textContent = message || "";
-  elements.statusPanel.className = "status-panel";
-  if (tone) {
-    elements.statusPanel.classList.add(`status-${tone}`);
+  const hasMessage = !!`${message || ""}`.trim();
+  const signedIn = !elements.dashboard.classList.contains("hidden");
+  const activePanel = signedIn ? elements.statusPanel : elements.signedOutStatusPanel;
+  const inactivePanel = signedIn ? elements.signedOutStatusPanel : elements.statusPanel;
+  inactivePanel.textContent = "";
+  inactivePanel.className = signedIn ? "status-panel hidden" : "status-panel welcome-status-panel hidden";
+  activePanel.textContent = hasMessage ? message : "";
+  activePanel.className = signedIn ? "status-panel welcome-status-panel" : "status-panel";
+  activePanel.classList.toggle("hidden", !hasMessage);
+  if (hasMessage && tone) {
+    activePanel.classList.add(`status-${tone}`);
   }
 }
 
@@ -2101,12 +3509,84 @@ function decodeIdToken(idToken) {
 
 function handleUserSearchSubmit(event) {
   event.preventDefault();
+  state.userSearchLimit = DEFAULT_ADMIN_USERS_LIMIT;
   searchUsers({ query: elements.userSearchInput.value.trim(), silent: false, autoSelect: true });
 }
 
 function clearUserSearch() {
   elements.userSearchInput.value = "";
+  state.userSearchLimit = DEFAULT_ADMIN_USERS_LIMIT;
   searchUsers({ query: "", silent: false, autoSelect: true });
+}
+
+function handleAdminUsersShowLess() {
+  if (state.userSearchBusy || state.userSearchLimit <= DEFAULT_ADMIN_USERS_LIMIT) {
+    return;
+  }
+  state.userSearchLimit = DEFAULT_ADMIN_USERS_LIMIT;
+  searchUsers({ query: state.currentSearchQuery, silent: true, autoSelect: true });
+}
+
+function handleAdminUsersShowMore() {
+  if (state.userSearchBusy || state.userSearchLimit >= RESULT_LIMIT_MAX) {
+    return;
+  }
+  state.userSearchLimit = Math.min(state.userSearchLimit + RESULT_LIMIT_STEP, RESULT_LIMIT_MAX);
+  searchUsers({ query: state.currentSearchQuery, silent: true, autoSelect: false });
+}
+
+function handleTrackedUsersShowLess() {
+  if (state.overviewBusy || state.overviewUserLimit <= DEFAULT_OVERVIEW_USERS_LIMIT) {
+    return;
+  }
+  state.overviewUserLimit = DEFAULT_OVERVIEW_USERS_LIMIT;
+  void refreshOverview();
+}
+
+function handleTrackedUsersShowMore() {
+  if (state.overviewBusy || state.overviewUserLimit >= RESULT_LIMIT_MAX) {
+    return;
+  }
+  state.overviewUserLimit = Math.min(
+    state.overviewUserLimit + RESULT_LIMIT_STEP,
+    RESULT_LIMIT_MAX,
+  );
+  void refreshOverview();
+}
+
+function handleProjectsShowLess() {
+  if (state.overviewBusy || state.overviewProjectLimit <= DEFAULT_OVERVIEW_PROJECTS_LIMIT) {
+    return;
+  }
+  state.overviewProjectLimit = DEFAULT_OVERVIEW_PROJECTS_LIMIT;
+  void refreshOverview();
+}
+
+function handleProjectsShowMore() {
+  if (state.overviewBusy || state.overviewProjectLimit >= RESULT_LIMIT_MAX) {
+    return;
+  }
+  state.overviewProjectLimit = Math.min(
+    state.overviewProjectLimit + RESULT_LIMIT_STEP,
+    RESULT_LIMIT_MAX,
+  );
+  void refreshOverview();
+}
+
+function handleFeedbackShowLess() {
+  if (state.feedbackBusy || state.feedbackLimit <= DEFAULT_FEEDBACK_LIMIT) {
+    return;
+  }
+  state.feedbackLimit = DEFAULT_FEEDBACK_LIMIT;
+  loadFeedback({ silent: true, autoSelect: true });
+}
+
+function handleFeedbackShowMore() {
+  if (state.feedbackBusy || state.feedbackLimit >= RESULT_LIMIT_MAX) {
+    return;
+  }
+  state.feedbackLimit = Math.min(state.feedbackLimit + RESULT_LIMIT_STEP, RESULT_LIMIT_MAX);
+  loadFeedback({ silent: true, autoSelect: false });
 }
 
 function handleAdminUsersTableClick(event) {
@@ -2206,13 +3686,25 @@ async function handleInspectorSubmit(event) {
   const formData = new FormData(form);
   const reason = `${formData.get("reason") || ""}`.trim();
   const confirmText = `${formData.get("confirmText") || ""}`.trim();
+  const confirmEmail = `${formData.get("confirmEmail") || ""}`.trim().toLowerCase();
   const force = formData.get("force") === "on";
   const confirmValue = inspectorConfirmValue(user);
+  const expectedEmail = inspectorDeleteEmailValue(user);
   if (confirmText !== confirmValue) {
     state.deleteFeedback = {
       userId: user.user_id,
       tone: "error",
       message: t("delete.typeExact", { value: confirmValue }),
+      requiresForce: force,
+    };
+    renderInspector();
+    return;
+  }
+  if (confirmEmail !== expectedEmail) {
+    state.deleteFeedback = {
+      userId: user.user_id,
+      tone: "error",
+      message: t("delete.typeExactEmail", { value: expectedEmail }),
       requiresForce: force,
     };
     renderInspector();
@@ -2231,6 +3723,7 @@ async function handleInspectorSubmit(event) {
       body: JSON.stringify({
         user_id: user.user_id,
         reason,
+        confirm_email: confirmEmail,
         force,
       }),
     });
@@ -2268,6 +3761,114 @@ async function handleInspectorSubmit(event) {
     }
   } finally {
     state.deleteBusy = false;
+    updateBusyState();
+  }
+}
+
+async function handleAiPromptLimitsSubmit(event) {
+  event.preventDefault();
+  if (!tokens?.idToken || !canViewAiRuntimeSettings() || !promptLimitsConfirmationMatches()) {
+    return;
+  }
+
+  const freeDailyPromptLimit = Number(`${elements.freeDailyPromptLimitInput.value || ""}`.trim());
+  const freeWeeklyPromptLimit = Number(`${elements.freeWeeklyPromptLimitInput.value || ""}`.trim());
+
+  state.aiPromptLimitsBusy = true;
+  state.aiPromptLimitsFeedback = null;
+  updateBusyState();
+  setStatus(t("status.savingAiPromptLimits"), "info");
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_AI_PROMPT_LIMITS_PATH, {
+      method: "PUT",
+      body: JSON.stringify({
+        free_daily_prompt_limit: freeDailyPromptLimit,
+        free_weekly_prompt_limit: freeWeeklyPromptLimit,
+      }),
+    });
+    state.aiPromptLimits = payload.settings || null;
+    state.aiPromptLimitsFeedback = {
+      tone: "success",
+      message: t("status.aiPromptLimitsSaved"),
+    };
+    elements.aiPromptLimitsConfirmInput.value = "";
+    renderAiPromptLimitSettings();
+    setStatus(t("status.aiPromptLimitsSaved"), "success");
+  } catch (error) {
+    handleAdminRequestError(error, t("status.saveAiPromptLimitsFailed"));
+    state.aiPromptLimitsFeedback = {
+      tone: "error",
+      message: error.message || t("status.saveAiPromptLimitsFailed"),
+    };
+    renderAiPromptLimitSettings();
+  } finally {
+    state.aiPromptLimitsBusy = false;
+    updateBusyState();
+  }
+}
+
+async function handleAiRuntimeSubmit(event) {
+  event.preventDefault();
+  const form = event.target.closest(".ai-runtime-form");
+  if (!form || !tokens?.idToken || !canViewAiRuntimeSettings() || !runtimeConfirmationMatches(form)) {
+    return;
+  }
+
+  const feature = `${form.dataset.feature || ""}`.trim();
+  const formData = new FormData(form);
+
+  state.aiRuntimeBusy = true;
+  state.aiRuntimeFeedbackByFeature = {
+    ...state.aiRuntimeFeedbackByFeature,
+    [feature]: null,
+  };
+  updateBusyState();
+  setStatus(t("status.savingAiRuntime"), "info");
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_AI_RUNTIME_PATH, {
+      method: "PUT",
+      body: JSON.stringify({
+        feature,
+        model_override: `${formData.get("model_override") || ""}`,
+        system_prompt_override: `${formData.get("system_prompt_override") || ""}`,
+        max_output_tokens_override: `${formData.get("max_output_tokens_override") || ""}`.trim(),
+        temperature_override: `${formData.get("temperature_override") || ""}`.trim(),
+        reasoning_effort_override: `${formData.get("reasoning_effort_override") || ""}`,
+        prompt_cache_retention_override: `${formData.get("prompt_cache_retention_override") || ""}`,
+      }),
+    });
+    if (state.aiRuntimeSettings?.features) {
+      state.aiRuntimeSettings.features = state.aiRuntimeSettings.features.map((candidate) =>
+        candidate.feature === feature ? payload.feature : candidate,
+      );
+    }
+    state.aiRuntimeFeedbackByFeature = {
+      ...state.aiRuntimeFeedbackByFeature,
+      [feature]: {
+        tone: "success",
+        message: t("status.aiRuntimeSaved"),
+      },
+    };
+    const confirmInput = form.querySelector(".ai-runtime-confirm-input");
+    if (confirmInput) {
+      confirmInput.value = "";
+    }
+    renderAiRuntimeSettings();
+    setStatus(t("status.aiRuntimeSaved"), "success");
+  } catch (error) {
+    handleAdminRequestError(error, t("status.saveAiRuntimeFailed"));
+    state.aiRuntimeFeedbackByFeature = {
+      ...state.aiRuntimeFeedbackByFeature,
+      [feature]: {
+        tone: "error",
+        message: error.message || t("status.saveAiRuntimeFailed"),
+      },
+    };
+    renderAiRuntimeSettings();
+  } finally {
+    state.aiRuntimeBusy = false;
     updateBusyState();
   }
 }
@@ -2310,26 +3911,46 @@ function inspectorConfirmValue(user) {
   return user.username || user.email || user.user_id || "";
 }
 
+function inspectorDeleteEmailValue(user) {
+  return `${user.email || user.user_id || ""}`.trim().toLowerCase();
+}
+
 function resetAdminState() {
+  destroyAllAnalyticsCharts();
   state.overviewBusy = false;
   state.userSearchBusy = false;
   state.feedbackBusy = false;
+  state.aiPromptLimitsBusy = false;
+  state.aiRuntimeBusy = false;
   state.deleteBusy = false;
   state.grantBusy = false;
   state.currentSearchQuery = "";
   state.overview = null;
+  state.overviewUserLimit = DEFAULT_OVERVIEW_USERS_LIMIT;
+  state.overviewProjectLimit = DEFAULT_OVERVIEW_PROJECTS_LIMIT;
   state.lastUserSearchPayload = null;
+  state.userSearchLimit = DEFAULT_ADMIN_USERS_LIMIT;
   state.adminUsers = [];
   state.selectedUserId = "";
+  state.lastFeedbackPayload = null;
+  state.feedbackLimit = DEFAULT_FEEDBACK_LIMIT;
   state.feedbackList = [];
   state.selectedFeedbackId = "";
   state.selectedFeedback = null;
+  state.aiPromptLimits = null;
+  state.aiPromptLimitsFeedback = null;
+  state.aiRuntimeSettings = null;
+  state.aiRuntimeFeedbackByFeature = {};
+  state.analyticsRange = "30d";
   state.feedbackRequestId = 0;
   state.deleteFeedback = null;
   state.grantFeedback = null;
   state.searchRequestId = 0;
+  state.activeTab = DEFAULT_TAB;
+  state.loadedTabs = buildLoadedTabs();
 
   elements.userSearchInput.value = "";
+  elements.aiPromptLimitsConfirmInput.value = "";
   elements.adminUsersTableBody.innerHTML = `
     <tr>
       <td colspan="5" class="table-empty">${escapeHtml(t("empty.signInSearchUsers"))}</td>
@@ -2344,6 +3965,25 @@ function resetAdminState() {
   `;
   elements.feedbackInspector.className = "inspector-empty";
   elements.feedbackInspector.innerHTML = escapeHtml(t("empty.signInFeedback"));
+  elements.adminUsersPageMeta.textContent = "";
+  elements.trackedUsersPageMeta.textContent = "";
+  elements.projectsPageMeta.textContent = "";
+  elements.feedbackPageMeta.textContent = "";
+  updateTabView();
+  renderAiPromptLimitSettings();
+  renderAiRuntimeSettings();
+}
+
+function destroyAnalyticsChart(chartKey) {
+  const chart = analyticsCharts[chartKey];
+  if (chart && typeof chart.destroy === "function") {
+    chart.destroy();
+  }
+  delete analyticsCharts[chartKey];
+}
+
+function destroyAllAnalyticsCharts() {
+  Object.keys(analyticsCharts).forEach(destroyAnalyticsChart);
 }
 
 function handleAdminRequestError(error, fallbackMessage) {
@@ -2437,8 +4077,32 @@ function formatNumber(value) {
   return new Intl.NumberFormat(state.locale, { notation: "compact" }).format(Number(value || 0));
 }
 
+function formatDecimal(value) {
+  return new Intl.NumberFormat(state.locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(Number(value || 0));
+}
+
 function formatWholeNumber(value) {
   return new Intl.NumberFormat(state.locale).format(Number(value || 0));
+}
+
+function formatPercent(value) {
+  return new Intl.NumberFormat(state.locale, {
+    style: "percent",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function formatShortDate(value) {
+  if (!value) return t("detail.na");
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return t("detail.na");
+  return new Intl.DateTimeFormat(state.locale, {
+    month: "short",
+    day: "numeric",
+  }).format(parsed);
 }
 
 function formatDate(value) {

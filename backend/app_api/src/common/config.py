@@ -16,6 +16,9 @@ PROJECTION_QUEUE_URL = os.environ["PROJECTION_QUEUE_URL"]
 USER_TOMBSTONES_TABLE = os.environ.get("USER_TOMBSTONES_TABLE", "").strip()
 AI_USAGE_STATE_TABLE = os.environ.get("AI_USAGE_STATE_TABLE", "").strip()
 AI_USAGE_EVENTS_TABLE = os.environ.get("AI_USAGE_EVENTS_TABLE", "").strip()
+AI_PROMPT_LIMIT_SETTINGS_TABLE = os.environ.get(
+    "AI_PROMPT_LIMIT_SETTINGS_TABLE", ""
+).strip()
 FEEDBACK_SUBMISSIONS_TABLE = os.environ.get("FEEDBACK_SUBMISSIONS_TABLE", "").strip()
 ADMIN_ALLOWLIST_TABLE = os.environ.get("ADMIN_ALLOWLIST_TABLE", "").strip()
 ADMIN_COGNITO_APP_CLIENT_ID = os.environ.get(
@@ -25,6 +28,31 @@ ADMIN_COGNITO_USER_POOL_ID = os.environ.get(
     "ADMIN_COGNITO_USER_POOL_ID", ""
 ).strip()
 ADMIN_ALLOWED_EMAILS = os.environ.get("ADMIN_ALLOWED_EMAILS", "").strip()
+AI_ADMIN_EDITOR_EMAILS = os.environ.get(
+    "AI_ADMIN_EDITOR_EMAILS",
+    "andrew@mixroom.ai",
+).strip()
+AI_RUNTIME_DEFAULT_MODEL = os.environ.get(
+    "AI_RUNTIME_DEFAULT_MODEL",
+    "gpt-4.1-mini",
+).strip() or "gpt-4.1-mini"
+AI_CHAT_DEFAULT_TEMPERATURE = float(
+    os.environ.get("AI_CHAT_DEFAULT_TEMPERATURE", "0.2") or "0.2"
+)
+VIDEO_EDITOR_DEFAULT_TEMPERATURE = float(
+    os.environ.get("VIDEO_EDITOR_DEFAULT_TEMPERATURE", "0.1") or "0.1"
+)
+AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS = frozenset(
+    value.strip().lower()
+    for value in os.environ.get(
+        "AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS",
+        (
+            "gpt-4.1,gpt-5,gpt-5-codex,gpt-5.1,gpt-5.1-codex,"
+            "gpt-5.1-codex-mini,gpt-5.1-chat-latest,gpt-5.2"
+        ),
+    ).split(",")
+    if value.strip()
+)
 
 ENFORCE_SUBSCRIPTIONS = os.environ.get("ENFORCE_SUBSCRIPTIONS", "false").lower() == "true"
 ALLOW_STUDIO_TIER = os.environ.get("ALLOW_STUDIO_TIER", "false").lower() == "true"
@@ -47,6 +75,21 @@ APP_AUTH_ACCESS_TOKEN_TTL_SECONDS = int(
 APP_AUTH_REFRESH_TOKEN_TTL_SECONDS = int(
     os.environ.get("APP_AUTH_REFRESH_TOKEN_TTL_SECONDS", "2592000") or "2592000"
 )
+AUTH_PASSWORD_MIN_LENGTH = int(
+    os.environ.get("COGNITO_PASSWORD_MIN_LENGTH", "8") or "8"
+)
+AUTH_PASSWORD_REQUIRE_UPPERCASE = os.environ.get(
+    "COGNITO_PASSWORD_REQUIRE_UPPERCASE", "true"
+).lower() == "true"
+AUTH_PASSWORD_REQUIRE_LOWERCASE = os.environ.get(
+    "COGNITO_PASSWORD_REQUIRE_LOWERCASE", "true"
+).lower() == "true"
+AUTH_PASSWORD_REQUIRE_NUMBER = os.environ.get(
+    "COGNITO_PASSWORD_REQUIRE_NUMBER", "true"
+).lower() == "true"
+AUTH_PASSWORD_REQUIRE_SYMBOL = os.environ.get(
+    "COGNITO_PASSWORD_REQUIRE_SYMBOL", "true"
+).lower() == "true"
 APP_AUTH_EMAIL_FROM_ADDRESS = os.environ.get(
     "APP_AUTH_EMAIL_FROM_ADDRESS", ""
 ).strip()
@@ -100,6 +143,17 @@ DEFAULT_CHECKOUT_URL = os.environ.get(
 
 POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY", "").strip()
 POSTHOG_HOST = os.environ.get("POSTHOG_HOST", "").strip()
+POSTHOG_APP_HOST = os.environ.get(
+    "POSTHOG_APP_HOST", "https://us.posthog.com"
+).strip() or "https://us.posthog.com"
+POSTHOG_PROJECT_ID = os.environ.get("POSTHOG_PROJECT_ID", "").strip()
+POSTHOG_PERSONAL_API_KEY = os.environ.get("POSTHOG_PERSONAL_API_KEY", "").strip()
+POSTHOG_PERSONAL_API_KEY_SECRET_ARN = os.environ.get(
+    "POSTHOG_PERSONAL_API_KEY_SECRET_ARN", ""
+).strip()
+POSTHOG_METRICS_CACHE_TTL_SECONDS = int(
+    os.environ.get("POSTHOG_METRICS_CACHE_TTL_SECONDS", "300") or "300"
+)
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "").strip() or "dev"
 MINIMUM_SIGNUP_AGE_YEARS = int(

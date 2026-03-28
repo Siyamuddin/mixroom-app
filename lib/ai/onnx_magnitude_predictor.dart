@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 
 import 'ai_debug.dart';
+import 'onnx_session_loader.dart';
 import '../models/goal_vector.dart';
 import '../models/mixing_result.dart';
 import '../models/project_state.dart';
@@ -127,21 +128,43 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
     );
 
     try {
-      _applySession = await _ort.createSessionFromAsset(applyModelAsset);
+      _applySession = await createCpuSessionFromAsset(
+        runtime: _ort,
+        assetKey: applyModelAsset,
+        scope: 'onnx-mag',
+      );
       aiDebugLog('onnx-mag', 'apply model loaded');
-    } catch (_) {
+    } catch (error) {
       _applySession = null;
-      aiDebugLog('onnx-mag', 'apply model load failed');
+      aiDebugLog('onnx-mag', 'apply model load failed error=$error');
     }
 
     try {
-      _magnitudeSession =
-          await _ort.createSessionFromAsset(magnitudeModelAsset);
+      _magnitudeSession = await createCpuSessionFromAsset(
+        runtime: _ort,
+        assetKey: magnitudeModelAsset,
+        scope: 'onnx-mag',
+      );
       aiDebugLog('onnx-mag', 'magnitude model loaded');
-    } catch (_) {
+    } catch (error) {
       _magnitudeSession = null;
-      aiDebugLog('onnx-mag', 'magnitude model load failed');
+      aiDebugLog('onnx-mag', 'magnitude model load failed error=$error');
     }
+  }
+
+  @override
+  Future<void> dispose() async {
+    final applySession = _applySession;
+    final magnitudeSession = _magnitudeSession;
+    _applySession = null;
+    _magnitudeSession = null;
+
+    try {
+      await applySession?.close();
+    } catch (_) {}
+    try {
+      await magnitudeSession?.close();
+    } catch (_) {}
   }
 
   @override

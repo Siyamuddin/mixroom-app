@@ -1,15 +1,22 @@
-import 'dart:convert';
+// ignore_for_file: unused_element
 
+import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:http/http.dart' as http;
 import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/config/legal_config.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
+import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/app_user_models.dart';
 import 'package:mixroom/models/auth_user_profile.dart';
+import 'package:mixroom/models/music_profile_option.dart';
 import 'package:mixroom/screens/login.dart';
 import 'package:mixroom/screens/signed_in_shell.dart';
+import 'package:mixroom/widgets/auth_figma_shell.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -22,19 +29,25 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   String? _lastStageKey;
+  LoginEntryMode _signedOutLoginMode = LoginEntryMode.signIn;
 
   bool _needsRequiredProfile(
-    AuthUserProfile user,
     AppUserSnapshot? profile,
     AppUserService appUser,
   ) {
     if (!appUser.supportsRemoteProfileEdits || profile == null) {
       return false;
     }
-    if (user.provider == AuthProviderType.email) {
-      return false;
-    }
     return !profile.isSignupComplete;
+  }
+
+  Future<void> _handleRequiredProfileBack(AuthUserProfile user) async {
+    setState(() {
+      _signedOutLoginMode = user.provider == AuthProviderType.email
+          ? LoginEntryMode.createAccount
+          : LoginEntryMode.signIn;
+    });
+    await context.read<AuthService>().signOut();
   }
 
   @override
@@ -45,19 +58,15 @@ class _AuthGateState extends State<AuthGate> {
         late final String stageKey;
 
         if (auth.isInitializing) {
-          destination = const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
-          );
+          destination = const MixroomLaunchSplash();
           stageKey = 'auth_initializing';
         } else if (!auth.isSignedIn) {
-          destination = const LoginScreen();
+          destination = LoginScreen(initialMode: _signedOutLoginMode);
           stageKey = 'signed_out';
         } else {
           final signedInUser = auth.signedInUser;
           if (signedInUser == null) {
-            destination = const LoginScreen();
+            destination = LoginScreen(initialMode: _signedOutLoginMode);
             stageKey = 'signed_out_null_user';
           } else if (appUser.isResolvingPostSignIn || !appUser.isInitialized) {
             destination = _SignupCompletionGate(
@@ -66,11 +75,9 @@ class _AuthGateState extends State<AuthGate> {
                   !appUser.isInitialized,
               isResolvingPostSignIn: appUser.isResolvingPostSignIn,
               hasPendingSignupProfileSync: false,
-              onSignOut: auth.isBusy ? null : auth.signOut,
             );
             stageKey = 'profile_loading';
           } else if (_needsRequiredProfile(
-            signedInUser,
             appUser.current,
             appUser,
           )) {
@@ -79,7 +86,9 @@ class _AuthGateState extends State<AuthGate> {
               profile: appUser.current!,
               busy: appUser.isLoading,
               error: appUser.lastError,
-              onSignOut: auth.isBusy ? null : auth.signOut,
+              onBack: auth.isBusy
+                  ? null
+                  : () => _handleRequiredProfileBack(signedInUser),
             );
             stageKey = 'required_profile';
           } else if (appUser.hasPendingSignupProfileSync) {
@@ -87,7 +96,6 @@ class _AuthGateState extends State<AuthGate> {
               busy: appUser.isLoading,
               isResolvingPostSignIn: false,
               hasPendingSignupProfileSync: true,
-              onSignOut: auth.isBusy ? null : auth.signOut,
             );
             stageKey = 'pending_signup_sync';
           } else {
@@ -96,8 +104,7 @@ class _AuthGateState extends State<AuthGate> {
           }
         }
 
-        final showLoginLoadingShell =
-            stageKey == 'profile_loading' &&
+        final showLoginLoadingShell = stageKey == 'profile_loading' &&
             (_lastStageKey == 'signed_out' ||
                 _lastStageKey == 'signed_out_null_user');
         final animatedChild = showLoginLoadingShell
@@ -106,6 +113,13 @@ class _AuthGateState extends State<AuthGate> {
 
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _lastStageKey = stageKey;
+          if (stageKey == 'signed_in_shell' &&
+              _signedOutLoginMode != LoginEntryMode.signIn &&
+              mounted) {
+            setState(() {
+              _signedOutLoginMode = LoginEntryMode.signIn;
+            });
+          }
         });
 
         return AnimatedSwitcher(
@@ -123,7 +137,8 @@ class _AuthGateState extends State<AuthGate> {
             );
           },
           child: KeyedSubtree(
-            key: ValueKey(showLoginLoadingShell ? 'login_loading_shell' : stageKey),
+            key: ValueKey(
+                showLoginLoadingShell ? 'login_loading_shell' : stageKey),
             child: animatedChild,
           ),
         );
@@ -137,21 +152,84 @@ class _AuthGateLoginLoadingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: const [
-        LoginScreen(),
-        ColoredBox(
-          color: Color(0x660C1A32),
-          child: Center(
-            child: SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(strokeWidth: 2.8),
+    return Scaffold(
+      backgroundColor: const Color(0xFF090909),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const MixroomAuthBackground(),
+          SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 320),
+                child: _AuthGateStatusPanel(
+                  title: L10n.translate(context, 'Loading your account'),
+                  body: L10n.translate(context, 'Checking your sign-in...'),
+                  compact: true,
+                ),
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AuthGateStatusPanel extends StatelessWidget {
+  const _AuthGateStatusPanel({
+    required this.title,
+    required this.body,
+    this.compact = false,
+  });
+
+  final String title;
+  final String body;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: compact ? 24 : 26,
+            height: compact ? 24 : 26,
+            child: const CircularProgressIndicator(
+              strokeWidth: 2.6,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                Color(0xFFF4F4F4),
+              ),
+            ),
+          ),
+          SizedBox(height: compact ? 18 : 20),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color: const Color(0xFFF4F4F4),
+              fontSize: compact ? 22 : 24,
+              height: 1.15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            body,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: 'Pretendard',
+              color: Color.fromRGBO(244, 244, 244, 0.82),
+              fontSize: 14,
+              height: 20 / 14,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -162,14 +240,14 @@ class _RequiredProfileCompletionGate extends StatefulWidget {
     required this.profile,
     required this.busy,
     required this.error,
-    required this.onSignOut,
+    required this.onBack,
   });
 
   final AuthUserProfile user;
   final AppUserSnapshot profile;
   final bool busy;
   final String? error;
-  final Future<void> Function()? onSignOut;
+  final Future<void> Function()? onBack;
 
   @override
   State<_RequiredProfileCompletionGate> createState() =>
@@ -220,6 +298,8 @@ class _RequiredProfileCompletionGateState
   final TextEditingController _birthdateController = TextEditingController();
 
   DateTime? _selectedBirthdateUtc;
+  String? _musicProfileValue;
+  bool _musicProfileMenuOpen = false;
   bool _newsletterOptIn = false;
   String? _inlineError;
   bool _isSubmitting = false;
@@ -239,6 +319,9 @@ class _RequiredProfileCompletionGateState
         _birthdateController.text = _formatBirthdate(_selectedBirthdateUtc!);
       }
     }
+    _musicProfileValue = (widget.profile.musicProfile ?? '').trim().isEmpty
+        ? null
+        : widget.profile.musicProfile!.trim().toLowerCase();
     _newsletterOptIn = widget.profile.newsletterOptIn;
   }
 
@@ -337,6 +420,192 @@ class _RequiredProfileCompletionGateState
     return '$year-$month-$day';
   }
 
+  DateTime _defaultBirthdateForPickerUtc() {
+    final now = DateTime.now().toUtc();
+    final defaultDate = DateTime.utc(now.year - 18, now.month, now.day);
+    final first = _earliestSelectableBirthdateUtc();
+    final last = _latestAllowedBirthdateUtc();
+    if (defaultDate.isBefore(first)) return first;
+    if (defaultDate.isAfter(last)) return last;
+    return defaultDate;
+  }
+
+  Widget _buildMusicProfileSelector({required bool busy}) {
+    final triggerText = _musicProfileValue == null
+        ? L10n.translate(context, 'Select one (optional)')
+        : musicProfileLabel(_musicProfileValue);
+    final textColor = _musicProfileValue == null
+        ? const Color.fromRGBO(244, 244, 244, 0.72)
+        : const Color(0xFFF4F4F4);
+    final options = <MapEntry<String, String>>[
+      MapEntry('__unset__', L10n.translate(context, 'Not set')),
+      ...kMusicProfileOptions.map(
+        (option) => MapEntry(option.value, option.label),
+      ),
+    ];
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            color: const Color.fromRGBO(244, 244, 244, 0.30),
+            boxShadow: const [
+              BoxShadow(
+                color: Color.fromRGBO(0, 0, 0, 0.25),
+                blurRadius: 15,
+                spreadRadius: 8,
+              ),
+            ],
+            border: Border.all(
+              color: const Color.fromRGBO(244, 244, 244, 0.12),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: busy
+                      ? null
+                      : () {
+                          setState(() {
+                            _musicProfileMenuOpen = !_musicProfileMenuOpen;
+                          });
+                        },
+                  child: SizedBox(
+                    height: 48,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(23, 0, 20, 0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              triggerText,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: textColor,
+                                fontSize: 15,
+                                height: 22 / 15,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Opacity(
+                            opacity: busy ? 0.45 : 1,
+                            child: SizedBox(
+                              width: 11.25,
+                              height: 11.25,
+                              child: Center(
+                                child: Transform.rotate(
+                                  angle: _musicProfileMenuOpen ? 0 : math.pi,
+                                  child: SvgPicture.asset(
+                                    kMixroomDropdownIconAsset,
+                                    width: 11.25,
+                                    height: 11.25,
+                                    colorFilter: const ColorFilter.mode(
+                                      Color(0x80F4F4F4),
+                                      BlendMode.srcIn,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                child: _musicProfileMenuOpen
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 23),
+                            child: Divider(
+                              height: 1,
+                              thickness: 1,
+                              color: Color.fromRGBO(244, 244, 244, 0.15),
+                            ),
+                          ),
+                          ...options.map((entry) {
+                            final isSelected = entry.key == '__unset__'
+                                ? _musicProfileValue == null
+                                : _musicProfileValue == entry.key;
+                            return Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: busy
+                                    ? null
+                                    : () {
+                                        setState(() {
+                                          _musicProfileValue =
+                                              entry.key == '__unset__'
+                                                  ? null
+                                                  : entry.key;
+                                          _inlineError = null;
+                                          _musicProfileMenuOpen = false;
+                                        });
+                                      },
+                                child: SizedBox(
+                                  height: 44,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 23,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            entry.value,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontFamily: 'Pretendard',
+                                              color: const Color(0xFFF4F4F4),
+                                              fontSize: 15,
+                                              height: 22 / 15,
+                                              fontWeight: isSelected
+                                                  ? FontWeight.w600
+                                                  : FontWeight.w400,
+                                            ),
+                                          ),
+                                        ),
+                                        if (isSelected)
+                                          const Icon(
+                                            Icons.check_rounded,
+                                            color: Color(0xFFF4F4F4),
+                                            size: 16,
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }),
+                        ],
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   String? _validateUsername(String value) {
     final safe = value.trim().toLowerCase();
     if (safe.isEmpty) {
@@ -361,7 +630,8 @@ class _RequiredProfileCompletionGateState
   }
 
   Future<void> _pickBirthdate() async {
-    final initialDate = _selectedBirthdateUtc ?? _latestAllowedBirthdateUtc();
+    final initialDate =
+        _selectedBirthdateUtc ?? _defaultBirthdateForPickerUtc();
     final picked = await showDatePicker(
       context: context,
       initialDate: initialDate,
@@ -452,21 +722,45 @@ class _RequiredProfileCompletionGateState
       await appUser.stageSignupConsents(
         email: widget.user.email,
         username: username,
-        displayName: widget.profile.displayName,
+        displayName: widget.profile.displayName.trim().isNotEmpty
+            ? widget.profile.displayName
+            : widget.user.displayName,
         givenName: widget.profile.givenName,
         familyName: widget.profile.familyName,
         birthdate: _formatBirthdate(birthdate),
+        musicProfile: _musicProfileValue,
+        newsletterOptIn: _newsletterOptIn,
+        syncImmediately: false,
+      );
+      await appUser.completeSignupProfile(
+        email: widget.user.email,
+        username: username,
+        displayName: widget.profile.displayName.trim().isNotEmpty
+            ? widget.profile.displayName
+            : widget.user.displayName,
+        givenName: widget.profile.givenName,
+        familyName: widget.profile.familyName,
+        birthdate: _formatBirthdate(birthdate),
+        musicProfile: _musicProfileValue,
         newsletterOptIn: _newsletterOptIn,
       );
-      await appUser.refresh(force: true);
       if (!mounted) return;
       final nextProfile = appUser.current;
+      final expectedMusicProfile =
+          (_musicProfileValue ?? '').trim().toLowerCase();
+      final persistedMusicProfile =
+          (nextProfile?.musicProfile ?? '').trim().toLowerCase();
+      final missingExpectedMusicProfile = expectedMusicProfile.isNotEmpty &&
+          persistedMusicProfile != expectedMusicProfile;
       if (nextProfile == null ||
-          !nextProfile.isSignupComplete) {
+          !nextProfile.isSignupComplete ||
+          missingExpectedMusicProfile) {
         setState(() {
-          _inlineError = (appUser.lastError ?? '').trim().isNotEmpty
-              ? appUser.lastError
-              : 'Mixroom could not finish creating your account. Please try again.';
+          _inlineError = missingExpectedMusicProfile
+              ? 'Mixroom could not save your music profile. Please try again.'
+              : (appUser.lastError ?? '').trim().isNotEmpty
+                  ? appUser.lastError
+                  : 'Mixroom could not finish creating your account. Please try again.';
         });
       }
     } catch (e) {
@@ -491,215 +785,175 @@ class _RequiredProfileCompletionGateState
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final busy = widget.busy || _isSubmitting;
     final errorText = (_inlineError ?? '').trim();
-    final inlineLinkStyle = TextButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      minimumSize: Size.zero,
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-    );
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: <Color>[
-              Color(0xFF09111E),
-              Color(0xFF0C182A),
-              Color(0xFF101D31),
-            ],
-          ),
-        ),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 440),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(22, 24, 22, 20),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.white.withOpacity(0.08)),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.22),
-                      blurRadius: 28,
-                      offset: const Offset(0, 16),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Align(
-                      child: Container(
-                        width: 52,
-                        height: 52,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF6BA8FF).withOpacity(0.14),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: const Color(0xFF8CBAFF).withOpacity(0.28),
-                          ),
+      resizeToAvoidBottomInset: false,
+      body: Stack(
+        children: [
+          const Positioned.fill(child: MixroomAuthBackground()),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+                final minHeight = constraints.maxHeight - bottomInset - 24;
+
+                return AnimatedPadding(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  padding: EdgeInsets.only(bottom: bottomInset),
+                  child: SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: const EdgeInsets.fromLTRB(27, 14, 27, 24),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: 402,
+                          minHeight: minHeight < 0 ? 0 : minHeight,
                         ),
-                        child: const Icon(
-                          Icons.person_outline_rounded,
-                          color: Color(0xFFCFE1FF),
-                          size: 26,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Almost done',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Pick a username and confirm your birthday to finish setting up your Mixroom account.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.white70,
-                        height: 1.45,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 18),
-                    TextField(
-                      controller: _usernameController,
-                      enabled: !busy,
-                      autocorrect: false,
-                      textCapitalization: TextCapitalization.none,
-                      decoration: const InputDecoration(
-                        labelText: 'Username',
-                        hintText: 'your_username',
-                      ),
-                      onChanged: (_) {
-                        if (_inlineError != null) {
-                          setState(() => _inlineError = null);
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'You can change this later.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.white54,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: _birthdateController,
-                      enabled: !busy,
-                      readOnly: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Birthday',
-                        hintText: 'Select birthday',
-                        suffixIcon: Icon(Icons.calendar_today_rounded),
-                      ),
-                      onTap: busy ? null : _pickBirthdate,
-                    ),
-                    const SizedBox(height: 14),
-                    CheckboxListTile(
-                      value: _newsletterOptIn,
-                      onChanged: busy
-                          ? null
-                          : (next) {
-                              setState(() => _newsletterOptIn = next ?? false);
-                            },
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: const Text(
-                        'Email me product updates and news.',
-                        style: TextStyle(fontSize: 13),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          'By continuing, you agree to the ',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.white70,
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: busy
-                              ? null
-                              : () => _openUrl(LegalConfig.termsUrl),
-                          style: inlineLinkStyle,
-                          child: const Text('Terms of Service'),
-                        ),
-                        Text(
-                          ' and ',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.white70,
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: busy
-                              ? null
-                              : () => _openUrl(LegalConfig.privacyUrl),
-                          style: inlineLinkStyle,
-                          child: const Text('Privacy Policy'),
-                        ),
-                        Text(
-                          '.',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (errorText.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF4A1F25).withOpacity(0.72),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: const Color(0xFFFF9AA2).withOpacity(0.35),
-                          ),
-                        ),
-                        child: Text(
-                          errorText,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: const Color(0xFFFFC9CF),
-                          ),
-                          textAlign: TextAlign.center,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            MixroomAuthTopBar(
+                              onBack: busy
+                                  ? null
+                                  : () {
+                                      widget.onBack?.call();
+                                    },
+                            ),
+                            const SizedBox(height: 52),
+                            const MixroomBrandLockup(showMark: false),
+                            const SizedBox(height: 28),
+                            Text(
+                              L10n.translate(
+                                context,
+                                'Finish your account setup',
+                              ),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 22,
+                                height: 28 / 22,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              L10n.translate(
+                                context,
+                                'Add the last few details to start using Mixroom.',
+                              ),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color.fromRGBO(244, 244, 244, 0.72),
+                                fontSize: 14,
+                                height: 20 / 14,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                            const SizedBox(height: 34),
+                            MixroomGlassPanel(
+                              borderColor: errorText.isNotEmpty
+                                  ? const Color.fromRGBO(255, 157, 71, 0.72)
+                                  : const Color.fromRGBO(244, 244, 244, 0.14),
+                              child: Column(
+                                children: [
+                                  MixroomGlassTextFieldRow(
+                                    controller: _usernameController,
+                                    label: L10n.translate(context, 'Username'),
+                                    textInputAction: TextInputAction.next,
+                                    onChanged: (_) {
+                                      if (_inlineError != null) {
+                                        setState(() => _inlineError = null);
+                                      }
+                                    },
+                                  ),
+                                  const MixroomGlassDivider(),
+                                  MixroomGlassTextFieldRow(
+                                    controller: _birthdateController,
+                                    label: L10n.translate(
+                                      context,
+                                      'Birthday (yyyy.mm.dd)',
+                                    ),
+                                    readOnly: true,
+                                    onTap: busy ? null : _pickBirthdate,
+                                    suffix: SvgPicture.asset(
+                                      kMixroomCalendarIconAsset,
+                                      width: 18,
+                                      height: 20,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            SizedBox(
+                              height: 15,
+                              child: Text(
+                                errorText,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFFF9D47),
+                                  fontSize: 12,
+                                  height: 15 / 12,
+                                  fontWeight: FontWeight.w400,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            Text(
+                              L10n.translate(
+                                context,
+                                'What describes you best?',
+                              ),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 15,
+                                height: 22 / 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            _buildMusicProfileSelector(busy: busy),
+                            const SizedBox(height: 60),
+                            Center(
+                              child: MixroomPillButton(
+                                label: L10n.translate(context, 'Done'),
+                                width: 124,
+                                busy: busy,
+                                onTap: busy ? null : _submit,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            Center(
+                              child: MixroomSecondaryPillButton(
+                                label: L10n.translate(context, 'Back'),
+                                width: 124,
+                                onTap: busy
+                                    ? null
+                                    : () {
+                                        widget.onBack?.call();
+                                      },
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      onPressed: busy ? null : _submit,
-                      child: Text(busy ? 'Finishing...' : 'Finish setup'),
                     ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: busy ? null : widget.onSignOut,
-                      child: const Text('Sign out'),
-                    ),
-                  ],
-                ),
-              ),
+                  ),
+                );
+              },
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -710,60 +964,48 @@ class _SignupCompletionGate extends StatelessWidget {
     required this.busy,
     required this.isResolvingPostSignIn,
     required this.hasPendingSignupProfileSync,
-    required this.onSignOut,
   });
 
   final bool busy;
   final bool isResolvingPostSignIn;
   final bool hasPendingSignupProfileSync;
-  final Future<void> Function()? onSignOut;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final title = hasPendingSignupProfileSync ? 'Finishing setup' : 'Loading';
+    final title = hasPendingSignupProfileSync
+        ? L10n.translate(context, 'Finishing setup')
+        : L10n.translate(context, 'Loading your account');
     final body = hasPendingSignupProfileSync
-        ? (busy ? 'Almost there...' : 'Preparing your account...')
+        ? (busy
+            ? L10n.translate(context, 'Almost there...')
+            : L10n.translate(context, 'Preparing your account...'))
         : (isResolvingPostSignIn
-            ? 'Checking your sign-in...'
-            : 'Preparing your account...');
+            ? L10n.translate(context, 'Checking your sign-in...')
+            : L10n.translate(
+                context,
+                'We are getting everything ready for you.',
+              ));
     return Scaffold(
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 300),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: CircularProgressIndicator(strokeWidth: 2.8),
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  title,
-                  style: theme.textTheme.titleLarge,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  body,
-                  style: theme.textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
-                ),
-                if (onSignOut != null) ...[
-                  const SizedBox(height: 14),
-                  TextButton(
-                    onPressed: busy ? null : onSignOut,
-                    child: const Text('Sign out'),
+      backgroundColor: const Color(0xFF090909),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const MixroomAuthBackground(),
+          SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: _AuthGateStatusPanel(
+                    title: title,
+                    body: body,
                   ),
-                ],
-              ],
+                ),
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

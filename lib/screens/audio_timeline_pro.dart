@@ -163,6 +163,38 @@ enum _InlineClipControlKind {
   settings,
 }
 
+const Color _kTimelineShellText = Color(0xFFF4F4F4);
+const Color _kTimelineShellMutedText = Color(0xB8F4F4F4);
+const Color _kTimelineShellFill = Color.fromRGBO(244, 244, 244, 0.12);
+const Color _kTimelineWarmStart = Color.fromRGBO(112, 119, 126, 0.96);
+const Color _kTimelineWarmEnd = Color.fromRGBO(78, 85, 92, 0.98);
+const Color _kTimelineWarmBorder = Color.fromRGBO(206, 213, 220, 0.42);
+const Color _kTimelineCanvas = Color(0xFF11161D);
+const Color _kTimelineRowEven = Color(0xFF2F3236);
+const Color _kTimelineRowOdd = Color(0xFF323539);
+const Color _kTimelineRowDivider = Color.fromRGBO(255, 255, 255, 0.08);
+const Color _kTimelineHeaderFocusedBlue = Color(0xFF7CA2CB);
+const Color _kTimelineHeaderFocusedBlueDark = Color(0xFF5D7FA6);
+const Color _kTimelineHeaderIdle = Color(0xFF464A4F);
+const Color _kTimelineHeaderIdleDark = Color(0xFF32363B);
+const Color _kTimelineHeaderSelected = Color(0xFF9A6A36);
+const Color _kTimelineHeaderSelectedDark = Color(0xFF744B24);
+const Color _kTimelineUtilityBlue = Color(0xFF2B88DE);
+const Color _kTimelineUtilityBlueDark = Color(0xFF1F69BA);
+const Color _kTimelineClipAudio = Color(0xFF6A7A89);
+const Color _kTimelineClipAudioSelected = Color(0xFFA36D35);
+const Color _kTimelineClipAudioBorder = Color(0xFF8191A0);
+const Color _kTimelineClipAudioSelectedBorder = Color(0xFFFFA04A);
+const Color _kTimelineClipMidi = _kTimelineClipAudio;
+const Color _kTimelineClipMidiSelected = _kTimelineClipAudioSelected;
+const Color _kTimelineExpandedPanelSurface = Color.fromRGBO(98, 104, 110, 0.82);
+const Color _kTimelineExpandedPanelSurfaceFx =
+    Color.fromRGBO(92, 99, 106, 0.96);
+const Color _kTimelineExpandedPanelBorder = Color.fromRGBO(255, 255, 255, 0.09);
+const Color _kTimelineExpandedInnerSurface =
+    Color.fromRGBO(244, 244, 244, 0.08);
+const Color _kTimelineExpandedInnerSurfaceFx = Color(0xFF5E656D);
+
 class _EditorLayoutSpec {
   final double bottomInteractionPadding;
 
@@ -174,7 +206,7 @@ class _EditorLayoutSpec {
     final isDesktop = PlatformCapabilities.current.isDesktop;
     final width = size.width;
     if (!isDesktop) {
-      return const _EditorLayoutSpec(bottomInteractionPadding: 96.0);
+      return const _EditorLayoutSpec(bottomInteractionPadding: 191.0);
     }
     if (width >= 1700) {
       return const _EditorLayoutSpec(bottomInteractionPadding: 128.0);
@@ -569,13 +601,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       (_kHeaderTabsMinHeight > kExpandedRowHeight)
           ? _kHeaderTabsMinHeight
           : kExpandedRowHeight;
-  static const double kHeaderFooterHeight = 48.0;
+  static const double kHeaderFooterHeight = 44.0;
   static const double kBottomInteractionPadding = 96.0;
+  static const double _kExtraAddRowBottomPadding = 18.0;
   final List<double> _effectsPanelHeights = <double>[];
   _EditorLayoutSpec _editorLayoutSpec = const _EditorLayoutSpec(
       bottomInteractionPadding: kBottomInteractionPadding);
 
   static const double kHeaderWidth = 80.0;
+  static const double kTimelineUnderlayLeft = 44.0;
   static const double kRulerHeight = 40.0;
   static const double kTrimHandleWidth = 12.0;
   static const double kTrimHitboxPadding =
@@ -1195,9 +1229,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final selected = await showMenu<int>(
       context: context,
-      color: const Color(0xFF1D2435),
+      color: const Color(0xFF4F5861),
       elevation: 10,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+      ),
       position: RelativeRect.fromLTRB(
         globalPos.dx + 8,
         globalPos.dy + 10,
@@ -1215,13 +1252,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 child: Text(
                   preset.label,
                   style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.white70,
+                    color: isSelected
+                        ? _kTimelineShellText
+                        : _kTimelineShellMutedText,
                     fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    fontFamily: 'Pretendard',
                   ),
                 ),
               ),
               if (isSelected)
-                const Icon(Icons.check, size: 16, color: Color(0xFF7FA7FF)),
+                const Icon(Icons.check, size: 16, color: _kTimelineWarmBorder),
             ],
           ),
         );
@@ -1253,9 +1293,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final selected = await showMenu<_TimelineTool>(
       context: context,
-      color: const Color(0xFF1D2435),
+      color: const Color(0xFF4F5861),
       elevation: 10,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+      ),
       position: RelativeRect.fromLTRB(
         globalPos.dx + 8,
         globalPos.dy + 10,
@@ -1279,13 +1322,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 child: Text(
                   tool.label,
                   style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.white70,
+                    color: isSelected
+                        ? _kTimelineShellText
+                        : _kTimelineShellMutedText,
                     fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    fontFamily: 'Pretendard',
                   ),
                 ),
               ),
               if (isSelected)
-                const Icon(Icons.check, size: 16, color: Color(0xFF7FA7FF)),
+                const Icon(Icons.check, size: 16, color: _kTimelineWarmBorder),
             ],
           ),
         );
@@ -2703,11 +2749,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   bool _isHoldEligibleInHeader(Offset localPos) {
-    final bool onMuteArea =
-        localPos.dx >= (kHeaderWidth - 30) && localPos.dy <= 30;
-    final bool onSoloArea =
-        localPos.dx >= (kHeaderWidth - 30) && localPos.dy >= (kRowHeight - 30);
-    return !(onMuteArea || onSoloArea);
+    // Keep M/S interactions fully isolated from row-header tap/hold logic.
+    const double msPillLeft = 44.0;
+    final bool inMuteSoloPill = localPos.dx >= msPillLeft;
+    return !inMuteSoloPill;
   }
 
   void _cancelHeaderHoldTimer() {
@@ -3085,7 +3130,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   double get _scrollContentHeight =>
       _timelinePaintHeight +
       kHeaderFooterHeight +
-      _editorLayoutSpec.bottomInteractionPadding;
+      _editorLayoutSpec.bottomInteractionPadding +
+      _kExtraAddRowBottomPadding;
 
   void _recalculateRowYPositions() {
     _rowYPositions.clear();
@@ -5288,8 +5334,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         hasSingleSelection ? selectedIndices.first : _selectedClipIndex;
     final int? popupClipIndex = hasSingleSelection &&
             singleSelectionIndex >= 0 &&
-            singleSelectionIndex < widget.clips.length &&
-            widget.clips[singleSelectionIndex].clipKind != ClipKind.midi
+            singleSelectionIndex < widget.clips.length
         ? singleSelectionIndex
         : null;
     final bool visible = popupClipIndex != null;
@@ -5577,7 +5622,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     return Container(
       constraints: const BoxConstraints(),
-      color: const Color(0xFF1A1F2E),
+      color: Colors.transparent,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -5607,6 +5652,116 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
+                            if (kTimelineUnderlayLeft < kHeaderWidth)
+                              Positioned(
+                                left: kTimelineUnderlayLeft,
+                                top: 0,
+                                bottom: 0,
+                                width: kHeaderWidth - kTimelineUnderlayLeft,
+                                child: IgnorePointer(
+                                  child: ClipRect(
+                                    child: Align(
+                                      alignment: Alignment.topLeft,
+                                      child: ColoredBox(
+                                        color: _kTimelineCanvas,
+                                        child: RepaintBoundary(
+                                          child: CustomPaint(
+                                            painter: _TimelinePainter(
+                                              clips: widget.clips,
+                                              getStartMs: widget.getStartMs,
+                                              getDurationMs:
+                                                  widget.getDurationMs,
+                                              getTimelineDurationMs:
+                                                  widget.getTimelineDurationMs,
+                                              getTrimStartMs:
+                                                  widget.getTrimStartMs,
+                                              getTrimEndMs: widget.getTrimEndMs,
+                                              getFullDurationMs:
+                                                  widget.getFullDurationMs,
+                                              getPeaks: widget.getPeaks,
+                                              pixelsPerMs: _pixelsPerMs,
+                                              // Keep M/S strip synced to true
+                                              // timeline world-position.
+                                              scrollOffsetMs: _scrollOffsetMs -
+                                                  ((kHeaderWidth -
+                                                          kTimelineUnderlayLeft) /
+                                                      _pixelsPerMs),
+                                              viewportWidth: viewportWidth,
+                                              playheadPx: playheadPx,
+                                              selectedClipIndex:
+                                                  _selectedClipIndex,
+                                              selectedClipIndices:
+                                                  _selectedClipIndices.toList(
+                                                      growable: false),
+                                              stretchToolActive: _activeTool ==
+                                                  _TimelineTool.stretch,
+                                              trimClipIndex: _trimClipIndex,
+                                              draggedClipIndex:
+                                                  _interactionMode == 'drag'
+                                                      ? _draggedClipIndex
+                                                      : null,
+                                              draggedClipStartMs:
+                                                  _interactionMode == 'drag'
+                                                      ? _dragStartClipMs
+                                                      : null,
+                                              draggedClipRowIndex:
+                                                  _interactionMode == 'drag'
+                                                      ? _dragStartRow
+                                                      : null,
+                                              rowExpanded: _rowExpanded,
+                                              kExpandedRowHeight:
+                                                  kExpandedRowHeight,
+                                              verticalScrollOffset:
+                                                  _verticalScrollOffset,
+                                              expandedTab: _expandedTab,
+                                              effectsPanelHeights:
+                                                  _effectsPanelHeights,
+                                              expandedHeights: expandedHeights,
+                                              automationLaneHeights:
+                                                  automationLaneHeights,
+                                              isRecording: widget.isRecording,
+                                              recordingRowIndex:
+                                                  widget.recordingRowIndex,
+                                              recordingStartMs:
+                                                  widget.recordingStartMs,
+                                              recordingPeaks:
+                                                  widget.recordingPeaks,
+                                              bpm: widget.bpm,
+                                              beatsPerBar: widget.beatsPerBar,
+                                              quantizeDivisions:
+                                                  _quantizeDivisionsPerBar,
+                                              highlightedSegmentRow:
+                                                  _highlightedSegmentRow,
+                                              highlightedSegmentStartMs:
+                                                  _highlightedSegmentStartMs,
+                                              highlightedSegmentEndMs:
+                                                  _highlightedSegmentEndMs,
+                                              sampleDropPreviewRow:
+                                                  _externalSampleDropRow,
+                                              sampleDropPreviewStartMs:
+                                                  _externalSampleDropStartMs,
+                                              sampleDropPreviewEndMs:
+                                                  _externalSampleDropEndMs,
+                                              cutPreviewClipIndex:
+                                                  _cutPreviewClipIndex,
+                                              cutPreviewMs: _cutPreviewMs,
+                                              automationClipVisuals:
+                                                  timelineAutomationClipVisuals,
+                                              leftVisibleExtensionPx:
+                                                  kHeaderWidth -
+                                                      kTimelineUnderlayLeft,
+                                            ),
+                                            size: Size(
+                                              viewportWidth,
+                                              _timelinePaintHeight,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
                             // === Timeline background (waveforms, clips, playhead) ===
                             Positioned.fill(
                               left:
@@ -5721,6 +5876,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                                 cutPreviewMs: _cutPreviewMs,
                                                 automationClipVisuals:
                                                     timelineAutomationClipVisuals,
+                                                leftVisibleExtensionPx: 0.0,
                                               ),
                                               size: Size(
                                                 viewportWidth,
@@ -5822,6 +5978,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                 ),
                               ),
                             ),
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: widget.bottomDockInset + 20.0,
+                              child: IgnorePointer(
+                                ignoring: false,
+                                child: Center(
+                                  child: _buildAddRowPill(),
+                                ),
+                              ),
+                            ),
                             _buildInlineClipControlOverlay(
                               viewportWidth,
                               visibleTimelineHeight,
@@ -5851,8 +6018,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       child: IgnorePointer(
         child: Container(
           decoration: BoxDecoration(
-            color: const Color(0x334F70E4),
-            border: Border.all(color: const Color(0xFF7FA7FF), width: 1.2),
+            color: const Color.fromRGBO(43, 136, 222, 0.18),
+            border: Border.all(
+              color: const Color.fromRGBO(107, 184, 255, 0.76),
+              width: 1.2,
+            ),
             borderRadius: BorderRadius.circular(4),
           ),
         ),
@@ -5881,19 +6051,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           child: ClipRect(
             // prevents overflow painting
             child: Container(
-              // margin: const EdgeInsets.only(top: 6),
               decoration: BoxDecoration(
                 color: normalizedExpandedTab == 1
-                    ? const Color(0xFF151A26)
-                    : Colors.transparent,
-                // borderRadius: BorderRadius.circular(0),
-                border: Border.all(
-                    color: const Color.fromARGB(255, 47, 64, 117)
-                        .withOpacity(0.28),
-                    width: 0),
+                    ? _kTimelineExpandedPanelSurfaceFx
+                    : _kTimelineExpandedPanelSurface,
+                border: Border(
+                  top: BorderSide(color: _kTimelineExpandedPanelBorder),
+                  bottom: BorderSide(color: _kTimelineExpandedPanelBorder),
+                ),
               ),
-              // padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              // padding: const EdgeInsets.only(bottom: 0),
               child: _buildExpandedRowPanelContent(
                 row,
                 viewportWidth,
@@ -5992,9 +6158,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 padding: const EdgeInsets.symmetric(
                     horizontal: horizontalPadding, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.28),
+                  color: Colors.black.withValues(alpha: 0.32),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.white.withOpacity(0.08)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.08)),
                 ),
                 child: Text(
                   name.isEmpty ? 'Row ${row + 1}' : name,
@@ -6085,31 +6252,32 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               gradient: selected
                   ? const LinearGradient(
                       colors: [
-                        Color(0xFF4F70E4), // top-left glossy blue
-                        Color(0xFF2A3A8F), // bottom-right deep blue
+                        _kTimelineWarmStart,
+                        _kTimelineWarmEnd,
                       ],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     )
                   : const LinearGradient(
                       colors: [
-                        Color(0x332F3645), // light greyish-blue
-                        Color(0x22212732), // darker muted tone
+                        Color.fromRGBO(47, 53, 60, 0.94),
+                        Color.fromRGBO(30, 35, 41, 0.96),
                       ],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
               boxShadow: [
                 BoxShadow(
-                    color: Colors.black.withOpacity(0.35),
-                    blurRadius: 6,
-                    offset: const Offset(0, 3))
+                  color: Colors.black.withValues(alpha: 0.28),
+                  blurRadius: 5,
+                  offset: const Offset(0, 2),
+                ),
               ],
 
               border: Border.all(
                 color: selected
-                    ? Colors.white.withOpacity(0.28)
-                    : Colors.white.withOpacity(0.12),
+                    ? _kTimelineWarmBorder
+                    : Colors.white.withValues(alpha: 0.12),
                 width: 1.2,
               ),
             ),
@@ -6125,9 +6293,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   overflow: TextOverflow.visible, // No ellipsis
                   softWrap: false, // NEVER wrap to next line
                   style: TextStyle(
+                    fontFamily: 'Pretendard',
                     fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: selected ? Colors.white : Colors.white70,
+                    fontWeight: FontWeight.w400,
+                    color: selected
+                        ? _kTimelineShellText
+                        : Colors.white.withValues(alpha: 0.72),
                   ),
                 ),
               ),
@@ -6149,216 +6320,225 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   Widget _buildVolumePanel(int row) {
-    Widget panel = Padding(
-      padding: const EdgeInsets.all(
-          0), // const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // === Automation graph placeholder ===
-          // Expanded(
-          //   child: Container(
-          //     decoration: BoxDecoration(
-          //       color: const Color.fromARGB(255, 67, 194, 74).withOpacity(0.15),
-          //       // borderRadius: BorderRadius.circular(10),
-          //     ),
-          //   ),
-          // ),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final double laneHeight = constraints.maxHeight;
+    Widget panel = Container(
+      decoration: const BoxDecoration(
+        color: _kTimelineExpandedInnerSurface,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // === Automation graph placeholder ===
+            // Expanded(
+            //   child: Container(
+            //     decoration: BoxDecoration(
+            //       color: const Color.fromARGB(255, 67, 194, 74).withOpacity(0.15),
+            //       // borderRadius: BorderRadius.circular(10),
+            //     ),
+            //   ),
+            // ),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final double laneHeight = constraints.maxHeight;
 
-                return _AutomationLane(
-                  rowIndex: row,
-                  points: widget.rowVolumeAutomation[row],
-                  pixelsPerMs: _pixelsPerMs,
-                  scrollOffsetMs: _scrollOffsetMs,
-                  laneHeight: laneHeight,
-                  timelineDurationMs: _maxDurationMs,
-                  targetLabel: 'Volume',
-                  targetParamId: 'volume',
-                  targetMin: 0.0,
-                  targetMax: 1.0,
-                  isVolumeLane: true,
-                  highlightStartMs: null,
-                  highlightEndMs: null,
-                  onChanged: (pts) {
-                    final before = widget.rowVolumeAutomation[row];
-                    widget.onAutomationCommit!(
-                      // for updating undo/redo history
-                      row,
-                      before,
-                      pts.map((p) => p.copy()).toList(),
-                    );
-
-                    setState(() => widget.rowVolumeAutomation[row] = pts);
-                    widget.setTrackAutomationPoints(
-                      row,
-                      pts.map((p) => p.toMap()).toList(),
-                    ); // careful of doing on update, maybe better to do once on end
-                  },
-                  onPanStartExternal: (pos) =>
-                      _automationPanStart(row, pos, laneHeight),
-                  onPanUpdateExternal: (pos) => _automationPanUpdate(row, pos),
-                  onPanEndExternal: () => _automationPanEnd(row),
-                  onPanCancelExternal: _cancelAutomationPointInteraction,
-                  onBackgroundPanStartExternal:
-                      _automationLaneBackgroundPanStart,
-                  onBackgroundPanUpdateExternal:
-                      _automationLaneBackgroundPanUpdate,
-                  onBackgroundPanEndExternal: _automationLaneBackgroundPanEnd,
-                );
-              },
-            ),
-          ),
-
-          // const SizedBox(height: 6),
-
-          // === L/R Stereo pan slider ===
-          // Padding(
-          //   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          //   child: PrettyStereoSlider(
-          //     value: _rowPan[row], // <-- plug in real per-track value
-          //     onChanged: (v) {
-          //       setState(() => _rowPan[row] = v);
-          //     },
-          //   ),
-          // ),
-
-          // const SizedBox(height: 10),
-
-          // // === Gain slider ===
-          // Padding(
-          //   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          //   child: PrettyGainSlider(
-          //     value: _rowGain[row],
-          //     onChanged: (v) {
-          //       setState(() => _rowGain[row] = v);
-          //     },
-          //   ),
-          // ),
-
-          // === Background for Pan + Gain (same as automation background) ===
-          Container(
-            // margin: const EdgeInsets.only(top: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF151A26),
-              borderRadius: BorderRadius.circular(0),
-            ),
-            // padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Builder(
-                    builder: (context) {
-                      Widget child = PrettyStereoSlider(
-                        value: widget.rowPan[row],
-                        onLongPress: () {
-                          unawaited(AppHaptics.impact(AppHapticImpact.medium));
-                          _openAutomationTabForTarget(
-                            row: row,
-                            targetId: 'mix:pan',
-                            haloKeys: <String>[
-                              'row:$row:automation_tab',
-                              'row:$row:volume_tab',
-                              'row:$row:mixer',
-                              'row:$row:pan',
-                              'row:$row:param:pan',
-                            ],
-                          );
-                        },
-                        onChangeStart: (v) {
-                          _panDragStart = v;
-                        },
-                        onChanged: (v) {
-                          setState(() => widget.rowPan[row] = v);
-                          widget.setRowPan(row, v);
-                        },
-                        onChangeEnd: (v) {
-                          widget.onRowPanCommit!(
-                              row, _panDragStart!, widget.rowPan[row]);
-                          _panDragStart = null;
-                        },
+                  return _AutomationLane(
+                    rowIndex: row,
+                    points: widget.rowVolumeAutomation[row],
+                    pixelsPerMs: _pixelsPerMs,
+                    scrollOffsetMs: _scrollOffsetMs,
+                    laneHeight: laneHeight,
+                    timelineDurationMs: _maxDurationMs,
+                    targetLabel: 'Volume',
+                    targetParamId: 'volume',
+                    targetMin: 0.0,
+                    targetMax: 1.0,
+                    isVolumeLane: true,
+                    highlightStartMs: null,
+                    highlightEndMs: null,
+                    onChanged: (pts) {
+                      final before = widget.rowVolumeAutomation[row];
+                      widget.onAutomationCommit!(
+                        // for updating undo/redo history
+                        row,
+                        before,
+                        pts.map((p) => p.copy()).toList(),
                       );
-                      if (widget.tutorialHighlighter != null) {
-                        child = MultiHalo(
-                          highlighter: widget.tutorialHighlighter!,
-                          haloKeys: <HaloKey>[
-                            HaloKey('row:$row:pan'),
-                            HaloKey('row:$row:param:pan'),
-                          ],
-                          borderRadius: BorderRadius.circular(10),
-                          child: child,
-                        );
-                      }
-                      return child;
+
+                      setState(() => widget.rowVolumeAutomation[row] = pts);
+                      widget.setTrackAutomationPoints(
+                        row,
+                        pts.map((p) => p.toMap()).toList(),
+                      ); // careful of doing on update, maybe better to do once on end
                     },
+                    onPanStartExternal: (pos) =>
+                        _automationPanStart(row, pos, laneHeight),
+                    onPanUpdateExternal: (pos) =>
+                        _automationPanUpdate(row, pos),
+                    onPanEndExternal: () => _automationPanEnd(row),
+                    onPanCancelExternal: _cancelAutomationPointInteraction,
+                    onBackgroundPanStartExternal:
+                        _automationLaneBackgroundPanStart,
+                    onBackgroundPanUpdateExternal:
+                        _automationLaneBackgroundPanUpdate,
+                    onBackgroundPanEndExternal: _automationLaneBackgroundPanEnd,
+                  );
+                },
+              ),
+            ),
+
+            // const SizedBox(height: 6),
+
+            // === L/R Stereo pan slider ===
+            // Padding(
+            //   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            //   child: PrettyStereoSlider(
+            //     value: _rowPan[row], // <-- plug in real per-track value
+            //     onChanged: (v) {
+            //       setState(() => _rowPan[row] = v);
+            //     },
+            //   ),
+            // ),
+
+            // const SizedBox(height: 10),
+
+            // // === Gain slider ===
+            // Padding(
+            //   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            //   child: PrettyGainSlider(
+            //     value: _rowGain[row],
+            //     onChanged: (v) {
+            //       setState(() => _rowGain[row] = v);
+            //     },
+            //   ),
+            // ),
+
+            // === Background for Pan + Gain (same as automation background) ===
+            Container(
+              decoration: BoxDecoration(
+                color: _kTimelineExpandedInnerSurface,
+                border: Border(
+                  top: BorderSide(
+                    color: Colors.white.withValues(alpha: 0.10),
                   ),
                 ),
-
-                const SizedBox(height: 10),
-
-                // === Gain slider ===
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Builder(
-                    builder: (context) {
-                      Widget child = PrettyGainSlider(
-                        value: widget.rowGain[row],
-                        onLongPress: () {
-                          unawaited(AppHaptics.impact(AppHapticImpact.medium));
-                          _openAutomationTabForTarget(
-                            row: row,
-                            targetId: 'mix:gain',
-                            haloKeys: <String>[
-                              'row:$row:automation_tab',
-                              'row:$row:volume_tab',
-                              'row:$row:mixer',
-                              'row:$row:gain',
-                              'row:$row:param:gain',
-                            ],
-                          );
-                        },
-                        onChangeStart: (v) {
-                          _gainDragStart = v;
-                        },
-                        onChanged: (v) {
-                          setState(() => widget.rowGain[row] = v);
-                          widget.setRowGain(row, v);
-                        },
-                        onChangeEnd: (v) {
-                          widget.onRowGainCommit!(
-                              row, _gainDragStart!, widget.rowGain[row]);
-                          _gainDragStart = null;
-                        },
-                      );
-                      if (widget.tutorialHighlighter != null) {
-                        child = MultiHalo(
-                          highlighter: widget.tutorialHighlighter!,
-                          haloKeys: <HaloKey>[
-                            HaloKey('row:$row:gain'),
-                            HaloKey('row:$row:param:gain'),
-                          ],
-                          borderRadius: BorderRadius.circular(10),
-                          child: child,
+              ),
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Builder(
+                      builder: (context) {
+                        Widget child = PrettyStereoSlider(
+                          value: widget.rowPan[row],
+                          onLongPress: () {
+                            unawaited(
+                                AppHaptics.impact(AppHapticImpact.medium));
+                            _openAutomationTabForTarget(
+                              row: row,
+                              targetId: 'mix:pan',
+                              haloKeys: <String>[
+                                'row:$row:automation_tab',
+                                'row:$row:volume_tab',
+                                'row:$row:mixer',
+                                'row:$row:pan',
+                                'row:$row:param:pan',
+                              ],
+                            );
+                          },
+                          onChangeStart: (v) {
+                            _panDragStart = v;
+                          },
+                          onChanged: (v) {
+                            setState(() => widget.rowPan[row] = v);
+                            widget.setRowPan(row, v);
+                          },
+                          onChangeEnd: (v) {
+                            widget.onRowPanCommit!(
+                                row, _panDragStart!, widget.rowPan[row]);
+                            _panDragStart = null;
+                          },
                         );
-                      }
-                      return child;
-                    },
+                        if (widget.tutorialHighlighter != null) {
+                          child = MultiHalo(
+                            highlighter: widget.tutorialHighlighter!,
+                            haloKeys: <HaloKey>[
+                              HaloKey('row:$row:pan'),
+                              HaloKey('row:$row:param:pan'),
+                            ],
+                            borderRadius: BorderRadius.circular(10),
+                            child: child,
+                          );
+                        }
+                        return child;
+                      },
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
 
-          // const SizedBox(height: 6),
-        ],
+                  const SizedBox(height: 10),
+
+                  // === Gain slider ===
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Builder(
+                      builder: (context) {
+                        Widget child = PrettyGainSlider(
+                          value: widget.rowGain[row],
+                          onLongPress: () {
+                            unawaited(
+                                AppHaptics.impact(AppHapticImpact.medium));
+                            _openAutomationTabForTarget(
+                              row: row,
+                              targetId: 'mix:gain',
+                              haloKeys: <String>[
+                                'row:$row:automation_tab',
+                                'row:$row:volume_tab',
+                                'row:$row:mixer',
+                                'row:$row:gain',
+                                'row:$row:param:gain',
+                              ],
+                            );
+                          },
+                          onChangeStart: (v) {
+                            _gainDragStart = v;
+                          },
+                          onChanged: (v) {
+                            setState(() => widget.rowGain[row] = v);
+                            widget.setRowGain(row, v);
+                          },
+                          onChangeEnd: (v) {
+                            widget.onRowGainCommit!(
+                                row, _gainDragStart!, widget.rowGain[row]);
+                            _gainDragStart = null;
+                          },
+                        );
+                        if (widget.tutorialHighlighter != null) {
+                          child = MultiHalo(
+                            highlighter: widget.tutorialHighlighter!,
+                            haloKeys: <HaloKey>[
+                              HaloKey('row:$row:gain'),
+                              HaloKey('row:$row:param:gain'),
+                            ],
+                            borderRadius: BorderRadius.circular(10),
+                            child: child,
+                          );
+                        }
+                        return child;
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // const SizedBox(height: 6),
+          ],
+        ),
       ),
     );
     if (widget.tutorialHighlighter != null) {
@@ -6792,7 +6972,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       padding: const EdgeInsets.fromLTRB(0, 0, 0, 0),
       child: Container(
         key: const ValueKey('automation_panel'),
-        color: const Color(0xFF151A26),
+        decoration: BoxDecoration(
+          color: _kTimelineExpandedInnerSurface,
+          border: Border(
+            top: BorderSide(
+              color: Colors.white.withValues(alpha: 0.10),
+            ),
+          ),
+        ),
         child: Column(
           children: [
             Expanded(
@@ -6877,7 +7064,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                color: Colors.white,
+                                fontFamily: 'Pretendard',
+                                color: _kTimelineShellText,
                                 fontSize: 12.4,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -6889,10 +7077,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.56),
+                                color: _kTimelineShellMutedText,
                                 fontSize: 9.4,
                                 fontWeight: FontWeight.w500,
                                 height: 1.1,
+                                fontFamily: 'Pretendard',
                               ),
                             ),
                           ],
@@ -6947,8 +7136,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     height: 36,
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.07),
-                      borderRadius: BorderRadius.circular(13),
+                      color: _kTimelineShellFill,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.12),
+                      ),
                     ),
                     child: Row(
                       children: [
@@ -6963,10 +7154,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             child: DropdownButton<String>(
                               value: activeTargetId,
                               isExpanded: true,
-                              dropdownColor: const Color(0xFF1A2233),
-                              iconEnabledColor: Colors.white70,
+                              dropdownColor: const Color(0xFF5F666D),
+                              iconEnabledColor: _kTimelineShellMutedText,
                               style: const TextStyle(
-                                color: Colors.white,
+                                fontFamily: 'Pretendard',
+                                color: _kTimelineShellText,
                                 fontSize: 11.6,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -7091,7 +7283,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   Widget _buildEffectsPanel(int row) {
     Widget panel = Container(
-      decoration: const BoxDecoration(color: Color(0xFF151A26)),
+      color: _kTimelineExpandedInnerSurfaceFx,
       child: RowEffectsPanel(
         key: ValueKey("effect_panel_row_${widget.rows[row].rowId}"),
         rowIndex: row,
@@ -7166,20 +7358,33 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       onTapDown: onTapDown,
       onTapUp: onTapUp,
       onTapCancel: onTapCancel,
-      child: Container(
+      child: SizedBox(
         width: size,
         height: size,
-        decoration: BoxDecoration(
-          color: active ? const Color(0xFF4F70E4) : const Color(0x332F3645),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: Colors.white24),
-        ),
-        alignment: Alignment.center,
-        child: SvgPicture.asset(
-          svgPath,
-          height: size * 0.60,
-          colorFilter: const ColorFilter.mode(
-              Color.fromARGB(200, 255, 255, 255), BlendMode.srcIn),
+        child: Container(
+          decoration: BoxDecoration(
+            color: active
+                ? const Color.fromRGBO(244, 244, 244, 0.92)
+                : const Color.fromRGBO(31, 37, 45, 0.88),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: active
+                  ? const Color.fromRGBO(43, 53, 63, 0.58)
+                  : Colors.white.withValues(alpha: 0.12),
+              width: 1,
+            ),
+          ),
+          alignment: Alignment.center,
+          child: SvgPicture.asset(
+            svgPath,
+            height: size * 0.70,
+            colorFilter: ColorFilter.mode(
+              active
+                  ? const Color.fromRGBO(35, 45, 54, 0.96)
+                  : const Color.fromRGBO(244, 244, 244, 0.94),
+              BlendMode.srcIn,
+            ),
+          ),
         ),
       ),
     );
@@ -7419,9 +7624,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         width: 30,
         height: 30,
         decoration: BoxDecoration(
-          color: const Color(0x332F3645),
+          color: const Color.fromRGBO(31, 37, 45, 0.88),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: Colors.white24, width: 1),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.12),
+            width: 1,
+          ),
         ),
         alignment: Alignment.center,
         child: _buildToolIcon(
@@ -7454,7 +7662,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   Widget _buildTimeRuler(double viewportWidth) {
     return Container(
       height: kRulerHeight,
-      color: const Color(0xFF0F1419),
+      color: _kTimelineCanvas,
       child: Stack(
         children: [
           Row(
@@ -7611,51 +7819,60 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     await AppHaptics.impact(AppHapticImpact.medium);
     final action = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: const Color(0xFF1B2233),
+      backgroundColor: const Color(0xFF5F666D),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading:
-                  const Icon(Icons.vertical_align_top, color: Colors.white),
+              leading: const Icon(Icons.vertical_align_top,
+                  color: _kTimelineShellText),
               title: const Text('Insert Row Above',
-                  style: TextStyle(color: Colors.white)),
+                  style: TextStyle(
+                      fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'insert_above'),
             ),
             ListTile(
-              leading:
-                  const Icon(Icons.vertical_align_bottom, color: Colors.white),
+              leading: const Icon(Icons.vertical_align_bottom,
+                  color: _kTimelineShellText),
               title: const Text('Insert Row Below',
-                  style: TextStyle(color: Colors.white)),
+                  style: TextStyle(
+                      fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'insert_below'),
             ),
             ListTile(
-              leading: const Icon(Icons.arrow_upward, color: Colors.white),
-              title:
-                  const Text('Move Up', style: TextStyle(color: Colors.white)),
+              leading:
+                  const Icon(Icons.arrow_upward, color: _kTimelineShellText),
+              title: const Text('Move Up',
+                  style: TextStyle(
+                      fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'move_up'),
             ),
             ListTile(
-              leading: const Icon(Icons.arrow_downward, color: Colors.white),
+              leading:
+                  const Icon(Icons.arrow_downward, color: _kTimelineShellText),
               title: const Text('Move Down',
-                  style: TextStyle(color: Colors.white)),
+                  style: TextStyle(
+                      fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'move_down'),
             ),
             ListTile(
               leading: const Icon(Icons.drive_file_rename_outline,
-                  color: Colors.white),
+                  color: _kTimelineShellText),
               title: const Text('Rename Row',
-                  style: TextStyle(color: Colors.white)),
+                  style: TextStyle(
+                      fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'rename'),
             ),
             ListTile(
-              leading: const Icon(Icons.image_outlined, color: Colors.white),
+              leading:
+                  const Icon(Icons.image_outlined, color: _kTimelineShellText),
               title: const Text('Choose Icon',
-                  style: TextStyle(color: Colors.white)),
+                  style: TextStyle(
+                      fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'icon'),
             ),
             ListTile(
@@ -7698,10 +7915,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             child: Dialog(
               alignment: Alignment.topCenter,
               insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
-              backgroundColor: const Color(0xFF1A2233),
+              backgroundColor: const Color(0xFF5F666D),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-                side: BorderSide(color: Colors.white.withOpacity(0.10)),
+                borderRadius: BorderRadius.circular(24),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
               ),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
@@ -7712,12 +7929,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     const Row(
                       children: [
                         Icon(Icons.drive_file_rename_outline,
-                            color: Color(0xFFB9D4FF)),
+                            color: _kTimelineShellText),
                         SizedBox(width: 8),
                         Text(
                           'Rename Row',
                           style: TextStyle(
-                              color: Colors.white,
+                              fontFamily: 'Pretendard',
+                              color: _kTimelineShellText,
                               fontSize: 18,
                               fontWeight: FontWeight.w700),
                         ),
@@ -7726,10 +7944,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     const SizedBox(height: 12),
                     Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(12),
-                        border:
-                            Border.all(color: Colors.white.withOpacity(0.12)),
+                        color: _kTimelineShellFill,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.12)),
                       ),
                       child: TextField(
                         controller: controller,
@@ -7739,10 +7957,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) =>
                             Navigator.pop(ctx, controller.text.trim()),
-                        style: const TextStyle(color: Colors.white),
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: _kTimelineShellText,
+                        ),
                         decoration: const InputDecoration(
                           hintText: 'Row name',
-                          hintStyle: TextStyle(color: Colors.white54),
+                          hintStyle: TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: _kTimelineShellMutedText,
+                          ),
                           border: InputBorder.none,
                           contentPadding: EdgeInsets.symmetric(
                               horizontal: 12, vertical: 12),
@@ -7764,10 +7988,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           onPressed: () =>
                               Navigator.pop(ctx, controller.text.trim()),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2E6EEB),
-                            foregroundColor: Colors.white,
+                            backgroundColor: const Color(0xFFC89762),
+                            foregroundColor: _kTimelineShellText,
                             shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10)),
+                                borderRadius: BorderRadius.circular(999)),
                           ),
                           child: const Text('Save'),
                         ),
@@ -7794,7 +8018,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         builder: (ctx) {
           const ids = [0, 1, 2, 3, 4, 5];
           return AlertDialog(
-            title: const Text('Select Icon'),
+            backgroundColor: const Color(0xFF5F666D),
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+            ),
+            title: const Text(
+              'Select Icon',
+              style: TextStyle(
+                  fontFamily: 'Pretendard', color: _kTimelineShellText),
+            ),
             content: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -7806,10 +8040,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         width: 44,
                         height: 44,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF2A3347),
-                          borderRadius: BorderRadius.circular(8),
+                          color: _kTimelineShellFill,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.12),
+                          ),
                         ),
-                        child: Icon(_iconForRow(id), color: Colors.white),
+                        child:
+                            Icon(_iconForRow(id), color: _kTimelineShellText),
                       ),
                     ),
                   )
@@ -7857,10 +8095,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     width: dynamicWidth,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E2434),
+                      color: const Color(0xFF1F2328),
                       border: Border(
-                        bottom:
-                            BorderSide(color: Colors.white.withOpacity(0.07)),
+                        bottom: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.06),
+                        ),
                       ),
                     ),
                     child: Align(
@@ -7869,7 +8108,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           ? Icon(
                               Icons.unfold_more_rounded,
                               size: 14,
-                              color: Colors.white.withOpacity(0.7),
+                              color: const Color(0xFFE8AA62),
                             )
                           : FittedBox(
                               fit: BoxFit.scaleDown,
@@ -7879,7 +8118,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                 maxLines: 1,
                                 softWrap: false,
                                 style: TextStyle(
-                                  color: Colors.white70,
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFC7CDD4),
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
                                   letterSpacing: 0.2,
@@ -7898,45 +8138,106 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             ],
           );
         }),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: SizedBox(
-            height: kHeaderFooterHeight - 8,
-            child: Center(
-              child: IconButton(
-                onPressed: widget.onAddRow,
-                icon: const Icon(Icons.add_circle_outline,
-                    color: Colors.white, size: 28),
-              ),
-            ),
-          ),
+        const SizedBox(height: kHeaderFooterHeight),
+        SizedBox(
+          height: _editorLayoutSpec.bottomInteractionPadding +
+              _kExtraAddRowBottomPadding,
         ),
-        SizedBox(height: _editorLayoutSpec.bottomInteractionPadding),
       ],
     );
   }
 
-  Widget _buildOneTrackHeader(int row, bool isSelected, bool isMuted) {
-    Widget muteButton = GestureDetector(
-      onTap: () => setState(() {
-        bool newVal = !widget.rowMuted[row];
-        widget.muteRow(row, newVal);
-      }),
-      child: Container(
-        width: 24,
-        height: 24,
-        decoration: BoxDecoration(
-          color: isMuted ? const Color(0xFF5B6B8C) : Colors.transparent,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.white30),
+  Widget _buildAddRowPill() {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: widget.onAddRow,
+        borderRadius: BorderRadius.circular(999),
+        child: Ink(
+          width: 116,
+          height: 50,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: <Color>[
+                Color.fromRGBO(109, 123, 140, 0.72),
+                Color.fromRGBO(70, 81, 95, 0.78),
+              ],
+            ),
+            color: const Color.fromRGBO(66, 76, 90, 0.52),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.16),
+            ),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(
+                color: Color.fromRGBO(0, 0, 0, 0.24),
+                blurRadius: 14,
+                offset: Offset(0, 6),
+              ),
+            ],
+          ),
+          child: const Center(
+            child: Text(
+              'Add Row',
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ),
         ),
-        alignment: Alignment.center,
-        child: Text(
-          'M',
-          style: TextStyle(
-            color: isMuted ? Colors.white : Colors.white38,
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
+      ),
+    );
+  }
+
+  Widget _buildOneTrackHeader(int row, bool isSelected, bool isMuted) {
+    const double iconStripWidth = 44;
+    const double controlPillHeight = 72;
+    const BorderRadius muteButtonRadius = BorderRadius.only(
+      topLeft: Radius.circular(5),
+      topRight: Radius.circular(5),
+    );
+    const BorderRadius soloButtonRadius = BorderRadius.only(
+      bottomLeft: Radius.circular(5),
+      bottomRight: Radius.circular(5),
+    );
+    Widget muteButton = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => setState(() {
+          final newVal = !widget.rowMuted[row];
+          widget.muteRow(row, newVal);
+        }),
+        splashFactory: NoSplash.splashFactory,
+        overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+        highlightColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        hoverColor: Colors.transparent,
+        focusColor: Colors.transparent,
+        borderRadius: muteButtonRadius,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 60),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isMuted
+                ? const Color.fromRGBO(103, 147, 198, 0.42)
+                : Colors.transparent,
+            borderRadius: muteButtonRadius,
+          ),
+          child: Text(
+            'M',
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color:
+                  isMuted ? Colors.white : Colors.white.withValues(alpha: 0.72),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
       ),
@@ -7955,28 +8256,39 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       );
     }
 
-    Widget soloButton = GestureDetector(
-      onTap: () {
-        bool newVal = !widget.rowSoloed[row];
-        widget.soloRow(row, newVal);
-      },
-      child: Container(
-        width: 24,
-        height: 24,
-        decoration: BoxDecoration(
-          color: widget.rowSoloed[row]
-              ? const Color(0xFFFFB000)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.white30),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          'S',
-          style: TextStyle(
-            color: widget.rowSoloed[row] ? Colors.black : Colors.white38,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
+    Widget soloButton = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          final newVal = !widget.rowSoloed[row];
+          widget.soloRow(row, newVal);
+        },
+        splashFactory: NoSplash.splashFactory,
+        overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+        highlightColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        hoverColor: Colors.transparent,
+        focusColor: Colors.transparent,
+        borderRadius: soloButtonRadius,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 60),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: widget.rowSoloed[row]
+                ? const Color.fromRGBO(183, 127, 63, 0.42)
+                : Colors.transparent,
+            borderRadius: soloButtonRadius,
+          ),
+          child: Text(
+            'S',
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color: widget.rowSoloed[row]
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.72),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
       ),
@@ -8003,46 +8315,73 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       onPointerCancel: _onHeaderPointerCancel,
       child: Container(
         height: kRowHeight, // Fixed height
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected
-              ? const Color.fromARGB(255, 55, 73, 108)
-              : const Color.fromARGB(255, 30, 41, 65), //Colors.transparent,
-          border: const Border(
-              bottom: BorderSide(color: Color(0xFF1A1F2E), width: 1)),
+          // Keep the header lane transparent so waveform/MIDI content can
+          // remain visible under the M/S pill area.
+          color: Colors.transparent,
+          border: Border(
+            bottom: BorderSide(color: _kTimelineRowDivider, width: 1),
+          ),
         ),
-        child: Stack(
-          clipBehavior: Clip.none,
+        child: Row(
           children: [
-            Positioned(
-              left: 5,
-              top: ((kRowHeight - 28) / 2) - 6,
-              child: Icon(_iconForRow(widget.rows[row].iconId),
-                  color: Colors.white, size: 28),
-            ),
-            if (isSelected)
-              Positioned(
-                left: 10,
-                bottom: 1,
-                child: Icon(
-                  _rowExpanded[row]
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  color: Colors.white54,
-                  size: 18,
+            SizedBox(
+              width: iconStripWidth,
+              child: Container(
+                height: double.infinity,
+                color: isSelected
+                    ? const Color.fromRGBO(103, 147, 198, 0.94)
+                    : const Color.fromRGBO(22, 64, 105, 0.82),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _iconForRow(widget.rows[row].iconId),
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    if (isSelected) ...[
+                      const SizedBox(height: 1),
+                      Icon(
+                        _rowExpanded[row]
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        color: Colors.white.withValues(alpha: 0.84),
+                        size: 12,
+                      ),
+                    ],
+                  ],
                 ),
               ),
-            // === Mute button (top-right, tighter to edge) ===
-            Positioned(
-              top: 0,
-              right: 0,
-              child: muteButton,
             ),
-            // === Solo button (bottom-right) ===
-            Positioned(
-              bottom: 0,
-              right: 0,
-              child: soloButton,
+            const SizedBox(width: 5),
+            SizedBox(
+              width: 31,
+              child: Align(
+                alignment: Alignment.center,
+                child: Container(
+                  height: controlPillHeight,
+                  decoration: BoxDecoration(
+                    color: const Color.fromRGBO(56, 63, 71, 0.92),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Expanded(child: muteButton),
+                      Container(
+                        height: 1,
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        color: Colors.white.withValues(alpha: 0.14),
+                      ),
+                      Expanded(child: soloButton),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ],
         ),
@@ -8094,9 +8433,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   Widget _buildHeaderTabs(int row) {
     return Container(
-      decoration: const BoxDecoration(
-        color: Color.fromARGB(255, 30, 41, 65),
-        border: Border(bottom: BorderSide(color: Color(0xFF1A1F2E), width: 1)),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: <Color>[
+            Color(0xFF20242A),
+            Color(0xFF181C21),
+          ],
+        ),
+        border: Border(
+          bottom:
+              BorderSide(color: Colors.white.withValues(alpha: 0.06), width: 1),
+        ),
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -9188,7 +9537,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _setPrimaryClipSelection(
           tappedClipIndex,
           preserveExistingSelection: draggingGroup,
-          popupMs: clip.clipKind == ClipKind.midi ? null : tapPopupMs,
+          popupMs: tapPopupMs,
         );
         _tentativeClipSelectionActive = !wasAlreadySelected && !draggingGroup;
         if (canBeginDrag) {
@@ -9323,16 +9672,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           !_pendingClipDragExceededSlop(details.globalPosition);
       final tapPopupMs =
           _scrollOffsetMs + details.localPosition.dx / _pixelsPerMs;
-      final shouldOpenMidiClip = shouldTreatAsTap &&
-          tappedDragIndex != null &&
-          tappedDragIndex >= 0 &&
-          tappedDragIndex < widget.clips.length &&
-          widget.clips[tappedDragIndex].clipKind == ClipKind.midi;
       final shouldSelectClip = shouldTreatAsTap &&
-          !shouldOpenMidiClip &&
           tappedDragIndex != null &&
           tappedDragIndex >= 0 &&
           tappedDragIndex < widget.clips.length;
+      final shouldOpenMidiFromRetap = shouldSelectClip &&
+          tappedDragIndex != null &&
+          _selectedClipIndices.contains(tappedDragIndex) &&
+          widget.clips[tappedDragIndex].clipKind == ClipKind.midi;
 
       setState(() {
         final preserveDraggedGroupSelection = shouldSelectClip &&
@@ -9353,9 +9700,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           );
         }
       });
-      if (shouldOpenMidiClip) {
-        widget.onOpenMidiClip?.call(tappedDragIndex);
-        return;
+      if (shouldOpenMidiFromRetap) {
+        widget.onOpenMidiClip?.call(tappedDragIndex!);
       }
       return;
     }
@@ -9370,8 +9716,33 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final tapRow = _rowForLocalY(localY);
     if (tapRow == null) return;
     final topIndex = _getGestureClipIndexAt(details.localPosition);
+
+    // If a MIDI clip is already selected, allow forgiving re-taps around it
+    // so opening piano roll remains easy even when zoomed out.
+    if (topIndex == null &&
+        _selectedClipIndex >= 0 &&
+        _selectedClipIndex < widget.clips.length) {
+      final selectedClip = widget.clips[_selectedClipIndex];
+      if (selectedClip.clipKind == ClipKind.midi &&
+          selectedClip.rowIndex == tapRow) {
+        final selectedRect = _getClipRect(_selectedClipIndex);
+        if (selectedRect != null) {
+          final forgivingRect = selectedRect.inflate(24.0);
+          if (forgivingRect.contains(details.localPosition)) {
+            widget.onOpenMidiClip?.call(_selectedClipIndex);
+            return;
+          }
+        }
+      }
+    }
+
     if (topIndex != null) {
-      final topClip = widget.clips[topIndex];
+      final clip = widget.clips[topIndex];
+      final wasSelected = _selectedClipIndices.contains(topIndex);
+      if (clip.clipKind == ClipKind.midi && wasSelected) {
+        widget.onOpenMidiClip?.call(topIndex);
+        return;
+      }
       final preserveExistingSelection = _selectedClipIndices.length > 1 &&
           _selectedClipIndices.contains(topIndex);
 
@@ -9389,9 +9760,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _highlightedSegmentStartMs = null;
         _highlightedSegmentEndMs = null;
       });
-      if (topClip.clipKind == ClipKind.midi) {
-        widget.onOpenMidiClip?.call(topIndex);
-      }
     } else {
       setState(() {
         _resetTrimInteractionState();
@@ -9509,6 +9877,7 @@ class _TimelinePainter extends CustomPainter {
   final int? cutPreviewClipIndex;
   final double? cutPreviewMs;
   final List<_TimelineAutomationClipVisual> automationClipVisuals;
+  final double? leftVisibleExtensionPx;
   final int _clipDataHash;
   final int _automationClipHash;
   final int _selectedClipIndicesHash;
@@ -9562,6 +9931,7 @@ class _TimelinePainter extends CustomPainter {
     required this.cutPreviewClipIndex,
     required this.cutPreviewMs,
     required this.automationClipVisuals,
+    this.leftVisibleExtensionPx,
   })  : _clipDataHash = _computeClipDataHash(
           clips: clips,
           getStartMs: getStartMs,
@@ -9705,8 +10075,7 @@ class _TimelinePainter extends CustomPainter {
       // 1. Draw the main track background (alternating colors)
       final rect = Rect.fromLTWH(0, currentY, viewportWidth, rowHeight);
       final paint = Paint()
-        ..color =
-            row % 2 == 0 ? const Color(0xFF1A1F2E) : const Color(0xFF151A26);
+        ..color = row.isEven ? _kTimelineRowEven : _kTimelineRowOdd;
       canvas.drawRect(rect, paint);
 
       if (automationLaneHeight > 0.0) {
@@ -9718,7 +10087,7 @@ class _TimelinePainter extends CustomPainter {
         );
         final automationPaint = Paint()
           ..color =
-              row.isEven ? const Color(0xFF141A27) : const Color(0xFF111723);
+              row.isEven ? const Color(0xFF1B1F24) : const Color(0xFF171B20);
         canvas.drawRect(automationRect, automationPaint);
       }
 
@@ -9728,14 +10097,13 @@ class _TimelinePainter extends CustomPainter {
         final expandedRect = Rect.fromLTWH(
             0, expandedTop, viewportWidth, expandedHeight.toDouble());
         final expandedPaint = Paint()
-          ..color = const Color(0xFF1A1F2E)
-              .withOpacity(0.9); // Semi-transparent overlay
+          ..color = const Color(0xFF1A1D22).withValues(alpha: 0.94);
         canvas.drawRect(expandedRect, expandedPaint);
       }
 
       // 3. Draw horizontal grid lines for row separation (at the end of the total block)
       final linePaint = Paint()
-        ..color = Colors.white.withOpacity(0.05)
+        ..color = _kTimelineRowDivider
         ..strokeWidth = 1;
 
       canvas.drawLine(
@@ -9769,11 +10137,11 @@ class _TimelinePainter extends CustomPainter {
             rect.intersect(Rect.fromLTWH(0, 0, viewportWidth, size.height));
         if (clipped.width > 0 && clipped.height > 0) {
           final fill = Paint()
-            ..color = const Color(0xFF7FA7FF).withOpacity(0.16);
+            ..color = const Color.fromRGBO(43, 136, 222, 0.16);
           final stroke = Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.2
-            ..color = const Color(0xFFBFD4FF).withOpacity(0.55);
+            ..color = const Color.fromRGBO(107, 184, 255, 0.58);
           canvas.drawRect(clipped, fill);
           canvas.drawRect(clipped, stroke);
         }
@@ -10029,7 +10397,8 @@ class _TimelinePainter extends CustomPainter {
     const double height = _AudioCanvasTimelineState.kRowHeight - 4;
 
     // Skip if completely off-screen
-    if (x + width < 0 || x > viewportWidth) return;
+    final leftExtension = leftVisibleExtensionPx ?? 0.0;
+    if (x + width < -leftExtension || x > viewportWidth) return;
 
     final rect = RRect.fromRectAndRadius(
       Rect.fromLTWH(x, y, width, height), // Use calculated y
@@ -10047,14 +10416,14 @@ class _TimelinePainter extends CustomPainter {
       ..color = hasOverlap
           ? const Color(0xFF8B3A3A)
           : (isMidi
-              ? (isSelected ? const Color(0xFF3F6C4A) : const Color(0xFF33593F))
+              ? (isSelected ? _kTimelineClipMidiSelected : _kTimelineClipMidi)
               : (isSelected
-                  ? const Color(0xFF4A5B7C)
-                  : const Color(0xFF3A4A5C)));
+                  ? _kTimelineClipAudioSelected
+                  : _kTimelineClipAudio));
 
     // === FIX ===: Make dragged clip semi-transparent
     if (isDragging) {
-      clipPaint.color = clipPaint.color.withOpacity(0.6);
+      clipPaint.color = clipPaint.color.withValues(alpha: 0.62);
     }
 
     canvas.drawRRect(rect, clipPaint);
@@ -10097,8 +10466,12 @@ class _TimelinePainter extends CustomPainter {
       );
       canvas.restore();
     }
-    // === NEW: Draw clip filename label ===
-    _drawClipLabel(canvas, rect, clip);
+    // Hide clip labels in the M/S passthrough underlay strip.
+    final bool paintClipLabelInThisPass =
+        (leftVisibleExtensionPx ?? 0.0) == 0.0;
+    if (paintClipLabelInThisPass) {
+      _drawClipLabel(canvas, rect, clip);
+    }
 
     // Draw border
     final bool isTrimming = index == trimClipIndex; // === FIX ===
@@ -10109,12 +10482,13 @@ class _TimelinePainter extends CustomPainter {
 
     if (isTrimming) {
       // === FIX ===: Trim mode halo
-      borderPaint.color = const Color.fromARGB(255, 50, 139, 255);
+      borderPaint.color = const Color(0xFF69B8FF);
       borderPaint.strokeWidth = 3;
     } else {
       // Existing border logic
-      borderPaint.color =
-          isSelected ? const Color(0xFF7A8B9C) : const Color(0xFF2A3A4C);
+      borderPaint.color = isSelected
+          ? _kTimelineClipAudioSelectedBorder
+          : _kTimelineClipAudioBorder;
       borderPaint.strokeWidth = isSelected ? 2 : 1;
     }
 
@@ -10228,7 +10602,8 @@ class _TimelinePainter extends CustomPainter {
 
     for (final visual in automationClipVisuals) {
       final rect = visual.rect;
-      if (rect.right <= 0 ||
+      final leftExtension = leftVisibleExtensionPx ?? 0.0;
+      if (rect.right <= -leftExtension ||
           rect.left >= viewportWidth ||
           rect.bottom <= 0 ||
           rect.top >= size.height) {
@@ -10359,12 +10734,15 @@ class _TimelinePainter extends CustomPainter {
         PlatformDispatcher.instance.implicitView?.devicePixelRatio ?? 1.0;
     double snapToDevicePixel(double x) => (x * dpr).roundToDouble() / dpr;
 
-    final visibleLeft = rect.left.clamp(0.0, viewportWidth).toDouble();
-    final visibleRight = rect.right.clamp(0.0, viewportWidth).toDouble();
+    final leftExtension = leftVisibleExtensionPx ?? 0.0;
+    final visibleLeft =
+        rect.left.clamp(-leftExtension, viewportWidth).toDouble();
+    final visibleRight =
+        rect.right.clamp(-leftExtension, viewportWidth).toDouble();
     if (visibleRight <= visibleLeft) return;
 
     final waveformPaint = Paint()
-      ..color = const Color(0xFFF6FAFF).withValues(alpha: 0.72)
+      ..color = const Color(0xFFF4F7FA).withValues(alpha: 0.78)
       ..style = PaintingStyle.stroke
       ..strokeWidth = math.max(1.0 / dpr, 0.5)
       ..isAntiAlias = false;
@@ -10431,10 +10809,10 @@ class _TimelinePainter extends CustomPainter {
     final beatMs =
         (60000.0 / sourceBpm.clamp(1.0, 1000000.0)).clamp(1.0, 1000000.0);
     final previewPaint = Paint()
-      ..color = const Color(0xFF9CF3A8).withOpacity(0.85)
+      ..color = const Color(0xFFB8E8B9).withValues(alpha: 0.78)
       ..style = PaintingStyle.fill;
     final linePaint = Paint()
-      ..color = Colors.white.withOpacity(0.08)
+      ..color = Colors.white.withValues(alpha: 0.07)
       ..strokeWidth = 1.0;
 
     final height = rect.height;
@@ -10481,7 +10859,7 @@ class _TimelinePainter extends CustomPainter {
       final y = rect.bottom - (pitchNorm * height) - 4.0;
 
       final alpha = (140 + (note.velocity.clamp(0.0, 1.0) * 90)).round();
-      previewPaint.color = Color.fromARGB(alpha, 159, 245, 174);
+      previewPaint.color = Color.fromARGB(alpha, 168, 228, 178);
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromLTWH(
@@ -10571,7 +10949,7 @@ class _TimelinePainter extends CustomPainter {
     );
 
     final bgPaint = Paint()
-      ..color = const Color(0xFF000000).withOpacity(0.28); // translucent dark
+      ..color = const Color(0xFF000000).withValues(alpha: 0.26);
 
     canvas.save();
     canvas.clipRRect(rect);
@@ -10593,9 +10971,9 @@ class _TimelinePainter extends CustomPainter {
   }) {
     const handleWidth = _AudioCanvasTimelineState.kTrimHandleWidth;
     final handleColor = !asStretchHandles
-        ? const Color.fromARGB(255, 40, 72, 168)
+        ? const Color(0xFF397FBE)
         : (!stretchEnabled
-            ? const Color(0xFF687288)
+            ? const Color(0xFF65707C)
             : (preservePitch
                 ? const Color(0xFF2AAE9F)
                 : const Color(0xFFD38A3D)));
@@ -10605,7 +10983,12 @@ class _TimelinePainter extends CustomPainter {
     // Left trim handle
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-          Rect.fromLTWH(rect.left, rect.top, handleWidth, rect.height),
+          Rect.fromLTWH(
+            rect.left + 1.5,
+            rect.top + 1.5,
+            handleWidth - 3,
+            rect.height - 3,
+          ),
           const Radius.circular(4)),
       handlePaint,
     );
@@ -10613,14 +10996,18 @@ class _TimelinePainter extends CustomPainter {
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromLTWH(
-            rect.right - handleWidth, rect.top, handleWidth, rect.height),
+          rect.right - handleWidth + 1.5,
+          rect.top + 1.5,
+          handleWidth - 3,
+          rect.height - 3,
+        ),
         const Radius.circular(4),
       ),
       handlePaint,
     );
     // Draw handle grips
     final gripPaint = Paint()
-      ..color = Colors.white.withOpacity(0.6)
+      ..color = Colors.white.withValues(alpha: 0.62)
       ..strokeWidth = 1.5;
     for (int i = 0; i < 3; i++) {
       final y = rect.top + rect.height / 2 + (i - 1) * 6;
@@ -10637,15 +11024,59 @@ class _TimelinePainter extends CustomPainter {
     // === FIX ===: Use playheadPx
     final x = playheadPx;
     const double rulerHeight = _AudioCanvasTimelineState.kRulerHeight;
+    final glowPaint = Paint()
+      ..color = const Color.fromRGBO(240, 169, 87, 0.22)
+      ..strokeWidth = 4;
     final paint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2;
-    // extend playhead from just below ruler to bottom of timeline
-    canvas.drawLine(
-      Offset(x, -rulerHeight), // start right under the ruler area
-      Offset(x, size.height),
-      paint,
-    );
+      ..color = const Color(0xFFF0A957)
+      ..strokeWidth = 1.5;
+    final blockedRanges = <Offset>[];
+    double rowTop = 0.0;
+    for (int row = 0; row < rowExpanded.length; row++) {
+      final rowHeight = _AudioCanvasTimelineState.kRowHeight;
+      final automationLaneHeight = _automationLaneHeightForRow(row);
+      final expandedHeight =
+          row < expandedHeights.length ? expandedHeights[row] : 0.0;
+      final expandedIsEffects =
+          row < expandedTab.length && expandedTab[row] == 1;
+      if (rowExpanded[row] && expandedIsEffects && expandedHeight > 0.0) {
+        final blockTop = rowTop + rowHeight + automationLaneHeight;
+        final blockBottom = blockTop + expandedHeight;
+        blockedRanges.add(Offset(blockTop, blockBottom));
+      }
+      rowTop += rowHeight + automationLaneHeight + expandedHeight;
+    }
+
+    void drawSegment(double top, double bottom) {
+      if (bottom <= top) return;
+      canvas.drawLine(Offset(x, top), Offset(x, bottom), glowPaint);
+      canvas.drawLine(Offset(x, top), Offset(x, bottom), paint);
+    }
+
+    final startY = -rulerHeight;
+    final endY = size.height;
+    if (blockedRanges.isEmpty) {
+      drawSegment(startY, endY);
+      return;
+    }
+
+    blockedRanges.sort((a, b) => a.dx.compareTo(b.dx));
+    double cursor = startY;
+    for (final range in blockedRanges) {
+      final blockTop = range.dx.clamp(startY, endY).toDouble();
+      final blockBottom = range.dy.clamp(startY, endY).toDouble();
+      if (blockBottom <= blockTop) continue;
+      if (blockTop > cursor) {
+        drawSegment(cursor, blockTop);
+      }
+      if (blockBottom > cursor) {
+        cursor = blockBottom;
+      }
+      if (cursor >= endY) break;
+    }
+    if (cursor < endY) {
+      drawSegment(cursor, endY);
+    }
   }
 
   void _drawCutPreviewLine(Canvas canvas) {
@@ -10740,6 +11171,8 @@ class _TimelinePainter extends CustomPainter {
         scrollOffsetMs != old.scrollOffsetMs ||
         pixelsPerMs != old.pixelsPerMs ||
         viewportWidth != old.viewportWidth ||
+        (leftVisibleExtensionPx ?? 0.0) !=
+            (old.leftVisibleExtensionPx ?? 0.0) ||
         selectedClipIndex != old.selectedClipIndex ||
         _selectedClipIndicesHash != old._selectedClipIndicesHash ||
         draggedClipIndex != old.draggedClipIndex ||
@@ -11648,15 +12081,15 @@ class _AutomationPainter extends CustomPainter {
         highlightEndMs != null &&
         highlightEndMs! > highlightStartMs!;
 
-    // 1) Dark background
-    final bg = Paint()..color = const Color(0xFF151A26).withOpacity(0.9);
+    // 1) Lane background
+    final bg = Paint()..color = const Color.fromRGBO(111, 117, 123, 0.34);
     canvas.drawRRect(
         RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(0)),
         bg);
 
     // Horizontal guide lines
     final guidePaint = Paint()
-      ..color = Colors.white.withOpacity(0.08)
+      ..color = Colors.white.withValues(alpha: 0.10)
       ..strokeWidth = 1;
 
     final topY = _volumeToPy(1.0);
@@ -11779,7 +12212,7 @@ class _AutomationPainter extends CustomPainter {
 
     // ----- Automation curve inside the clipped area -----
     final linePaint = Paint()
-      ..color = const Color(0xFF7AB9FF)
+      ..color = const Color(0xFFC3CBD4)
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;

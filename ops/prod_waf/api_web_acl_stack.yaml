@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Mixroom regional WebACL for production APIs
+
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+  WebAclName:
+    Type: String
+    Default: mixroom-prod-apis
+
+Resources:
+  ApiWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Ref WebAclName
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub ${WebAclName}-metrics
+        SampledRequestsEnabled: true
+      Rules:
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 10
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: common-rule-set
+            SampledRequestsEnabled: true
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 20
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: known-bad-inputs
+            SampledRequestsEnabled: true
+
+Outputs:
+  WebAclArn:
+    Description: Regional WebACL ARN for Mixroom production APIs
+    Value: !GetAtt ApiWebAcl.Arn
+  WebAclId:
+    Description: Regional WebACL ID
+    Value: !GetAtt ApiWebAcl.Id

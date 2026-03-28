@@ -1,18 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
 import 'package:mixroom/helpers/password_policy.dart';
+import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/models/app_user_models.dart';
 import 'package:mixroom/models/auth_user_profile.dart';
+import 'package:mixroom/models/music_profile_option.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/screens/legal_privacy_center.dart';
 import 'package:mixroom/widgets/app_responsive_body.dart';
+import 'package:mixroom/widgets/app_shell_figma.dart';
+import 'package:mixroom/widgets/auth_figma_shell.dart';
 import 'package:mixroom/widgets/email_verification_sheet.dart';
-import 'package:mixroom/widgets/feedback_sheet.dart';
 import 'package:mixroom/widgets/language_selector.dart';
 import 'package:provider/provider.dart';
 
@@ -35,6 +39,7 @@ class AccountScreen extends StatelessWidget {
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
+      backgroundColor: Colors.transparent,
       appBar: showTopBar
           ? const PreferredSize(
               preferredSize: Size.fromHeight(86),
@@ -43,43 +48,57 @@ class AccountScreen extends StatelessWidget {
           : null,
       body: user == null
           ? const SizedBox.expand()
-          : AppResponsiveBody(
-              maxWidth: 920,
-              expandToHeight: true,
-              child: showTopBar
-                  ? _AccountBody(
-                      user: user,
-                      appUser: appUser.current,
-                      canEditAppProfile: appUser.supportsRemoteProfileEdits,
-                      enforceProfileCompletion: enforceProfileCompletion,
-                    )
-                  : SafeArea(
-                      top: true,
-                      child: _AccountBody(
-                        user: user,
-                        appUser: appUser.current,
-                        canEditAppProfile: appUser.supportsRemoteProfileEdits,
-                        enforceProfileCompletion: enforceProfileCompletion,
-                      ),
-                    ),
+          : Stack(
+              children: [
+                if (!showTopBar)
+                  const Positioned.fill(child: MixroomShellBackground()),
+                AppResponsiveBody(
+                  maxWidth: 920,
+                  expandToHeight: true,
+                  child: showTopBar
+                      ? _AccountBody(
+                          user: user,
+                          appUser: appUser.current,
+                          canEditAppProfile: appUser.supportsRemoteProfileEdits,
+                          enforceProfileCompletion: enforceProfileCompletion,
+                          embeddedMode: false,
+                        )
+                      : SafeArea(
+                          top: true,
+                          child: _AccountBody(
+                            user: user,
+                            appUser: appUser.current,
+                            canEditAppProfile:
+                                appUser.supportsRemoteProfileEdits,
+                            enforceProfileCompletion: enforceProfileCompletion,
+                            embeddedMode: true,
+                            onSignOut: () async {
+                              await context.read<AuthService>().signOut();
+                            },
+                          ),
+                        ),
+                ),
+              ],
             ),
       bottomNavigationBar: user == null
           ? null
-          : _AccountActions(
-              isBusy: auth.isBusy,
-              onSignOut: () async {
-                final authService = context.read<AuthService>();
-                final navigator = Navigator.of(context);
-                final shouldDismissRoute = showTopBar && navigator.canPop();
-                if (shouldDismissRoute) {
-                  navigator.pop();
-                  await Future<void>.delayed(
-                    const Duration(milliseconds: 180),
-                  );
-                }
-                await authService.signOut();
-              },
-            ),
+          : showTopBar
+              ? _AccountActions(
+                  isBusy: auth.isBusy,
+                  onSignOut: () async {
+                    final authService = context.read<AuthService>();
+                    final navigator = Navigator.of(context);
+                    final shouldDismissRoute = showTopBar && navigator.canPop();
+                    if (shouldDismissRoute) {
+                      navigator.pop();
+                      await Future<void>.delayed(
+                        const Duration(milliseconds: 180),
+                      );
+                    }
+                    await authService.signOut();
+                  },
+                )
+              : null,
     );
   }
 }
@@ -135,12 +154,16 @@ class _AccountBody extends StatefulWidget {
     required this.appUser,
     required this.canEditAppProfile,
     required this.enforceProfileCompletion,
+    required this.embeddedMode,
+    this.onSignOut,
   });
 
   final AuthUserProfile user;
   final AppUserSnapshot? appUser;
   final bool canEditAppProfile;
   final bool enforceProfileCompletion;
+  final bool embeddedMode;
+  final Future<void> Function()? onSignOut;
 
   @override
   State<_AccountBody> createState() => _AccountBodyState();
@@ -150,6 +173,7 @@ class _AccountBodyState extends State<_AccountBody> {
   late TextEditingController _nameController;
   late TextEditingController _usernameController;
   late TextEditingController _bioController;
+  String? _musicProfileValue;
   bool _isEditing = false;
   bool _isSaving = false;
 
@@ -184,6 +208,9 @@ class _AccountBodyState extends State<_AccountBody> {
     _nameController.text = widget.user.displayName;
     _usernameController.text = widget.appUser?.username ?? '';
     _bioController.text = widget.appUser?.bio ?? '';
+    _musicProfileValue = (widget.appUser?.musicProfile ?? '').trim().isEmpty
+        ? null
+        : widget.appUser?.musicProfile;
   }
 
   bool get _hasAuthChanges {
@@ -193,7 +220,9 @@ class _AccountBodyState extends State<_AccountBody> {
   bool get _hasAppProfileChanges {
     return _usernameController.text.trim() !=
             (widget.appUser?.username ?? '').trim() ||
-        _bioController.text.trim() != (widget.appUser?.bio ?? '').trim();
+        _bioController.text.trim() != (widget.appUser?.bio ?? '').trim() ||
+        ((_musicProfileValue ?? '').trim().toLowerCase() !=
+            (widget.appUser?.musicProfile ?? '').trim().toLowerCase());
   }
 
   Future<void> _save() async {
@@ -201,22 +230,19 @@ class _AccountBodyState extends State<_AccountBody> {
     final safeUsername = _usernameController.text.trim().toLowerCase();
     final safeBio = _bioController.text.trim();
     if (safeName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(L10n.translate(context, 'Name cannot be empty.'))),
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Name cannot be empty.'),
       );
       return;
     }
     if (_isSaving) return;
     if (!widget.canEditAppProfile && _hasAppProfileChanges) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            L10n.translate(
-              context,
-              'Username and bio require the deployed account backend before they can be saved.',
-            ),
-          ),
+      showAppSnackBar(
+        context,
+        L10n.translate(
+          context,
+          'Username and bio require the deployed account backend before they can be saved.',
         ),
       );
       return;
@@ -241,18 +267,21 @@ class _AccountBodyState extends State<_AccountBody> {
         await appUserService.updateProfile(
           displayName: safeName,
           username: safeUsername,
+          musicProfile: _musicProfileValue,
           bio: safeBio,
         );
       }
       if (!mounted) return;
       setState(() => _isEditing = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(L10n.translate(context, 'Account updated.'))),
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Account updated.'),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Bad state: ', ''))),
+      showAppSnackBar(
+        context,
+        e.toString().replaceFirst('Bad state: ', ''),
       );
     } finally {
       if (mounted) {
@@ -263,32 +292,68 @@ class _AccountBodyState extends State<_AccountBody> {
 
   Future<void> _openFeedbackComposer() async {
     final authService = context.read<AuthService>();
-    final draft = await showFeedbackSheet(
-      context,
-      source: FeedbackSource.account,
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.62),
+      builder: (dialogContext) {
+        return MediaQuery.removeViewInsets(
+          context: dialogContext,
+          removeBottom: true,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              child: ConstrainedBox(
+                constraints:
+                    const BoxConstraints(maxWidth: 440, maxHeight: 760),
+                child: Material(
+                  color: Colors.transparent,
+                  child: MixroomShellSurface(
+                    radius: 32,
+                    strong: true,
+                    color: const Color.fromRGBO(24, 34, 48, 0.92),
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
+                    child: Stack(
+                      children: [
+                        SingleChildScrollView(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: MixroomInlineFeedbackComposer(
+                            compact: true,
+                            onSubmit: (category, message, allowEmailContact) {
+                              return FeedbackService.instance.submit(
+                                auth: authService,
+                                request: FeedbackSubmissionRequest(
+                                  category: category,
+                                  source: FeedbackSource.account,
+                                  message: message,
+                                  allowEmailContact: allowEmailContact,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: MixroomShellRoundButton(
+                            size: 42,
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                              color: Colors.white,
+                            ),
+                            onTap: () => Navigator.of(dialogContext).pop(),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
-    if (draft == null || !mounted) return;
-
-    try {
-      await FeedbackService.instance.submit(
-        auth: authService,
-        request: FeedbackSubmissionRequest(
-          category: draft.category,
-          source: FeedbackSource.account,
-          message: draft.message,
-          allowEmailContact: draft.allowEmailContact,
-        ),
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Thank you for your submission!')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Bad state: ', ''))),
-      );
-    }
   }
 
   @override
@@ -298,6 +363,7 @@ class _AccountBodyState extends State<_AccountBody> {
     final joinedAt = _formatDate(widget.user.createdAt.toLocal());
     final usernameValue = (widget.appUser?.username ?? '').trim();
     final bioValue = (widget.appUser?.bio ?? '').trim();
+    final musicProfileValue = musicProfileLabel(widget.appUser?.musicProfile);
     final needsEmailVerification =
         widget.user.provider == AuthProviderType.email &&
             !widget.user.emailVerified;
@@ -305,23 +371,42 @@ class _AccountBodyState extends State<_AccountBody> {
     return ListView(
       physics:
           const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+      padding: EdgeInsets.fromLTRB(
+        16,
+        widget.embeddedMode ? 10 : 14,
+        16,
+        widget.embeddedMode ? mixroomShellBottomPadding(context) : 20,
+      ),
       children: [
-        _ProfileHero(
-          user: widget.user,
-          username: _usernameController.text,
-          overrideName: _nameController.text,
-          isEditing: _isEditing,
-          onEditToggle: () {
-            HapticFeedback.selectionClick();
-            setState(() {
-              if (_isEditing) {
-                _syncFromUser();
-              }
-              _isEditing = !_isEditing;
-            });
-          },
-        ),
+        if (widget.embeddedMode)
+          _EmbeddedAccountChrome(
+            isEditing: _isEditing,
+            onEditToggle: () {
+              HapticFeedback.selectionClick();
+              setState(() {
+                if (_isEditing) {
+                  _syncFromUser();
+                }
+                _isEditing = !_isEditing;
+              });
+            },
+          )
+        else
+          _ProfileHero(
+            user: widget.user,
+            username: _usernameController.text,
+            overrideName: _nameController.text,
+            isEditing: _isEditing,
+            onEditToggle: () {
+              HapticFeedback.selectionClick();
+              setState(() {
+                if (_isEditing) {
+                  _syncFromUser();
+                }
+                _isEditing = !_isEditing;
+              });
+            },
+          ),
         if (needsEmailVerification) ...[
           const SizedBox(height: 10),
           _EmailVerificationBanner(
@@ -356,12 +441,14 @@ class _AccountBodyState extends State<_AccountBody> {
           ),
         ],
         const SizedBox(height: 12),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withOpacity(0.08)),
-          ),
+        MixroomShellSurface(
+          radius: 24,
+          padding: EdgeInsets.zero,
+          color: widget.embeddedMode
+              ? (_isEditing
+                  ? const Color.fromRGBO(244, 244, 244, 0.48)
+                  : const Color.fromRGBO(244, 244, 244, 0.16))
+              : const Color.fromRGBO(244, 244, 244, 0.08),
           child: Column(
             children: [
               _ReadonlyRow(label: 'Email', value: widget.user.email),
@@ -380,6 +467,20 @@ class _AccountBodyState extends State<_AccountBody> {
                     : usernameValue,
               ),
               _DividerLine(),
+              _EditableMusicProfileRow(
+                isEditing: _isEditing,
+                enabled: widget.canEditAppProfile,
+                value: musicProfileValue.isEmpty
+                    ? L10n.translate(context, 'Not set')
+                    : musicProfileValue,
+                selectedValue: _musicProfileValue,
+                onChanged: (next) {
+                  setState(() {
+                    _musicProfileValue = next;
+                  });
+                },
+              ),
+              _DividerLine(),
               _EditableBioRow(
                 isEditing: _isEditing,
                 controller: _bioController,
@@ -388,8 +489,10 @@ class _AccountBodyState extends State<_AccountBody> {
                     ? L10n.translate(context, 'No bio yet')
                     : bioValue,
               ),
-              _DividerLine(),
-              const _LanguagePreferenceRow(),
+              if (!widget.embeddedMode) ...[
+                _DividerLine(),
+                const _LanguagePreferenceRow(),
+              ],
               _DividerLine(),
               _ReadonlyRow(
                 label: 'Provider',
@@ -501,7 +604,129 @@ class _AccountBodyState extends State<_AccountBody> {
             );
           },
         ),
+        if (widget.embeddedMode) ...[
+          const SizedBox(height: 16),
+          _EmbeddedLogoutButton(
+            isBusy: auth.isBusy,
+            onSignOut: widget.onSignOut,
+          ),
+        ],
       ],
+    );
+  }
+}
+
+class _EmbeddedAccountChrome extends StatelessWidget {
+  const _EmbeddedAccountChrome({
+    required this.isEditing,
+    required this.onEditToggle,
+  });
+
+  final bool isEditing;
+  final VoidCallback onEditToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            MixroomShellRoundButton(
+              assetPath: isEditing
+                  ? kMixroomShellAccountEditCheckAsset
+                  : kMixroomShellAccountEditPencilAsset,
+              iconExtent: isEditing ? 20 : 17,
+              onTap: onEditToggle,
+            ),
+            const SizedBox(width: 10),
+            GestureDetector(
+              onTap: onEditToggle,
+              child: Text(
+                L10n.translate(context, isEditing ? 'Finish' : 'Edit'),
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Color(0xFFF4F4F4),
+                  fontSize: 15,
+                  height: 22 / 15,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
+            const Spacer(),
+            const MixroomLocaleSelector(),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: isEditing
+                ? const Color.fromRGBO(244, 244, 244, 0.42)
+                : const Color.fromRGBO(244, 244, 244, 0.20),
+            borderRadius: BorderRadius.circular(40),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: isEditing ? 0.12 : 0.08),
+              width: 0.8,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.26),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: SvgPicture.asset(
+            kMixroomShellAccountProfileHeadAsset,
+            width: 40,
+            height: 40,
+          ),
+        ),
+        const SizedBox(height: 18),
+      ],
+    );
+  }
+}
+
+class _EmbeddedLogoutButton extends StatelessWidget {
+  const _EmbeddedLogoutButton({
+    required this.isBusy,
+    required this.onSignOut,
+  });
+
+  final bool isBusy;
+  final Future<void> Function()? onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: isBusy ? null : onSignOut,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 212),
+          child: MixroomShellSurface(
+            radius: 24,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+            color: const Color.fromRGBO(84, 112, 143, 0.82),
+            strong: true,
+            child: SizedBox(
+              width: double.infinity,
+              child: Text(
+                L10n.translate(context, 'Log Out'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Color(0xFFF4F4F4),
+                  fontSize: 15,
+                  height: 22 / 15,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -921,6 +1146,9 @@ class _EditableNameRow extends StatelessWidget {
           Expanded(
             child: TextField(
               controller: controller,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => FocusScope.of(context).unfocus(),
+              onTapOutside: (_) => FocusScope.of(context).unfocus(),
               style: const TextStyle(color: Colors.white, fontSize: 13),
               decoration: InputDecoration(
                 isDense: true,
@@ -981,6 +1209,9 @@ class _EditableUsernameRow extends StatelessWidget {
                   controller: controller,
                   enabled: enabled,
                   autocorrect: false,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => FocusScope.of(context).unfocus(),
+                  onTapOutside: (_) => FocusScope.of(context).unfocus(),
                   textCapitalization: TextCapitalization.none,
                   inputFormatters: <TextInputFormatter>[
                     FilteringTextInputFormatter.allow(
@@ -991,7 +1222,7 @@ class _EditableUsernameRow extends StatelessWidget {
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: InputDecoration(
                     isDense: true,
-                    hintText: 'your_username',
+                    hintText: L10n.translate(context, 'your_username'),
                     hintStyle: TextStyle(color: Colors.white.withOpacity(0.45)),
                     filled: true,
                     fillColor: Colors.white.withOpacity(enabled ? 0.06 : 0.03),
@@ -1072,6 +1303,9 @@ class _EditableBioRow extends StatelessWidget {
             child: TextField(
               controller: controller,
               enabled: enabled,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => FocusScope.of(context).unfocus(),
+              onTapOutside: (_) => FocusScope.of(context).unfocus(),
               minLines: 2,
               maxLines: 3,
               maxLength: 160,
@@ -1171,6 +1405,83 @@ class _AccountFieldLabel extends StatelessWidget {
   }
 }
 
+class _EditableMusicProfileRow extends StatelessWidget {
+  const _EditableMusicProfileRow({
+    required this.isEditing,
+    required this.enabled,
+    required this.value,
+    required this.selectedValue,
+    required this.onChanged,
+  });
+
+  final bool isEditing;
+  final bool enabled;
+  final String value;
+  final String? selectedValue;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isEditing) {
+      return _ReadonlyRow(label: 'You are', value: value);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _AccountFieldLabel(label: 'You are'),
+          const SizedBox(width: 8),
+          Expanded(
+            child: DropdownButtonFormField<String?>(
+              key: ValueKey<String>(selectedValue ?? '__unset__'),
+              initialValue: selectedValue,
+              items: <DropdownMenuItem<String?>>[
+                DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text(L10n.translate(context, 'Not set')),
+                ),
+                ...kMusicProfileOptions.map(
+                  (option) => DropdownMenuItem<String?>(
+                    value: option.value,
+                    child: Text(option.label),
+                  ),
+                ),
+              ],
+              onChanged: enabled ? onChanged : null,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              dropdownColor: const Color(0xFF13233D),
+              iconEnabledColor: Colors.white70,
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: L10n.translate(context, 'Select one'),
+                hintStyle: TextStyle(color: Colors.white.withOpacity(0.45)),
+                filled: true,
+                fillColor: Colors.white.withOpacity(enabled ? 0.06 : 0.03),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
+                ),
+                disabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: Colors.white.withOpacity(0.08)),
+                ),
+                focusedBorder: const OutlineInputBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(10)),
+                  borderSide: BorderSide(color: Color(0xFF5F96FF), width: 1.1),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DividerLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -1212,7 +1523,7 @@ class _SubscriptionEntitlementCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            'Subscriptions are not enabled yet.',
+            L10n.translate(context, 'Subscriptions are not enabled yet.'),
             style: const TextStyle(
               color: Colors.white,
               fontSize: 12.5,
@@ -1221,7 +1532,10 @@ class _SubscriptionEntitlementCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'When billing opens, you will be able to upgrade and manage your plan from this screen.',
+            L10n.translate(
+              context,
+              'When billing opens, you will be able to upgrade and manage your plan from this screen.',
+            ),
             style: const TextStyle(
               color: Colors.white70,
               fontSize: 12,
@@ -1315,13 +1629,10 @@ class _FeedbackEntryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return MixroomShellSurface(
+      radius: 20,
+      color: const Color.fromRGBO(244, 244, 244, 0.10),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1342,36 +1653,69 @@ class _FeedbackEntryCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Feedback / bug report',
-                  style: TextStyle(
+                Text(
+                  L10n.translate(context, 'Feedback / bug report'),
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  'Tell us what is working, what is broken, or what you want to see next.',
-                  style: TextStyle(
+                Text(
+                  L10n.translate(
+                    context,
+                    'Tell us what is working, what is broken, or what you want to see next.',
+                  ),
+                  style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 13,
                     height: 1.35,
                   ),
                 ),
                 const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: onOpen,
-                    icon: const Icon(Icons.edit_outlined, size: 18),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: BorderSide(
-                        color: Colors.white.withValues(alpha: 0.14),
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => onOpen(),
+                    borderRadius: BorderRadius.circular(22),
+                    child: MixroomShellSurface(
+                      radius: 22,
+                      color: const Color.fromRGBO(244, 244, 244, 0.14),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 11,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.edit_outlined,
+                            size: 18,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 10),
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                L10n.translate(
+                                  context,
+                                  'Send feedback or bug report',
+                                ),
+                                maxLines: 1,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    label: const Text('Send feedback or bug report'),
                   ),
                 ),
               ],

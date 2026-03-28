@@ -442,13 +442,34 @@ public:
                        double) override
     {
         const int style = juce::jlimit(0, 3, preset.oscillator);
-        if (note.pitch <= 36)
+        const int pitch = note.pitch;
+        const bool isKick = (pitch == 35 || pitch == 36);
+        const bool isSnare = (pitch == 38 || pitch == 40);
+        const bool isClap = (pitch == 37 || pitch == 39);
+        const bool isTom = (pitch == 41 || pitch == 43 || pitch == 45 ||
+                            pitch == 47 || pitch == 48 || pitch == 50);
+        const bool isHat = (pitch == 42 || pitch == 44 || pitch == 46 ||
+                            pitch == 49 || pitch == 51 || pitch == 52 ||
+                            pitch == 53 || pitch == 55 || pitch == 57 ||
+                            pitch == 59);
+
+        // Prefer GM-like drum note routing so common MIDI drum clips sound expected.
+        if (isKick || pitch < 35)
             return renderKick(state, noteSampleIndex, frequencyHz, noteProgress, style);
-        if (note.pitch <= 44)
+        if (isSnare)
             return renderSnare(state, noteSampleIndex, frequencyHz, noteProgress, style);
-        if (note.pitch <= 52)
+        if (isClap)
             return renderClap(state, noteSampleIndex, frequencyHz, noteProgress, style);
-        if (note.pitch <= 63)
+        if (isTom)
+            return renderTom(state, noteSampleIndex, frequencyHz, noteProgress, style);
+        if (isHat)
+            return renderHat(state, noteSampleIndex, noteProgress, style);
+
+        if (pitch <= 44)
+            return renderSnare(state, noteSampleIndex, frequencyHz, noteProgress, style);
+        if (pitch <= 52)
+            return renderClap(state, noteSampleIndex, frequencyHz, noteProgress, style);
+        if (pitch <= 63)
             return renderTom(state, noteSampleIndex, frequencyHz, noteProgress, style);
         return renderHat(state, noteSampleIndex, noteProgress, style);
     }

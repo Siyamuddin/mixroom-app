@@ -210,6 +210,7 @@
 + (NSString *)getCurrentOutputDeviceNameObjC;
 + (BOOL)prepareRecordingInputsObjC:(NSInteger)desiredInputChannels
                             reason:(NSString *)reason;
++ (BOOL)preparePlaybackRouteObjC:(NSString *)reason;
 + (void)refreshAudioRouteObjC:(NSString *)reason;
 + (void)setLiveInputMonitoringEnabledObjC:(BOOL)enabled;
 

@@ -322,14 +322,18 @@ class AdminUserRepository:
         deleted_by_user_id: str,
         deleted_by_email: str,
         reason: str,
+        confirm_email: str,
         force: bool = False,
     ) -> Dict[str, Any]:
         safe_user_id = _safe_str(user_id)
         safe_reason = _safe_str(reason)
+        safe_confirm_email = _safe_str(confirm_email).lower()
         if not safe_user_id:
             raise ValueError("User ID is required.")
         if not safe_reason:
             raise ValueError("Deletion reason is required.")
+        if not safe_confirm_email:
+            raise ValueError("The user's login email is required to confirm deletion.")
         if self._tombstones is None:
             raise RuntimeError("User tombstones table is not configured.")
         if self._billing_repo is None:
@@ -358,6 +362,17 @@ class AdminUserRepository:
             entitlement=entitlement,
             subscriptions=subscriptions,
         )
+
+        expected_email = _safe_str(
+            snapshot.get("email")
+            or auth_account.get("email")
+            or app_profile.get("email")
+            or cognito_profile.get("email")
+        ).lower()
+        if not expected_email:
+            raise ValueError("This user does not have a login email available for confirmation.")
+        if safe_confirm_email != expected_email:
+            raise ValueError("Type the user's login email exactly to confirm deletion.")
 
         if snapshot["has_active_subscription"] and not force:
             raise AdminDeleteRequiresForceError(
@@ -568,6 +583,7 @@ class AdminUserRepository:
             "family_name": _safe_str(
                 app_profile.get("family_name") or cognito_profile.get("family_name")
             ),
+            "music_profile": _safe_str(app_profile.get("music_profile")),
             "email_verified": bool(
                 auth_account.get("email_verified")
                 if "email_verified" in auth_account

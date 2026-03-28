@@ -145,14 +145,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.2.1"
-  background_downloader:
-    dependency: transitive
-    description:
-      name: background_downloader
-      sha256: "2ea5322fe836c0aaf96aefd29ef1936771c71927f687cf18168dcc119666a45f"
-      url: "https://pub.dev"
-    source: hosted
-    version: "9.5.2"
   better_player:
     dependency: "direct main"
     description:
@@ -523,14 +515,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.3"
-  flutter_gemma:
-    dependency: "direct main"
-    description:
-      name: flutter_gemma
-      sha256: cb16272874da09efe9389fa27206a4a476dff1b542a4362ab5b3b24bad22f2d5
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.11.16"
   flutter_gen:
     dependency: "direct main"
     description:
@@ -1019,14 +1003,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.10.0"
-  large_file_handler:
-    dependency: transitive
-    description:
-      name: large_file_handler
-      sha256: c2ecaf552e8039119bbe3a094d15aecbafe833899f30b2dcfbb513eddf76b36f
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.3.1"
   leak_tracker:
     dependency: transitive
     description:

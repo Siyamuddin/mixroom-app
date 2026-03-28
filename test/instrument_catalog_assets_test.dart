@@ -71,6 +71,18 @@ String _resolveSfzSampleAssetPath({
   return _normalizeAssetPath(p.posix.join(sfzDir, defaultPath, samplePath));
 }
 
+Set<String> _extractStaticSfzPaths(String source) {
+  final out = <String>{};
+  final regex = RegExp(r'''assets/instruments/[^"'\s]+\.sfz''');
+  for (final match in regex.allMatches(source)) {
+    final value = match.group(0)?.trim();
+    if (value != null && value.isNotEmpty) {
+      out.add(_normalizeAssetPath(value));
+    }
+  }
+  return out;
+}
+
 void main() {
   test('bundled instrument catalog resolves every indexed SFZ preset',
       () async {
@@ -179,6 +191,39 @@ void main() {
           reason: 'Missing sample for $sfzAssetPath: $sampleAssetPath',
         );
       }
+    }
+  });
+
+  test('statically referenced SFZ assets exist on disk', () async {
+    final repoRoot = Directory.current;
+    final sourceFiles = <String>[
+      p.join(repoRoot.path, 'lib', 'screens', 'audio_editor.dart'),
+      p.join(repoRoot.path, 'juce_audio_engine', 'android', 'src', 'main',
+          'cpp', 'JuceEngine.h'),
+      p.join(repoRoot.path, 'juce_audio_engine', 'android', 'src', 'main',
+          'cpp', 'TimelineMidiClipProcessor.h'),
+      p.join(repoRoot.path, 'juce_audio_engine', 'ios', 'Classes',
+          'JuceEngine.h'),
+    ];
+
+    final referenced = <String>{};
+    for (final path in sourceFiles) {
+      final file = File(path);
+      expect(file.existsSync(), isTrue, reason: 'Missing source file: $path');
+      final text = await file.readAsString();
+      referenced.addAll(_extractStaticSfzPaths(text));
+    }
+
+    expect(referenced, isNotEmpty,
+        reason: 'No static SFZ references were found.');
+
+    for (final sfzPath in referenced) {
+      final sfzFile = File(p.join(repoRoot.path, sfzPath));
+      expect(
+        sfzFile.existsSync(),
+        isTrue,
+        reason: 'Missing static SFZ reference: $sfzPath',
+      );
     }
   });
 }

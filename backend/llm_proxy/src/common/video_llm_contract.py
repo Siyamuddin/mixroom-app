@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from .ai_runtime_defaults import VIDEO_DEFAULT_TEMPERATURE
 from .llm_settings import DEFAULT_MODEL
-DEFAULT_TEMPERATURE = 0.1
+DEFAULT_TEMPERATURE = VIDEO_DEFAULT_TEMPERATURE
 NormalizedLlmRequest = Dict[str, Any]
 
 VIDEO_SYSTEM_PROMPT = """

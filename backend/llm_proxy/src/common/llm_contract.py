@@ -3,22 +3,15 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
+from .ai_runtime_defaults import (
+    CHAT_DEFAULT_TEMPERATURE,
+    default_prompt_cache_retention,
+    default_reasoning,
+)
 from .llm_settings import DEFAULT_MODEL
-DEFAULT_TEMPERATURE = 0.2
+DEFAULT_TEMPERATURE = CHAT_DEFAULT_TEMPERATURE
 PROMPT_CACHE_VERSION = "mixroom-daw-v20260316"
 DEFAULT_PROMPT_CACHE_RETENTION = "in_memory"
-_EXTENDED_PROMPT_CACHE_RETENTION_MODELS = frozenset(
-    {
-        "gpt-4.1",
-        "gpt-5",
-        "gpt-5-codex",
-        "gpt-5.1",
-        "gpt-5.1-codex",
-        "gpt-5.1-codex-mini",
-        "gpt-5.1-chat-latest",
-        "gpt-5.2",
-    }
-)
 NormalizedLlmRequest = Dict[str, Any]
 
 
@@ -28,17 +21,11 @@ def _supports_temperature(model_name: str) -> bool:
 
 
 def _default_reasoning(model_name: str) -> Dict[str, str] | None:
-    normalized = str(model_name or "").strip().lower()
-    if normalized.startswith("gpt-5"):
-        return {"effort": "minimal"}
-    return None
+    return default_reasoning(model_name)
 
 
 def _default_prompt_cache_retention(model_name: str) -> str:
-    normalized = str(model_name or "").strip().lower()
-    if normalized in _EXTENDED_PROMPT_CACHE_RETENTION_MODELS:
-        return "24h"
-    return DEFAULT_PROMPT_CACHE_RETENTION
+    return default_prompt_cache_retention(model_name)
 
 SYSTEM_PROMPT = """
 You are AI Co-Producer — an intelligent, on-device DAW mixing collaborator.

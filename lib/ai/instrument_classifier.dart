@@ -1,28 +1,33 @@
-import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
-import 'package:flutter/services.dart';
-// import 'package:onnxruntime/onnxruntime.dart';
+
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+import 'ai_debug.dart';
+import 'onnx_session_loader.dart';
 
 class InstrumentClassifier {
   static const int _sr = 16000;
   static const int _frameSize = 15600; // ~0.975s at 16kHz
   static const int _numFrames = 3; // sample a few windows for robustness
 
+  final bool enabled;
   final OnnxRuntime _ort = OnnxRuntime();
   OrtSession? _session;
 
+  InstrumentClassifier({this.enabled = true});
+
   Future<void> load() async {
+    if (!enabled) return;
     try {
-      // This library handles the asset-to-file logic internally!
-      _session = await _ort.createSessionFromAsset('assets/models/yamnet.onnx');
-      print("ONNX Session loaded via flutter_onnxruntime");
+      _session = await createCpuSessionFromAsset(
+        runtime: _ort,
+        assetKey: 'assets/models/yamnet.onnx',
+        scope: 'yamnet',
+      );
+      aiDebugLog('yamnet', 'classifier model loaded');
     } catch (e) {
-      print("Error loading session: $e");
+      _session = null;
+      aiDebugLog('yamnet', 'classifier model load failed error=$e');
     }
   }
   // Future<void> load() async {
@@ -62,10 +67,11 @@ class InstrumentClassifier {
   //   // _session = OrtSession.fromBuffer(modelBytes, options);
   // }
 
-  bool get isReady => _session != null;
+  bool get isReady => !enabled || _session != null;
 
   /// pcm16k must be Float32 mono @ 16kHz (any length). We will sample frames.
   Future<Map<String, double>> classifyAudio(Float32List pcm16k) async {
+    if (!enabled) return _fallback();
     final s = _session;
 
     if (s == null || pcm16k.isEmpty) return _fallback();
@@ -104,7 +110,7 @@ class InstrumentClassifier {
       final inputName = session.inputNames.first;
       final outputName = session.outputNames.first;
 
-      final inputTensor = await OrtValue.fromList(frame, [frame.length]);
+      final inputTensor = await OrtValue.fromList(frame, [1, frame.length]);
       final inputs = {inputName: inputTensor};
       final outputs = await session.run(inputs);
 
@@ -129,9 +135,18 @@ class InstrumentClassifier {
 
       return scores;
     } catch (e) {
-      print("Inference Error: $e");
+      aiDebugLog('yamnet', 'inference failed error=$e');
       return null;
     }
+  }
+
+  Future<void> dispose() async {
+    final session = _session;
+    _session = null;
+    if (session == null) return;
+    try {
+      await session.close();
+    } catch (_) {}
   }
   // List<double>? _runOnce(OrtSession session, String inputName, Float32List frame) {
   //   // Shape should match most YAMNet ONNX exports: [1, 15600]

@@ -141,6 +141,7 @@ class AppUserService extends ChangeNotifier {
   Future<void> updateProfile({
     required String displayName,
     required String username,
+    String? musicProfile,
     required String bio,
     String? avatarUrl,
   }) async {
@@ -161,6 +162,9 @@ class AppUserService extends ChangeNotifier {
       final body = <String, dynamic>{
         'display_name': displayName.trim(),
         'username': username.trim(),
+        'music_profile': (musicProfile ?? '').trim().isEmpty
+            ? null
+            : musicProfile!.trim().toLowerCase(),
         'bio': bio.trim(),
       };
       if (avatarUrl != null) {
@@ -201,6 +205,105 @@ class AppUserService extends ChangeNotifier {
       _lastSyncedAtUtc = DateTime.now().toUtc();
       _lastError = null;
       _isInitialized = true;
+      await _writeCachedProfile(user.userId, _current!);
+    } catch (e) {
+      _lastError = e.toString().replaceFirst('Bad state: ', '');
+      _isInitialized = true;
+      rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> completeSignupProfile({
+    required String email,
+    String? username,
+    String? displayName,
+    String? givenName,
+    String? familyName,
+    String? birthdate,
+    String? musicProfile,
+    required bool newsletterOptIn,
+  }) async {
+    final auth = _auth;
+    final user = auth?.signedInUser;
+    if (auth == null || user == null) {
+      throw StateError('No active account.');
+    }
+    if (!supportsRemoteProfileEdits) {
+      throw StateError('App profile backend is not configured yet.');
+    }
+    if (_isLoading) {
+      await (_refreshInFlight ?? Future<void>.value());
+    }
+    if (_isLoading) return;
+
+    final safeEmail = email.trim().toLowerCase();
+    final safeUsername = (username ?? '').trim().toLowerCase();
+    final safeDisplayName = (displayName ?? '').trim();
+    final safeGivenName = (givenName ?? '').trim();
+    final safeFamilyName = (familyName ?? '').trim();
+    final safeBirthdate = (birthdate ?? '').trim();
+    final safeMusicProfile = (musicProfile ?? '').trim().toLowerCase();
+    final acceptedAt = DateTime.now().toUtc();
+
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final response = await auth.authorizedRequest(
+        (token) => _httpClient
+            .patch(
+              _buildUri('/v1/users/me'),
+              headers: <String, String>{
+                'Authorization': 'Bearer $token',
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode(<String, dynamic>{
+                if (safeDisplayName.isNotEmpty) 'display_name': safeDisplayName,
+                if (safeUsername.isNotEmpty) 'username': safeUsername,
+                if (safeGivenName.isNotEmpty) 'given_name': safeGivenName,
+                if (safeFamilyName.isNotEmpty) 'family_name': safeFamilyName,
+                if (safeBirthdate.isNotEmpty) 'birthdate': safeBirthdate,
+                'music_profile':
+                    safeMusicProfile.isEmpty ? null : safeMusicProfile,
+                'accepted_terms_version': LegalConfig.termsVersion,
+                'accepted_privacy_version': LegalConfig.privacyVersion,
+                'accepted_at': acceptedAt.toIso8601String(),
+                'newsletter_opt_in': newsletterOptIn,
+                'newsletter_opt_in_at':
+                    newsletterOptIn ? acceptedAt.toIso8601String() : null,
+              }),
+            )
+            .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          throw StateError(
+            'Session expired. Please sign in again and finish account setup.',
+          );
+        }
+        throw StateError(
+          _extractErrorMessage(
+                response.body,
+                fallback: 'Failed to finish creating your account.',
+              ) ??
+              'Failed to finish creating your account.',
+        );
+      }
+
+      _current = _parseProfileResponse(response.body, fallbackUser: user);
+      _lastSyncedAtUtc = DateTime.now().toUtc();
+      _lastError = null;
+      _isInitialized = true;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_pendingSignupConsentKey(safeEmail));
+      _hasPendingSignupProfileSync = false;
+
       await _writeCachedProfile(user.userId, _current!);
     } catch (e) {
       _lastError = e.toString().replaceFirst('Bad state: ', '');
@@ -307,7 +410,9 @@ class AppUserService extends ChangeNotifier {
     String? givenName,
     String? familyName,
     String? birthdate,
+    String? musicProfile,
     required bool newsletterOptIn,
+    bool syncImmediately = true,
   }) async {
     final safeEmail = email.trim().toLowerCase();
     if (safeEmail.isEmpty) return;
@@ -316,6 +421,7 @@ class AppUserService extends ChangeNotifier {
     final safeGivenName = (givenName ?? '').trim();
     final safeFamilyName = (familyName ?? '').trim();
     final safeBirthdate = (birthdate ?? '').trim();
+    final safeMusicProfile = (musicProfile ?? '').trim().toLowerCase();
 
     final acceptedAt = DateTime.now().toUtc();
     final payload = <String, dynamic>{
@@ -325,6 +431,7 @@ class AppUserService extends ChangeNotifier {
       'given_name': safeGivenName.isEmpty ? null : safeGivenName,
       'family_name': safeFamilyName.isEmpty ? null : safeFamilyName,
       'birthdate': safeBirthdate.isEmpty ? null : safeBirthdate,
+      'music_profile': safeMusicProfile.isEmpty ? null : safeMusicProfile,
       'accepted_terms_version': LegalConfig.termsVersion,
       'accepted_privacy_version': LegalConfig.privacyVersion,
       'accepted_at': acceptedAt.toIso8601String(),
@@ -344,7 +451,8 @@ class AppUserService extends ChangeNotifier {
 
     final auth = _auth;
     final currentUser = auth?.signedInUser;
-    if (auth != null &&
+    if (syncImmediately &&
+        auth != null &&
         currentUser != null &&
         auth.hasActiveSessionTokens &&
         currentUser.email.trim().toLowerCase() == safeEmail) {
@@ -506,7 +614,24 @@ class AppUserService extends ChangeNotifier {
     AuthUserProfile user, {
     required bool notify,
   }) {
-    _current = AppUserSnapshot.fromAuthUser(user);
+    final previous = _current;
+    final mergedJson = <String, dynamic>{
+      ...(previous?.toJson() ?? <String, dynamic>{}),
+      'user_id': user.userId,
+      'email': user.email,
+      'display_name': user.displayName,
+      'email_verified': user.emailVerified,
+      'cognito_username': user.email,
+      'auth_provider': user.provider.value,
+      'created_at': (previous?.createdAt ?? user.createdAt.toUtc())
+          .toUtc()
+          .toIso8601String(),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    _current = AppUserSnapshot.fromJson(
+      mergedJson,
+      fallbackAuthUser: user,
+    );
     _lastSyncedAtUtc = DateTime.now().toUtc();
     if (notify) {
       notifyListeners();
@@ -517,7 +642,6 @@ class AppUserService extends ChangeNotifier {
     return <String>[
       user.userId,
       user.email,
-      user.displayName,
       user.provider.value,
       user.emailVerified.toString(),
     ].join('|');
@@ -577,6 +701,16 @@ class AppUserService extends ChangeNotifier {
         return null;
       }
 
+      if (currentProfile.isSignupComplete) {
+        await prefs.remove(key);
+        if (_hasPendingSignupProfileSync) {
+          _hasPendingSignupProfileSync = false;
+          notifyListeners();
+        }
+        _lastError = null;
+        return null;
+      }
+
       final acceptedTermsVersion =
           (payload['accepted_terms_version'] ?? '').toString().trim();
       final acceptedPrivacyVersion =
@@ -586,7 +720,10 @@ class AppUserService extends ChangeNotifier {
       final givenName = (payload['given_name'] ?? '').toString().trim();
       final familyName = (payload['family_name'] ?? '').toString().trim();
       final birthdate = (payload['birthdate'] ?? '').toString().trim();
-      final username = (payload['username'] ?? '').toString().trim().toLowerCase();
+      final musicProfile =
+          (payload['music_profile'] ?? '').toString().trim().toLowerCase();
+      final username =
+          (payload['username'] ?? '').toString().trim().toLowerCase();
       final newsletterOptIn = payload['newsletter_opt_in'] == true;
       final newsletterOptInAt =
           (payload['newsletter_opt_in_at'] ?? '').toString().trim();
@@ -603,6 +740,9 @@ class AppUserService extends ChangeNotifier {
               familyName.isEmpty) &&
           ((currentProfile.birthdate ?? '').trim() == birthdate ||
               birthdate.isEmpty) &&
+          ((currentProfile.musicProfile ?? '').trim().toLowerCase() ==
+                  musicProfile ||
+              musicProfile.isEmpty) &&
           currentProfile.acceptedPrivacyVersion == acceptedPrivacyVersion &&
           (currentProfile.acceptedAt?.toIso8601String() ?? '') == acceptedAt &&
           currentProfile.newsletterOptIn == newsletterOptIn &&
@@ -631,6 +771,7 @@ class AppUserService extends ChangeNotifier {
                 if (givenName.isNotEmpty) 'given_name': givenName,
                 if (familyName.isNotEmpty) 'family_name': familyName,
                 if (birthdate.isNotEmpty) 'birthdate': birthdate,
+                'music_profile': musicProfile.isEmpty ? null : musicProfile,
                 'accepted_terms_version': acceptedTermsVersion,
                 'accepted_privacy_version': acceptedPrivacyVersion,
                 'accepted_at': acceptedAt,

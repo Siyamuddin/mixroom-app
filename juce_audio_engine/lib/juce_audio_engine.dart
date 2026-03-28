@@ -1626,6 +1626,20 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<bool> preparePlaybackRoute({
+    String reason = 'dart',
+  }) async {
+    try {
+      final res = await _ch.invokeMethod<bool>('preparePlaybackRoute', {
+        'reason': reason,
+      });
+      return res ?? false;
+    } on PlatformException catch (e) {
+      _logError('preparePlaybackRoute', e);
+      return false;
+    }
+  }
+
   static Future<void> refreshAudioRoute({
     String reason = 'dart',
   }) async {

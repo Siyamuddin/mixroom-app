@@ -1,8 +1,12 @@
+// ignore_for_file: unused_element, unused_catch_clause
+
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:http/http.dart' as http;
 import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/config/legal_config.dart';
@@ -13,26 +17,35 @@ import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/password_policy.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/auth_user_profile.dart';
+import 'package:mixroom/widgets/auth_figma_shell.dart';
 import 'package:mixroom/widgets/email_verification_sheet.dart';
-import 'package:mixroom/widgets/language_selector.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-enum _AuthMode { signIn, register }
-
-enum _SignInStep { email, password }
+enum LoginEntryMode { signIn, createAccount }
 
 enum _RegisterStep { account, profile }
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({
+    super.key,
+    this.initialMode = LoginEntryMode.signIn,
+  });
+
+  final LoginEntryMode initialMode;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const int _confirmationCodeLength = 6;
+  static const Duration _confirmationCodeExpiry = Duration(minutes: 20);
+  static final math.Random _usernameRandom = math.Random();
+
   final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _confirmationCodeController =
+      TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController =
       TextEditingController();
@@ -44,9 +57,10 @@ class _LoginScreenState extends State<LoginScreen> {
   final FocusNode _signInEmailFocusNode = FocusNode();
   final FocusNode _signInPasswordFocusNode = FocusNode();
 
-  _AuthMode _mode = _AuthMode.signIn;
-  _SignInStep _signInStep = _SignInStep.email;
+  LoginEntryMode _mode = LoginEntryMode.signIn;
   _RegisterStep _registerStep = _RegisterStep.account;
+  Timer? _confirmationCodeTimer;
+  DateTime? _confirmationCodeSentAtUtc;
 
   bool _hidePassword = true;
   bool _hideConfirmPassword = true;
@@ -57,6 +71,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _signInPasswordError;
   String? _signInInlineError;
   String? _registerEmailError;
+  String? _registerCodeError;
   String? _registerPasswordError;
   String? _registerConfirmPasswordError;
   String? _registerUsernameError;
@@ -65,8 +80,31 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _registerInlineInfo;
 
   @override
+  void initState() {
+    super.initState();
+    _mode = widget.initialMode;
+    if (_mode == LoginEntryMode.createAccount) {
+      _ensureSuggestedSignupUsername();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant LoginScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialMode != widget.initialMode &&
+        widget.initialMode != _mode) {
+      _mode = widget.initialMode;
+      _registerStep = _RegisterStep.account;
+      _clearSignInErrors();
+      _clearRegisterErrors();
+    }
+  }
+
+  @override
   void dispose() {
+    _confirmationCodeTimer?.cancel();
     _emailController.dispose();
+    _confirmationCodeController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     _firstNameController.dispose();
@@ -78,7 +116,7 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  bool get _isRegisterMode => _mode == _AuthMode.register;
+  bool get _isRegisterMode => _mode == LoginEntryMode.createAccount;
 
   bool _isLikelyEmail(String value) {
     final safe = value.trim();
@@ -169,6 +207,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _clearRegisterErrors() {
     _registerEmailError = null;
+    _registerCodeError = null;
     _registerPasswordError = null;
     _registerConfirmPasswordError = null;
     _registerUsernameError = null;
@@ -200,7 +239,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   bool _validateRegisterProfileStep() {
-    final usernameError = _validateUsername(_signupUsernameController.text);
+    final usernameError = _validateOptionalUsername(
+      _signupUsernameController.text,
+    );
     final birthdateError = _validateBirthdate(_selectedBirthdateUtc);
 
     setState(() {
@@ -216,6 +257,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String _trimmedLastName() => _lastNameController.text.trim();
 
+  String? _validateOptionalUsername(String value) {
+    final safe = value.trim();
+    if (safe.isEmpty) return null;
+    return _validateUsername(safe);
+  }
+
   String _composeSignupDisplayName() {
     final parts = <String>[
       _trimmedFirstName(),
@@ -225,6 +272,34 @@ class _LoginScreenState extends State<LoginScreen> {
       return parts.join(' ');
     }
     return _signupUsernameController.text.trim().toLowerCase();
+  }
+
+  String _generateSuggestedUsername() {
+    final suffix =
+        _usernameRandom.nextInt(1000000000).toString().padLeft(9, '0');
+    return 'mixroom-user$suffix';
+  }
+
+  void _ensureSuggestedSignupUsername() {
+    if (_signupUsernameController.text.trim().isNotEmpty) return;
+    _signupUsernameController.text = _generateSuggestedUsername();
+  }
+
+  Future<void> _stagePendingSignupProfile(
+    AppUserService appUserService,
+    String safeEmail,
+  ) {
+    final safeUsername = _signupUsernameController.text.trim().toLowerCase();
+    final displayName = _composeSignupDisplayName();
+    return appUserService.stageSignupConsents(
+      email: safeEmail,
+      username: safeUsername.isEmpty ? null : safeUsername,
+      displayName: displayName.isEmpty ? null : displayName,
+      givenName: _trimmedFirstName(),
+      familyName: _trimmedLastName(),
+      birthdate: _birthdateController.text.trim(),
+      newsletterOptIn: _newsletterOptIn,
+    );
   }
 
   String? _validateBirthdate(DateTime? birthdateUtc) {
@@ -260,8 +335,19 @@ class _LoginScreenState extends State<LoginScreen> {
     return '$year-$month-$day';
   }
 
+  DateTime _defaultBirthdateForPickerUtc() {
+    final now = DateTime.now().toUtc();
+    final defaultDate = DateTime.utc(now.year - 18, now.month, now.day);
+    final first = _earliestSelectableBirthdateUtc();
+    final last = _latestAllowedBirthdateUtc();
+    if (defaultDate.isBefore(first)) return first;
+    if (defaultDate.isAfter(last)) return last;
+    return defaultDate;
+  }
+
   Future<void> _pickBirthdate() async {
-    final initialDate = _selectedBirthdateUtc ?? _latestAllowedBirthdateUtc();
+    final initialDate =
+        _selectedBirthdateUtc ?? _defaultBirthdateForPickerUtc();
     final picked = await showDatePicker(
       context: context,
       initialDate: initialDate,
@@ -280,37 +366,18 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
-  void _switchMode(_AuthMode next) {
+  void _switchMode(LoginEntryMode next) {
     if (_mode == next) return;
     FocusScope.of(context).unfocus();
     setState(() {
       _mode = next;
-      _signInStep = _SignInStep.email;
       _registerStep = _RegisterStep.account;
       _newsletterOptIn = false;
       _clearSignInErrors();
       _clearRegisterErrors();
-    });
-  }
-
-  void _continueToPasswordStep() {
-    if (!_isLikelyLoginIdentifier(_emailController.text.trim())) {
-      setState(() {
-        _signInEmailError = 'Please enter a valid email or username.';
-      });
-      _signInEmailFocusNode.requestFocus();
-      return;
-    }
-
-    setState(() {
-      _signInEmailError = null;
-      _signInInlineError = null;
-      _signInStep = _SignInStep.password;
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _signInPasswordFocusNode.requestFocus();
+      if (next == LoginEntryMode.createAccount) {
+        _ensureSuggestedSignupUsername();
+      }
     });
   }
 
@@ -330,6 +397,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (!_validateRegisterAccountStep()) return;
         setState(() {
           _registerStep = _RegisterStep.profile;
+          _ensureSuggestedSignupUsername();
           _registerUsernameError = null;
           _registerBirthdateError = null;
           _registerInlineInfo = null;
@@ -340,6 +408,94 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
     }
   }
+
+  String? _pendingCreateAccountEmail(AuthService auth) {
+    if (!auth.hasPendingEmailVerification) return null;
+    final pendingEmail = auth.currentUser?.email.trim().toLowerCase() ?? '';
+    return pendingEmail.isEmpty ? null : pendingEmail;
+  }
+
+  bool _isAwaitingCreateAccountCode(AuthService auth) {
+    final pendingEmail = _pendingCreateAccountEmail(auth);
+    if (pendingEmail == null) return false;
+    return pendingEmail == _emailController.text.trim().toLowerCase();
+  }
+
+  void _startConfirmationCodeCountdown() {
+    _confirmationCodeTimer?.cancel();
+    _confirmationCodeSentAtUtc = DateTime.now().toUtc();
+    _confirmationCodeTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if ((_confirmationCodeSentAtUtc ?? DateTime.now().toUtc())
+          .add(_confirmationCodeExpiry)
+          .isBefore(DateTime.now().toUtc())) {
+        _confirmationCodeTimer?.cancel();
+      }
+      setState(() {});
+    });
+  }
+
+  String? _confirmationCodeCountdownLabel() {
+    final sentAt = _confirmationCodeSentAtUtc;
+    if (sentAt == null) return null;
+    final remaining =
+        _confirmationCodeExpiry - DateTime.now().toUtc().difference(sentAt);
+    if (remaining.isNegative) {
+      return '00:00';
+    }
+    final minutes =
+        remaining.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds =
+        remaining.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  bool _validateCreateAccountStep({
+    required bool requiresCode,
+  }) {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final confirm = _confirmPasswordController.text;
+    final code = _confirmationCodeController.text.trim();
+
+    final emailError =
+        _isLikelyEmail(email) ? null : 'Please enter a valid email address.';
+    final codeError = requiresCode && code.isEmpty
+        ? 'Please enter the confirmation code.'
+        : null;
+    final passwordIssues = PasswordPolicy.validateIssues(password);
+    final passwordError =
+        passwordIssues.isEmpty ? null : passwordIssues.join('\n');
+    final confirmError = password == confirm ? null : 'Passwords do not match.';
+
+    setState(() {
+      _registerEmailError = emailError;
+      _registerCodeError = codeError;
+      _registerPasswordError = passwordError;
+      _registerConfirmPasswordError = confirmError;
+      _registerInlineError = null;
+      _registerInlineInfo = null;
+    });
+
+    return emailError == null &&
+        codeError == null &&
+        passwordError == null &&
+        confirmError == null;
+  }
+
+  bool _canSendCreateAccountCodeLocally() {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final confirm = _confirmPasswordController.text;
+    return _isLikelyEmail(email) &&
+        PasswordPolicy.validateIssues(password).isEmpty &&
+        password == confirm;
+  }
+
+  bool get _hasReadyCreateAccountEmail => _isLikelyEmail(_emailController.text);
+
+  bool get _hasReadyConfirmationCode =>
+      _confirmationCodeController.text.trim().length >= _confirmationCodeLength;
 
   Future<void> _openEmailVerificationFlow(AuthService auth) async {
     await showEmailVerificationSheet(
@@ -466,8 +622,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     onPressed: () async {
                       Navigator.of(sheetContext).pop();
                       setState(() {
-                        _mode = _AuthMode.signIn;
-                        _signInStep = _SignInStep.password;
+                        _mode = LoginEntryMode.signIn;
                         _emailController.text = safeEmail;
                         _passwordController.clear();
                       });
@@ -582,8 +737,7 @@ class _LoginScreenState extends State<LoginScreen> {
       case null:
         if (!mounted) return;
         setState(() {
-          _mode = _AuthMode.signIn;
-          _signInStep = _SignInStep.password;
+          _mode = LoginEntryMode.signIn;
           _emailController.text = safeEmail;
           _passwordController.clear();
           _signInInlineError = conflict.message;
@@ -595,14 +749,23 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _submitSignIn(AuthService auth) async {
     FocusScope.of(context).unfocus();
 
+    if (!_isLikelyLoginIdentifier(_emailController.text.trim())) {
+      setState(() {
+        _signInEmailError = 'Please enter a valid email or username.';
+      });
+      return;
+    }
+
     if (_passwordController.text.isEmpty) {
       setState(() {
+        _signInEmailError = null;
         _signInPasswordError = 'Please enter your password.';
       });
       return;
     }
 
     setState(() {
+      _signInEmailError = null;
       _signInPasswordError = null;
       _signInInlineError = null;
     });
@@ -632,58 +795,131 @@ class _LoginScreenState extends State<LoginScreen> {
     final appUserService = context.read<AppUserService>();
     final safeEmail = _emailController.text.trim().toLowerCase();
     final localeCode = Localizations.localeOf(context).languageCode;
+    final requiresCode = _isAwaitingCreateAccountCode(auth);
 
-    if (!_validateRegisterProfileStep()) return;
+    if (!_validateCreateAccountStep(requiresCode: requiresCode)) return;
 
     setState(() {
       _registerInlineError = null;
       _registerInlineInfo = null;
     });
 
-    final usernameAvailabilityError = await _checkUsernameAvailability();
-    if (usernameAvailabilityError != null) {
+    try {
+      final availabilityError = await _checkUsernameAvailability();
+      if (availabilityError != null) {
+        if (!mounted) return;
+        setState(() {
+          _registerUsernameError = availabilityError;
+        });
+        return;
+      }
+      if (requiresCode) {
+        await auth.confirmEmailSignUp(
+          email: safeEmail,
+          code: _confirmationCodeController.text,
+          passwordToSignIn: _passwordController.text,
+        );
+      } else {
+        await auth.registerWithEmail(
+          name: _composeSignupDisplayName(),
+          givenName: _trimmedFirstName(),
+          familyName: _trimmedLastName(),
+          birthdate: _birthdateController.text.trim(),
+          email: safeEmail,
+          password: _passwordController.text,
+          localeCode: localeCode,
+        );
+      }
+      await _stagePendingSignupProfile(appUserService, safeEmail);
+    } on AuthEmailConfirmationRequiredException catch (e) {
+      await _stagePendingSignupProfile(appUserService, safeEmail);
+      if (!mounted) return;
+      if (auth.isSignedIn) return;
+      _startConfirmationCodeCountdown();
+      setState(() {
+        _registerInlineError = null;
+        _registerInlineInfo =
+            L10n.translate(context, 'Confirmation code sent!');
+      });
+    } catch (e) {
       if (!mounted) return;
       setState(() {
-        _registerUsernameError = usernameAvailabilityError;
+        _registerInlineError = _normalizeError(e);
       });
-      return;
     }
+  }
+
+  Future<void> _sendCreateAccountCode(AuthService auth) async {
+    FocusScope.of(context).unfocus();
+    final appUserService = context.read<AppUserService>();
+    final safeEmail = _emailController.text.trim().toLowerCase();
+    final localeCode = Localizations.localeOf(context).languageCode;
+
+    if (!_validateCreateAccountStep(requiresCode: false)) return;
+
+    setState(() {
+      _registerInlineError = null;
+      _registerInlineInfo = null;
+    });
 
     try {
+      final availabilityError = await _checkUsernameAvailability();
+      if (availabilityError != null) {
+        if (!mounted) return;
+        setState(() {
+          _registerUsernameError = availabilityError;
+        });
+        return;
+      }
       await auth.registerWithEmail(
         name: _composeSignupDisplayName(),
         givenName: _trimmedFirstName(),
         familyName: _trimmedLastName(),
         birthdate: _birthdateController.text.trim(),
-        email: _emailController.text,
+        email: safeEmail,
         password: _passwordController.text,
         localeCode: localeCode,
       );
-      await appUserService.stageSignupConsents(
-        email: safeEmail,
-        username: _signupUsernameController.text,
-        displayName: _composeSignupDisplayName(),
-        givenName: _trimmedFirstName(),
-        familyName: _trimmedLastName(),
-        birthdate: _birthdateController.text.trim(),
-        newsletterOptIn: _newsletterOptIn,
-      );
-    } on AuthEmailConfirmationRequiredException catch (e) {
-      await appUserService.stageSignupConsents(
-        email: safeEmail,
-        username: _signupUsernameController.text,
-        displayName: _composeSignupDisplayName(),
-        givenName: _trimmedFirstName(),
-        familyName: _trimmedLastName(),
-        birthdate: _birthdateController.text.trim(),
-        newsletterOptIn: _newsletterOptIn,
-      );
+      await _stagePendingSignupProfile(appUserService, safeEmail);
+    } on AuthEmailConfirmationRequiredException {
+      await _stagePendingSignupProfile(appUserService, safeEmail);
       if (!mounted) return;
       if (auth.isSignedIn) return;
+      _startConfirmationCodeCountdown();
       setState(() {
-        _registerInlineError = e.message;
+        _registerInlineError = null;
+        _registerInlineInfo =
+            L10n.translate(context, 'Confirmation code sent!');
       });
-      await _openEmailVerificationFlow(auth);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _registerInlineError = _normalizeError(e);
+      });
+    }
+  }
+
+  Future<void> _resendCreateAccountCode(AuthService auth) async {
+    final safeEmail = _emailController.text.trim().toLowerCase();
+    if (!_isLikelyEmail(safeEmail)) {
+      setState(() {
+        _registerEmailError = 'Please enter a valid email address.';
+      });
+      return;
+    }
+
+    try {
+      await auth.resendSignUpCode(
+        email: safeEmail,
+        localeCode: Localizations.localeOf(context).languageCode,
+      );
+      if (!mounted) return;
+      _startConfirmationCodeCountdown();
+      setState(() {
+        _registerInlineError = null;
+        _registerInlineInfo =
+            L10n.translate(context, 'Confirmation code sent!');
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -700,7 +936,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final normalizedUsername =
         _signupUsernameController.text.trim().toLowerCase();
     if (normalizedUsername.isEmpty) {
-      return 'Please choose a username.';
+      return null;
     }
 
     try {
@@ -745,32 +981,6 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _submitSocial(AuthService auth, Future<void> Function() action,
       {required String providerLabel}) async {
     final appUserService = context.read<AppUserService>();
-    final isRegisterSocialFlow = _isRegisterMode;
-    if (isRegisterSocialFlow) {
-      if (_registerStep != _RegisterStep.profile) {
-        FocusScope.of(context).unfocus();
-        setState(() {
-          _registerStep = _RegisterStep.profile;
-          _registerInlineError = null;
-          _registerInlineInfo =
-              'Choose a username and birthday, then continue with $providerLabel.';
-        });
-        return;
-      }
-      if (!_validateRegisterProfileStep()) {
-        return;
-      }
-      final usernameAvailabilityError = await _checkUsernameAvailability();
-      if (usernameAvailabilityError != null) {
-        if (!mounted) return;
-        setState(() {
-          _registerUsernameError = usernameAvailabilityError;
-          _registerInlineInfo = null;
-        });
-        return;
-      }
-    }
-
     if (!mounted) return;
     FocusScope.of(context).unfocus();
     setState(() {
@@ -781,31 +991,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
     var resolvingPostSignIn = false;
     try {
-      if (isRegisterSocialFlow) {
-        appUserService.beginPostSignInResolution();
-        resolvingPostSignIn = true;
-      }
+      appUserService.beginPostSignInResolution();
+      resolvingPostSignIn = true;
       await action();
-      if (isRegisterSocialFlow &&
-          auth.lastSocialSignInRequiresSignupCompletion &&
-          auth.signedInUser != null) {
-        try {
-          await appUserService.stageSignupConsents(
-            email: auth.signedInUser!.email,
-            username: _signupUsernameController.text,
-            displayName: _composeSignupDisplayName(),
-            givenName: _trimmedFirstName(),
-            familyName: _trimmedLastName(),
-            birthdate: _birthdateController.text.trim(),
-            newsletterOptIn: _newsletterOptIn,
-          );
-        } catch (_) {
-          await auth.signOut();
-          throw StateError(
-            'Mixroom could not finish preparing your signup details. Please try again.',
-          );
-        }
-      }
     } on AuthSocialAccountConflictException catch (e) {
       if (!mounted) return;
       final message = _normalizeError(e);
@@ -871,8 +1059,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (identifier.isEmpty || password.isEmpty) {
       if (!mounted) return;
       setState(() {
-        _mode = _AuthMode.signIn;
-        _signInStep = _SignInStep.password;
+        _mode = LoginEntryMode.signIn;
         _signInEmailError = identifier.isEmpty
             ? 'Please provide a dev login email/username.'
             : null;
@@ -886,8 +1073,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (!mounted) return;
     setState(() {
-      _mode = _AuthMode.signIn;
-      _signInStep = _SignInStep.password;
+      _mode = LoginEntryMode.signIn;
       _emailController.text = identifier;
       _signInEmailError = null;
       _signInPasswordError = null;
@@ -943,289 +1129,575 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      body: Container(
-        color: const Color(0xFF15498E),
-        child: Stack(
-          children: [
-            const Positioned.fill(
-              child: _MusicBackdrop(),
-            ),
-            SafeArea(
-              child: LayoutBuilder(
-                builder: (context, _) {
-                  final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+      body: Stack(
+        children: [
+          const Positioned.fill(
+            child: MixroomAuthBackground(),
+          ),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+                final minHeight = math.max(
+                  0.0,
+                  constraints.maxHeight - bottomInset - 24,
+                );
 
-                  return AnimatedPadding(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    padding: EdgeInsets.only(bottom: bottomInset),
-                    child: ListView(
-                      physics: const ClampingScrollPhysics(),
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-                      children: [
-                        Align(
-                          alignment: Alignment.topCenter,
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 430),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                const SizedBox(height: 2),
-                                const Align(
-                                  alignment: Alignment.centerRight,
-                                  child: LanguageSelector(),
-                                ),
-                                const SizedBox(height: 12),
-                                const _BrandHeader(),
-                                const SizedBox(height: 22),
-                                _AuthCard(
-                                  mode: _mode,
-                                  onModeChanged: busy ? null : _switchMode,
-                                  child: AnimatedSize(
-                                    duration: const Duration(milliseconds: 220),
-                                    curve: Curves.easeOutCubic,
-                                    alignment: Alignment.topCenter,
-                                    clipBehavior: Clip.hardEdge,
-                                    child: AnimatedSwitcher(
-                                      duration:
-                                          const Duration(milliseconds: 220),
-                                      switchInCurve: Curves.easeOutCubic,
-                                      switchOutCurve: Curves.easeInCubic,
-                                      transitionBuilder: _slideFadeTransition,
-                                      layoutBuilder:
-                                          (currentChild, previousChildren) =>
-                                              currentChild ??
-                                              const SizedBox.shrink(),
-                                      child: _isRegisterMode
-                                          ? _buildRegisterFlow(
-                                              auth: auth,
-                                              busy: busy,
-                                            )
-                                          : _buildSignInFlow(
-                                              auth: auth,
-                                              busy: busy,
-                                            ),
-                                    ),
-                                  ),
-                                ),
-                                if (showAnySocial) ...[
-                                  const SizedBox(height: 14),
-                                  _SocialCard(
-                                    showGoogle: showGoogle,
-                                    showApple: showApple,
-                                    showKakao: showKakao,
-                                    onGoogleTap: busy
-                                        ? null
-                                        : () => _submitSocial(
-                                              auth,
-                                              auth.signInWithGoogle,
-                                              providerLabel:
-                                                  AuthProviderType.google.label,
-                                            ),
-                                    onAppleTap: busy
-                                        ? null
-                                        : () => _submitSocial(
-                                              auth,
-                                              auth.signInWithApple,
-                                              providerLabel:
-                                                  AuthProviderType.apple.label,
-                                            ),
-                                    onKakaoTap: busy
-                                        ? null
-                                        : () => _submitSocial(
-                                              auth,
-                                              auth.signInWithKakao,
-                                              providerLabel:
-                                                  AuthProviderType.kakao.label,
-                                            ),
-                                  ),
-                                ],
-                                if (isDevLoginButtonEnabled) ...[
-                                  const SizedBox(height: 4),
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: TextButton.icon(
-                                      onPressed: busy
-                                          ? null
-                                          : () => _devRealLogin(auth),
-                                      icon: const Icon(
-                                        Icons.developer_mode_rounded,
-                                        size: 16,
-                                      ),
-                                      label: Text(
-                                        hasConfiguredDevLoginCredentials
-                                            ? 'Dev Login (Real)'
-                                            : 'Dev Login (Use Typed)',
-                                      ),
-                                      style: TextButton.styleFrom(
-                                        foregroundColor:
-                                            Colors.white.withOpacity(0.72),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 2),
-                              ],
-                            ),
-                          ),
+                return AnimatedPadding(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  padding: EdgeInsets.only(bottom: bottomInset),
+                  child: SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: const EdgeInsets.fromLTRB(27, 14, 27, 24),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: 402,
+                          minHeight: minHeight,
                         ),
-                      ],
+                        child: _isRegisterMode
+                            ? _buildRegisterStage(
+                                auth: auth,
+                                busy: busy,
+                              )
+                            : _buildSignInFlow(
+                                auth: auth,
+                                busy: busy,
+                                showGoogle: showGoogle,
+                                showApple: showApple,
+                                showKakao: showKakao,
+                                showAnySocial: showAnySocial,
+                              ),
+                      ),
                     ),
-                  );
-                },
-              ),
+                  ),
+                );
+              },
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildSignInFlow({required AuthService auth, required bool busy}) {
+  Widget _buildRegisterStage({
+    required AuthService auth,
+    required bool busy,
+  }) {
+    final awaitingCode = _isAwaitingCreateAccountCode(auth);
+    final passwordIssues =
+        PasswordPolicy.validateIssues(_passwordController.text);
+    final hasPasswordInteraction = _passwordController.text.isNotEmpty ||
+        _confirmPasswordController.text.isNotEmpty;
+    final confirmMismatch = _confirmPasswordController.text.isNotEmpty &&
+        _passwordController.text != _confirmPasswordController.text;
+    final emailCardHasError = _registerEmailError != null ||
+        (awaitingCode && _registerCodeError != null);
+    final passwordCardHasError =
+        _registerPasswordError != null || _registerConfirmPasswordError != null;
+    final showPasswordRequirementAccent = passwordCardHasError ||
+        (hasPasswordInteraction &&
+            (passwordIssues.isNotEmpty || confirmMismatch));
+    final codeStatusText = awaitingCode
+        ? (_registerInlineInfo ??
+            L10n.translate(context, 'Confirmation code sent!'))
+        : L10n.translate(
+            context,
+            'Confirmation code will be sent to your email inbox.',
+          );
+    final countdownLabel = _confirmationCodeCountdownLabel();
+
     return Column(
-      key: const ValueKey('sign-in-flow'),
+      key: const ValueKey('create-account-stage'),
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AnimatedSize(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.topCenter,
-          clipBehavior: Clip.hardEdge,
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            transitionBuilder: _slideFadeTransition,
-            child: _signInStep == _SignInStep.email
-                ? Column(
-                    key: const ValueKey('sign-in-email-step'),
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _Field(
-                        label: 'Email or username',
-                        hint: 'Email or username',
-                        controller: _emailController,
-                        keyboardType: TextInputType.text,
-                        textInputAction: TextInputAction.done,
-                        focusNode: _signInEmailFocusNode,
-                        errorText: _signInEmailError,
-                        onChanged: (_) {
-                          setState(() {
-                            _signInEmailError = null;
-                            _signInInlineError = null;
-                          });
-                        },
-                        onSubmitted: (_) {
-                          if (busy) return;
-                          _continueToPasswordStep();
-                        },
-                      ),
-                      const SizedBox(height: 14),
-                      if (_signInInlineError != null) ...[
-                        _InlineErrorBanner(message: _signInInlineError!),
-                        const SizedBox(height: 10),
-                      ],
-                      _PrimaryButton(
-                        label: 'Continue',
-                        onTap: busy ? null : _continueToPasswordStep,
-                      ),
-                    ],
-                  )
-                : Column(
-                    key: const ValueKey('sign-in-password-step'),
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _SignedInEmailChip(
-                        email: _emailController.text.trim(),
-                        onTap: busy
-                            ? null
-                            : () {
-                                setState(() {
-                                  _signInStep = _SignInStep.email;
-                                  _signInPasswordError = null;
-                                  _signInInlineError = null;
-                                });
-                                WidgetsBinding.instance
-                                    .addPostFrameCallback((_) {
-                                  if (!mounted) return;
-                                  _signInEmailFocusNode.requestFocus();
-                                });
-                              },
-                      ),
-                      const SizedBox(height: 10),
-                      _Field(
-                        label: 'Password',
-                        hint: 'Enter password',
-                        controller: _passwordController,
-                        obscureText: _hidePassword,
-                        textInputAction: TextInputAction.done,
-                        focusNode: _signInPasswordFocusNode,
-                        errorText: _signInPasswordError,
-                        onChanged: (_) {
-                          setState(() {
-                            _signInPasswordError = null;
-                            _signInInlineError = null;
-                          });
-                        },
-                        onSubmitted: (_) {
-                          if (busy) return;
-                          _submitSignIn(auth);
-                        },
-                        suffix: IconButton(
-                          onPressed: () {
-                            setState(() {
-                              _hidePassword = !_hidePassword;
-                            });
-                          },
-                          icon: Icon(
-                            _hidePassword
-                                ? Icons.visibility_off_rounded
-                                : Icons.visibility_rounded,
-                            color: Colors.white70,
+        MixroomAuthTopBar(
+          onBack: busy ? null : () => _switchMode(LoginEntryMode.signIn),
+        ),
+        const SizedBox(height: 52),
+        const MixroomBrandLockup(showMark: false),
+        const SizedBox(height: 56),
+        MixroomGlassPanel(
+          borderColor: emailCardHasError
+              ? const Color.fromRGBO(255, 157, 71, 0.72)
+              : const Color.fromRGBO(244, 244, 244, 0.14),
+          child: Column(
+            children: [
+              SizedBox(
+                height: 58,
+                child: MixroomGlassTextFieldRow(
+                  controller: _emailController,
+                  label: L10n.translate(context, 'Email'),
+                  keyboardType: TextInputType.emailAddress,
+                  textInputAction: TextInputAction.next,
+                  onChanged: (_) {
+                    setState(() {
+                      _registerEmailError = null;
+                      _registerCodeError = null;
+                      _registerInlineError = null;
+                      _registerInlineInfo = null;
+                    });
+                  },
+                ),
+              ),
+              if (awaitingCode) ...[
+                const MixroomGlassDivider(),
+                MixroomGlassTextFieldRow(
+                  controller: _confirmationCodeController,
+                  label: L10n.translate(context, 'Confirmation code'),
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  onChanged: (_) {
+                    setState(() {
+                      _registerCodeError = null;
+                      _registerInlineError = null;
+                      _registerInlineInfo = null;
+                    });
+                  },
+                  onSubmitted: (_) {
+                    if (busy) return;
+                    _submitRegister(auth);
+                  },
+                  trailingText: countdownLabel,
+                  suffix: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: busy ? null : () => _resendCreateAccountCode(auth),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 2,
+                          vertical: 6,
+                        ),
+                        child: Text(
+                          L10n.translate(context, 'Resend code'),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 15,
+                            height: 22 / 15,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed:
-                              busy ? null : () => _openForgotPasswordFlow(auth),
-                          child:
-                              Text(L10n.translate(context, 'Forgot password?')),
-                        ),
-                      ),
-                      if (_signInInlineError != null) ...[
-                        const SizedBox(height: 6),
-                        _InlineErrorBanner(message: _signInInlineError!),
-                      ],
-                      if (auth.hasPendingEmailVerification) ...[
-                        const SizedBox(height: 6),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton(
-                            onPressed: busy
-                                ? null
-                                : () => _openEmailVerificationFlow(auth),
-                            child: Text(
-                              L10n.translate(
-                                  context, 'Enter verification code'),
-                            ),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 14),
-                      _PrimaryButton(
-                        label: busy ? 'Signing In...' : 'Sign In',
-                        busy: busy,
-                        onTap: busy ? null : () => _submitSignIn(auth),
-                      ),
-                    ],
+                    ),
                   ),
+                ),
+              ],
+            ],
           ),
         ),
+        const SizedBox(height: 14),
+        Text(
+          codeStatusText,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: 'Pretendard',
+            color: const Color(0xFFF4F4F4),
+            fontSize: 12,
+            height: 15 / 12,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+        const SizedBox(height: 18),
+        MixroomGlassPanel(
+          borderColor: passwordCardHasError
+              ? const Color.fromRGBO(255, 157, 71, 0.72)
+              : const Color.fromRGBO(244, 244, 244, 0.14),
+          child: Column(
+            children: [
+              MixroomGlassTextFieldRow(
+                controller: _passwordController,
+                label: L10n.translate(context, 'Password'),
+                obscureText: _hidePassword,
+                textInputAction: TextInputAction.next,
+                onChanged: (_) {
+                  setState(() {
+                    _registerPasswordError = null;
+                    _registerInlineError = null;
+                    _registerInlineInfo = null;
+                  });
+                },
+                suffix: IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _hidePassword = !_hidePassword;
+                    });
+                  },
+                  splashRadius: 18,
+                  icon: SvgPicture.asset(
+                    _hidePassword
+                        ? kMixroomEyeIconAsset
+                        : kMixroomEyeOffIconAsset,
+                    width: 20,
+                    height: 15,
+                  ),
+                ),
+              ),
+              const MixroomGlassDivider(),
+              MixroomGlassTextFieldRow(
+                controller: _confirmPasswordController,
+                label: L10n.translate(context, 'Confirm Password'),
+                obscureText: _hideConfirmPassword,
+                textInputAction: TextInputAction.done,
+                onChanged: (_) {
+                  setState(() {
+                    _registerConfirmPasswordError = null;
+                    _registerInlineError = null;
+                    _registerInlineInfo = null;
+                  });
+                },
+                onSubmitted: (_) {
+                  if (busy) return;
+                  if (awaitingCode) {
+                    _submitRegister(auth);
+                  } else {
+                    _sendCreateAccountCode(auth);
+                  }
+                },
+                suffix: IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _hideConfirmPassword = !_hideConfirmPassword;
+                    });
+                  },
+                  splashRadius: 18,
+                  icon: SvgPicture.asset(
+                    _hideConfirmPassword
+                        ? kMixroomEyeIconAsset
+                        : kMixroomEyeOffIconAsset,
+                    width: 20,
+                    height: 15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          PasswordPolicy.requirementsTextLocalized(context),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: 'Pretendard',
+            color: showPasswordRequirementAccent
+                ? const Color(0xFFFF9D47)
+                : const Color(0xFFF4F4F4),
+            fontSize: 12,
+            height: 15 / 12,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          child: _buildCreateAccountMessages(),
+        ),
+        const SizedBox(height: 36),
+        Center(
+          child: MixroomPillButton(
+            label: L10n.translate(context, 'Next'),
+            width: 124,
+            busy: busy,
+            onTap: busy
+                ? null
+                : () {
+                    if (awaitingCode) {
+                      _submitRegister(auth);
+                    } else {
+                      _sendCreateAccountCode(auth);
+                    }
+                  },
+          ),
+        ),
+        if (isDevLoginButtonEnabled) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: busy ? null : () => _devRealLogin(auth),
+              icon: const Icon(
+                Icons.developer_mode_rounded,
+                size: 16,
+              ),
+              label: Text(
+                hasConfiguredDevLoginCredentials
+                    ? 'Dev Login (Real)'
+                    : 'Dev Login (Use Typed)',
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white.withOpacity(0.72),
+              ),
+            ),
+          ),
+        ],
       ],
+    );
+  }
+
+  Widget _buildSignInFlow({
+    required AuthService auth,
+    required bool busy,
+    required bool showGoogle,
+    required bool showApple,
+    required bool showKakao,
+    required bool showAnySocial,
+  }) {
+    return Column(
+      key: const ValueKey('sign-in-flow'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const Align(
+          alignment: Alignment.centerRight,
+          child: MixroomLocaleSelector(),
+        ),
+        const SizedBox(height: 28),
+        const MixroomBrandLockup(),
+        const SizedBox(height: 40),
+        MixroomSignInFieldsCard(
+          emailController: _emailController,
+          passwordController: _passwordController,
+          emailFocusNode: _signInEmailFocusNode,
+          passwordFocusNode: _signInPasswordFocusNode,
+          hidePassword: _hidePassword,
+          hasError: _signInEmailError != null || _signInPasswordError != null,
+          onEmailChanged: (_) {
+            setState(() {
+              _signInEmailError = null;
+              _signInInlineError = null;
+            });
+          },
+          onPasswordChanged: (_) {
+            setState(() {
+              _signInPasswordError = null;
+              _signInInlineError = null;
+            });
+          },
+          onEmailEditingComplete: () {
+            if (busy) return;
+            _signInPasswordFocusNode.requestFocus();
+          },
+          onPasswordSubmitted: (_) {
+            if (busy) return;
+            _submitSignIn(auth);
+          },
+          onTogglePasswordVisibility: () {
+            setState(() {
+              _hidePassword = !_hidePassword;
+            });
+          },
+        ),
+        const SizedBox(height: 14),
+        TextButton(
+          onPressed: busy ? null : () => _openForgotPasswordFlow(auth),
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xFFF4F4F4),
+            textStyle: const TextStyle(
+              fontFamily: 'Pretendard',
+              fontSize: 15,
+              height: 22 / 15,
+              decoration: TextDecoration.underline,
+              decorationColor: Color(0xFFF4F4F4),
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+          child: Text(L10n.translate(context, 'Forgot password?')),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          child: _buildSignInMessages(auth: auth, busy: busy),
+        ),
+        const SizedBox(height: 16),
+        MixroomPillButton(
+          label: busy
+              ? L10n.translate(context, 'Signing In...')
+              : L10n.translate(context, 'Sign In'),
+          width: 124,
+          busy: busy,
+          onTap: busy ? null : () => _submitSignIn(auth),
+        ),
+        if (showAnySocial) ...[
+          const SizedBox(height: 42),
+          Text(
+            L10n.translate(context, 'Or continue with'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: 'Pretendard',
+              color: Color(0xFFF4F4F4),
+              fontSize: 15,
+              height: 22 / 15,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (showGoogle)
+                MixroomSocialIconButton(
+                  assetPath: kMixroomGoogleSocialAsset,
+                  semanticLabel: 'Continue with Google',
+                  onTap: busy
+                      ? null
+                      : () => _submitSocial(
+                            auth,
+                            auth.signInWithGoogle,
+                            providerLabel: AuthProviderType.google.label,
+                          ),
+                ),
+              if (showApple) ...[
+                if (showGoogle) const SizedBox(width: 10),
+                MixroomSocialIconButton(
+                  assetPath: kMixroomAppleSocialAsset,
+                  semanticLabel: 'Continue with Apple',
+                  onTap: busy
+                      ? null
+                      : () => _submitSocial(
+                            auth,
+                            auth.signInWithApple,
+                            providerLabel: AuthProviderType.apple.label,
+                          ),
+                ),
+              ],
+              if (showKakao) ...[
+                if (showGoogle || showApple) const SizedBox(width: 10),
+                MixroomSocialIconButton(
+                  assetPath: kMixroomKakaoSocialAsset,
+                  semanticLabel: 'Continue with Kakao',
+                  onTap: busy
+                      ? null
+                      : () => _submitSocial(
+                            auth,
+                            auth.signInWithKakao,
+                            providerLabel: AuthProviderType.kakao.label,
+                          ),
+                ),
+              ],
+            ],
+          ),
+        ],
+        const SizedBox(height: 28),
+        MixroomPillButton(
+          label: L10n.translate(context, 'Create account'),
+          width: 164,
+          onTap: busy ? null : () => _switchMode(LoginEntryMode.createAccount),
+        ),
+        if (isDevLoginButtonEnabled) ...[
+          const SizedBox(height: 10),
+          TextButton.icon(
+            onPressed: busy ? null : () => _devRealLogin(auth),
+            icon: const Icon(Icons.developer_mode_rounded, size: 16),
+            label: Text(
+              hasConfiguredDevLoginCredentials
+                  ? 'Dev Login (Real)'
+                  : 'Dev Login (Use Typed)',
+            ),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white.withOpacity(0.72),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSignInMessages({
+    required AuthService auth,
+    required bool busy,
+  }) {
+    final children = <Widget>[];
+    if (_signInEmailError != null) {
+      children.add(_InlineErrorBanner(message: _signInEmailError!));
+    }
+    if (_signInPasswordError != null) {
+      if (children.isNotEmpty) {
+        children.add(const SizedBox(height: 8));
+      }
+      children.add(_InlineErrorBanner(message: _signInPasswordError!));
+    }
+    if (_signInInlineError != null) {
+      if (children.isNotEmpty) {
+        children.add(const SizedBox(height: 8));
+      }
+      children.add(_InlineErrorBanner(message: _signInInlineError!));
+    }
+    if (auth.hasPendingEmailVerification) {
+      if (children.isNotEmpty) {
+        children.add(const SizedBox(height: 8));
+      }
+      children.add(
+        Align(
+          alignment: Alignment.center,
+          child: TextButton(
+            onPressed: busy ? null : () => _openEmailVerificationFlow(auth),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFF4F4F4),
+              textStyle: const TextStyle(
+                fontFamily: 'Pretendard',
+                fontSize: 15,
+                height: 22 / 15,
+                decoration: TextDecoration.underline,
+                decorationColor: Color(0xFFF4F4F4),
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+            child: Text(L10n.translate(context, 'Enter verification code')),
+          ),
+        ),
+      );
+    }
+    if (children.isEmpty) {
+      return const SizedBox(height: 0);
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      ),
+    );
+  }
+
+  Widget _buildCreateAccountMessages() {
+    final messages = <String>[
+      if ((_registerEmailError ?? '').trim().isNotEmpty) _registerEmailError!,
+      if ((_registerCodeError ?? '').trim().isNotEmpty) _registerCodeError!,
+      if ((_registerPasswordError ?? '').trim().isNotEmpty)
+        _registerPasswordError!,
+      if ((_registerConfirmPasswordError ?? '').trim().isNotEmpty)
+        _registerConfirmPasswordError!,
+      if ((_registerInlineError ?? '').trim().isNotEmpty) _registerInlineError!,
+    ];
+    if (messages.isEmpty) {
+      return const SizedBox(height: 0);
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        children: messages
+            .map(
+              (message) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFFF9D47),
+                    fontSize: 12,
+                    height: 15 / 12,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
     );
   }
 
@@ -1275,6 +1747,17 @@ class _LoginScreenState extends State<LoginScreen> {
             alignment: Alignment.centerLeft,
             child: TextButton(
               onPressed: busy ? null : () => _openEmailVerificationFlow(auth),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFF4F4F4),
+                textStyle: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  fontSize: 15,
+                  height: 22 / 15,
+                  decoration: TextDecoration.underline,
+                  decorationColor: Color(0xFFF4F4F4),
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
               child: Text(L10n.translate(context, 'Enter verification code')),
             ),
           ),
@@ -1284,8 +1767,10 @@ class _LoginScreenState extends State<LoginScreen> {
         const SizedBox(height: 8),
         _PrimaryButton(
           label: _registerStep == _RegisterStep.profile
-              ? (busy ? 'Creating...' : 'Create Account')
-              : 'Continue',
+              ? (busy
+                  ? L10n.translate(context, 'Creating...')
+                  : L10n.translate(context, 'Create Account'))
+              : L10n.translate(context, 'Continue'),
           busy: busy && _registerStep == _RegisterStep.profile,
           onTap: busy
               ? null
@@ -1411,12 +1896,12 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             const SizedBox(height: 8),
             _Field(
-              label: 'Username',
+              label: 'Username (optional)',
               hint: 'your_username',
               controller: _signupUsernameController,
               errorText: _registerUsernameError,
               helperText:
-                  'Used for your username and sign-in. Lowercase letters, numbers, underscores, and hyphens only.',
+                  'Used for your username and sign-in. Leave blank to get an auto-generated mixroom-user name you can change later.',
               onChanged: (_) {
                 setState(() {
                   _registerUsernameError = null;
@@ -1838,44 +2323,6 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
   }
 }
 
-class _BrandHeader extends StatelessWidget {
-  const _BrandHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Image.asset(
-          'assets/short_white.png',
-          height: 30,
-          fit: BoxFit.contain,
-        ),
-        const SizedBox(height: 14),
-        Text(
-          L10n.translate(context, 'Welcome to Mixroom'),
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 28,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.3,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          L10n.translate(context, 'Fast, AI-assisted music production.'),
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.7),
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _AuthCard extends StatelessWidget {
   const _AuthCard({
     required this.mode,
@@ -1883,8 +2330,8 @@ class _AuthCard extends StatelessWidget {
     required this.child,
   });
 
-  final _AuthMode mode;
-  final ValueChanged<_AuthMode>? onModeChanged;
+  final LoginEntryMode mode;
+  final ValueChanged<LoginEntryMode>? onModeChanged;
   final Widget child;
 
   @override
@@ -1999,8 +2446,8 @@ class _ModeSwitcher extends StatelessWidget {
     required this.onChanged,
   });
 
-  final _AuthMode mode;
-  final ValueChanged<_AuthMode>? onChanged;
+  final LoginEntryMode mode;
+  final ValueChanged<LoginEntryMode>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -2016,20 +2463,21 @@ class _ModeSwitcher extends StatelessWidget {
         children: [
           Expanded(
             child: _ModeTab(
-              label: 'Sign In',
-              active: mode == _AuthMode.signIn,
-              onTap:
-                  onChanged == null ? null : () => onChanged!(_AuthMode.signIn),
+              label: L10n.translate(context, 'Sign In'),
+              active: mode == LoginEntryMode.signIn,
+              onTap: onChanged == null
+                  ? null
+                  : () => onChanged!(LoginEntryMode.signIn),
             ),
           ),
           const SizedBox(width: 6),
           Expanded(
             child: _ModeTab(
-              label: 'Create Account',
-              active: mode == _AuthMode.register,
+              label: L10n.translate(context, 'Create Account'),
+              active: mode == LoginEntryMode.createAccount,
               onTap: onChanged == null
                   ? null
-                  : () => onChanged!(_AuthMode.register),
+                  : () => onChanged!(LoginEntryMode.createAccount),
             ),
           ),
         ],
@@ -2127,52 +2575,11 @@ class _StepIndicator extends StatelessWidget {
   }
 }
 
-class _SignedInEmailChip extends StatelessWidget {
-  const _SignedInEmailChip({required this.email, required this.onTap});
-
-  final String email;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.11)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.email_outlined, color: Colors.white70, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              email,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          TextButton(
-            onPressed: onTap,
-            child: Text(L10n.translate(context, 'Change')),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _Field extends StatelessWidget {
   const _Field({
     required this.label,
     required this.hint,
     required this.controller,
-    this.focusNode,
     this.keyboardType,
     this.obscureText = false,
     this.suffix,
@@ -2188,7 +2595,6 @@ class _Field extends StatelessWidget {
   final String label;
   final String hint;
   final TextEditingController controller;
-  final FocusNode? focusNode;
   final TextInputType? keyboardType;
   final bool obscureText;
   final Widget? suffix;
@@ -2204,7 +2610,6 @@ class _Field extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
-      focusNode: focusNode,
       keyboardType: keyboardType,
       obscureText: obscureText,
       onChanged: onChanged,
@@ -2496,173 +2901,4 @@ class _GoogleGlyph extends StatelessWidget {
       ),
     );
   }
-}
-
-class _MusicBackdrop extends StatelessWidget {
-  const _MusicBackdrop();
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: RepaintBoundary(
-        child: CustomPaint(
-          painter: const _TexturedBlueBackdropPainter(),
-          child: const SizedBox.expand(),
-        ),
-      ),
-    );
-  }
-}
-
-class _TexturedBlueBackdropPainter extends CustomPainter {
-  const _TexturedBlueBackdropPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final bounds = Offset.zero & size;
-    _paintColorWash(canvas, bounds);
-    _paintDiagonalTexture(canvas, size);
-    _paintMusicLines(canvas, size);
-    _paintDust(canvas, size);
-    _paintVignette(canvas, bounds);
-  }
-
-  void _paintColorWash(Canvas canvas, Rect bounds) {
-    final fill = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          const Color(0xFF112F5E).withValues(alpha: 0.34),
-          const Color(0xFF1D5CA6).withValues(alpha: 0.16),
-          const Color(0xFF0E2951).withValues(alpha: 0.36),
-        ],
-      ).createShader(bounds);
-    canvas.drawRect(bounds, fill);
-
-    final centerGlow = Paint()
-      ..shader = RadialGradient(
-        center: const Alignment(0.10, -0.35),
-        radius: 1.0,
-        colors: [
-          const Color(0xFF9BCCFF).withValues(alpha: 0.14),
-          Colors.transparent,
-        ],
-      ).createShader(bounds);
-    canvas.drawRect(bounds, centerGlow);
-  }
-
-  void _paintDiagonalTexture(Canvas canvas, Size size) {
-    final linePaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-    for (int i = 0; i < 24; i++) {
-      final t = i / 23;
-      linePaint.color = const Color(0xFFE2F3FF).withValues(
-        alpha: 0.010 + (i % 4) * 0.003,
-      );
-      canvas.drawLine(
-        Offset(-size.width * 0.24, size.height * (t + 0.14)),
-        Offset(size.width * 1.18, size.height * (t - 0.16)),
-        linePaint,
-      );
-    }
-  }
-
-  void _paintMusicLines(Canvas canvas, Size size) {
-    _paintWave(
-      canvas,
-      size,
-      baselineFactor: 0.30,
-      amplitudeFactor: 0.010,
-      frequency: 2.2,
-      color: const Color(0xFFA9DCFF).withValues(alpha: 0.20),
-    );
-    _paintWave(
-      canvas,
-      size,
-      baselineFactor: 0.72,
-      amplitudeFactor: 0.008,
-      frequency: 3.4,
-      color: const Color(0xFFBFE4FF).withValues(alpha: 0.17),
-    );
-  }
-
-  void _paintWave(
-    Canvas canvas,
-    Size size, {
-    required double baselineFactor,
-    required double amplitudeFactor,
-    required double frequency,
-    required Color color,
-  }) {
-    final baseline = size.height * baselineFactor;
-    final amplitude = size.height * amplitudeFactor;
-    final path = Path();
-    for (double x = 0; x <= size.width; x += 3.5) {
-      final n = x / size.width;
-      final y = baseline +
-          math.sin(n * math.pi * 2 * frequency) * amplitude +
-          math.sin(n * math.pi * 2 * (frequency * 0.62) + 1.8) *
-              (amplitude * 0.46);
-      if (x == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-
-    canvas.drawPath(
-      path,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.4
-        ..strokeCap = StrokeCap.round
-        ..color = color.withValues(alpha: 0.20),
-    );
-    canvas.drawPath(
-      path,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2
-        ..strokeCap = StrokeCap.round
-        ..color = color.withValues(alpha: 0.62),
-    );
-  }
-
-  void _paintDust(Canvas canvas, Size size) {
-    final paint = Paint()..style = PaintingStyle.fill;
-    for (int i = 0; i < 220; i++) {
-      final dx = _unit(i * 71 + 3) * size.width;
-      final dy = _unit(i * 43 + 11) * size.height;
-      final radius = 0.35 + _unit(i * 89 + 17) * 0.85;
-      paint.color = const Color(0xFFEAF7FF).withValues(
-        alpha: 0.010 + _unit(i * 97 + 5) * 0.030,
-      );
-      canvas.drawCircle(Offset(dx, dy), radius, paint);
-    }
-  }
-
-  double _unit(int seed) {
-    final value = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return value / 0x7fffffff;
-  }
-
-  void _paintVignette(Canvas canvas, Rect bounds) {
-    final vignette = Paint()
-      ..shader = RadialGradient(
-        center: const Alignment(0, -0.05),
-        radius: 1.2,
-        colors: [
-          Colors.transparent,
-          const Color(0xFF02060C).withValues(alpha: 0.60),
-        ],
-        stops: const [0.52, 1.0],
-      ).createShader(bounds);
-    canvas.drawRect(bounds, vignette);
-  }
-
-  @override
-  bool shouldRepaint(covariant _TexturedBlueBackdropPainter oldDelegate) =>
-      false;
 }

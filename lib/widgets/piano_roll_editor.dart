@@ -14,6 +14,52 @@ typedef MidiCommitCallback = Future<void> Function({
   required String instrumentName,
 });
 
+const Color _kPianoShellText = Color(0xFFF4F4F4);
+const Color _kPianoShellMutedText = Color(0xB8F4F4F4);
+const Color _kPianoShellBorder = Color.fromRGBO(255, 255, 255, 0.12);
+const Color _kPianoShellFill = Color.fromRGBO(244, 244, 244, 0.08);
+const Color _kPianoShellFillStrong = Color.fromRGBO(244, 244, 244, 0.14);
+const Color _kPianoWarmStart = Color(0xFF9D6833);
+const Color _kPianoWarmEnd = Color(0xFF704821);
+const Color _kPianoWarmBorder = Color(0xFFE0B27F);
+
+BoxDecoration _mixroomPianoSurfaceDecoration({
+  double radius = 24,
+}) {
+  return BoxDecoration(
+    borderRadius: BorderRadius.circular(radius),
+    gradient: const LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: <Color>[
+        Color.fromRGBO(87, 96, 106, 0.96),
+        Color.fromRGBO(49, 58, 68, 0.96),
+      ],
+    ),
+    border: Border.all(color: _kPianoShellBorder),
+    boxShadow: const <BoxShadow>[
+      BoxShadow(
+        color: Color.fromRGBO(0, 0, 0, 0.30),
+        blurRadius: 20,
+        offset: Offset(0, 8),
+      ),
+    ],
+  );
+}
+
+BoxDecoration _mixroomPianoInsetDecoration({
+  double radius = 18,
+  bool selected = false,
+}) {
+  return BoxDecoration(
+    color: selected ? _kPianoShellFillStrong : _kPianoShellFill,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(
+      color: Colors.white.withValues(alpha: selected ? 0.18 : 0.12),
+    ),
+  );
+}
+
 class PianoRollEditor extends StatefulWidget {
   const PianoRollEditor({
     super.key,
@@ -1140,19 +1186,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     return Material(
       color: Colors.transparent,
       child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFF0E111A).withValues(alpha: 0.97),
-          border: Border(
-            top: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.5),
-              blurRadius: 24,
-              offset: const Offset(0, -6),
-            ),
-          ],
-        ),
+        decoration: _mixroomPianoSurfaceDecoration(radius: 24),
         child: SafeArea(
           top: widget.fullscreen,
           bottom: false,
@@ -1190,9 +1224,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: Colors.white,
+                color: _kPianoShellText,
+                fontFamily: 'Pretendard',
                 fontWeight: FontWeight.w700,
-                fontSize: 12.2,
+                fontSize: 13.0,
                 letterSpacing: 0.1,
               ),
             ),
@@ -1240,34 +1275,37 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
       child: Container(
         clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: const Color(0xFF171F2B),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-        ),
+        decoration: _mixroomPianoInsetDecoration(radius: 18),
         child: SizedBox(
-          height: 28,
+          height: 34,
           child: TabBar(
             controller: _tabController,
             indicator: BoxDecoration(
-              color: const Color(0xFF2A384F),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+              gradient: const LinearGradient(
+                colors: <Color>[_kPianoWarmStart, _kPianoWarmEnd],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _kPianoWarmBorder),
             ),
             indicatorPadding: const EdgeInsets.symmetric(
               horizontal: 2,
               vertical: 2,
             ),
             indicatorSize: TabBarIndicatorSize.tab,
-            labelColor: Colors.white,
-            labelStyle:
-                const TextStyle(fontSize: 11.2, fontWeight: FontWeight.w700),
-            unselectedLabelColor: Colors.white70,
+            labelColor: _kPianoShellText,
+            labelStyle: const TextStyle(
+              fontFamily: 'Pretendard',
+              fontSize: 11.6,
+              fontWeight: FontWeight.w700,
+            ),
+            unselectedLabelColor: _kPianoShellMutedText,
             dividerColor: Colors.transparent,
-            splashBorderRadius: BorderRadius.circular(8),
+            splashBorderRadius: BorderRadius.circular(18),
             tabs: const [
-              Tab(height: 28, text: 'MIDI'),
-              Tab(height: 28, text: 'Instrument'),
+              Tab(height: 34, text: 'MIDI'),
+              Tab(height: 34, text: 'Instrument'),
             ],
           ),
         ),
@@ -1281,10 +1319,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF0F1422),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          ),
+          decoration: _mixroomPianoInsetDecoration(radius: 18),
           child: Row(
             children: [
               SizedBox(
@@ -1316,8 +1351,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             margin: const EdgeInsets.fromLTRB(6, 0, 6, 4),
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xD6101825),
-              borderRadius: BorderRadius.circular(9),
+              color: const Color.fromRGBO(244, 244, 244, 0.12),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
             ),
             child: SizedBox(
@@ -1326,8 +1361,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                 height: 24,
                 padding: const EdgeInsets.symmetric(horizontal: 5),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.07),
-                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
                   border:
                       Border.all(color: Colors.white.withValues(alpha: 0.12)),
                 ),
@@ -1359,6 +1394,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                         textAlign: TextAlign.right,
                         style: const TextStyle(
                           color: Colors.white70,
+                          fontFamily: 'Pretendard',
                           fontSize: 8.8,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1375,8 +1411,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           margin: const EdgeInsets.fromLTRB(6, 0, 6, 6),
           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
           decoration: BoxDecoration(
-            color: const Color(0xD6101825),
-            borderRadius: BorderRadius.circular(9),
+            color: const Color.fromRGBO(244, 244, 244, 0.12),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
           ),
           child: IntrinsicWidth(
@@ -1606,11 +1642,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-            ),
+            decoration:
+                _mixroomPianoInsetDecoration(radius: 18, selected: true),
             child: Row(
               children: [
                 Container(
@@ -1634,9 +1667,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                       Text(
                         'Instrument',
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.58),
+                          color: _kPianoShellMutedText,
                           fontSize: 10.5,
                           fontWeight: FontWeight.w600,
+                          fontFamily: 'Pretendard',
                         ),
                       ),
                       Text(
@@ -1646,7 +1680,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: Colors.white,
+                          color: _kPianoShellText,
+                          fontFamily: 'Pretendard',
                           fontSize: 13.4,
                           fontWeight: FontWeight.w700,
                         ),
@@ -1658,8 +1693,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.14),
+                    color: _kPianoShellFillStrong,
                     borderRadius: BorderRadius.circular(999),
+                    border:
+                        Border.all(color: Colors.white.withValues(alpha: 0.12)),
                   ),
                   child: Text(
                     category,
@@ -1667,6 +1704,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                       color: accent,
                       fontSize: 10.5,
                       fontWeight: FontWeight.w700,
+                      fontFamily: 'Pretendard',
                     ),
                   ),
                 ),
@@ -1698,13 +1736,12 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: selected
-                          ? chipAccent.withValues(alpha: 0.17)
-                          : Colors.white.withValues(alpha: 0.05),
+                      color:
+                          selected ? _kPianoShellFillStrong : _kPianoShellFill,
                       borderRadius: BorderRadius.circular(999),
                       border: Border.all(
                         color: selected
-                            ? chipAccent.withValues(alpha: 0.70)
+                            ? _kPianoWarmBorder
                             : Colors.white.withValues(alpha: 0.14),
                       ),
                     ),
@@ -1723,10 +1760,13 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                             c,
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: selected ? chipAccent : Colors.white70,
+                              color: selected
+                                  ? _kPianoShellText
+                                  : _kPianoShellMutedText,
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                               height: 1.0,
+                              fontFamily: 'Pretendard',
                             ),
                           ),
                         ],
@@ -1741,24 +1781,14 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           Container(
             width: double.infinity,
             constraints: const BoxConstraints(maxHeight: 210),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0xFF152032),
-                  Color(0xFF111A28),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.11)),
-            ),
+            decoration: _mixroomPianoInsetDecoration(radius: 18),
             child: instruments.isEmpty
                 ? Center(
                     child: Text(
                       'No instruments in this category.',
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.64),
+                        color: _kPianoShellMutedText,
+                        fontFamily: 'Pretendard',
                         fontSize: 12,
                       ),
                     ),
@@ -1786,13 +1816,12 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                             padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
                             decoration: BoxDecoration(
                               color: selected
-                                  ? rowAccent.withValues(alpha: 0.14)
+                                  ? _kPianoShellFillStrong
                                   : Colors.transparent,
                               border: selected
                                   ? Border(
                                       left: BorderSide(
-                                        color:
-                                            rowAccent.withValues(alpha: 0.95),
+                                        color: _kPianoWarmBorder,
                                         width: 2.0,
                                       ),
                                     )
@@ -1815,6 +1844,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       color: Colors.white,
+                                      fontFamily: 'Pretendard',
                                       fontSize: 12.2,
                                       fontWeight: selected
                                           ? FontWeight.w800
@@ -1826,7 +1856,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                   Icon(
                                     Icons.check_circle_rounded,
                                     size: 15,
-                                    color: rowAccent.withValues(alpha: 0.92),
+                                    color: _kPianoWarmBorder,
                                   ),
                               ],
                             ),
@@ -2011,27 +2041,28 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: selected
-              ? accent.withValues(alpha: 0.18)
-              : Colors.white.withValues(alpha: 0.05),
+          color: selected ? _kPianoShellFillStrong : _kPianoShellFill,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: selected
-                ? accent.withValues(alpha: 0.76)
+                ? _kPianoWarmBorder
                 : Colors.white.withValues(alpha: 0.12),
           ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: selected ? accent : Colors.white70, size: 16),
+            Icon(icon,
+                color: selected ? _kPianoShellText : _kPianoShellMutedText,
+                size: 16),
             const SizedBox(height: 2),
             Text(
               _oscillatorLabel(index),
               style: TextStyle(
-                color: selected ? accent : Colors.white70,
+                color: selected ? _kPianoShellText : _kPianoShellMutedText,
                 fontSize: 10.2,
                 fontWeight: FontWeight.w700,
+                fontFamily: 'Pretendard',
               ),
             ),
           ],
@@ -2052,9 +2083,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 9, 10, 8),
       decoration: BoxDecoration(
-        color: const Color(0xFF141D2B),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: accent.withValues(alpha: 0.45)),
+        color: _kPianoShellFill,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2064,7 +2095,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
               Text(
                 label,
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: _kPianoShellText,
+                  fontFamily: 'Pretendard',
                   fontSize: 11.3,
                   fontWeight: FontWeight.w700,
                 ),
@@ -2073,9 +2105,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
               Text(
                 valueLabelBuilder(value),
                 style: TextStyle(
-                  color: accent,
+                  color: _kPianoShellMutedText,
                   fontSize: 10.6,
                   fontWeight: FontWeight.w700,
+                  fontFamily: 'Pretendard',
                 ),
               ),
             ],
@@ -2084,8 +2117,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             data: SliderTheme.of(context).copyWith(
               activeTrackColor: accent,
               inactiveTrackColor: Colors.white.withValues(alpha: 0.16),
-              thumbColor: accent,
-              overlayColor: accent.withValues(alpha: 0.20),
+              thumbColor: _kPianoShellText,
+              overlayColor: Colors.white.withValues(alpha: 0.20),
               trackHeight: 3.2,
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
             ),
@@ -2110,16 +2143,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF161F2F),
-            Color(0xFF121B29),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+        color: _kPianoShellFill,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2127,7 +2153,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           Text(
             title,
             style: const TextStyle(
-              color: Colors.white,
+              color: _kPianoShellText,
+              fontFamily: 'Pretendard',
               fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
@@ -2136,9 +2163,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           Text(
             subtitle,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.62),
+              color: _kPianoShellMutedText,
               fontSize: 10.4,
               fontWeight: FontWeight.w500,
+              fontFamily: 'Pretendard',
             ),
           ),
           const SizedBox(height: 8),
@@ -2152,10 +2180,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     const blackKeyWidth = 46.0;
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFE2E8F1),
+        color: const Color(0xFFE7EAED),
         border: Border(
           right: BorderSide(
-              color: const Color(0xFF768396).withValues(alpha: 0.9),
+              color: const Color(0xFFB5BDC4).withValues(alpha: 0.95),
               width: 1.0),
         ),
       ),
@@ -2184,9 +2212,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                   !_isBlackKey(belowPitch) &&
                   _pressedPreviewPitch == belowPitch;
               final blackTop =
-                  isPressed ? const Color(0xFF3B4A63) : const Color(0xFF182131);
+                  isPressed ? const Color(0xFF737D86) : const Color(0xFF525A62);
               final blackBottom =
-                  isPressed ? const Color(0xFF253349) : const Color(0xFF0F1623);
+                  isPressed ? const Color(0xFF626B74) : const Color(0xFF454C54);
               return GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTapDown: (_) => _previewPianoKey(pitch),
@@ -2200,11 +2228,11 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                         child: Container(
                           color: isBlack
                               ? (isPressed
-                                  ? const Color(0xFF2D3D54)
-                                  : const Color(0xFF15202F))
+                                  ? const Color(0xFF6A747D)
+                                  : const Color(0xFF50575F))
                               : (isPressed
-                                  ? const Color(0xFFDCE7FB)
-                                  : const Color(0xFFF6F8FC)),
+                                  ? const Color(0xFFF3F5F6)
+                                  : const Color(0xFFF8F9FA)),
                         ),
                       ),
                       if (isBlack)
@@ -2219,18 +2247,18 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                 child: Container(
                                   color: topHalfPressed
                                       ? const Color(0xFFDCE7FB)
-                                      : const Color(0xFFF8FAFF),
+                                      : const Color(0xFFF9FAFB),
                                 ),
                               ),
                               Container(
                                 height: 0.7,
-                                color: const Color(0xFFD3D9E8),
+                                color: const Color(0xFFD6DADF),
                               ),
                               Expanded(
                                 child: Container(
                                   color: bottomHalfPressed
                                       ? const Color(0xFFDCE7FB)
-                                      : const Color(0xFFF2F5FC),
+                                      : const Color(0xFFF3F5F7),
                                 ),
                               ),
                             ],
@@ -2253,7 +2281,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                 right: Radius.circular(1.2),
                               ),
                               border: Border.all(
-                                color: Colors.black.withValues(alpha: 0.32),
+                                color: Colors.black.withValues(alpha: 0.22),
                                 width: 0.6,
                               ),
                               boxShadow: [
@@ -2274,7 +2302,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                           width: belowIsBlack ? blackKeyWidth : null,
                           child: Container(
                             height: 0.7,
-                            color: const Color(0xFFD5DAE7),
+                            color: const Color(0xFFD8DDE1),
                           ),
                         ),
                       Positioned(
@@ -2290,10 +2318,11 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                             overflow: TextOverflow.clip,
                             style: TextStyle(
                               color: isBlack
-                                  ? Colors.white.withValues(alpha: 0.82)
-                                  : const Color(0xFF27314A),
+                                  ? Colors.white.withValues(alpha: 0.84)
+                                  : const Color(0xFF535B64),
                               fontSize: showLabel ? 10.2 : 0.1,
                               fontWeight: FontWeight.w700,
+                              fontFamily: 'Pretendard',
                             ),
                           ),
                         ),
@@ -2314,7 +2343,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         ? const NeverScrollableScrollPhysics()
         : const ClampingScrollPhysics();
     return Container(
-      color: const Color(0xFF0F1422),
+      color: const Color(0xFF41474E),
       child: Stack(
         children: [
           Positioned.fill(
@@ -2369,7 +2398,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                 height: _rowHeight,
                                 child: IgnorePointer(
                                   child: Container(
-                                    color: const Color(0x33F0D17A),
+                                    color: _kPianoWarmBorder.withValues(
+                                        alpha: 0.18),
                                   ),
                                 ),
                               ),
@@ -2711,20 +2741,20 @@ class _PianoGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rowPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.05)
+      ..color = Colors.white.withValues(alpha: 0.06)
       ..strokeWidth = 0.7;
     final whiteRowFill = Paint()
-      ..color = const Color(0xFF172233).withValues(alpha: 0.34);
+      ..color = const Color(0xFF585F66).withValues(alpha: 0.32);
     final blackRowFill = Paint()
-      ..color = const Color(0xFF0D1523).withValues(alpha: 0.72);
+      ..color = const Color(0xFF454C53).withValues(alpha: 0.82);
     final majorPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.08)
+      ..color = Colors.white.withValues(alpha: 0.14)
       ..strokeWidth = 1.5;
     final beatPaint = Paint()
-      ..color = Colors.white.withValues(alpha: magnetEnabled ? 0.09 : 0.06)
+      ..color = Colors.white.withValues(alpha: magnetEnabled ? 0.10 : 0.07)
       ..strokeWidth = magnetEnabled ? 1.25 : 1.1;
     final minorPaint = Paint()
-      ..color = Colors.white.withValues(alpha: magnetEnabled ? 0.07 : 0.04)
+      ..color = Colors.white.withValues(alpha: magnetEnabled ? 0.08 : 0.05)
       ..strokeWidth = magnetEnabled ? 1.05 : 1.0;
 
     final pitchCount = (maxPitch - minPitch) + 1;

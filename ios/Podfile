@@ -27,31 +27,6 @@ require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelpe
 
 flutter_ios_podfile_setup
 
-# flutter_gemma 0.11.16 pulls TensorFlowLiteSelectTfOps nightly, which currently has
-# only an ios-arm64 slice and breaks simulator linking.
-flutter_gemma_podspec = File.join(
-  __dir__,
-  '.symlinks',
-  'plugins',
-  'flutter_gemma',
-  'ios',
-  'flutter_gemma.podspec'
-)
-if File.exist?(flutter_gemma_podspec)
-  gemma_podspec = File.read(flutter_gemma_podspec)
-  patched_podspec = gemma_podspec.gsub(
-    /^\s*s\.dependency\s+'TensorFlowLiteSelectTfOps'.*\n/,
-    ''
-  )
-  if patched_podspec != gemma_podspec
-    begin
-      File.write(flutter_gemma_podspec, patched_podspec)
-    rescue SystemCallError => e
-      Pod::UI.warn("Could not patch flutter_gemma podspec (#{e.message})")
-    end
-  end
-end
-
 # ffmpeg_kit_flutter_new_full currently excludes arm64 for the iOS simulator in
 # its podspec. Xcode 26+ flags this as unsupported; keep only legacy i386 exclude.
 ffmpeg_new_full_podspec = File.join(

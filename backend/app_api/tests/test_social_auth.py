@@ -62,11 +62,15 @@ if "botocore.exceptions" not in sys.modules:
     botocore_stub = ModuleType("botocore")
     exceptions_stub = ModuleType("botocore.exceptions")
 
+    class _BotoCoreError(Exception):
+        pass
+
     class _ClientError(Exception):
         def __init__(self, response: dict, operation_name: str = "") -> None:
             super().__init__(operation_name)
             self.response = response
 
+    exceptions_stub.BotoCoreError = _BotoCoreError
     exceptions_stub.ClientError = _ClientError
     botocore_stub.exceptions = exceptions_stub
     sys.modules["botocore"] = botocore_stub
@@ -313,6 +317,64 @@ class CompleteSocialSignInTests(unittest.TestCase):
                         "nonce": "nonce-123",
                     }
                 )
+
+    def test_verify_social_reauthentication_accepts_matching_link(self) -> None:
+        repo = mock.Mock()
+        repo.get_auth_account.return_value = {
+            "user_id": "user-123",
+            "auth_provider": "google",
+        }
+        repo.get_customer_link.return_value = {"user_id": "user-123"}
+        identity = social_auth.SocialIdentity(
+            provider="google",
+            subject="google-subject-123",
+            email="user@example.com",
+            email_verified=True,
+            display_name="User",
+        )
+
+        with mock.patch.object(
+            social_auth,
+            "_verify_google_identity",
+            return_value=identity,
+        ):
+            verified = social_auth.verify_social_reauthentication(
+                repo,
+                user_id="user-123",
+                payload={"id_token": "token"},
+            )
+
+        self.assertEqual(verified.subject, "google-subject-123")
+        repo.get_customer_link.assert_called_once_with("google", "auth:google-subject-123")
+
+    def test_verify_social_reauthentication_rejects_mismatched_link(self) -> None:
+        repo = mock.Mock()
+        repo.get_auth_account.return_value = {
+            "user_id": "user-123",
+            "auth_provider": "google",
+        }
+        repo.get_customer_link.return_value = {"user_id": "user-999"}
+        identity = social_auth.SocialIdentity(
+            provider="google",
+            subject="google-subject-123",
+            email="user@example.com",
+            email_verified=True,
+            display_name="User",
+        )
+
+        with mock.patch.object(
+            social_auth,
+            "_verify_google_identity",
+            return_value=identity,
+        ):
+            with self.assertRaises(social_auth.SocialAuthError) as raised:
+                social_auth.verify_social_reauthentication(
+                    repo,
+                    user_id="user-123",
+                    payload={"id_token": "token"},
+                )
+
+        self.assertEqual(raised.exception.code, "SOCIAL_REAUTH_MISMATCH")
 
 
 if __name__ == "__main__":

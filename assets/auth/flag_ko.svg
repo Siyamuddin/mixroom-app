@@ -1,0 +1,21 @@
+<svg viewBox="0 0 50 50" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="ko-clip">
+      <circle cx="25" cy="25" r="25"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#ko-clip)">
+    <circle cx="25" cy="25" r="25" fill="#F4F4F4"/>
+    <g transform="translate(25 25) scale(0.28)">
+      <path fill="#fff" d="M-72 -48H72V48H-72z"/>
+      <g stroke="#000" stroke-width="4">
+        <path transform="rotate(33.69006752598)" d="M-50-12v24m6 0v-24m6 0v24m76 0V1m0-2v-11m6 0v11m0 2v11m6 0V1m0-2v-11"/>
+        <path transform="rotate(-33.69006752598)" d="M-50-12v24m6 0V1m0-2v-11m6 0v24m76 0V1m0-2v-11m6 0v24m6 0V1m0-2v-11"/>
+      </g>
+      <g transform="rotate(33.69006752598)">
+        <path fill="#CD2E3A" d="M12 0a18 18 0 1 1-36 0 24 24 0 1 1 48 0"/>
+        <path fill="#0047A0" d="M0 0a12 12 0 1 1 24 0 24 24 0 1 1-48 0 12 12 0 1 0 24 0"/>
+      </g>
+    </g>
+  </g>
+</svg>

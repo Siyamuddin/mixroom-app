@@ -91,6 +91,7 @@ class _FakeRepo:
         deleted_by_user_id: str,
         deleted_by_email: str,
         reason: str,
+        confirm_email: str,
         force: bool = False,
     ):
         self.delete_calls.append(
@@ -99,6 +100,7 @@ class _FakeRepo:
                 "deleted_by_user_id": deleted_by_user_id,
                 "deleted_by_email": deleted_by_email,
                 "reason": reason,
+                "confirm_email": confirm_email,
                 "force": force,
             }
         )
@@ -208,7 +210,7 @@ class AdminUsersHandlerTests(unittest.TestCase):
             {
                 "rawPath": "/v1/internal/admin/users/delete",
                 "requestContext": {"http": {"method": "POST"}},
-                "body": '{"user_id":"user-1"}',
+                "body": '{"user_id":"user-1","confirm_email":"user@example.com"}',
             },
             object(),
         )
@@ -229,7 +231,7 @@ class AdminUsersHandlerTests(unittest.TestCase):
             {
                 "rawPath": "/v1/internal/admin/users/delete",
                 "requestContext": {"http": {"method": "POST"}},
-                "body": '{"user_id":"user-1","reason":"duplicate"}',
+                "body": '{"user_id":"user-1","reason":"duplicate","confirm_email":"user@example.com"}',
             },
             object(),
         )
@@ -252,7 +254,7 @@ class AdminUsersHandlerTests(unittest.TestCase):
             {
                 "rawPath": "/v1/internal/admin/users/delete",
                 "requestContext": {"http": {"method": "POST"}},
-                "body": '{"user_id":"user-1","reason":"test cleanup","force":true}',
+                "body": "{\"user_id\":\"user-1\",\"reason\":\"test cleanup\",\"confirm_email\":\"user@example.com\",\"force\":true}",
             },
             object(),
         )
@@ -261,9 +263,10 @@ class AdminUsersHandlerTests(unittest.TestCase):
         self.assertIn('"deleted": true', result["body"])
         self.assertIn('"cognito_user": true', result["body"])
         self.assertTrue(admin_module.repo.delete_calls[0]["force"])
+        self.assertEqual(admin_module.repo.delete_calls[0]["confirm_email"], "user@example.com")
 
     def test_grant_prompt_allowance_returns_payload(self):
-        self._authenticate()
+        self._authenticate(email="andrew@mixroom.ai")
         admin_module.repo = _FakeRepo(
             grant_payload={
                 "granted": True,
@@ -285,6 +288,22 @@ class AdminUsersHandlerTests(unittest.TestCase):
         self.assertIn('"granted": true', result["body"])
         self.assertIn('"granted_prompts": 25', result["body"])
         self.assertEqual(admin_module.repo.grant_calls[0]["prompt_count"], 25)
+
+    def test_grant_prompt_allowance_requires_ai_editor_email(self):
+        self._authenticate(email="other-admin@example.com")
+        admin_module.repo = _FakeRepo()
+
+        result = admin_module.handler(
+            {
+                "rawPath": "/v1/internal/admin/users/grant-prompts",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": '{"user_id":"user-1","prompt_count":25}',
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 403)
+        self.assertIn("andrew@mixroom.ai", result["body"])
 
 
 class AdminUserRepositoryTests(unittest.TestCase):
@@ -320,6 +339,7 @@ class AdminUserRepositoryTests(unittest.TestCase):
                 "user_id": "user-1",
                 "email": "profile@example.com",
                 "display_name": "Profile Name",
+                "music_profile": "music_enthusiast",
                 "auth_provider": "email",
                 "email_verified": False,
                 "profile_status": "active",
@@ -353,6 +373,7 @@ class AdminUserRepositoryTests(unittest.TestCase):
         self.assertEqual(record["auth_provider"], "google")
         self.assertEqual(record["auth_source"], "native_legacy_bridge")
         self.assertEqual(record["auth_status"], "native_legacy_bridge")
+        self.assertEqual(record["music_profile"], "music_enthusiast")
         self.assertTrue(record["email_verified"])
         self.assertTrue(record["native_auth_exists"])
         self.assertEqual(record["native_session_count"], 2)
@@ -488,10 +509,47 @@ class AdminUserRepositoryTests(unittest.TestCase):
             deleted_by_user_id="admin-1",
             deleted_by_email="admin@example.com",
             reason="cleanup",
+            confirm_email="user@example.com",
             force=False,
         )
 
         repository._delete_cognito_user.assert_not_called()
+
+    def test_delete_user_requires_matching_confirm_email(self):
+        repository = repo_module.AdminUserRepository.__new__(repo_module.AdminUserRepository)
+        repository._tombstones = mock.Mock()
+        repository._billing_repo = mock.Mock()
+        repository._get_user_profile = mock.Mock(return_value={})
+        repository._get_auth_account = mock.Mock(
+            return_value={
+                "user_id": "user-1",
+                "email": "user@example.com",
+                "auth_provider": "email",
+            }
+        )
+        repository._get_entitlement = mock.Mock(return_value={})
+        repository._list_subscriptions_for_user = mock.Mock(return_value=[])
+        repository._list_customer_link_items = mock.Mock(return_value=[])
+        repository._list_purchase_tokens = mock.Mock(return_value=[])
+        repository._build_user_record = mock.Mock(
+            return_value={
+                "user_id": "user-1",
+                "email": "user@example.com",
+                "has_active_subscription": False,
+            }
+        )
+        repository._mark_tombstone = mock.Mock()
+        repository._delete_cognito_user = mock.Mock()
+
+        with self.assertRaisesRegex(ValueError, "login email exactly"):
+            repository.delete_user(
+                user_id="user-1",
+                deleted_by_user_id="admin-1",
+                deleted_by_email="admin@example.com",
+                reason="cleanup",
+                confirm_email="other@example.com",
+                force=False,
+            )
 
 
 if __name__ == "__main__":

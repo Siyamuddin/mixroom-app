@@ -15,6 +15,7 @@ class AppUserSnapshot {
     required this.givenName,
     required this.familyName,
     required this.birthdate,
+    required this.musicProfile,
     required this.avatarUrl,
     required this.bio,
     required this.profileStatus,
@@ -39,6 +40,7 @@ class AppUserSnapshot {
   final String? givenName;
   final String? familyName;
   final String? birthdate;
+  final String? musicProfile;
   final String? avatarUrl;
   final String? bio;
   final String profileStatus;
@@ -80,6 +82,7 @@ class AppUserSnapshot {
       'given_name': givenName,
       'family_name': familyName,
       'birthdate': birthdate,
+      'music_profile': musicProfile,
       'avatar_url': avatarUrl,
       'bio': bio,
       'profile_status': profileStatus,
@@ -148,6 +151,13 @@ class AppUserSnapshot {
               true
           ? null
           : (json['birthdate'] ?? fallback?.birthdate)?.toString(),
+      musicProfile:
+          ((json['music_profile'] ?? fallback?.musicProfile) as String?)
+                      ?.trim()
+                      .isEmpty ==
+                  true
+              ? null
+              : (json['music_profile'] ?? fallback?.musicProfile)?.toString(),
       avatarUrl: ((json['avatar_url'] ?? fallback?.avatarUrl) as String?)
                   ?.trim()
                   .isEmpty ==
@@ -207,6 +217,7 @@ class AppUserSnapshot {
       givenName: null,
       familyName: null,
       birthdate: null,
+      musicProfile: null,
       avatarUrl: null,
       bio: null,
       profileStatus: 'active',

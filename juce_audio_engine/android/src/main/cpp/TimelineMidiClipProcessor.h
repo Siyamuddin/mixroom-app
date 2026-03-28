@@ -1137,42 +1137,78 @@ private:
             return normalizeAssetPath(instrumentId.substring(10));
 
         static const std::unordered_map<std::string, std::string> knownMap = {
-            {"sfz.vsco.violin_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsSusVib.sfz"},
-            {"sfz.vsco.cello_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/CelloEnsSusVib.sfz"},
-            {"sfz.vsco.trumpet_sus", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetSus.sfz"},
-            {"sfz.vsco.fhorn_sus", "assets/instruments/VSCO-2-CE-1.1.0/FHornSus.sfz"},
-            {"sfz.vsco.flute_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/FluteSusVib.sfz"},
-            {"sfz.vsco.clarinet_sus", "assets/instruments/VSCO-2-CE-1.1.0/ClarinetSus.sfz"},
+            {"sfz.vsco.mixroom_acoustic_drum_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz"},
+            {"sfz.vsco.mixroom_dry_drum_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz"},
+            {"sfz.vsco.violin_ens_pizz", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz"},
+            {"sfz.vsco.trumpet_stac", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
+            {"sfz.vsco.tuba_stac", "assets/instruments/VSCO-2-CE-1.1.0/TubaStac.sfz"},
+            {"sfz.vsco.flute_stac", "assets/instruments/VSCO-2-CE-1.1.0/FluteStac.sfz"},
+            {"sfz.vsco.clarinet_stac", "assets/instruments/VSCO-2-CE-1.1.0/ClarinetStac.sfz"},
+            {"sfz.vsco.bassoon_stac", "assets/instruments/VSCO-2-CE-1.1.0/BassoonStac.sfz"},
+            {"sfz.vsco.oboe_stac", "assets/instruments/VSCO-2-CE-1.1.0/OboeStac.sfz"},
+            {"sfz.vsco.piccolo_sus", "assets/instruments/VSCO-2-CE-1.1.0/PiccoloSus.sfz"},
+            {"sfz.vsco.piccolo_stac", "assets/instruments/VSCO-2-CE-1.1.0/PiccoloStac.sfz"},
             {"sfz.vsco.organ_quiet", "assets/instruments/VSCO-2-CE-1.1.0/OrganQuiet.sfz"},
             {"sfz.vsco.organ_loud", "assets/instruments/VSCO-2-CE-1.1.0/OrganLoud.sfz"},
             {"sfz.vsco.marimba", "assets/instruments/VSCO-2-CE-1.1.0/Marimba.sfz"},
             {"sfz.vsco.glockenspiel", "assets/instruments/VSCO-2-CE-1.1.0/Glockenspiel.sfz"},
+            {"sfz.vsco.xylophone", "assets/instruments/VSCO-2-CE-1.1.0/Xylophone.sfz"},
+            {"sfz.vsco.tubular_bells", "assets/instruments/VSCO-2-CE-1.1.0/TubularBells.sfz"},
+            // Legacy aliases kept for backward compatibility with older projects.
+            {"sfz.vsco.violin_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz"},
+            {"sfz.vsco.cello_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz"},
+            {"sfz.vsco.trumpet_sus", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
+            {"sfz.vsco.fhorn_sus", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
+            {"sfz.vsco.flute_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/FluteStac.sfz"},
+            {"sfz.vsco.clarinet_sus", "assets/instruments/VSCO-2-CE-1.1.0/ClarinetStac.sfz"},
         };
         if (auto found = knownMap.find(id.toStdString()); found != knownMap.end())
             return found->second.c_str();
 
         const juce::String text = (id + " " + instrumentName.toLowerCase());
         auto contains = [&](const char *needle) { return text.contains(needle); };
+        if (contains("acoustic drum"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz";
+        if (contains("dry drum"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz";
+        if (contains("drum"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz";
         if (contains("violin"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsSusVib.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz";
         if (contains("cello"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/CelloEnsSusVib.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz";
         if (contains("trumpet"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/TrumpetSus.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz";
         if (contains("horn"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/FHornSus.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz";
+        if (contains("tuba"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/TubaStac.sfz";
         if (contains("flute"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/FluteSusVib.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/FluteStac.sfz";
         if (contains("clarinet"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/ClarinetSus.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/ClarinetStac.sfz";
+        if (contains("bassoon"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/BassoonStac.sfz";
+        if (contains("oboe"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/OboeStac.sfz";
+        if (contains("piccolo sustain"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/PiccoloSus.sfz";
+        if (contains("piccolo"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/PiccoloStac.sfz";
         if (contains("organ quiet"))
             return "assets/instruments/VSCO-2-CE-1.1.0/OrganQuiet.sfz";
         if (contains("organ"))
             return "assets/instruments/VSCO-2-CE-1.1.0/OrganLoud.sfz";
+        if (contains("piano"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/OrganQuiet.sfz";
         if (contains("marimba"))
             return "assets/instruments/VSCO-2-CE-1.1.0/Marimba.sfz";
         if (contains("glock"))
             return "assets/instruments/VSCO-2-CE-1.1.0/Glockenspiel.sfz";
+        if (contains("xylo"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/Xylophone.sfz";
+        if (contains("tubular") || contains("bell"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/TubularBells.sfz";
         return {};
     }
 

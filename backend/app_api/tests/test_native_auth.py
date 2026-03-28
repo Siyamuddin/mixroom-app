@@ -54,11 +54,15 @@ if "botocore.exceptions" not in sys.modules:
     botocore_stub = ModuleType("botocore")
     exceptions_stub = ModuleType("botocore.exceptions")
 
+    class _BotoCoreError(Exception):
+        pass
+
     class _ClientError(Exception):
         def __init__(self, response: dict, operation_name: str = "") -> None:
             super().__init__(operation_name)
             self.response = response
 
+    exceptions_stub.BotoCoreError = _BotoCoreError
     exceptions_stub.ClientError = _ClientError
     botocore_stub.exceptions = exceptions_stub
     sys.modules["botocore"] = botocore_stub
@@ -165,6 +169,21 @@ class _FakeRepo:
 
 
 class NativeAuthFlowTests(unittest.TestCase):
+    def test_email_signup_rejects_weak_password(self) -> None:
+        repo = _FakeRepo()
+
+        with self.assertRaises(native_auth.AppUserAuthError) as raised:
+            native_auth.register_email_account(
+                repo,
+                email="user@example.com",
+                password="password",
+                display_name="Native User",
+            )
+
+        self.assertEqual(raised.exception.code, "WEAK_PASSWORD")
+        self.assertIn("uppercase", raised.exception.message.lower())
+        self.assertEqual(repo.accounts, {})
+
     def test_email_signup_bootstraps_free_entitlement_before_confirmation(self) -> None:
         repo = _FakeRepo()
 
@@ -363,6 +382,70 @@ class NativeAuthFlowTests(unittest.TestCase):
             )
 
         self.assertTrue(confirmed["user"]["emailVerified"])
+
+    def test_confirm_verified_email_requires_password_for_session(self) -> None:
+        repo = _FakeRepo()
+
+        with mock.patch.object(native_auth, "send_auth_email"), mock.patch.object(
+            native_auth,
+            "_generate_numeric_code",
+            return_value="123456",
+        ):
+            native_auth.register_email_account(
+                repo,
+                email="user@example.com",
+                password="CorrectHorseBatteryStaple1!",
+                display_name="Native User",
+            )
+
+        with mock.patch.object(
+            native_auth,
+            "new_refresh_token",
+            return_value=(
+                "rt_session-confirmed_secret",
+                native_auth._hash_value("rt_session-confirmed_secret"),  # noqa: SLF001
+            ),
+        ), mock.patch.object(
+            native_auth,
+            "mint_token",
+            side_effect=["access-token-confirmed", "id-token-confirmed"],
+        ):
+            native_auth.confirm_email_account(
+                repo,
+                email="user@example.com",
+                code="123456",
+            )
+
+        with self.assertRaises(native_auth.AppUserAuthError) as raised:
+            native_auth.confirm_email_account(
+                repo,
+                email="user@example.com",
+                code="123456",
+            )
+
+        self.assertEqual(raised.exception.code, "ACCOUNT_ALREADY_VERIFIED")
+
+        with mock.patch.object(
+            native_auth,
+            "new_refresh_token",
+            return_value=(
+                "rt_session-retry_secret",
+                native_auth._hash_value("rt_session-retry_secret"),  # noqa: SLF001
+            ),
+        ), mock.patch.object(
+            native_auth,
+            "mint_token",
+            side_effect=["access-token-retry", "id-token-retry"],
+        ):
+            retried = native_auth.confirm_email_account(
+                repo,
+                email="user@example.com",
+                code="123456",
+                password="CorrectHorseBatteryStaple1!",
+            )
+
+        self.assertEqual(retried["user"]["userId"], repo.get_auth_account_by_email("user@example.com")["user_id"])
+        self.assertEqual(retried["tokens"]["accessToken"], "access-token-retry")
 
     def test_email_signup_returns_delivery_unavailable_when_email_send_fails(self) -> None:
         repo = _FakeRepo()
@@ -646,6 +729,45 @@ class NativeAuthFlowTests(unittest.TestCase):
 
         self.assertEqual(sign_in["tokens"]["accessToken"], "access-token-reset")
 
+    def test_password_reset_rejects_weak_new_password(self) -> None:
+        repo = _FakeRepo()
+
+        with mock.patch.object(native_auth, "send_auth_email"), mock.patch.object(
+            native_auth,
+            "_generate_numeric_code",
+            side_effect=["123456", "654321"],
+        ):
+            native_auth.register_email_account(
+                repo,
+                email="user@example.com",
+                password="CorrectHorseBatteryStaple1!",
+                display_name="Native User",
+            )
+            native_auth.confirm_email_account(
+                repo,
+                email="user@example.com",
+                code="123456",
+            )
+            native_auth.request_password_reset(
+                repo,
+                email="user@example.com",
+            )
+
+        original_account = repo.get_auth_account_by_email("user@example.com")
+        with self.assertRaises(native_auth.AppUserAuthError) as raised:
+            native_auth.confirm_password_reset(
+                repo,
+                email="user@example.com",
+                code="654321",
+                new_password="password",
+            )
+
+        self.assertEqual(raised.exception.code, "WEAK_PASSWORD")
+        self.assertEqual(
+            repo.get_auth_account_by_email("user@example.com"),
+            original_account,
+        )
+
     def test_refresh_session_reuses_stable_refresh_token(self) -> None:
         repo = _FakeRepo()
 
@@ -823,6 +945,88 @@ class NativeAuthFlowTests(unittest.TestCase):
             "legacy-social-user",
         )
         self.assertEqual(repo.get_entitlement("legacy-social-user")["tier"], "free")
+
+    def test_linked_social_sign_in_does_not_overwrite_email_owned_by_another_account(self) -> None:
+        repo = _FakeRepo()
+        repo.accounts["social-user"] = {
+            "user_id": "social-user",
+            "email": "social@example.com",
+            "email_lc": "social@example.com",
+            "auth_provider": "google",
+            "email_verified": True,
+            "created_at": "2026-03-13T00:00:00+00:00",
+        }
+        repo.accounts_by_email["social@example.com"] = "social-user"
+        repo.profiles["social-user"] = {
+            "user_id": "social-user",
+            "email": "social@example.com",
+            "email_lc": "social@example.com",
+            "display_name": "Social User",
+            "auth_provider": "google",
+            "created_at": "2026-03-13T00:00:00+00:00",
+        }
+        repo.customer_links["google:auth:google-subject-1"] = {
+            "provider": "google",
+            "customer_key": "auth:google-subject-1",
+            "user_id": "social-user",
+        }
+        repo.accounts["other-user"] = {
+            "user_id": "other-user",
+            "email": "taken@example.com",
+            "email_lc": "taken@example.com",
+            "auth_provider": "email",
+            "email_verified": True,
+            "created_at": "2026-03-13T00:00:00+00:00",
+        }
+        repo.accounts_by_email["taken@example.com"] = "other-user"
+
+        result = native_auth.upsert_social_account(
+            repo,
+            provider="google",
+            subject="google-subject-1",
+            email="taken@example.com",
+            email_verified=True,
+            display_name="Social User",
+        )
+
+        self.assertEqual(result["account"]["user_id"], "social-user")
+        self.assertEqual(result["account"]["email"], "social@example.com")
+        self.assertEqual(repo.get_auth_account("social-user")["email"], "social@example.com")
+
+    def test_change_password_rejects_weak_new_password(self) -> None:
+        repo = _FakeRepo()
+
+        with mock.patch.object(native_auth, "send_auth_email"), mock.patch.object(
+            native_auth,
+            "_generate_numeric_code",
+            return_value="123456",
+        ):
+            native_auth.register_email_account(
+                repo,
+                email="user@example.com",
+                password="CorrectHorseBatteryStaple1!",
+                display_name="Native User",
+            )
+            native_auth.confirm_email_account(
+                repo,
+                email="user@example.com",
+                code="123456",
+            )
+
+        account_before = repo.get_auth_account_by_email("user@example.com")
+        with self.assertRaises(native_auth.AppUserAuthError) as raised:
+            native_auth.change_password(
+                repo,
+                user_id=str(account_before["user_id"]),
+                current_password="CorrectHorseBatteryStaple1!",
+                new_password="password",
+            )
+
+        self.assertEqual(raised.exception.code, "WEAK_PASSWORD")
+        self.assertEqual(
+            repo.get_auth_account_by_email("user@example.com")["password_hash"],
+            account_before["password_hash"],
+        )
 
 
 if __name__ == "__main__":

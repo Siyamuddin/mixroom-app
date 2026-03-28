@@ -65,6 +65,15 @@ _RESERVED_USERNAMES = {
     "verify",
     "www",
 }
+_ALLOWED_MUSIC_PROFILES = {
+    "producer",
+    "artist",
+    "songwriter",
+    "audio_engineer",
+    "music_enthusiast",
+    "beginner",
+    "music_for_work",
+}
 
 
 def _utc_now_iso() -> str:
@@ -227,6 +236,15 @@ def _normalize_birthdate(value: Any) -> Optional[str]:
     return parsed.isoformat()
 
 
+def normalize_music_profile(value: Any) -> Optional[str]:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    if raw not in _ALLOWED_MUSIC_PROFILES:
+        raise ValueError("Music profile must be one of the supported options.")
+    return raw
+
+
 def _default_onboarding_state(record: Dict[str, Any]) -> str:
     existing = str(record.get("onboarding_state") or "").strip()
     if existing and existing not in ("bootstrap_only", "profile_ready"):
@@ -251,6 +269,10 @@ def _default_onboarding_state(record: Dict[str, Any]) -> str:
     if existing:
         return existing
     return "bootstrap_only"
+
+
+def default_onboarding_state(record: Dict[str, Any]) -> str:
+    return _default_onboarding_state(record)
 
 
 def build_user_profile_from_claims(
@@ -301,6 +323,7 @@ def build_user_profile_from_claims(
         "given_name": given_name,
         "family_name": family_name,
         "birthdate": _normalize_birthdate(current.get("birthdate")),
+        "music_profile": normalize_music_profile(current.get("music_profile")),
         "avatar_url": current.get("avatar_url"),
         "bio": current.get("bio"),
         "profile_status": str(current.get("profile_status") or "active").strip() or "active",
@@ -436,6 +459,11 @@ def apply_user_profile_patch(
             raise ValueError("Birthdate is required.")
         record["birthdate"] = birthdate
 
+    if "music_profile" in patch:
+        record["music_profile"] = normalize_music_profile(
+            patch.get("music_profile")
+        )
+
     if "bio" in patch:
         record["bio"] = normalize_bio(patch.get("bio"))
 
@@ -479,8 +507,6 @@ def apply_user_profile_patch(
         )
 
     if record.get("accepted_terms_version") and record.get("accepted_privacy_version"):
-        if not record.get("username"):
-            raise ValueError("Username is required to finish creating your account.")
         if not record.get("birthdate"):
             raise ValueError("Birthdate is required to finish creating your account.")
         record["accepted_at"] = record.get("accepted_at") or now

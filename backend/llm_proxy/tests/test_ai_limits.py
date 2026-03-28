@@ -17,6 +17,7 @@ from common import ai_limits  # noqa: E402
 class AiLimitsTests(unittest.TestCase):
     def setUp(self) -> None:
         ai_limits.load_ai_limits.cache_clear()
+        ai_limits.clear_prompt_limits_cache()
 
     def test_load_ai_limits_reads_expected_single_source_file(self) -> None:
         limits = ai_limits.load_ai_limits()
@@ -29,6 +30,34 @@ class AiLimitsTests(unittest.TestCase):
 
     def test_get_prompt_limits_reads_daily_and_weekly_caps(self) -> None:
         limits = ai_limits.get_prompt_limits()
+
+        self.assertEqual(limits["daily_prompts"], 50)
+        self.assertEqual(limits["weekly_prompts"], 350)
+
+    def test_get_prompt_limits_prefers_remote_override_for_free_tier(self) -> None:
+        with mock.patch.object(
+            ai_limits,
+            "_get_cached_remote_prompt_limits",
+            return_value={
+                "free_daily_prompt_limit": 12,
+                "free_weekly_prompt_limit": 90,
+            },
+        ):
+            limits = ai_limits.get_prompt_limits("free")
+
+        self.assertEqual(limits["daily_prompts"], 12)
+        self.assertEqual(limits["weekly_prompts"], 90)
+
+    def test_get_prompt_limits_does_not_apply_free_override_to_pro_tier(self) -> None:
+        with mock.patch.object(
+            ai_limits,
+            "_get_cached_remote_prompt_limits",
+            return_value={
+                "free_daily_prompt_limit": 12,
+                "free_weekly_prompt_limit": 90,
+            },
+        ):
+            limits = ai_limits.get_prompt_limits("pro")
 
         self.assertEqual(limits["daily_prompts"], 50)
         self.assertEqual(limits["weekly_prompts"], 350)

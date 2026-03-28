@@ -123,6 +123,14 @@ void main() {
     expect(calls[2].arguments, <String, dynamic>{'timeSeconds': 11.0});
   });
 
+  test('preparePlaybackRoute routes reason payload', () async {
+    await JuceAudioEngine.preparePlaybackRoute(reason: 'projectLoad');
+
+    expect(calls, hasLength(1));
+    expect(calls.single.method, 'preparePlaybackRoute');
+    expect(calls.single.arguments, <String, dynamic>{'reason': 'projectLoad'});
+  });
+
   test('capabilities + plugin scan normalization', () async {
     final caps = await JuceAudioEngine.getEngineCapabilities();
     final plugins = await JuceAudioEngine.scanPlugins();

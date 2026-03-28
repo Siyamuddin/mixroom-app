@@ -14,5 +14,29 @@ AI_USAGE_STATE_TABLE = (
     or os.environ.get("AI_USAGE_METRICS_TABLE", "")
 ).strip()
 AI_USAGE_EVENTS_TABLE = os.environ.get("AI_USAGE_EVENTS_TABLE", "").strip()
+AI_PROMPT_LIMIT_SETTINGS_TABLE = os.environ.get(
+    "AI_PROMPT_LIMIT_SETTINGS_TABLE", ""
+).strip()
 ENTITLEMENTS_TABLE = os.environ.get("ENTITLEMENTS_TABLE", "").strip()
 LLM_MAX_OUTPUT_TOKENS = os.environ.get("LLM_MAX_OUTPUT_TOKENS", "").strip()
+AI_RUNTIME_DEFAULT_MODEL = os.environ.get(
+    "AI_RUNTIME_DEFAULT_MODEL",
+    os.environ.get("LLM_MODEL", os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")),
+).strip() or "gpt-4.1-mini"
+AI_CHAT_DEFAULT_TEMPERATURE = float(
+    os.environ.get("AI_CHAT_DEFAULT_TEMPERATURE", "0.2") or "0.2"
+)
+VIDEO_EDITOR_DEFAULT_TEMPERATURE = float(
+    os.environ.get("VIDEO_EDITOR_DEFAULT_TEMPERATURE", "0.1") or "0.1"
+)
+AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS = frozenset(
+    value.strip().lower()
+    for value in os.environ.get(
+        "AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS",
+        (
+            "gpt-4.1,gpt-5,gpt-5-codex,gpt-5.1,gpt-5.1-codex,"
+            "gpt-5.1-codex-mini,gpt-5.1-chat-latest,gpt-5.2"
+        ),
+    ).split(",")
+    if value.strip()
+)

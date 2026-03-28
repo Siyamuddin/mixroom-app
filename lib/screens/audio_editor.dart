@@ -11,6 +11,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:image/image.dart' as img;
 import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
@@ -83,6 +84,7 @@ import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
 import 'package:mixroom/widgets/feedback_sheet.dart';
+import 'package:mixroom/widgets/app_shell_figma.dart';
 import 'package:mixroom/widgets/piano_roll_editor.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:just_audio/just_audio.dart' as ja;
@@ -108,84 +110,121 @@ const List<String> kMixroomBuiltInEffects = [
   "Vibrato",
 ];
 
+const String kMixroomDawBackgroundAsset = 'assets/daw/editor_background.webp';
+const String kMixroomDawTopSettingsIconAsset =
+    'assets/daw/top_settings_icon.png';
+const String kMixroomDawTopMasterIconAsset = 'assets/daw/top_master_icon.png';
+const String kMixroomDawTopBackIconAsset = 'assets/daw/top_back_icon.png';
+const String kMixroomDawTopShareIconAsset = 'assets/daw/top_share_icon.png';
+const String kMixroomDawTransportWaveIconAsset =
+    'assets/daw/transport_wave_icon.png';
+const String kMixroomDawChatBarIconAsset = 'assets/daw/chat_bar_icon.svg';
+
 const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
   {
-    'id': 'sfz.vsco.violin_ens_sus_vib',
-    'name': 'Violin Ensemble Sustain Vibrato',
+    'id': 'sfz.vsco.mixroom_acoustic_drum_kit',
+    'name': 'Mixroom Acoustic Drum Kit',
+    'category': 'instrument',
+    'pickerCategory': 'Drums',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath':
+        'assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz',
+    'outputGain': 0.94,
+    'attackMs': 1.0,
+    'releaseMs': 260.0,
+  },
+  {
+    'id': 'sfz.vsco.mixroom_dry_drum_kit',
+    'name': 'Mixroom Dry Drum Kit',
+    'category': 'instrument',
+    'pickerCategory': 'Drums',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz',
+    'outputGain': 0.92,
+    'attackMs': 1.0,
+    'releaseMs': 220.0,
+  },
+  {
+    'id': 'sfz.vsco.violin_ens_pizz',
+    'name': 'Violin Ensemble Pizzicato',
     'category': 'instrument',
     'pickerCategory': 'Strings',
     'sourceProject': 'VSCO-2 CE',
     'sourceLicense': 'See bundled LICENSE',
     'isSampled': true,
-    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsSusVib.sfz',
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz',
     'outputGain': 0.72,
-    'attackMs': 8.0,
-    'releaseMs': 620.0,
-  },
-  {
-    'id': 'sfz.vsco.cello_ens_sus_vib',
-    'name': 'Cello Ensemble Sustain Vibrato',
-    'category': 'instrument',
-    'pickerCategory': 'Strings',
-    'sourceProject': 'VSCO-2 CE',
-    'sourceLicense': 'See bundled LICENSE',
-    'isSampled': true,
-    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/CelloEnsSusVib.sfz',
-    'outputGain': 0.74,
-    'attackMs': 8.0,
-    'releaseMs': 680.0,
-  },
-  {
-    'id': 'sfz.vsco.trumpet_sus',
-    'name': 'Trumpet Sustain',
-    'category': 'instrument',
-    'pickerCategory': 'Brass',
-    'sourceProject': 'VSCO-2 CE',
-    'sourceLicense': 'See bundled LICENSE',
-    'isSampled': true,
-    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/TrumpetSus.sfz',
-    'outputGain': 0.68,
     'attackMs': 6.0,
-    'releaseMs': 420.0,
+    'releaseMs': 360.0,
   },
   {
-    'id': 'sfz.vsco.fhorn_sus',
-    'name': 'French Horn Sustain',
+    'id': 'sfz.vsco.trumpet_stac',
+    'name': 'Trumpet Staccato',
     'category': 'instrument',
     'pickerCategory': 'Brass',
     'sourceProject': 'VSCO-2 CE',
     'sourceLicense': 'See bundled LICENSE',
     'isSampled': true,
-    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/FHornSus.sfz',
-    'outputGain': 0.68,
-    'attackMs': 7.0,
-    'releaseMs': 460.0,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz',
+    'outputGain': 0.7,
+    'attackMs': 6.0,
+    'releaseMs': 260.0,
   },
   {
-    'id': 'sfz.vsco.flute_sus_vib',
-    'name': 'Flute Sustain Vibrato',
+    'id': 'sfz.vsco.tuba_stac',
+    'name': 'Tuba Staccato',
+    'category': 'instrument',
+    'pickerCategory': 'Brass',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/TubaStac.sfz',
+    'outputGain': 0.7,
+    'attackMs': 6.0,
+    'releaseMs': 260.0,
+  },
+  {
+    'id': 'sfz.vsco.flute_stac',
+    'name': 'Flute Staccato',
     'category': 'instrument',
     'pickerCategory': 'Woodwinds',
     'sourceProject': 'VSCO-2 CE',
     'sourceLicense': 'See bundled LICENSE',
     'isSampled': true,
-    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/FluteSusVib.sfz',
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/FluteStac.sfz',
     'outputGain': 0.66,
     'attackMs': 4.0,
-    'releaseMs': 380.0,
+    'releaseMs': 220.0,
   },
   {
-    'id': 'sfz.vsco.clarinet_sus',
-    'name': 'Clarinet Sustain',
+    'id': 'sfz.vsco.clarinet_stac',
+    'name': 'Clarinet Staccato',
     'category': 'instrument',
     'pickerCategory': 'Woodwinds',
     'sourceProject': 'VSCO-2 CE',
     'sourceLicense': 'See bundled LICENSE',
     'isSampled': true,
-    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/ClarinetSus.sfz',
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/ClarinetStac.sfz',
     'outputGain': 0.68,
     'attackMs': 5.0,
-    'releaseMs': 420.0,
+    'releaseMs': 220.0,
+  },
+  {
+    'id': 'sfz.vsco.piccolo_sus',
+    'name': 'Piccolo Sustain',
+    'category': 'instrument',
+    'pickerCategory': 'Woodwinds',
+    'sourceProject': 'VSCO-2 CE',
+    'sourceLicense': 'See bundled LICENSE',
+    'isSampled': true,
+    'sfzAssetPath': 'assets/instruments/VSCO-2-CE-1.1.0/PiccoloSus.sfz',
+    'outputGain': 0.66,
+    'attackMs': 5.0,
+    'releaseMs': 640.0,
   },
   {
     'id': 'sfz.vsco.organ_quiet',
@@ -239,6 +278,39 @@ const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
     'attackMs': 2.0,
     'releaseMs': 820.0,
   },
+];
+
+const Set<String> kReleaseEssentialInstrumentIds = <String>{
+  'mixroom.drum_acoustic_easy',
+  'mixroom.drum_808_starter',
+  'mixroom.velvet_ep',
+  'mixroom.fm_keys',
+  'mixroom.vintage_strings',
+  'mixroom.horn_stack',
+  'mixroom.neon_lead',
+  'mixroom.reese_bass',
+  'mixroom.mellow_sub',
+  'sfz.vsco.mixroom_acoustic_drum_kit',
+  'sfz.vsco.mixroom_dry_drum_kit',
+  'sfz.vsco.organ_loud',
+  'sfz.vsco.violin_ens_pizz',
+  'sfz.vsco.trumpet_stac',
+};
+
+const Map<String, String> kLegacySfzInstrumentAliases = {
+  'sfz.vsco.violin_ens_sus_vib': 'sfz.vsco.violin_ens_pizz',
+  'sfz.vsco.cello_ens_sus_vib': 'sfz.vsco.violin_ens_pizz',
+  'sfz.vsco.trumpet_sus': 'sfz.vsco.trumpet_stac',
+  'sfz.vsco.fhorn_sus': 'sfz.vsco.trumpet_stac',
+  'sfz.vsco.flute_sus_vib': 'sfz.vsco.flute_stac',
+  'sfz.vsco.clarinet_sus': 'sfz.vsco.clarinet_stac',
+};
+
+const List<String> kReleaseBlockedInstrumentTokens = <String>[
+  // Upstream provenance for TicTokMen mirrors is incomplete for public release.
+  'tictokmen',
+  // Hide auto-generated duplicate IDs from index.json and prefer curated aliases.
+  'sfz.vsco_2_ce_1_1_0_',
 ];
 
 class _SfzRegion {
@@ -476,13 +548,14 @@ const List<Map<String, dynamic>> kInstrumentCatalog = [
     "id": "mixroom.drum_808_starter",
     "name": "808 Starter Kit",
     "category": "drum",
-    "sourceProject": "Mixroom Stock",
-    "sourceLicense": "Built-in",
-    "oscillator": 0.0,
-    "cutoffHz": 1100.0,
-    "attackMs": 0.0,
-    "releaseMs": 190.0,
-    "drive": 0.36,
+    "pickerCategory": "Drums",
+    "sourceProject": "VSCO-2 CE",
+    "sourceLicense": "See bundled LICENSE",
+    "isSampled": true,
+    "sfzAssetPath": "assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz",
+    "outputGain": 0.90,
+    "attackMs": 2.0,
+    "releaseMs": 300.0,
   },
   {
     "id": "mixroom.drum_lofi",
@@ -732,6 +805,36 @@ const List<Map<String, dynamic>> kInstrumentCatalog = [
     "drive": 0.33,
   },
 ];
+
+List<Map<String, dynamic>> _cloneInstrumentCatalog(
+  Iterable<Map<String, dynamic>> catalog,
+) {
+  return catalog
+      .map((spec) => Map<String, dynamic>.from(spec))
+      .toList(growable: true);
+}
+
+List<Map<String, dynamic>> _mergeInstrumentCatalogs(
+  Iterable<Iterable<Map<String, dynamic>>> catalogs,
+) {
+  final merged = <Map<String, dynamic>>[];
+  final seen = <String>{};
+
+  for (final catalog in catalogs) {
+    for (final spec in catalog) {
+      final next = Map<String, dynamic>.from(spec);
+      final id = (next['id'] as String? ?? '').trim().toLowerCase();
+      final key = id.isNotEmpty
+          ? id
+          : '${(next['name'] as String? ?? '').trim().toLowerCase()}|'
+              '${(next['sfzAssetPath'] as String? ?? '').trim().toLowerCase()}';
+      if (!seen.add(key)) continue;
+      merged.add(next);
+    }
+  }
+
+  return merged;
+}
 
 enum _FallbackInstrumentFamily {
   basic,
@@ -1969,7 +2072,35 @@ double _renderFallbackRawSample({
     case _FallbackInstrumentFamily.drum:
       {
         final style = preset.oscillator.clamp(0, 3).toInt();
-        if (pitch <= 36) {
+        final isKick = pitch == 35 || pitch == 36;
+        final isSnare = pitch == 38 || pitch == 40;
+        final isClap = pitch == 37 || pitch == 39;
+        final isTom = pitch == 41 ||
+            pitch == 43 ||
+            pitch == 45 ||
+            pitch == 47 ||
+            pitch == 48 ||
+            pitch == 50;
+        final isHat = pitch == 42 ||
+            pitch == 44 ||
+            pitch == 46 ||
+            pitch == 49 ||
+            pitch == 51 ||
+            pitch == 52 ||
+            pitch == 53 ||
+            pitch == 55 ||
+            pitch == 57 ||
+            pitch == 59;
+
+        final treatAsKick = isKick || pitch < 35;
+        final treatAsSnare =
+            isSnare || (!isClap && !isTom && !isHat && pitch <= 44);
+        final treatAsClap =
+            isClap || (!isTom && !isHat && pitch > 44 && pitch <= 52);
+        final treatAsTom = isTom || (!isHat && pitch > 52 && pitch <= 63);
+
+        // Prefer GM-like drum note routing so common MIDI drum clips sound expected.
+        if (treatAsKick) {
           final extraDrop = style == 0
               ? 22.0
               : style == 1
@@ -2021,7 +2152,7 @@ double _renderFallbackRawSample({
           );
           return raw;
         }
-        if (pitch <= 44) {
+        if (treatAsSnare) {
           final toneMult = style == 0
               ? 1.25
               : style == 1
@@ -2058,7 +2189,7 @@ double _renderFallbackRawSample({
           );
           return raw;
         }
-        if (pitch <= 52) {
+        if (treatAsClap) {
           if (style == 1) {
             final rimTone = math.sin(2.0 * math.pi * state.phaseA) *
                 math.exp(-22.0 * noteProgress) *
@@ -2084,7 +2215,7 @@ double _renderFallbackRawSample({
           final noise = _noiseForSample(state.seed + 29, noteSampleIndex);
           return noise * (envelopeNoise * 0.78 + tail * 0.22);
         }
-        if (pitch <= 63) {
+        if (treatAsTom) {
           final tomMul = style == 0
               ? 0.85
               : style == 1
@@ -2433,8 +2564,8 @@ class _EditorLayoutSpec {
         8.0 * scale,
       ),
       topBarBottomGap: isDesktop ? 14.0 : 12.0,
-      topBarClusterGap: 10.0 * scale,
-      topBarActionButtonSize: 48.0 * scale,
+      topBarClusterGap: (isDesktop ? 10.0 : 8.0) * scale,
+      topBarActionButtonSize: (isDesktop ? 48.0 : 46.0) * scale,
     );
   }
 }
@@ -3185,17 +3316,41 @@ class AudioEditorScreen extends StatefulWidget {
   State<AudioEditorScreen> createState() => _AudioEditorScreenState2();
 }
 
+enum _TopPopupType { none, projectSettings, tempo, master }
+
+class _TopPopupLayout {
+  const _TopPopupLayout({
+    required this.top,
+    required this.left,
+    required this.width,
+    required this.connectorLeft,
+  });
+
+  final double top;
+  final double left;
+  final double width;
+  final double connectorLeft;
+}
+
 class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     with WidgetsBindingObserver {
   static const Key _editorScaffoldKey = Key('audio_editor_screen');
   static const Key _editorBackButtonKey = Key('audio_editor_back_button');
-  static const Key _projectSettingsButtonKey =
-      Key('audio_editor_project_settings_button');
-  static const Key _masterPluginsButtonKey =
-      Key('audio_editor_master_plugins_button');
+  static final GlobalKey _projectSettingsButtonKey =
+      GlobalKey(debugLabel: 'audio_editor_project_settings_button');
+  static final GlobalKey _tempoButtonKey =
+      GlobalKey(debugLabel: 'audio_editor_tempo_button');
+  static final GlobalKey _masterPluginsButtonKey =
+      GlobalKey(debugLabel: 'audio_editor_master_plugins_button');
+  static final GlobalKey _toolbarPillKey =
+      GlobalKey(debugLabel: 'audio_editor_toolbar_pill');
   static const Key _exportButtonKey = Key('audio_editor_export_button');
-  static const Key _masterRackKey = Key('audio_editor_master_rack');
-  static const Key _projectSettingsDialogKey = Key('project_settings_dialog');
+  static final GlobalKey _masterRackKey =
+      GlobalKey(debugLabel: 'audio_editor_master_rack');
+  static final GlobalKey _projectSettingsDialogKey =
+      GlobalKey(debugLabel: 'project_settings_dialog');
+  static final GlobalKey _tempoRollDownPanelKey =
+      GlobalKey(debugLabel: 'audio_editor_tempo_roll_down_panel');
   static const Key _projectSettingsNameFieldKey =
       Key('project_settings_name_field');
   static const Key _projectSettingsMetronomeSwitchKey =
@@ -3204,16 +3359,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       Key('project_settings_producer_capture_switch');
   static const Key _projectSettingsCloseButtonKey =
       Key('project_settings_close_button');
-  static const double _kTransportBarHeight = 94.0;
-  static const double _kChatBarStackHeight = 70.0;
+  static const double _kTransportBarHeight = 88.0;
+  static const double _kChatBarStackHeight = 68.0;
   static const double _kChatHistoryHeight = 380.0;
-  static const double _kChatChromeOpacity = 0.08;
-  static const double _kChatBarFixedHeight = 50.0;
+  static const double _kChatHistoryBottomGap = 20.0;
+  static const double _kChatChromeOpacity = 0.30;
+  static const double _kChatBarFixedHeight = 48.0;
+  double get _chatHistoryBottomGap =>
+      Platform.isIOS ? 12.0 : _kChatHistoryBottomGap;
   static const double _kSamplePanelCollapsedTopFactor = 0.34;
   static const double _kSamplePanelExpandedTop = 68.0;
-  static const double _kSamplePanelBottomGap = 0.0;
+  static const double _kSamplePanelBottomGap = 12.0;
   static const double _kAddActionsPanelWidth = 312.0;
   static const double _kProducerBannerHeightEstimate = 62.0;
+  static const double _kTopPopupHorizontalMargin = 11.0;
   static const Set<String> _kSampleAudioExtensions = <String>{
     '.wav',
     '.wave',
@@ -3287,6 +3446,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _loadedOnce = false;
   bool _handledInitialAction = false;
   bool _hasTrackedAiAssistantScreen = false;
+  bool _isProjectLoading = false;
+  int _androidEngineCriticalSectionDepth = 0;
+  bool _androidRouteRefreshInFlight = false;
+  bool _pendingAndroidRouteRefresh = false;
+  String? _pendingAndroidRouteRefreshReason;
 
   Duration _scrubPosition = Duration.zero;
   bool _isPlaying = false;
@@ -3368,6 +3532,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     resampleQuality: _ExportResampleQuality.best,
   );
   _AudioExportSettings? _activeAudioExportSettings;
+  String _selectedOneButtonMixProfile = 'Mixroom Producer';
 
   List<int> _exportSampleRatesForFormat(_ExportAudioFormat format) {
     return AudioExportPlan.uiSampleRatesForFormat(format.name);
@@ -3674,12 +3839,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _loopEndMs = 0;
   bool _loopWrapInFlight = false;
 
-  // master rack
-  bool _showMasterRack = false;
+  // top attached popups
+  _TopPopupType _activeTopPopup = _TopPopupType.none;
   final AudioCanvasTimelineController _timelineController =
       AudioCanvasTimelineController();
   final GlobalKey<_DynamicRackContentState> _masterRackContentKey =
       GlobalKey<_DynamicRackContentState>();
+  final GlobalKey _editorContentStackKey =
+      GlobalKey(debugLabel: 'audio_editor_content_stack');
   double _masterGain = _kGainUiUnity;
   double _masterPan = 0.5;
   double? _masterGainDragStart;
@@ -3702,7 +3869,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   double _tempo = 120.0;
   bool _tempoStretchEnabled = false;
   bool _tempoStretchPreservePitchDefault = false;
-  bool _showTempoRollDown = false;
+  bool _isExportSheetOpen = false;
+  String _projectSettingsDraftName = '';
   bool _tempoSyncInFlight = false;
   bool _tempoSyncQueued = false;
 
@@ -3791,7 +3959,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _dawTutorialAssistantCountAtPromptSend = 0;
   bool _isDialogOpen =
       false; // to fix weird issue on iPad iOS 26 where opening some dialogue would insta-close it
-  bool _isMasterPopupOpen = false; // same thing as above
   StateSetter? _projectSettingsStateSetter;
   final GlobalKey _feedbackScreenshotBoundaryKey =
       GlobalKey(debugLabel: 'audio_editor_feedback_screenshot_boundary');
@@ -3805,6 +3972,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _showAddActionsPanel = false;
   String? _activeAddActionId;
   bool _addButtonPressed = false;
+  final GlobalKey _addButtonAnchorKey = GlobalKey();
+  int? _topPopupTapPointerId;
+  Offset? _topPopupTapDownGlobalPos;
+  bool _topPopupTapMoved = false;
   final List<String> _sampleBrowserRoots = <String>[];
   final AccessingSecurityScopedResource _securityScopedResource =
       AccessingSecurityScopedResource();
@@ -3817,9 +3988,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _samplePreviewPlaying = false;
   int _pianoPreviewToken = 0;
   final Map<String, String> _pianoPreviewRenderCache = <String, String>{};
-  List<Map<String, dynamic>> _instrumentCatalog = kBundledSfzFallbackCatalog
-      .map((e) => Map<String, dynamic>.from(e))
-      .toList(growable: true);
+  List<Map<String, dynamic>> _instrumentCatalog =
+      _cloneInstrumentCatalog(kInstrumentCatalog);
   bool _instrumentCatalogReady = false;
   final Map<String, _SfzDefinition> _sfzDefinitionCache =
       <String, _SfzDefinition>{};
@@ -4064,6 +4234,149 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     setState(updater);
   }
 
+  bool get _showMasterRack => _activeTopPopup == _TopPopupType.master;
+  bool get _showTempoRollDown => _activeTopPopup == _TopPopupType.tempo;
+  bool get _isProjectSettingsOpen =>
+      _activeTopPopup == _TopPopupType.projectSettings;
+  bool get _isMasterPopupOpen => _activeTopPopup == _TopPopupType.master;
+
+  bool _toggleTopPopup(_TopPopupType popupType) {
+    final bool willOpen = _activeTopPopup != popupType;
+    setState(() {
+      _activeTopPopup = willOpen ? popupType : _TopPopupType.none;
+    });
+    return willOpen;
+  }
+
+  void _closeTopPopup([_TopPopupType popupType = _TopPopupType.none]) {
+    if (_activeTopPopup == _TopPopupType.none) return;
+    if (popupType != _TopPopupType.none && _activeTopPopup != popupType) return;
+    setState(() {
+      _activeTopPopup = _TopPopupType.none;
+    });
+  }
+
+  void _onTopPopupTapAwayPointerDown(PointerDownEvent event) {
+    _topPopupTapPointerId = event.pointer;
+    _topPopupTapDownGlobalPos = event.position;
+    _topPopupTapMoved = false;
+  }
+
+  void _onTopPopupTapAwayPointerMove(PointerMoveEvent event) {
+    if (_topPopupTapPointerId != event.pointer ||
+        _topPopupTapDownGlobalPos == null) {
+      return;
+    }
+    if (_topPopupTapMoved) return;
+    final movedDistance =
+        (event.position - _topPopupTapDownGlobalPos!).distance;
+    if (movedDistance > 10.0) {
+      _topPopupTapMoved = true;
+    }
+  }
+
+  void _onTopPopupTapAwayPointerCancel(PointerCancelEvent event) {
+    if (_topPopupTapPointerId == event.pointer) {
+      _topPopupTapPointerId = null;
+      _topPopupTapDownGlobalPos = null;
+      _topPopupTapMoved = false;
+    }
+  }
+
+  bool _consumeTopPopupTapAwayPointerUp(PointerUpEvent event) {
+    final pointerMatches = _topPopupTapPointerId == event.pointer;
+    final down = _topPopupTapDownGlobalPos;
+    final moved = _topPopupTapMoved;
+    _topPopupTapPointerId = null;
+    _topPopupTapDownGlobalPos = null;
+    _topPopupTapMoved = false;
+    if (!pointerMatches || down == null || moved) return false;
+    return (event.position - down).distance <= 10.0;
+  }
+
+  bool _isGlobalPointInsideKeyRect(GlobalKey key, Offset globalPosition) {
+    final context = key.currentContext;
+    if (context == null) return false;
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return false;
+    final origin = renderObject.localToGlobal(Offset.zero);
+    final rect = origin & renderObject.size;
+    return rect.contains(globalPosition);
+  }
+
+  Rect? _topPopupAnchorRect(GlobalKey key) {
+    final BuildContext? anchorContext = key.currentContext;
+    final BuildContext? stackContext = _editorContentStackKey.currentContext;
+    if (anchorContext == null || stackContext == null) return null;
+
+    final RenderObject? anchorObject = anchorContext.findRenderObject();
+    final RenderObject? stackObject = stackContext.findRenderObject();
+    if (anchorObject is! RenderBox ||
+        stackObject is! RenderBox ||
+        !anchorObject.hasSize ||
+        !stackObject.hasSize) {
+      return null;
+    }
+
+    final Offset offset =
+        anchorObject.localToGlobal(Offset.zero, ancestor: stackObject);
+    return offset & anchorObject.size;
+  }
+
+  _TopPopupLayout _resolveTopPopupLayout({
+    required GlobalKey anchorKey,
+    required double desiredWidth,
+    required double connectorWidth,
+    bool centerOnToolbarPill = false,
+  }) {
+    final BuildContext? stackContext = _editorContentStackKey.currentContext;
+    final RenderObject? stackObject = stackContext?.findRenderObject();
+    if (stackObject is! RenderBox || !stackObject.hasSize) {
+      final fallbackWidth = desiredWidth;
+      return _TopPopupLayout(
+        top: 48,
+        left: _kTopPopupHorizontalMargin,
+        width: fallbackWidth,
+        connectorLeft: (fallbackWidth - connectorWidth) / 2,
+      );
+    }
+
+    final Rect? anchorRect = _topPopupAnchorRect(anchorKey);
+    final Rect? toolbarRect =
+        centerOnToolbarPill ? _topPopupAnchorRect(_toolbarPillKey) : null;
+    final double maxWidth = math.max(
+      0,
+      stackObject.size.width - (_kTopPopupHorizontalMargin * 2),
+    );
+    final double resolvedWidth = math.min(desiredWidth, maxWidth);
+    final double centerX = toolbarRect?.center.dx ??
+        anchorRect?.center.dx ??
+        (stackObject.size.width / 2);
+    final double centeredLeft = centerX - (resolvedWidth / 2);
+    final double maxLeft = math.max(
+      _kTopPopupHorizontalMargin,
+      stackObject.size.width - resolvedWidth - _kTopPopupHorizontalMargin,
+    );
+    final double left = centeredLeft.clamp(
+      _kTopPopupHorizontalMargin,
+      maxLeft,
+    );
+    final Rect? topAnchorRect = toolbarRect ?? anchorRect;
+    final double connectorLeft = anchorRect == null
+        ? (resolvedWidth - connectorWidth) / 2
+        : (anchorRect.center.dx - left - (connectorWidth / 2)).clamp(
+            14.0,
+            math.max(14.0, resolvedWidth - connectorWidth - 14.0),
+          );
+
+    return _TopPopupLayout(
+      top: topAnchorRect == null ? 56 : topAnchorRect.bottom - 12,
+      left: left,
+      width: resolvedWidth,
+      connectorLeft: connectorLeft,
+    );
+  }
+
   String _sanitizeInstrumentIdToken(String raw) {
     final lower = raw.toLowerCase();
     final collapsed = lower.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
@@ -4112,11 +4425,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Map<String, dynamic> _defaultInstrumentSpec() {
+    for (final spec in _instrumentCatalog) {
+      if (!_isSampledInstrumentSpec(spec)) return spec;
+    }
+    if (kInstrumentCatalog.isNotEmpty) {
+      return Map<String, dynamic>.from(kInstrumentCatalog.first);
+    }
     if (_instrumentCatalog.isNotEmpty) return _instrumentCatalog.first;
     if (kBundledSfzFallbackCatalog.isNotEmpty) {
       return Map<String, dynamic>.from(kBundledSfzFallbackCatalog.first);
     }
-    return Map<String, dynamic>.from(kInstrumentCatalog.first);
+    return <String, dynamic>{
+      'id': 'mixroom.basic_synth',
+      'name': 'Basic Synth',
+      'category': 'instrument',
+    };
   }
 
   bool _isSampledInstrumentSpec(Map<String, dynamic> spec) {
@@ -4186,28 +4509,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (loaded.isEmpty) {
         return;
       }
+      final merged = _mergeInstrumentCatalogs([
+        kInstrumentCatalog,
+        loaded,
+        kBundledSfzFallbackCatalog,
+      ]);
       if (!mounted) {
-        _instrumentCatalog = loaded;
+        _instrumentCatalog = merged;
         _instrumentCatalogReady = true;
         return;
       }
       setState(() {
-        _instrumentCatalog = loaded;
+        _instrumentCatalog = merged;
         _instrumentCatalogReady = true;
       });
     } catch (_) {
       if (_instrumentCatalogReady) return;
+      final fallback = _mergeInstrumentCatalogs([
+        kInstrumentCatalog,
+        kBundledSfzFallbackCatalog,
+      ]);
       if (!mounted) {
-        _instrumentCatalog = kBundledSfzFallbackCatalog
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList(growable: true);
+        _instrumentCatalog = fallback;
         _instrumentCatalogReady = true;
         return;
       }
       setState(() {
-        _instrumentCatalog = kBundledSfzFallbackCatalog
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList(growable: true);
+        _instrumentCatalog = fallback;
         _instrumentCatalogReady = true;
       });
     }
@@ -4457,6 +4785,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _reloadRowsFromEngine();
       await _loadProjectIfAny();
       setState(() => _isLoadingNextScreen = false);
+      unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
       await _runInitialActionIfNeeded();
       await _maybeShowDawOnboarding();
     });
@@ -5184,8 +5513,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _activeAddActionId = null;
       _chatExpanded = false;
       _chatInputActive = false;
-      _showMasterRack = false;
-      _isMasterPopupOpen = false;
+      _activeTopPopup = _TopPopupType.none;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -5241,8 +5569,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case _DawTutorialStepId.masterTabs:
         if (!_showMasterRack) {
           setState(() {
-            _showMasterRack = true;
-            _isMasterPopupOpen = true;
+            _activeTopPopup = _TopPopupType.master;
           });
         }
         break;
@@ -5307,8 +5634,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case _DawTutorialStepId.masterTabs:
         if (_showMasterRack || _isMasterPopupOpen) {
           setState(() {
-            _showMasterRack = false;
-            _isMasterPopupOpen = false;
+            _activeTopPopup = _TopPopupType.none;
           });
         }
         break;
@@ -5354,8 +5680,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _timelineController.collapseExpandedRows();
     if (_showMasterRack || _isMasterPopupOpen) {
       setState(() {
-        _showMasterRack = false;
-        _isMasterPopupOpen = false;
+        _activeTopPopup = _TopPopupType.none;
       });
     }
     if (markSeen) {
@@ -5693,6 +6018,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _amplitudeSub?.cancel();
     _micRecorder.dispose();
     unawaited(_spleeterStemSeparator.dispose());
+    unawaited(_classifier.dispose());
+    unawaited(_magnitudePredictor.dispose());
     for (var track in _audioTracks) {
       track.audioStartTimer?.cancel();
     }
@@ -5745,9 +6072,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (defaultTargetPlatform == TargetPlatform.android) {
       if (state == AppLifecycleState.resumed) {
         debugPrint("App Resumed on Android - Re-initializing.");
-        unawaited(JuceAudioEngine.refreshAudioRoute(reason: 'appResumed'));
-        unawaited(_refreshMicrophonePermissionAndInputs());
-        unawaited(_refreshAudioRouteInfo());
+        unawaited(_handleAndroidEditorResumed());
       } else if (state == AppLifecycleState.paused ||
           state == AppLifecycleState.inactive) {
         _scheduleChatHistoryPersist(immediate: true);
@@ -5773,9 +6098,84 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  bool get _shouldDeferAndroidRouteRefresh =>
+      defaultTargetPlatform == TargetPlatform.android &&
+      (_isLoadingNextScreen ||
+          _isProjectLoading ||
+          _isLoadingAudio ||
+          _androidEngineCriticalSectionDepth > 0);
+
+  Future<T> _runWithAndroidEngineCriticalSection<T>(
+    Future<T> Function() action,
+  ) async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return action();
+    }
+    _androidEngineCriticalSectionDepth += 1;
+    try {
+      return await action();
+    } finally {
+      _androidEngineCriticalSectionDepth =
+          math.max(0, _androidEngineCriticalSectionDepth - 1);
+      if (_androidEngineCriticalSectionDepth == 0) {
+        unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
+      }
+    }
+  }
+
+  Future<void> _requestAndroidRouteRefresh({
+    required String reason,
+  }) async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      await JuceAudioEngine.refreshAudioRoute(reason: reason);
+      return;
+    }
+    if (_androidRouteRefreshInFlight || _shouldDeferAndroidRouteRefresh) {
+      _pendingAndroidRouteRefresh = true;
+      _pendingAndroidRouteRefreshReason = reason;
+      debugPrint(
+        'Deferring Android audio route refresh while engine is busy: $reason',
+      );
+      return;
+    }
+
+    _androidRouteRefreshInFlight = true;
+    try {
+      await JuceAudioEngine.refreshAudioRoute(reason: reason);
+    } finally {
+      _androidRouteRefreshInFlight = false;
+    }
+
+    if (_pendingAndroidRouteRefresh) {
+      unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
+    }
+  }
+
+  Future<void> _flushDeferredAndroidRouteRefreshIfNeeded() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (!_pendingAndroidRouteRefresh ||
+        _androidRouteRefreshInFlight ||
+        _shouldDeferAndroidRouteRefresh) {
+      return;
+    }
+
+    final reason = _pendingAndroidRouteRefreshReason ?? 'deferred';
+    _pendingAndroidRouteRefresh = false;
+    _pendingAndroidRouteRefreshReason = null;
+    await _requestAndroidRouteRefresh(reason: 'deferred:$reason');
+    await _refreshAudioRouteInfo(refreshNativeRoute: false);
+  }
+
+  Future<void> _handleAndroidEditorResumed() async {
+    await _requestAndroidRouteRefresh(reason: 'appResumed');
+    await _refreshMicrophonePermissionAndInputs();
+    await _refreshAudioRouteInfo(refreshNativeRoute: false);
+  }
+
   Future<void> _loadProjectIfAny() async {
     if (_loadedOnce) return;
     _loadedOnce = true;
+    _isProjectLoading = true;
 
     try {
       // File browser roots should be per-session only, not persisted per project.
@@ -6103,11 +6503,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       await _refreshAutomationTargetsForAllRows();
 
-      // Stabilize first playback after loading by forcing transport to start.
+      // Prime transport state and, on iOS, recover any missing output route
+      // before the first user-driven play.
       _setGlobalAudioClock(Duration.zero);
       await JuceAudioEngine.setTransportSeconds(0.001);
       await JuceAudioEngine.setTransportSeconds(0.0);
       await JuceAudioEngine.setMetronomeTransportMs(0.0);
+      if (Platform.isIOS) {
+        await JuceAudioEngine.preparePlaybackRoute(reason: 'projectLoad');
+      }
       await _syncNativeAutomationForAllRows();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -6134,6 +6538,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() {});
     } catch (e) {
       debugPrint("Project load failed: $e");
+    } finally {
+      _isProjectLoading = false;
+      unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
     }
   }
 
@@ -6365,82 +6772,161 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           removeBottom: true,
           child: Dialog(
             alignment: Alignment.topCenter,
-            insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
-            backgroundColor: const Color(0xFF1A2233),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-              side: BorderSide(color: Colors.white.withOpacity(0.10)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+            insetPadding: const EdgeInsets.fromLTRB(20, 56, 20, 16),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            child: Material(
+              color: Colors.transparent,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: MixroomShellSurface(
+                  radius: 24,
+                  strong: true,
+                  color: const Color.fromRGBO(26, 38, 56, 0.92),
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.drive_file_rename_outline,
-                          color: Color(0xFFB9D4FF)),
-                      const SizedBox(width: 8),
-                      Text(
-                        title,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700),
+                      Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white.withValues(alpha: 0.08),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.10),
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.drive_file_rename_outline,
+                              color: Color(0xFFF4F4F4),
+                              size: 16,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 17,
+                                height: 22 / 17,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.06),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.12)),
-                    ),
-                    child: TextField(
-                      controller: controller,
-                      focusNode: focusNode,
-                      autofocus: false,
-                      maxLength: 50,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) =>
-                          Navigator.pop(ctx, controller.text.trim()),
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: hint,
-                        hintStyle: const TextStyle(color: Colors.white54),
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 12),
-                        counterText: '',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Cancel',
-                            style: TextStyle(color: Colors.white70)),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: () =>
-                            Navigator.pop(ctx, controller.text.trim()),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2E6EEB),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+                      const SizedBox(height: 12),
+                      MixroomShellSurface(
+                        radius: 16,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 3,
                         ),
-                        child: const Text('Save'),
+                        color: const Color.fromRGBO(244, 244, 244, 0.10),
+                        child: TextField(
+                          controller: controller,
+                          focusNode: focusNode,
+                          autofocus: false,
+                          maxLength: 50,
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) =>
+                              Navigator.pop(ctx, controller.text.trim()),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 15,
+                            height: 22 / 15,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: hint,
+                            hintStyle: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Colors.white.withValues(alpha: 0.48),
+                              fontSize: 15,
+                              height: 22 / 15,
+                            ),
+                            border: InputBorder.none,
+                            counterText: '',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          SizedBox(
+                            width: 112,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => Navigator.pop(ctx),
+                              child: MixroomShellSurface(
+                                radius: 20,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 11,
+                                ),
+                                color:
+                                    const Color.fromRGBO(244, 244, 244, 0.14),
+                                child: SizedBox(
+                                  width: double.infinity,
+                                  child: Text(
+                                    L10n.translate(ctx, 'Cancel'),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color: Color(0xFFF4F4F4),
+                                      fontSize: 15,
+                                      height: 22 / 15,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          SizedBox(
+                            width: 112,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () =>
+                                  Navigator.pop(ctx, controller.text.trim()),
+                              child: MixroomShellSurface(
+                                radius: 20,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 11,
+                                ),
+                                color: const Color.fromRGBO(0, 149, 255, 0.52),
+                                strong: true,
+                                child: SizedBox(
+                                  width: double.infinity,
+                                  child: Text(
+                                    L10n.translate(ctx, 'Save'),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color: Color(0xFFF4F4F4),
+                                      fontSize: 15,
+                                      height: 22 / 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
@@ -6919,608 +7405,721 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       selectedResampleQuality = _ExportResampleQuality.best;
     }
 
-    return showDialog<_AudioExportSettings>(
-      context: context,
-      barrierDismissible: true,
-      barrierColor: Colors.black.withOpacity(0.58),
-      builder: (dialogContext) {
-        final theme = Theme.of(dialogContext);
-        const panelTop = Color(0xFF1A2233);
-        const panelBottom = Color(0xFF111725);
-        const accent = Color(0xFF6EA7FF);
-        const border = Color(0x334B6F9E);
-        const fieldFill = Color(0xFF151D2B);
-        final mutedText = Colors.white.withOpacity(0.74);
+    if (mounted) {
+      setState(() => _isExportSheetOpen = true);
+    }
+    try {
+      return await showDialog<_AudioExportSettings>(
+        context: context,
+        barrierDismissible: true,
+        barrierColor: Colors.black.withValues(alpha: 0.58),
+        builder: (dialogContext) {
+          final theme = Theme.of(dialogContext);
+          const accent = Color(0xFFF4F4F4);
+          const exportBlue = Color(0xFF258AE6);
+          final mutedText = Colors.white.withValues(alpha: 0.78);
 
-        Widget buildDropdownField<T>({
-          required String label,
-          required T value,
-          required List<T> options,
-          required ValueChanged<T?> onChanged,
-          required String Function(T) textBuilder,
-        }) {
-          return DropdownButtonFormField<T>(
-            value: value,
-            dropdownColor: const Color(0xFF232E42),
-            iconEnabledColor: Colors.white.withOpacity(0.76),
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-            ),
-            decoration: InputDecoration(
-              labelText: label,
-              labelStyle: TextStyle(color: Colors.white.withOpacity(0.68)),
-              filled: true,
-              fillColor: fieldFill,
-              isDense: true,
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: border),
+          Widget buildDropdownField<T>({
+            required String label,
+            required T value,
+            required List<T> options,
+            required ValueChanged<T?> onChanged,
+            required String Function(T) textBuilder,
+          }) {
+            return DropdownButtonFormField<T>(
+              value: value,
+              dropdownColor: const Color(0xFF5F6871),
+              iconEnabledColor: Colors.white.withValues(alpha: 0.76),
+              style: const TextStyle(
+                fontFamily: 'Pretendard',
+                color: Color(0xFFF4F4F4),
+                fontWeight: FontWeight.w600,
               ),
-              focusedBorder: const OutlineInputBorder(
-                borderRadius: BorderRadius.all(Radius.circular(10)),
-                borderSide: BorderSide(color: accent, width: 1.1),
-              ),
-            ),
-            items: options
-                .map((option) => DropdownMenuItem<T>(
-                      value: option,
-                      child: Text(textBuilder(option)),
-                    ))
-                .toList(),
-            onChanged: onChanged,
-          );
-        }
-
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final sampleRateOptions = _exportSampleRatesForFormat(
-              nativeWavOnly ? _ExportAudioFormat.wav : selectedFormat,
-            );
-
-            Widget buildFormatOption({
-              required _ExportAudioFormat format,
-              required String label,
-              required bool isLeft,
-              required bool enabled,
-            }) {
-              final isSelected = selectedFormat == format;
-              return Expanded(
-                child: InkWell(
-                  borderRadius: BorderRadius.horizontal(
-                    left: isLeft ? const Radius.circular(12) : Radius.zero,
-                    right: isLeft ? Radius.zero : const Radius.circular(12),
-                  ),
-                  onTap: enabled
-                      ? () => setSheetState(() {
-                            selectedFormat = format;
-                            selectedSampleRate =
-                                _normalizeExportSampleRateForFormat(
-                              format,
-                              selectedSampleRate,
-                            );
-                          })
-                      : null,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 140),
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? const Color(0x553F73C8)
-                          : (enabled
-                              ? Colors.transparent
-                              : Colors.white.withOpacity(0.04)),
-                      borderRadius: BorderRadius.horizontal(
-                        left: isLeft ? const Radius.circular(12) : Radius.zero,
-                        right: isLeft ? Radius.zero : const Radius.circular(12),
-                      ),
-                      border: Border.all(
-                        color: isSelected
-                            ? const Color(0xFF6EA7FF)
-                            : (enabled
-                                ? Colors.transparent
-                                : Colors.white.withOpacity(0.08)),
-                        width: 1.2,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          label,
-                          style: TextStyle(
-                            fontWeight:
-                                isSelected ? FontWeight.w800 : FontWeight.w700,
-                            color: !enabled
-                                ? Colors.white38
-                                : (isSelected ? Colors.white : mutedText),
-                          ),
-                        ),
-                        if (isSelected) ...[
-                          const SizedBox(width: 6),
-                          const Icon(
-                            Icons.check_circle_rounded,
-                            size: 16,
-                            color: Color(0xFF9BC4FF),
-                          ),
-                        ],
-                      ],
-                    ),
+              decoration: InputDecoration(
+                labelText: label,
+                labelStyle:
+                    TextStyle(color: Colors.white.withValues(alpha: 0.68)),
+                filled: true,
+                fillColor: const Color.fromRGBO(244, 244, 244, 0.09),
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide(
+                    color: Colors.white.withValues(alpha: 0.12),
                   ),
                 ),
-              );
-            }
-
-            return AnimatedPadding(
-              duration: const Duration(milliseconds: 150),
-              curve: Curves.easeOut,
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 16,
-                bottom: MediaQuery.of(dialogContext).viewInsets.bottom + 16,
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: const BorderRadius.all(Radius.circular(24)),
+                  borderSide: BorderSide(
+                    color: exportBlue.withValues(alpha: 0.66),
+                    width: 1.1,
+                  ),
+                ),
               ),
-              child: Dialog(
-                insetPadding: EdgeInsets.zero,
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 520),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [panelTop, panelBottom],
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: border),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.35),
-                          blurRadius: 22,
-                          offset: const Offset(0, 12),
+              items: options
+                  .map((option) => DropdownMenuItem<T>(
+                        value: option,
+                        child: Text(textBuilder(option)),
+                      ))
+                  .toList(),
+              onChanged: onChanged,
+            );
+          }
+
+          return StatefulBuilder(
+            builder: (context, setSheetState) {
+              final sampleRateOptions = _exportSampleRatesForFormat(
+                nativeWavOnly ? _ExportAudioFormat.wav : selectedFormat,
+              );
+
+              Widget buildFormatOption({
+                required _ExportAudioFormat format,
+                required String label,
+                required bool isLeft,
+                required bool enabled,
+              }) {
+                final isSelected = selectedFormat == format;
+                return Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: enabled
+                        ? () => setSheetState(() {
+                              selectedFormat = format;
+                              selectedSampleRate =
+                                  _normalizeExportSampleRateForFormat(
+                                format,
+                                selectedSampleRate,
+                              );
+                            })
+                        : null,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 140),
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? const Color.fromRGBO(244, 244, 244, 0.26)
+                            : (enabled
+                                ? Colors.transparent
+                                : Colors.white.withValues(alpha: 0.025)),
+                        borderRadius: BorderRadius.horizontal(
+                          left:
+                              isLeft ? const Radius.circular(24) : Radius.zero,
+                          right:
+                              isLeft ? Radius.zero : const Radius.circular(24),
                         ),
-                      ],
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        border: Border.all(
+                          color: isSelected
+                              ? Colors.white.withValues(alpha: 0.34)
+                              : (enabled
+                                  ? Colors.transparent
+                                  : Colors.white.withValues(alpha: 0.08)),
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
-                            'Export',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
+                            label,
+                            style: TextStyle(
+                              fontWeight: isSelected
+                                  ? FontWeight.w800
+                                  : FontWeight.w700,
+                              color: !enabled
+                                  ? Colors.white38
+                                  : (isSelected
+                                      ? const Color(0xFFF4F4F4)
+                                      : mutedText),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: border),
-                              color: const Color(0xFF141C2A),
+                          if (isSelected) ...[
+                            const SizedBox(width: 6),
+                            Icon(
+                              Icons.check_circle_rounded,
+                              size: 16,
+                              color: Colors.white.withValues(alpha: 0.92),
                             ),
-                            child: Row(
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }
+
+              return Material(
+                type: MaterialType.transparency,
+                child: AnimatedPadding(
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.easeOut,
+                  padding: EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    top: 16,
+                    bottom: MediaQuery.of(dialogContext).viewInsets.bottom + 16,
+                  ),
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 348),
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(30),
+                          topRight: Radius.circular(30),
+                          bottomLeft: Radius.circular(24),
+                          bottomRight: Radius.circular(24),
+                        ),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: <Color>[
+                                  Color.fromRGBO(96, 105, 114, 0.44),
+                                  Color.fromRGBO(63, 71, 80, 0.46),
+                                ],
+                              ),
+                              color: const Color.fromRGBO(244, 244, 244, 0.16),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                buildFormatOption(
-                                  format: _ExportAudioFormat.wav,
-                                  label: 'WAV',
-                                  isLeft: true,
-                                  enabled: true,
+                                Text(
+                                  'Export',
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: const Color(0xFFF4F4F4),
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 24,
+                                  ),
                                 ),
+                                const SizedBox(height: 12),
                                 Container(
-                                  width: 1,
-                                  height: 48,
-                                  color: const Color(0x223A5A88),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(24),
+                                    border: Border.all(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.12),
+                                    ),
+                                    color: const Color.fromRGBO(
+                                        244, 244, 244, 0.10),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      buildFormatOption(
+                                        format: _ExportAudioFormat.wav,
+                                        label: 'WAV',
+                                        isLeft: true,
+                                        enabled: true,
+                                      ),
+                                      Container(
+                                        width: 1,
+                                        height: 48,
+                                        color: Colors.white
+                                            .withValues(alpha: 0.12),
+                                      ),
+                                      buildFormatOption(
+                                        format: _ExportAudioFormat.mp3,
+                                        label: 'MP3',
+                                        isLeft: false,
+                                        enabled: !nativeWavOnly,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                buildFormatOption(
-                                  format: _ExportAudioFormat.mp3,
-                                  label: 'MP3',
-                                  isLeft: false,
-                                  enabled: !nativeWavOnly,
+                                if (nativeWavOnly) ...[
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: const Color.fromRGBO(
+                                          244, 244, 244, 0.10),
+                                      borderRadius: BorderRadius.circular(18),
+                                      border: Border.all(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.09),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.',
+                                      style: TextStyle(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.86),
+                                        fontSize: 12.2,
+                                        height: 1.3,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 10),
+                                GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () {
+                                    setSheetState(
+                                        () => showAdvanced = !showAdvanced);
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 6,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Text(
+                                          'Advanced options',
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white
+                                                .withValues(alpha: 0.82),
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        Icon(
+                                          showAdvanced
+                                              ? Icons.keyboard_arrow_up
+                                              : Icons.keyboard_arrow_down,
+                                          color: mutedText,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                if (showAdvanced) ...[
+                                  const SizedBox(height: 10),
+                                  Theme(
+                                    data: theme.copyWith(
+                                      unselectedWidgetColor:
+                                          Colors.white.withValues(alpha: 0.45),
+                                      colorScheme: theme.colorScheme.copyWith(
+                                        primary: exportBlue,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        buildDropdownField(
+                                          label: 'Sample rate',
+                                          value: selectedSampleRate,
+                                          options: sampleRateOptions,
+                                          textBuilder: (value) => '$value Hz',
+                                          onChanged: (value) {
+                                            if (value == null) return;
+                                            setSheetState(() {
+                                              selectedSampleRate = value;
+                                            });
+                                          },
+                                        ),
+                                        if (!nativeWavOnly) ...[
+                                          const SizedBox(height: 10),
+                                          buildDropdownField(
+                                            label: 'Channels',
+                                            value: selectedChannelMode,
+                                            options: _ExportChannelMode.values,
+                                            textBuilder: (value) => value ==
+                                                    _ExportChannelMode.stereo
+                                                ? 'Stereo'
+                                                : 'Mono',
+                                            onChanged: (value) {
+                                              if (value == null) return;
+                                              setSheetState(() {
+                                                selectedChannelMode = value;
+                                              });
+                                            },
+                                          ),
+                                          const SizedBox(height: 10),
+                                          buildDropdownField(
+                                            label: L10n.translate(
+                                                context, 'Resample quality'),
+                                            value: selectedResampleQuality,
+                                            options:
+                                                _ExportResampleQuality.values,
+                                            textBuilder: (value) {
+                                              switch (value) {
+                                                case _ExportResampleQuality
+                                                      .draft:
+                                                  return L10n.translate(
+                                                      context, 'Draft (fast)');
+                                                case _ExportResampleQuality
+                                                      .good:
+                                                  return L10n.translate(
+                                                      context, 'Good');
+                                                case _ExportResampleQuality
+                                                      .best:
+                                                  return L10n.translate(
+                                                      context, 'Best');
+                                              }
+                                            },
+                                            onChanged: (value) {
+                                              if (value == null) return;
+                                              setSheetState(() {
+                                                selectedResampleQuality = value;
+                                              });
+                                            },
+                                          ),
+                                          const SizedBox(height: 6),
+                                          SwitchListTile(
+                                            contentPadding: EdgeInsets.zero,
+                                            title: Text(
+                                              L10n.translate(context,
+                                                  'Normalize loudness'),
+                                              style:
+                                                  TextStyle(color: mutedText),
+                                            ),
+                                            value: selectedNormalize,
+                                            activeColor: exportBlue,
+                                            onChanged: (value) {
+                                              setSheetState(() {
+                                                selectedNormalize = value;
+                                              });
+                                            },
+                                          ),
+                                        ],
+                                        if (!nativeWavOnly &&
+                                            selectedNormalize) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            L10n.translate(context,
+                                                'Limiter ceiling (dBTP)'),
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(color: mutedText),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          SliderTheme(
+                                            data: SliderTheme.of(context)
+                                                .copyWith(
+                                              activeTrackColor: exportBlue,
+                                              inactiveTrackColor: Colors.white
+                                                  .withValues(alpha: 0.14),
+                                              thumbColor: Colors.white,
+                                              overlayColor:
+                                                  exportBlue.withValues(
+                                                alpha: 0.16,
+                                              ),
+                                              trackHeight: 4,
+                                            ),
+                                            child: Slider(
+                                              value: selectedNormalizeTargetDb
+                                                  .clamp(
+                                                    _kExportNormalizeTargetDbMin,
+                                                    _kExportNormalizeTargetDbMax,
+                                                  )
+                                                  .toDouble(),
+                                              min: _kExportNormalizeTargetDbMin,
+                                              max: _kExportNormalizeTargetDbMax,
+                                              divisions: 17,
+                                              label:
+                                                  '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
+                                              onChanged: (value) {
+                                                final stepped = double.parse(
+                                                    value.toStringAsFixed(1));
+                                                setSheetState(() {
+                                                  selectedNormalizeTargetDb =
+                                                      stepped
+                                                          .clamp(
+                                                            _kExportNormalizeTargetDbMin,
+                                                            _kExportNormalizeTargetDbMax,
+                                                          )
+                                                          .toDouble();
+                                                });
+                                              },
+                                            ),
+                                          ),
+                                          Align(
+                                            alignment: Alignment.centerRight,
+                                            child: Text(
+                                              '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
+                                              style: theme.textTheme.bodySmall
+                                                  ?.copyWith(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.82),
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Wrap(
+                                            spacing: 8,
+                                            runSpacing: 6,
+                                            children: _kExportNormalizeTargetsDb
+                                                .map(
+                                                  (preset) => ChoiceChip(
+                                                    label: Text(
+                                                      '${preset.toStringAsFixed(1)} dB',
+                                                    ),
+                                                    selected:
+                                                        (selectedNormalizeTargetDb -
+                                                                    preset)
+                                                                .abs() <
+                                                            0.05,
+                                                    labelStyle: theme
+                                                        .textTheme.bodySmall
+                                                        ?.copyWith(
+                                                      color: Colors.white
+                                                          .withValues(
+                                                              alpha: 0.9),
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                    backgroundColor:
+                                                        Colors.white.withValues(
+                                                            alpha: 0.05),
+                                                    selectedColor:
+                                                        exportBlue.withValues(
+                                                            alpha: 0.26),
+                                                    side: BorderSide(
+                                                      color: Colors.white
+                                                          .withValues(
+                                                              alpha: 0.16),
+                                                    ),
+                                                    onSelected: (_) {
+                                                      setSheetState(() {
+                                                        selectedNormalizeTargetDb =
+                                                            preset;
+                                                      });
+                                                    },
+                                                  ),
+                                                )
+                                                .toList(growable: false),
+                                          ),
+                                        ],
+                                        const SizedBox(height: 10),
+                                        if (selectedFormat ==
+                                                _ExportAudioFormat.wav ||
+                                            nativeWavOnly) ...[
+                                          buildDropdownField(
+                                            label: L10n.translate(
+                                                context, 'Bit depth'),
+                                            value: selectedWavBitDepth,
+                                            options: _kExportWavBitDepths,
+                                            textBuilder: (value) =>
+                                                '$value-bit',
+                                            onChanged: (value) {
+                                              if (value == null) return;
+                                              setSheetState(() {
+                                                selectedWavBitDepth = value;
+                                              });
+                                            },
+                                          ),
+                                          const SizedBox(height: 6),
+                                          SwitchListTile(
+                                            contentPadding: EdgeInsets.zero,
+                                            title: Text(
+                                              L10n.translate(
+                                                  context, 'Enable dithering'),
+                                              style:
+                                                  TextStyle(color: mutedText),
+                                            ),
+                                            value: selectedWavDithering,
+                                            activeColor: exportBlue,
+                                            onChanged: (value) {
+                                              setSheetState(() {
+                                                selectedWavDithering = value;
+                                              });
+                                            },
+                                          ),
+                                        ] else ...[
+                                          buildDropdownField(
+                                            label: L10n.translate(
+                                                context, 'Encoding mode'),
+                                            value: selectedMp3Mode,
+                                            options: _ExportMp3Mode.values,
+                                            textBuilder: (value) =>
+                                                value == _ExportMp3Mode.cbr
+                                                    ? 'CBR'
+                                                    : 'VBR',
+                                            onChanged: (value) {
+                                              if (value == null) return;
+                                              setSheetState(() {
+                                                selectedMp3Mode = value;
+                                              });
+                                            },
+                                          ),
+                                          const SizedBox(height: 10),
+                                          if (selectedMp3Mode ==
+                                              _ExportMp3Mode.cbr)
+                                            buildDropdownField(
+                                              label: L10n.translate(
+                                                  context, 'Bit rate'),
+                                              value: selectedMp3Bitrate,
+                                              options: _kExportMp3Bitrates,
+                                              textBuilder: (value) =>
+                                                  '${value} kbps',
+                                              onChanged: (value) {
+                                                if (value == null) return;
+                                                setSheetState(() {
+                                                  selectedMp3Bitrate = value;
+                                                });
+                                              },
+                                            )
+                                          else
+                                            buildDropdownField(
+                                              label: L10n.translate(
+                                                  context, 'VBR quality'),
+                                              value: selectedMp3VbrQuality,
+                                              options: _kExportMp3VbrQualities,
+                                              textBuilder: (value) =>
+                                                  'V$value (${L10n.translate(context, value == 0 ? "highest" : "smaller file")})',
+                                              onChanged: (value) {
+                                                if (value == null) return;
+                                                setSheetState(() {
+                                                  selectedMp3VbrQuality = value;
+                                                });
+                                              },
+                                            ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 12),
+                                Container(
+                                  height: 50,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(25),
+                                    color: const Color.fromRGBO(
+                                        244, 244, 244, 0.10),
+                                    border: Border.all(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.12),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(dialogContext),
+                                          style: TextButton.styleFrom(
+                                            foregroundColor: Colors.white,
+                                            padding: EdgeInsets.zero,
+                                            shape: const RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.only(
+                                                topLeft: Radius.circular(25),
+                                                bottomLeft: Radius.circular(25),
+                                              ),
+                                            ),
+                                            backgroundColor: Colors.transparent,
+                                          ),
+                                          child: Text(
+                                            L10n.translate(context, 'Cancel'),
+                                            style: const TextStyle(
+                                              fontFamily: 'Pretendard',
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      Container(
+                                        width: 1,
+                                        height: 28,
+                                        color: Colors.white
+                                            .withValues(alpha: 0.10),
+                                      ),
+                                      Expanded(
+                                        child: FilledButton(
+                                          style: FilledButton.styleFrom(
+                                            backgroundColor: exportBlue,
+                                            foregroundColor: Colors.white,
+                                            elevation: 0,
+                                            padding: EdgeInsets.zero,
+                                            shape: const RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.only(
+                                                topRight: Radius.circular(25),
+                                                bottomRight:
+                                                    Radius.circular(25),
+                                              ),
+                                            ),
+                                          ),
+                                          onPressed: () {
+                                            Navigator.pop(
+                                              dialogContext,
+                                              _AudioExportSettings(
+                                                format: nativeWavOnly
+                                                    ? _ExportAudioFormat.wav
+                                                    : selectedFormat,
+                                                sampleRate:
+                                                    _normalizeExportSampleRateForFormat(
+                                                  nativeWavOnly
+                                                      ? _ExportAudioFormat.wav
+                                                      : selectedFormat,
+                                                  selectedSampleRate,
+                                                ),
+                                                wavBitDepth:
+                                                    selectedWavBitDepth,
+                                                wavDithering:
+                                                    selectedWavDithering,
+                                                mp3BitrateKbps:
+                                                    selectedMp3Bitrate,
+                                                mp3Mode: selectedMp3Mode,
+                                                mp3VbrQuality:
+                                                    selectedMp3VbrQuality,
+                                                channelMode: nativeWavOnly
+                                                    ? _ExportChannelMode.stereo
+                                                    : selectedChannelMode,
+                                                normalize: nativeWavOnly
+                                                    ? false
+                                                    : selectedNormalize,
+                                                normalizeTargetDb:
+                                                    selectedNormalizeTargetDb,
+                                                resampleQuality: nativeWavOnly
+                                                    ? _ExportResampleQuality
+                                                        .best
+                                                    : selectedResampleQuality,
+                                              ),
+                                            );
+                                          },
+                                          child: Text(
+                                            L10n.translate(
+                                              context,
+                                              'Start export',
+                                            ),
+                                            style: const TextStyle(
+                                              fontFamily: 'Pretendard',
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),
                           ),
-                          if (nativeWavOnly) ...[
-                            const SizedBox(height: 10),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: const Color(0x2237669C),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                    color: Colors.white.withOpacity(0.09)),
-                              ),
-                              child: Text(
-                                'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.86),
-                                  fontSize: 12.2,
-                                  height: 1.3,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 10),
-                          InkWell(
-                            borderRadius: BorderRadius.circular(10),
-                            onTap: () {
-                              setSheetState(() => showAdvanced = !showAdvanced);
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 6,
-                              ),
-                              child: Row(
-                                children: [
-                                  Text(
-                                    'Advanced options',
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white.withOpacity(0.86),
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  Icon(
-                                    showAdvanced
-                                        ? Icons.keyboard_arrow_up
-                                        : Icons.keyboard_arrow_down,
-                                    color: mutedText,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          if (showAdvanced) ...[
-                            const SizedBox(height: 10),
-                            Theme(
-                              data: theme.copyWith(
-                                unselectedWidgetColor:
-                                    Colors.white.withOpacity(0.45),
-                                colorScheme: theme.colorScheme.copyWith(
-                                  primary: accent,
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  buildDropdownField(
-                                    label: 'Sample rate',
-                                    value: selectedSampleRate,
-                                    options: sampleRateOptions,
-                                    textBuilder: (value) => '$value Hz',
-                                    onChanged: (value) {
-                                      if (value == null) return;
-                                      setSheetState(() {
-                                        selectedSampleRate = value;
-                                      });
-                                    },
-                                  ),
-                                  if (!nativeWavOnly) ...[
-                                    const SizedBox(height: 10),
-                                    buildDropdownField(
-                                      label: 'Channels',
-                                      value: selectedChannelMode,
-                                      options: _ExportChannelMode.values,
-                                      textBuilder: (value) =>
-                                          value == _ExportChannelMode.stereo
-                                              ? 'Stereo'
-                                              : 'Mono',
-                                      onChanged: (value) {
-                                        if (value == null) return;
-                                        setSheetState(() {
-                                          selectedChannelMode = value;
-                                        });
-                                      },
-                                    ),
-                                    const SizedBox(height: 10),
-                                    buildDropdownField(
-                                      label: L10n.translate(
-                                          context, 'Resample quality'),
-                                      value: selectedResampleQuality,
-                                      options: _ExportResampleQuality.values,
-                                      textBuilder: (value) {
-                                        switch (value) {
-                                          case _ExportResampleQuality.draft:
-                                            return L10n.translate(
-                                                context, 'Draft (fast)');
-                                          case _ExportResampleQuality.good:
-                                            return L10n.translate(
-                                                context, 'Good');
-                                          case _ExportResampleQuality.best:
-                                            return L10n.translate(
-                                                context, 'Best');
-                                        }
-                                      },
-                                      onChanged: (value) {
-                                        if (value == null) return;
-                                        setSheetState(() {
-                                          selectedResampleQuality = value;
-                                        });
-                                      },
-                                    ),
-                                    const SizedBox(height: 6),
-                                    SwitchListTile(
-                                      contentPadding: EdgeInsets.zero,
-                                      title: Text(
-                                        L10n.translate(
-                                            context, 'Normalize loudness'),
-                                        style: TextStyle(color: mutedText),
-                                      ),
-                                      value: selectedNormalize,
-                                      activeColor: accent,
-                                      onChanged: (value) {
-                                        setSheetState(() {
-                                          selectedNormalize = value;
-                                        });
-                                      },
-                                    ),
-                                  ],
-                                  if (!nativeWavOnly && selectedNormalize) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      L10n.translate(
-                                          context, 'Limiter ceiling (dBTP)'),
-                                      style: theme.textTheme.bodySmall
-                                          ?.copyWith(color: mutedText),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    SliderTheme(
-                                      data: SliderTheme.of(context).copyWith(
-                                        activeTrackColor: accent,
-                                        inactiveTrackColor: Colors.white
-                                            .withValues(alpha: 0.14),
-                                        thumbColor: accent,
-                                        overlayColor:
-                                            accent.withValues(alpha: 0.16),
-                                        trackHeight: 4,
-                                      ),
-                                      child: Slider(
-                                        value: selectedNormalizeTargetDb
-                                            .clamp(
-                                              _kExportNormalizeTargetDbMin,
-                                              _kExportNormalizeTargetDbMax,
-                                            )
-                                            .toDouble(),
-                                        min: _kExportNormalizeTargetDbMin,
-                                        max: _kExportNormalizeTargetDbMax,
-                                        divisions: 17,
-                                        label:
-                                            '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
-                                        onChanged: (value) {
-                                          final stepped = double.parse(
-                                              value.toStringAsFixed(1));
-                                          setSheetState(() {
-                                            selectedNormalizeTargetDb = stepped
-                                                .clamp(
-                                                  _kExportNormalizeTargetDbMin,
-                                                  _kExportNormalizeTargetDbMax,
-                                                )
-                                                .toDouble();
-                                          });
-                                        },
-                                      ),
-                                    ),
-                                    Align(
-                                      alignment: Alignment.centerRight,
-                                      child: Text(
-                                        '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
-                                        style:
-                                            theme.textTheme.bodySmall?.copyWith(
-                                          color: Colors.white.withOpacity(0.82),
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 6,
-                                      children: _kExportNormalizeTargetsDb
-                                          .map(
-                                            (preset) => ChoiceChip(
-                                              label: Text(
-                                                '${preset.toStringAsFixed(1)} dB',
-                                              ),
-                                              selected:
-                                                  (selectedNormalizeTargetDb -
-                                                              preset)
-                                                          .abs() <
-                                                      0.05,
-                                              labelStyle: theme
-                                                  .textTheme.bodySmall
-                                                  ?.copyWith(
-                                                color: Colors.white
-                                                    .withOpacity(0.9),
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                              backgroundColor: Colors.white
-                                                  .withValues(alpha: 0.05),
-                                              selectedColor: accent.withValues(
-                                                  alpha: 0.26),
-                                              side: BorderSide(
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.16),
-                                              ),
-                                              onSelected: (_) {
-                                                setSheetState(() {
-                                                  selectedNormalizeTargetDb =
-                                                      preset;
-                                                });
-                                              },
-                                            ),
-                                          )
-                                          .toList(growable: false),
-                                    ),
-                                  ],
-                                  const SizedBox(height: 10),
-                                  if (selectedFormat ==
-                                          _ExportAudioFormat.wav ||
-                                      nativeWavOnly) ...[
-                                    buildDropdownField(
-                                      label:
-                                          L10n.translate(context, 'Bit depth'),
-                                      value: selectedWavBitDepth,
-                                      options: _kExportWavBitDepths,
-                                      textBuilder: (value) => '$value-bit',
-                                      onChanged: (value) {
-                                        if (value == null) return;
-                                        setSheetState(() {
-                                          selectedWavBitDepth = value;
-                                        });
-                                      },
-                                    ),
-                                    const SizedBox(height: 6),
-                                    SwitchListTile(
-                                      contentPadding: EdgeInsets.zero,
-                                      title: Text(
-                                        L10n.translate(
-                                            context, 'Enable dithering'),
-                                        style: TextStyle(color: mutedText),
-                                      ),
-                                      value: selectedWavDithering,
-                                      activeColor: accent,
-                                      onChanged: (value) {
-                                        setSheetState(() {
-                                          selectedWavDithering = value;
-                                        });
-                                      },
-                                    ),
-                                  ] else ...[
-                                    buildDropdownField(
-                                      label: L10n.translate(
-                                          context, 'Encoding mode'),
-                                      value: selectedMp3Mode,
-                                      options: _ExportMp3Mode.values,
-                                      textBuilder: (value) =>
-                                          value == _ExportMp3Mode.cbr
-                                              ? 'CBR'
-                                              : 'VBR',
-                                      onChanged: (value) {
-                                        if (value == null) return;
-                                        setSheetState(() {
-                                          selectedMp3Mode = value;
-                                        });
-                                      },
-                                    ),
-                                    const SizedBox(height: 10),
-                                    if (selectedMp3Mode == _ExportMp3Mode.cbr)
-                                      buildDropdownField(
-                                        label:
-                                            L10n.translate(context, 'Bit rate'),
-                                        value: selectedMp3Bitrate,
-                                        options: _kExportMp3Bitrates,
-                                        textBuilder: (value) => '${value} kbps',
-                                        onChanged: (value) {
-                                          if (value == null) return;
-                                          setSheetState(() {
-                                            selectedMp3Bitrate = value;
-                                          });
-                                        },
-                                      )
-                                    else
-                                      buildDropdownField(
-                                        label: L10n.translate(
-                                            context, 'VBR quality'),
-                                        value: selectedMp3VbrQuality,
-                                        options: _kExportMp3VbrQualities,
-                                        textBuilder: (value) =>
-                                            'V$value (${L10n.translate(context, value == 0 ? "highest" : "smaller file")})',
-                                        onChanged: (value) {
-                                          if (value == null) return;
-                                          setSheetState(() {
-                                            selectedMp3VbrQuality = value;
-                                          });
-                                        },
-                                      ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextButton(
-                                  onPressed: () => Navigator.pop(dialogContext),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor:
-                                        Colors.white.withOpacity(0.74),
-                                  ),
-                                  child: Text(
-                                    L10n.translate(context, 'Cancel'),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: FilledButton(
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xFF2E6EEB),
-                                    foregroundColor: Colors.white,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  onPressed: () {
-                                    Navigator.pop(
-                                      dialogContext,
-                                      _AudioExportSettings(
-                                        format: nativeWavOnly
-                                            ? _ExportAudioFormat.wav
-                                            : selectedFormat,
-                                        sampleRate:
-                                            _normalizeExportSampleRateForFormat(
-                                          nativeWavOnly
-                                              ? _ExportAudioFormat.wav
-                                              : selectedFormat,
-                                          selectedSampleRate,
-                                        ),
-                                        wavBitDepth: selectedWavBitDepth,
-                                        wavDithering: selectedWavDithering,
-                                        mp3BitrateKbps: selectedMp3Bitrate,
-                                        mp3Mode: selectedMp3Mode,
-                                        mp3VbrQuality: selectedMp3VbrQuality,
-                                        channelMode: nativeWavOnly
-                                            ? _ExportChannelMode.stereo
-                                            : selectedChannelMode,
-                                        normalize: nativeWavOnly
-                                            ? false
-                                            : selectedNormalize,
-                                        normalizeTargetDb:
-                                            selectedNormalizeTargetDb,
-                                        resampleQuality: nativeWavOnly
-                                            ? _ExportResampleQuality.best
-                                            : selectedResampleQuality,
-                                      ),
-                                    );
-                                  },
-                                  child: Text(
-                                    L10n.translate(context, 'Start export'),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
-        );
-      },
-    );
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isExportSheetOpen = false);
+      }
+    }
   }
 
   Future<String> _convertMixWithExportSettings({
@@ -8687,18 +9286,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             (trimEndRequested - requestedTrimStart).inMilliseconds / 1000.0,
           )
         : 0.0;
-    await JuceAudioEngine.loadClip(
-      engineClipId,
-      rowId,
-      clipSourceFile.path,
-      startSec: startSec,
-      lengthSec: requestedLengthSec,
-      inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
-    );
+    await _runWithAndroidEngineCriticalSection(() {
+      return JuceAudioEngine.loadClip(
+        engineClipId,
+        rowId,
+        clipSourceFile.path,
+        startSec: startSec,
+        lengthSec: requestedLengthSec,
+        inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
+      );
+    });
 
-    final dur = await _resolveClipSourceDuration(
-      filePath: clipSourceFile.path,
-      engineClipId: engineClipId,
+    final dur = await _runWithAndroidEngineCriticalSection(
+      () => _resolveClipSourceDuration(
+        filePath: clipSourceFile.path,
+        engineClipId: engineClipId,
+      ),
     );
 
     // Create a new AudioTrack instance with a fixed audioDuration.
@@ -8726,6 +9329,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _audioTracks.add(newTrack);
       _isLoadingAudio = false;
     });
+    unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
     await _syncClipMixToEngine(newTrack);
     _updateOverallDurationIfNeeded();
   }
@@ -8763,14 +9367,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       (requestedTrimEnd - requestedTrimStart).inMilliseconds / 1000.0,
     );
     final requestedInFileOffsetSec = requestedTrimStart.inMilliseconds / 1000.0;
-    await JuceAudioEngine.loadClip(
-      engineClipId,
-      rowId,
-      clip.file.path,
-      startSec: timeMs / 1000.0,
-      lengthSec: requestedLengthSec,
-      inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
-    );
+    await _runWithAndroidEngineCriticalSection(() {
+      return JuceAudioEngine.loadClip(
+        engineClipId,
+        rowId,
+        clip.file.path,
+        startSec: timeMs / 1000.0,
+        lengthSec: requestedLengthSec,
+        inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
+      );
+    });
     final dur = clip.audioDuration;
 
     // Create a new AudioTrack instance with a fixed audioDuration.
@@ -8839,18 +9445,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             (trimEndRequested - requestedTrimStart).inMilliseconds / 1000.0,
           )
         : 0.0;
-    await JuceAudioEngine.loadClip(
-      engineClipId,
-      rowId,
-      projectAudioFile.path,
-      startSec: timeMs / 1000.0,
-      lengthSec: requestedLengthSec,
-      inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
-    );
+    await _runWithAndroidEngineCriticalSection(() {
+      return JuceAudioEngine.loadClip(
+        engineClipId,
+        rowId,
+        projectAudioFile.path,
+        startSec: timeMs / 1000.0,
+        lengthSec: requestedLengthSec,
+        inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
+      );
+    });
 
-    final dur = await _resolveClipSourceDuration(
-      filePath: projectAudioFile.path,
-      engineClipId: engineClipId,
+    final dur = await _runWithAndroidEngineCriticalSection(
+      () => _resolveClipSourceDuration(
+        filePath: projectAudioFile.path,
+        engineClipId: engineClipId,
+      ),
     );
 
     final newTrack = await AudioTrack.create(
@@ -8957,6 +9567,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Map<String, dynamic>? _findInstrumentSpecById(String id) {
     final trimmed = id.trim();
     if (trimmed.isEmpty) return null;
+    final lower = trimmed.toLowerCase();
+
+    final aliasId = kLegacySfzInstrumentAliases[lower];
+    if (aliasId != null && aliasId.isNotEmpty) {
+      for (final spec in _instrumentCatalog) {
+        if (spec['id'] == aliasId) return spec;
+      }
+      for (final spec in kBundledSfzFallbackCatalog) {
+        if (spec['id'] == aliasId) return spec;
+      }
+      for (final spec in kInstrumentCatalog) {
+        if (spec['id'] == aliasId) return spec;
+      }
+    }
 
     for (final spec in _instrumentCatalog) {
       if (spec['id'] == trimmed) return spec;
@@ -8968,7 +9592,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (spec['id'] == trimmed) return spec;
     }
 
-    final lower = trimmed.toLowerCase();
     if (lower.startsWith('sfz_asset:')) {
       final sfzPath = trimmed.substring('sfz_asset:'.length).trim();
       if (sfzPath.isNotEmpty) {
@@ -9029,6 +9652,82 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   List<MidiNote> _defaultMidiNotesForInstrument(String instrumentId) {
     final now = DateTime.now().microsecondsSinceEpoch;
+    if (instrumentId == 'mixroom.drum_808_starter') {
+      return <MidiNote>[
+        MidiNote(
+            id: '${now}_0',
+            pitch: 49,
+            startBeat: 0.0,
+            lengthBeats: 0.25,
+            velocity: 0.76),
+        MidiNote(
+            id: '${now}_1',
+            pitch: 36,
+            startBeat: 0.0,
+            lengthBeats: 0.25,
+            velocity: 0.98),
+        MidiNote(
+            id: '${now}_2',
+            pitch: 42,
+            startBeat: 0.5,
+            lengthBeats: 0.125,
+            velocity: 0.62),
+        MidiNote(
+            id: '${now}_3',
+            pitch: 38,
+            startBeat: 1.0,
+            lengthBeats: 0.25,
+            velocity: 0.84),
+        MidiNote(
+            id: '${now}_4',
+            pitch: 42,
+            startBeat: 1.5,
+            lengthBeats: 0.125,
+            velocity: 0.58),
+        MidiNote(
+            id: '${now}_5',
+            pitch: 44,
+            startBeat: 1.75,
+            lengthBeats: 0.125,
+            velocity: 0.66),
+        MidiNote(
+            id: '${now}_6',
+            pitch: 36,
+            startBeat: 2.0,
+            lengthBeats: 0.25,
+            velocity: 0.96),
+        MidiNote(
+            id: '${now}_7',
+            pitch: 42,
+            startBeat: 2.5,
+            lengthBeats: 0.125,
+            velocity: 0.6),
+        MidiNote(
+            id: '${now}_8',
+            pitch: 45,
+            startBeat: 2.75,
+            lengthBeats: 0.25,
+            velocity: 0.72),
+        MidiNote(
+            id: '${now}_9',
+            pitch: 38,
+            startBeat: 3.0,
+            lengthBeats: 0.25,
+            velocity: 0.86),
+        MidiNote(
+            id: '${now}_10',
+            pitch: 36,
+            startBeat: 3.25,
+            lengthBeats: 0.25,
+            velocity: 0.92),
+        MidiNote(
+            id: '${now}_11',
+            pitch: 47,
+            startBeat: 3.5,
+            lengthBeats: 0.25,
+            velocity: 0.7),
+      ];
+    }
     if (_isSampledInstrumentId(instrumentId)) {
       final name = _instrumentNameFromId(instrumentId).toLowerCase();
       if (name.contains('timpani')) {
@@ -9570,76 +10269,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             startBeat: 3.5,
             lengthBeats: 0.125,
             velocity: 0.62),
-      ];
-    }
-    if (instrumentId == 'mixroom.drum_808_starter') {
-      return <MidiNote>[
-        MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 0.25,
-            velocity: 0.98),
-        MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 1.5,
-            lengthBeats: 0.25,
-            velocity: 0.94),
-        MidiNote(
-            id: '${now}_2',
-            pitch: 36,
-            startBeat: 2.0,
-            lengthBeats: 0.25,
-            velocity: 0.96),
-        MidiNote(
-            id: '${now}_3',
-            pitch: 36,
-            startBeat: 3.25,
-            lengthBeats: 0.25,
-            velocity: 0.92),
-        MidiNote(
-            id: '${now}_4',
-            pitch: 38,
-            startBeat: 1.0,
-            lengthBeats: 0.25,
-            velocity: 0.84),
-        MidiNote(
-            id: '${now}_5',
-            pitch: 38,
-            startBeat: 3.0,
-            lengthBeats: 0.25,
-            velocity: 0.86),
-        MidiNote(
-            id: '${now}_6',
-            pitch: 42,
-            startBeat: 0.5,
-            lengthBeats: 0.125,
-            velocity: 0.6),
-        MidiNote(
-            id: '${now}_7',
-            pitch: 42,
-            startBeat: 1.0,
-            lengthBeats: 0.125,
-            velocity: 0.56),
-        MidiNote(
-            id: '${now}_8',
-            pitch: 42,
-            startBeat: 1.5,
-            lengthBeats: 0.125,
-            velocity: 0.6),
-        MidiNote(
-            id: '${now}_9',
-            pitch: 42,
-            startBeat: 2.5,
-            lengthBeats: 0.125,
-            velocity: 0.58),
-        MidiNote(
-            id: '${now}_10',
-            pitch: 46,
-            startBeat: 3.5,
-            lengthBeats: 0.25,
-            velocity: 0.72),
       ];
     }
     if (instrumentId == 'mixroom.drum_lofi') {
@@ -10873,17 +11502,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_liveMidiEventPlaybackSupported) return false;
     if (engineClipId < 0 || rowId < 0) return false;
     final liveInstrumentId = _liveMidiEngineInstrumentId(instrumentId);
-    return JuceAudioEngine.loadMidiClip(
-      engineClipId,
-      rowId,
-      instrumentId: liveInstrumentId,
-      instrumentName: instrumentName,
-      notes: _midiNotesToEnginePayload(midiNotes),
-      params: Map<String, double>.from(instrumentParams),
-      sourceTempoBpm: sourceTempoBpm,
-      startSec: startSec,
-      lengthSec: math.max(0.0, lengthSec),
-      inFileOffsetSec: math.max(0.0, inFileOffsetSec),
+    return _runWithAndroidEngineCriticalSection(
+      () => JuceAudioEngine.loadMidiClip(
+        engineClipId,
+        rowId,
+        instrumentId: liveInstrumentId,
+        instrumentName: instrumentName,
+        notes: _midiNotesToEnginePayload(midiNotes),
+        params: Map<String, double>.from(instrumentParams),
+        sourceTempoBpm: sourceTempoBpm,
+        startSec: startSec,
+        lengthSec: math.max(0.0, lengthSec),
+        inFileOffsetSec: math.max(0.0, inFileOffsetSec),
+      ),
     );
   }
 
@@ -10891,13 +11522,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_liveMidiEventPlaybackSupported) return false;
     if (!clip.isMidi || clip.engineClipId < 0) return false;
     final liveInstrumentId = _liveMidiEngineInstrumentId(clip.instrumentId);
-    return JuceAudioEngine.updateMidiClipEvents(
-      clip.engineClipId,
-      instrumentId: liveInstrumentId,
-      instrumentName: clip.instrumentName,
-      notes: _midiNotesToEnginePayload(clip.midiNotes),
-      params: Map<String, double>.from(clip.instrumentParams),
-      sourceTempoBpm: _resolvedClipSourceTempoBpm(clip),
+    return _runWithAndroidEngineCriticalSection(
+      () => JuceAudioEngine.updateMidiClipEvents(
+        clip.engineClipId,
+        instrumentId: liveInstrumentId,
+        instrumentName: clip.instrumentName,
+        notes: _midiNotesToEnginePayload(clip.midiNotes),
+        params: Map<String, double>.from(clip.instrumentParams),
+        sourceTempoBpm: _resolvedClipSourceTempoBpm(clip),
+      ),
     );
   }
 
@@ -11034,33 +11667,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final resolvedTempoStretchPreservePitch = tempoStretchPreservePitch ?? true;
     final startSec = timeMs / 1000.0;
 
-    final loadedLiveMidi = await _loadMidiClipIntoEngineLive(
-      engineClipId: engineClipId,
-      rowId: rowId,
-      instrumentId: instrumentId,
-      instrumentName: instrumentName,
-      midiNotes: midiNotes,
-      instrumentParams: instrumentParams,
-      sourceTempoBpm: resolvedSourceTempoBpm,
-      startSec: startSec,
-      lengthSec: requestedLengthSec,
-      inFileOffsetSec: requestedInFileOffsetSec,
+    final loadedLiveMidi = await _runWithAndroidEngineCriticalSection(
+      () => _loadMidiClipIntoEngineLive(
+        engineClipId: engineClipId,
+        rowId: rowId,
+        instrumentId: instrumentId,
+        instrumentName: instrumentName,
+        midiNotes: midiNotes,
+        instrumentParams: instrumentParams,
+        sourceTempoBpm: resolvedSourceTempoBpm,
+        startSec: startSec,
+        lengthSec: requestedLengthSec,
+        inFileOffsetSec: requestedInFileOffsetSec,
+      ),
     );
 
     if (!loadedLiveMidi) {
-      await JuceAudioEngine.loadClip(
-        engineClipId,
-        rowId,
-        outFile.path,
-        startSec: startSec,
-        lengthSec: requestedLengthSec,
-        inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
-      );
+      await _runWithAndroidEngineCriticalSection(() {
+        return JuceAudioEngine.loadClip(
+          engineClipId,
+          rowId,
+          outFile.path,
+          startSec: startSec,
+          lengthSec: requestedLengthSec,
+          inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
+        );
+      });
     }
 
-    final dur = await _resolveClipSourceDuration(
-      filePath: outFile.path,
-      engineClipId: engineClipId,
+    final dur = await _runWithAndroidEngineCriticalSection(
+      () => _resolveClipSourceDuration(
+        filePath: outFile.path,
+        engineClipId: engineClipId,
+      ),
     );
 
     final newTrack = await AudioTrack.create(
@@ -11316,7 +11955,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (parsed == null || parsed < 20.0 || parsed > 999.0) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter 20.0 to 999.0 BPM')),
+        SnackBar(
+            content: Text(L10n.translate(context, 'Enter 20.0 to 999.0 BPM'))),
       );
       return;
     }
@@ -11326,27 +11966,67 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _showTempoModeInfoDialog() async {
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1F2E),
-        titlePadding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
-        contentPadding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
-        title: const Text(
-          'Tempo Mode',
-          style: TextStyle(
-              color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
-        ),
-        content: const Text(
-          'Off: Clips ignore project tempo.\n'
-          'Resample: Clips follow tempo and shift pitch.\n'
-          'Stretch: Clips follow tempo and keep pitch.',
-          style: TextStyle(color: Colors.white70, height: 1.35),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(22),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[
+                    Color.fromRGBO(101, 111, 121, 0.96),
+                    Color.fromRGBO(63, 72, 82, 0.96),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Text(
+                      L10n.translate(ctx, 'Tempo Mode'),
+                      style: const TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Color(0xFFF4F4F4),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Off: Clips ignore project tempo.\n'
+                    'Resample: Clips follow tempo and shift pitch.\n'
+                    'Stretch: Clips follow tempo and keep pitch.',
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.84),
+                      fontSize: 12.5,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: Text(L10n.translate(ctx, 'Close')),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -11406,20 +12086,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final lengthSec = _clipTimelineDurationSec(clip);
     final inFileOffsetSec = clip.trimStart.inMilliseconds.toDouble() / 1000.0;
 
-    await JuceAudioEngine.unloadClip(clip.engineClipId);
-    await JuceAudioEngine.loadClip(
-      clip.engineClipId,
-      rowId,
-      clip.file.path,
-      startSec: startSec,
-      lengthSec: math.max(0.0, lengthSec),
-      inFileOffsetSec: math.max(0.0, inFileOffsetSec),
-    );
+    await _runWithAndroidEngineCriticalSection(() async {
+      await JuceAudioEngine.unloadClip(clip.engineClipId);
+      await JuceAudioEngine.loadClip(
+        clip.engineClipId,
+        rowId,
+        clip.file.path,
+        startSec: startSec,
+        lengthSec: math.max(0.0, lengthSec),
+        inFileOffsetSec: math.max(0.0, inFileOffsetSec),
+      );
+    });
     await _syncClipMixToEngine(clip);
 
-    clip.audioDuration = await _resolveClipSourceDuration(
-      filePath: clip.file.path,
-      engineClipId: clip.engineClipId,
+    clip.audioDuration = await _runWithAndroidEngineCriticalSection(
+      () => _resolveClipSourceDuration(
+        filePath: clip.file.path,
+        engineClipId: clip.engineClipId,
+      ),
     );
 
     _startWaveformExtraction(clip);
@@ -11890,8 +12574,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _ensureAndroidMediaLibraryAccess() async {
     if (!Platform.isAndroid) return true;
 
-    final status = await Permission.audio.request();
-    if (status.isGranted || status.isLimited) {
+    final audioStatus = await Permission.audio.request();
+    if (audioStatus.isGranted || audioStatus.isLimited) {
+      return true;
+    }
+    PermissionStatus storageStatus = PermissionStatus.denied;
+    try {
+      storageStatus = await Permission.storage.request();
+    } catch (_) {}
+    if (storageStatus.isGranted || storageStatus.isLimited) {
       return true;
     }
 
@@ -12071,14 +12762,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         dialogTitle: 'Choose Sample Folder',
       ),
     );
-    if (directoryPath == null) return;
+    if (directoryPath == null) {
+      if (mounted && Platform.isAndroid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'In Android folder picker, first open a subfolder (phone root is blocked), then tap USE THIS FOLDER.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     final normalized = _normalizePickedDirectoryPath(directoryPath);
     if (normalized.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            Platform.isAndroid
+                ? 'Could not open that folder. On Android, choose a concrete subfolder (for example Download, Music, or your sample pack folder).'
+                : 'Could not open that folder. Choose a local folder that Mixroom can access.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (_isAndroidRootFolderPath(normalized)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Could not open that folder. Choose a local folder that Mixroom can access.',
+            'Phone root cannot be granted to apps on Android. Select a subfolder (Download/Music/sample packs) instead.',
           ),
         ),
       );
@@ -12100,6 +12815,106 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _sampleBrowserRoots.add(normalized);
       _sampleBrowserVisible = true;
     });
+  }
+
+  bool _isAndroidRootFolderPath(String path) {
+    if (!Platform.isAndroid) return false;
+    final normalized = p.normalize(path);
+    const rootCandidates = <String>{
+      '/storage/emulated/0',
+      '/sdcard',
+      '/storage/self/primary',
+    };
+    return rootCandidates.contains(normalized);
+  }
+
+  Future<List<String>> _androidSampleBrowserDefaultRoots() async {
+    final candidates = <String>{
+      '/storage/emulated/0/Music',
+      '/storage/emulated/0/Download',
+      '/sdcard/Music',
+      '/sdcard/Download',
+    };
+    for (final base in _androidStorageRootCandidates) {
+      final dirs = _listTopLevelAndroidSubfolders(base);
+      candidates.addAll(dirs);
+    }
+    try {
+      final musicDirs =
+          await getExternalStorageDirectories(type: StorageDirectory.music);
+      if (musicDirs != null) {
+        for (final dir in musicDirs) {
+          candidates.add(dir.path);
+        }
+      }
+    } catch (_) {}
+    try {
+      final downloadDirs =
+          await getExternalStorageDirectories(type: StorageDirectory.downloads);
+      if (downloadDirs != null) {
+        for (final dir in downloadDirs) {
+          candidates.add(dir.path);
+        }
+      }
+    } catch (_) {}
+
+    final resolved = <String>[];
+    for (final raw in candidates) {
+      final normalized = _normalizePickedDirectoryPath(raw);
+      if (normalized.isEmpty || _isAndroidRootFolderPath(normalized)) continue;
+      if (!_canUseAsSampleBrowserRoot(normalized)) continue;
+      if (!resolved.contains(normalized)) {
+        resolved.add(normalized);
+      }
+    }
+    return resolved;
+  }
+
+  static const List<String> _androidStorageRootCandidates = <String>[
+    '/storage/emulated/0',
+    '/sdcard',
+    '/storage/self/primary',
+  ];
+
+  List<String> _listTopLevelAndroidSubfolders(String rootPath) {
+    final dirs = <String>[];
+    try {
+      final root = Directory(rootPath);
+      if (!root.existsSync()) return dirs;
+      for (final entity in root.listSync(followLinks: false)) {
+        if (entity is! Directory) continue;
+        final name = p.basename(entity.path).trim();
+        if (name.isEmpty || name.startsWith('.')) continue;
+        dirs.add(entity.path);
+      }
+    } catch (_) {}
+    return dirs;
+  }
+
+  bool _canUseAsSampleBrowserRoot(String path) {
+    try {
+      final dir = Directory(path);
+      if (!dir.existsSync()) return false;
+      // Guard against inaccessible roots that appear to exist but cannot be listed.
+      dir.listSync(followLinks: false);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _seedAndroidSampleBrowserDefaultRootsIfNeeded() async {
+    if (!Platform.isAndroid || _sampleBrowserRoots.isNotEmpty) return false;
+    final defaults = await _androidSampleBrowserDefaultRoots();
+    if (defaults.isEmpty || !mounted) return false;
+    setState(() {
+      for (final root in defaults) {
+        if (!_sampleBrowserRoots.contains(root)) {
+          _sampleBrowserRoots.add(root);
+        }
+      }
+    });
+    return _sampleBrowserRoots.isNotEmpty;
   }
 
   Future<T?> _runFilePickerRequest<T>(Future<T?> Function() request) async {
@@ -12285,7 +13100,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _openSampleBrowser({bool promptFolderIfEmpty = false}) async {
     if (promptFolderIfEmpty && _sampleBrowserRoots.isEmpty) {
-      await _addSampleBrowserRootFolder();
+      if (!await _ensureAndroidMediaLibraryAccess()) return;
+      var seededDefaults = false;
+      if (Platform.isAndroid) {
+        seededDefaults = await _seedAndroidSampleBrowserDefaultRootsIfNeeded();
+      }
+      if (!seededDefaults && _sampleBrowserRoots.isEmpty) {
+        await _addSampleBrowserRootFolder();
+      }
+      if (_sampleBrowserRoots.isEmpty) {
+        return;
+      }
     }
     if (!mounted) return;
     setState(() {
@@ -12392,8 +13217,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     // JUCE getTrackDuration() returns the active clip length, which may already
     // include trim/stretched timeline settings. Use it only as a fallback.
-    final rawFallbackSeconds =
-        await JuceAudioEngine.getTrackDuration(engineClipId);
+    final rawFallbackSeconds = await _runWithAndroidEngineCriticalSection(
+      () => JuceAudioEngine.getTrackDuration(engineClipId),
+    );
     final fallbackSeconds =
         (!rawFallbackSeconds.isFinite || rawFallbackSeconds < 0.0)
             ? 0.0
@@ -12544,10 +13370,56 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   List<Map<String, dynamic>> _activeInstrumentCatalog() {
-    if (_instrumentCatalog.isNotEmpty) return _instrumentCatalog;
-    return kBundledSfzFallbackCatalog
-        .map((e) => Map<String, dynamic>.from(e))
+    final available = _instrumentCatalog.isNotEmpty
+        ? _instrumentCatalog
+        : _mergeInstrumentCatalogs([
+            kInstrumentCatalog,
+            kBundledSfzFallbackCatalog,
+          ]);
+    final filtered = <Map<String, dynamic>>[];
+    for (final spec in available) {
+      if (!_isReleaseAllowedInstrumentSpec(spec)) continue;
+      filtered.add(Map<String, dynamic>.from(spec));
+    }
+    if (filtered.isNotEmpty) return filtered;
+    return available
+        .map((spec) => Map<String, dynamic>.from(spec))
         .toList(growable: false);
+  }
+
+  bool _isReleaseAllowedInstrumentSpec(Map<String, dynamic> spec) {
+    final id = (spec['id'] as String? ?? '').trim().toLowerCase();
+    final sfzAssetPath =
+        (spec['sfzAssetPath'] as String? ?? '').trim().toLowerCase();
+    for (final token in kReleaseBlockedInstrumentTokens) {
+      if (token.isEmpty) continue;
+      if (id.contains(token) || sfzAssetPath.contains(token)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool _isReleaseEssentialInstrument(Map<String, dynamic> spec) {
+    final id = (spec['id'] as String? ?? '').trim().toLowerCase();
+    return kReleaseEssentialInstrumentIds.contains(id);
+  }
+
+  int _compareInstrumentSpecsForPicker(
+    Map<String, dynamic> a,
+    Map<String, dynamic> b,
+  ) {
+    final aEssential = _isReleaseEssentialInstrument(a);
+    final bEssential = _isReleaseEssentialInstrument(b);
+    if (aEssential != bEssential) return aEssential ? -1 : 1;
+
+    final aSampled = _isSampledInstrumentSpec(a);
+    final bSampled = _isSampledInstrumentSpec(b);
+    if (aSampled != bSampled) return aSampled ? 1 : -1;
+
+    final aName = ((a['name'] as String?) ?? '').trim().toLowerCase();
+    final bName = ((b['name'] as String?) ?? '').trim().toLowerCase();
+    return aName.compareTo(bName);
   }
 
   List<String> _instrumentPickerCategories() {
@@ -12729,7 +13601,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final filtered = catalog.where((spec) {
               if (selectedCategory == 'All') return true;
               return _instrumentPickerCategory(spec) == selectedCategory;
-            }).toList(growable: false);
+            }).toList(growable: true)
+              ..sort(_compareInstrumentSpecsForPicker);
             return AlertDialog(
               backgroundColor: const Color(0xFF1A2230),
               shape: RoundedRectangleBorder(
@@ -12940,36 +13813,72 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) {
     final selected = _activeAddActionId == id;
     Widget tile = Padding(
-      padding: EdgeInsets.fromLTRB(8, topPadding, 8, bottomPadding),
+      padding: EdgeInsets.fromLTRB(10, topPadding, 10, bottomPadding),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 85),
+        duration: const Duration(milliseconds: 120),
         decoration: BoxDecoration(
-          color: selected ? const Color(0x334D8DFF) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
+          color: selected
+              ? const Color.fromRGBO(255, 255, 255, 0.07)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: selected ? const Color(0x887DB4FF) : Colors.transparent,
+            color: selected
+                ? Colors.white.withValues(alpha: 0.12)
+                : Colors.transparent,
           ),
         ),
-        child: ListTile(
-          dense: true,
-          visualDensity: const VisualDensity(horizontal: -2, vertical: -3),
-          minVerticalPadding: 0,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-          leading: Icon(icon),
-          title: Text(title),
-          subtitle: subtitle == null ? null : Text(subtitle),
-          titleTextStyle: const TextStyle(
-            color: Colors.white,
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                crossAxisAlignment: subtitle == null
+                    ? CrossAxisAlignment.center
+                    : CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.only(top: subtitle == null ? 0 : 2),
+                    child: Icon(icon, size: 19, color: Colors.white),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: -0.15,
+                          ),
+                        ),
+                        if (subtitle != null) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            subtitle,
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Colors.white.withValues(alpha: 0.44),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w400,
+                              height: 1.15,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-          subtitleTextStyle: const TextStyle(
-            color: Colors.white70,
-            fontSize: 12,
-          ),
-          textColor: Colors.white,
-          iconColor: Colors.white,
-          onTap: onTap,
         ),
       ),
     );
@@ -13087,12 +13996,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Widget _buildMasterPopup() {
     if (!_showMasterRack) return const SizedBox.shrink();
-    final double deviceWidth = MediaQuery.of(context).size.width;
-    // We center horizontally (ignoring the old "right: 16")
+    final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
+      anchorKey: _masterPluginsButtonKey,
+      desiredWidth: 358,
+      connectorWidth: 206,
+      centerOnToolbarPill: true,
+    );
     return Positioned(
-      top: 68,
-      left: 0,
-      right: 0,
+      top: popupLayout.top,
+      left: popupLayout.left,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 180),
         opacity: _showMasterRack ? 1 : 0,
@@ -13102,162 +14014,115 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           child: Center(
             child: Material(
               color: Colors.transparent,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // ▼ Small connector arrow
-                  // Container(
-                  //   width: 18,
-                  //   height: 10,
-                  //   decoration: const BoxDecoration(
-                  //     color: Colors.transparent,
-                  //   ),
-                  //   child: CustomPaint(
-                  //     painter: _TrianglePainter(),
-                  //   ),
-                  // ),// === GLOBAL FX BYPASS HEADER ===
-                  Container(
+              child: TweenAnimationBuilder<double>(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                tween: Tween<double>(
+                  begin: 0.965,
+                  end: _showMasterRack ? 1.0 : 0.965,
+                ),
+                builder: (context, value, child) {
+                  return Transform.scale(
+                    scale: value,
+                    alignment: Alignment.topCenter,
+                    child: child,
+                  );
+                },
+                child: _buildConnectedTopPopupFrame(
+                  child: SizedBox(
                     key: _masterRackKey,
-                    constraints: BoxConstraints(
-                      minWidth: 320,
-                      maxWidth: math.min(deviceWidth * 0.96, 980),
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color.fromARGB(255, 34, 41, 61),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.14)),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // ───────────── HEADER ─────────────
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 10),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text(
-                                "MASTER BUS",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.6,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-
-                              // meter in the middle
-                              Expanded(
-                                child: Align(
-                                  alignment: Alignment.centerRight,
-                                  child: AnimatedBuilder(
-                                    animation: _meters,
-                                    builder: (_, __) {
-                                      return MiniStereoMeterHorizontal(
-                                        frame: _meters.master,
-                                        width: 160,
-                                        height: 18,
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-
-                              const SizedBox(width: 12),
-
-                              Row(
-                                children: [
-                                  const Text(
-                                    "FX Bypass",
-                                    style: TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Switch(
-                                    value: _globalFxBypass,
-                                    activeColor: Colors.orangeAccent,
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    onChanged: (v) async {
-                                      await _toggleGlobalFxBypass(v);
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // subtle divider
-                        Container(
-                            height: 1, color: Colors.white.withOpacity(0.08)),
-
-                        // ───────────── CONTENT ─────────────
-                        Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: DynamicRackContent(
-                            key: _masterRackContentKey,
-                            volumePage: _buildMasterVolumePage(),
-                            effectsPage: _buildMasterEffectsPage(),
-                            tutorialHighlighter: _mixHighlighter,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  /*
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      margin: const EdgeInsets.only(bottom: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.white.withOpacity(0.12)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    width: popupLayout.width,
+                    child: _buildDawConnectedSurface(
+                      borderRadius: BorderRadius.circular(29),
+                      active: true,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text(
-                            "Global FX Bypass",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  "Master Bus",
+                                  style: TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Color(0xFFF4F4F4),
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: -0.2,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const Spacer(),
+                                Row(
+                                  children: [
+                                    const Text(
+                                      "FX Bypass",
+                                      style: TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        color: Color(0xB8F4F4F4),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Switch(
+                                      value: _globalFxBypass,
+                                      activeColor: Colors.orangeAccent,
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      onChanged: (v) async {
+                                        await _toggleGlobalFxBypass(v);
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
-                          Switch(
-                            value: _globalFxBypass,
-                            activeColor: Colors.orangeAccent,
-                            onChanged: (v) async {
-                              await _toggleGlobalFxBypass(v);
-                            },
+                          Container(
+                            height: 1,
+                            color: Colors.white.withValues(alpha: 0.08),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                            child: Container(
+                              height: 26,
+                              decoration: BoxDecoration(
+                                color: const Color.fromRGBO(80, 91, 107, 0.28),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                ),
+                              ),
+                              child: Center(
+                                child: AnimatedBuilder(
+                                  animation: _meters,
+                                  builder: (_, __) {
+                                    return MiniStereoMeterHorizontal(
+                                      frame: _meters.master,
+                                      width: 222,
+                                      height: 14,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+                            child: DynamicRackContent(
+                              key: _masterRackContentKey,
+                              volumePage: _buildMasterVolumePage(),
+                              effectsPage: _buildMasterEffectsPage(),
+                              tutorialHighlighter: _mixHighlighter,
+                            ),
                           ),
                         ],
                       ),
                     ),
-                    Container(
-                      // IMPORTANT: Remove ALL height constraints here!
-                      // The new widget handles the sizing.
-                      constraints: BoxConstraints(minWidth: 280, maxWidth: 0.9 * deviceWidth),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color.fromARGB(255, 34, 41, 61),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.14)),
-                        // ... (rest of decoration)
-                      ),
-                      // 3. Use the new isolated widget!
-                      child: DynamicRackContent(
-                        volumePage: _buildMasterVolumePage(), // Pass your existing methods
-                        effectsPage: _buildMasterEffectsPage(),
-                      ),
-                    ),
-                  */
-                ],
+                  ),
+                ),
               ),
             ),
           ),
@@ -13430,111 +14295,113 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AnimatedBuilder(
-            animation: _meters,
-            builder: (_, __) {
-              final MeterFrame frame = row < _meters.rows.length
-                  ? _meters.rows[row]
-                  : MeterFrame.zero;
-              final double heldPeakDb = _heldPeakDbForRow(row, frame);
-              final String levelLabel = _technicalLevelLabel(heldPeakDb);
-              final Color levelColor = _technicalLevelColor(heldPeakDb);
+      child: _buildMasterGainStagingCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AnimatedBuilder(
+              animation: _meters,
+              builder: (_, __) {
+                final MeterFrame frame = row < _meters.rows.length
+                    ? _meters.rows[row]
+                    : MeterFrame.zero;
+                final double heldPeakDb = _heldPeakDbForRow(row, frame);
+                final String levelLabel = _technicalLevelLabel(heldPeakDb);
+                final Color levelColor = _technicalLevelColor(heldPeakDb);
 
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        _iconForMasterGainStagingRow(rowInfo.iconId),
-                        size: 18,
-                        color: Colors.white.withOpacity(0.88),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          rowName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.92),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _iconForMasterGainStagingRow(rowInfo.iconId),
+                          size: 18,
+                          color: Colors.white.withOpacity(0.88),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            rowName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.92),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: levelColor.withOpacity(0.17),
-                          borderRadius: BorderRadius.circular(999),
-                          border:
-                              Border.all(color: levelColor.withOpacity(0.48)),
-                        ),
-                        child: Text(
-                          levelLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: levelColor,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: levelColor.withOpacity(0.17),
+                            borderRadius: BorderRadius.circular(999),
+                            border:
+                                Border.all(color: levelColor.withOpacity(0.48)),
+                          ),
+                          child: Text(
+                            levelLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: levelColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 30,
-                    child: TrackGainStagingDbMeter(frame: frame),
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 6),
-          PrettyGainSlider(
-            value: _rowGain[row],
-            showLabel: false,
-            onChangeStart: (v) {
-              _masterRackRowGainDragStart[row] = v;
-            },
-            onChanged: (v) {
-              setState(() => _rowGain[row] = v);
-              JuceAudioEngine.setRowGain(row, v);
-            },
-            onChangeEnd: (v) {
-              final oldGain = _masterRackRowGainDragStart.remove(row) ?? v;
-              final newGain = _rowGain[row];
-              if ((newGain - oldGain).abs() < 0.00001) return;
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 30,
+                      child: TrackGainStagingDbMeter(frame: frame),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 6),
+            PrettyGainSlider(
+              value: _rowGain[row],
+              showLabel: false,
+              onChangeStart: (v) {
+                _masterRackRowGainDragStart[row] = v;
+              },
+              onChanged: (v) {
+                setState(() => _rowGain[row] = v);
+                JuceAudioEngine.setRowGain(row, v);
+              },
+              onChangeEnd: (v) {
+                final oldGain = _masterRackRowGainDragStart.remove(row) ?? v;
+                final newGain = _rowGain[row];
+                if ((newGain - oldGain).abs() < 0.00001) return;
 
-              _undoManager.execute(
-                SetRowGainAction(
-                  row: row,
-                  oldGain: oldGain,
-                  newGain: newGain,
-                  applyToState: (r, g) {
-                    setState(() {
-                      _rowGain[r] = g;
-                    });
-                  },
-                ),
-              );
-              _recordProducerManualEdit('row_gain', {
-                'row': row,
-                'old_gain': oldGain,
-                'new_gain': newGain,
-              });
-            },
-          ),
-        ],
+                _undoManager.execute(
+                  SetRowGainAction(
+                    row: row,
+                    oldGain: oldGain,
+                    newGain: newGain,
+                    applyToState: (r, g) {
+                      setState(() {
+                        _rowGain[r] = g;
+                      });
+                    },
+                  ),
+                );
+                _recordProducerManualEdit('row_gain', {
+                  'row': row,
+                  'old_gain': oldGain,
+                  'new_gain': newGain,
+                });
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -13550,64 +14417,78 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.surround_sound_outlined,
-                    size: 18,
-                    color: Colors.white.withOpacity(0.88),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Master',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.92),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+          child: _buildMasterGainStagingCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.surround_sound_outlined,
+                      size: 18,
+                      color: Colors.white.withOpacity(0.88),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Master',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.92),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: levelColor.withOpacity(0.17),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: levelColor.withOpacity(0.48)),
-                    ),
-                    child: Text(
-                      levelLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: levelColor,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: levelColor.withOpacity(0.17),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: levelColor.withOpacity(0.48)),
+                      ),
+                      child: Text(
+                        levelLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: levelColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              SizedBox(
-                width: double.infinity,
-                height: 30,
-                child: TrackGainStagingDbMeter(
-                  frame: frame,
-                  showClipIndicator: false,
+                  ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: double.infinity,
+                  height: 30,
+                  child: TrackGainStagingDbMeter(
+                    frame: frame,
+                    showClipIndicator: false,
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildMasterGainStagingCard({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+      decoration: BoxDecoration(
+        color: const Color.fromRGBO(95, 108, 126, 0.24),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: child,
     );
   }
 
@@ -13833,9 +14714,153 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  BoxDecoration _dawConnectedShellDecoration({
+    required BorderRadius borderRadius,
+    bool active = false,
+  }) {
+    return BoxDecoration(
+      borderRadius: borderRadius,
+      color: Color.fromRGBO(244, 244, 244, active ? 0.20 : 0.16),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: active ? 0.14 : 0.10),
+      ),
+      boxShadow: const <BoxShadow>[
+        BoxShadow(
+          color: Color.fromRGBO(0, 0, 0, 0.25),
+          blurRadius: 15,
+          spreadRadius: 8,
+          offset: Offset.zero,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDawConnectedSurface({
+    required Widget child,
+    required BorderRadius borderRadius,
+    EdgeInsetsGeometry padding = EdgeInsets.zero,
+    bool active = false,
+    bool showOverlay = true,
+    double blur = 18,
+  }) {
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+        child: Container(
+          padding: padding,
+          decoration: _dawConnectedShellDecoration(
+            borderRadius: borderRadius,
+            active: active,
+          ),
+          child: Stack(
+            children: [
+              if (showOverlay)
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: borderRadius,
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: <Color>[
+                          Colors.white.withValues(alpha: active ? 0.10 : 0.07),
+                          Colors.white.withValues(alpha: 0.04),
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.04),
+                        ],
+                        stops: const <double>[0.0, 0.22, 0.72, 1.0],
+                      ),
+                    ),
+                  ),
+                ),
+              Material(
+                type: MaterialType.transparency,
+                child: child,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConnectedTopPopupFrame({
+    required Widget child,
+    double topInset = 0,
+  }) {
+    return Padding(
+      padding: EdgeInsets.only(top: topInset),
+      child: child,
+    );
+  }
+
+  Widget _buildTopCircleButtonShell({
+    required Widget child,
+    required VoidCallback? onTap,
+    Key? key,
+    bool active = false,
+    double size = 52,
+    bool drawShell = true,
+  }) {
+    final Widget body = drawShell
+        ? _buildDawConnectedSurface(
+            borderRadius: BorderRadius.circular(24),
+            active: active,
+            child: SizedBox(
+              width: size,
+              height: size,
+              child: child,
+            ),
+          )
+        : SizedBox(
+            width: size,
+            height: size,
+            child: child,
+          );
+    return Semantics(
+      button: true,
+      enabled: onTap != null,
+      child: GestureDetector(
+        key: key,
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: body,
+      ),
+    );
+  }
+
+  Widget _buildToolbarSegment({
+    required Widget child,
+    required bool active,
+    required BorderRadius borderRadius,
+    double? width,
+    double height = 44,
+    BorderRadius? activeBorderRadius,
+    EdgeInsetsGeometry margin = const EdgeInsets.all(2),
+    EdgeInsetsGeometry? activeMargin,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOutCubic,
+      width: width,
+      height: height,
+      margin: active ? (activeMargin ?? margin) : margin,
+      decoration: BoxDecoration(
+        color: active
+            ? const Color.fromRGBO(244, 244, 244, 0.50)
+            : Colors.transparent,
+        borderRadius:
+            active ? (activeBorderRadius ?? borderRadius) : borderRadius,
+      ),
+      child: child,
+    );
+  }
+
   Widget _buildTopBar(Duration currentClock, _EditorLayoutSpec layoutSpec) {
     final pluginAffordanceEnabled =
         _platformCapabilities.supportsExternalPluginAffordances;
+    final connectedTopPanelVisible = _activeTopPopup != _TopPopupType.none;
     return Halo(
       highlighter: _mixHighlighter,
       haloKey: const HaloKey('tutorial:toolbar'),
@@ -13844,128 +14869,53 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         padding: layoutSpec.topBarPadding,
         child: Row(
           children: [
-            // Left: back
-            _Glass(
-              radius: 24,
-              padding: EdgeInsets.zero,
-              opacity: 0.10,
-              child: IconButton(
-                key: _editorBackButtonKey,
-                icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                    color: Colors.white, size: 18),
-                onPressed: _handleBackPressed,
-              ),
-            ),
-            SizedBox(width: layoutSpec.topBarClusterGap),
-            // NEW PROJECT SETTINGS BUTTON
-            Halo(
-              highlighter: _mixHighlighter,
-              haloKey: const HaloKey('tutorial:project_settings'),
-              borderRadius: BorderRadius.circular(22),
-              child: _Glass(
-                radius: 22,
-                padding: EdgeInsets.zero,
-                opacity: 0.10,
-                child: IconButton(
-                  key: _projectSettingsButtonKey,
-                  icon:
-                      const Icon(Icons.settings, color: Colors.white, size: 20),
-                  onPressed: _openProjectSettings,
+            _buildTopCircleButtonShell(
+              key: _editorBackButtonKey,
+              onTap: _handleBackPressed,
+              active: connectedTopPanelVisible,
+              size: layoutSpec.topBarActionButtonSize,
+              child: Center(
+                child: SvgPicture.asset(
+                  kMixroomDawTopBackIconAsset,
+                  width: 10,
+                  height: 18,
                 ),
               ),
             ),
-
             SizedBox(width: layoutSpec.topBarClusterGap),
-            // CENTER: Time pill (true center on iPad)
             Expanded(
               child: Center(
-                child: _timePill(
-                  current: _formatDuration(currentClock),
-                  total: _formatDuration(_audioOnlyOverallDuration),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: _buildToolbarPill(
+                    current: _formatDuration(currentClock),
+                    total: _formatDuration(_audioOnlyOverallDuration),
+                    pluginAffordanceEnabled: pluginAffordanceEnabled,
+                    connected: false,
+                  ),
                 ),
               ),
             ),
-
-            // CENTER: make flexible & scale down if needed
-            // Expanded(
-            //   child: Align(
-            //     alignment: Alignment.centerLeft,
-            //     child: _tempoTimePill(
-            //       tempo: _tempo,
-            //       current: _formatDuration(_globalAudioClock),
-            //       total: _formatDuration(_audioOnlyOverallDuration),
-            //     ),
-            //   ),
-            // ),
             SizedBox(width: layoutSpec.topBarClusterGap * 0.8),
-
-            // RIGHT: allow this cluster to also scale when narrow
             FittedBox(
               fit: BoxFit.scaleDown,
               child: Row(
                 children: [
-                  MultiHalo(
-                    highlighter: _mixHighlighter,
-                    haloKeys: const <HaloKey>[
-                      HaloKey('tutorial:plugins'),
-                      HaloKey('tutorial:master_button'),
-                    ],
-                    borderRadius: BorderRadius.circular(22),
-                    child: _Glass(
-                      radius: 22,
-                      padding: EdgeInsets.zero,
-                      opacity: 0.10,
-                      child: IconButton(
-                        key: _masterPluginsButtonKey,
-                        icon: Icon(
-                          Icons.settings_input_composite,
-                          color: pluginAffordanceEnabled
-                              ? Colors.white
-                              : Colors.white38,
-                          size: 20,
-                        ),
-                        onPressed: pluginAffordanceEnabled
-                            ? () {
-                                final willOpen = !_showMasterRack;
-                                _isMasterPopupOpen = willOpen;
-                                setState(() => _showMasterRack = willOpen);
-                                if (willOpen) {
-                                  _handleDawOnboardingMasterOpened();
-                                }
-                              }
-                            : () {
-                                _showSmallNotice(
-                                    'External plugins are not available on this platform.');
-                              },
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: layoutSpec.topBarClusterGap),
                   Halo(
                     highlighter: _mixHighlighter,
                     haloKey: const HaloKey('tutorial:export'),
                     borderRadius: BorderRadius.circular(24),
-                    child: GestureDetector(
+                    child: _buildTopCircleButtonShell(
                       key: _exportButtonKey,
                       onTap: _exportAndNavigate,
-                      child: Container(
-                        width: layoutSpec.topBarActionButtonSize,
-                        height: layoutSpec.topBarActionButtonSize,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border:
-                              Border.all(color: Colors.white.withOpacity(0.1)),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.3),
-                            ),
-                            const BoxShadow(
-                              color: Color(0x22FFFFFF),
-                            ),
-                          ],
+                      active: _isExportSheetOpen || connectedTopPanelVisible,
+                      size: layoutSpec.topBarActionButtonSize,
+                      child: Center(
+                        child: SvgPicture.asset(
+                          kMixroomDawTopShareIconAsset,
+                          width: 16,
+                          height: 16,
                         ),
-                        child: const Icon(Icons.ios_share_rounded,
-                            color: Colors.white, size: 22),
                       ),
                     ),
                   ),
@@ -13978,301 +14928,574 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  void _openProjectSettings() async {
-    if (_isDialogOpen) return;
-    if (_showTempoRollDown) {
-      setState(() => _showTempoRollDown = false);
-    }
-    _isDialogOpen = true;
-    unawaited(_refreshMicrophonePermissionState());
-    if (_inputDevices.isEmpty && !_loadingDevices) {
-      unawaited(_loadInputDevicesFromJuce(scheduleRecordingPrewarm: true));
-    }
-    unawaited(_refreshAudioRouteInfo());
-    String draftProjectName = _projectName;
-    bool reopenDawTour = false;
-    Future<void> commitProjectName() async {
-      final renamed = draftProjectName.trim();
-      if (renamed.isEmpty) {
-        draftProjectName = _projectName;
-        return;
-      }
-      if (renamed == _projectName) return;
-      final renamedOk = await _renameProjectAndSyncState(renamed);
-      if (!renamedOk) {
-        draftProjectName = _projectName;
-        return;
-      }
-      draftProjectName = _projectName;
-    }
+  double _topBarReservedHeight(_EditorLayoutSpec layoutSpec) {
+    return layoutSpec.topBarPadding.vertical +
+        math.max(layoutSpec.topBarActionButtonSize, 48) +
+        layoutSpec.topBarBottomGap;
+  }
 
-    try {
-      await showDialog(
-        context: context,
-        builder: (context) {
-          return MediaQuery.removeViewInsets(
-            context: context,
-            removeBottom: true,
-            child: StatefulBuilder(
-              builder: (context, localSetState) {
-                _projectSettingsStateSetter = localSetState;
-                return Dialog(
-                  key: _projectSettingsDialogKey,
-                  backgroundColor: const Color(0xFF1A1F2E),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
-                  child: ConstrainedBox(
-                    constraints:
-                        const BoxConstraints(maxHeight: 560, maxWidth: 360),
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text(
-                            "Project Settings",
-                            style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white),
-                          ),
-                          const SizedBox(height: 16),
-                          TextFormField(
-                            key: _projectSettingsNameFieldKey,
-                            initialValue: _projectName,
-                            readOnly: false,
-                            textInputAction: TextInputAction.done,
-                            onChanged: (value) {
-                              draftProjectName = value;
-                            },
-                            onFieldSubmitted: (_) async {
-                              await commitProjectName();
-                            },
-                            onTapOutside: (_) async {
-                              FocusScope.of(context).unfocus();
-                              await commitProjectName();
-                            },
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600),
-                            decoration: InputDecoration(
-                              labelText: 'Project name',
-                              isDense: true,
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
-                                borderSide: BorderSide(
-                                    color: Colors.white.withOpacity(0.12)),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(
-                                    color: Color(0xFF4C8DFF), width: 1.3),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          _buildInputSelector(),
-                          if (_numInputChannels > 0) ...[
-                            const SizedBox(height: 20),
-                            _buildInputChannelRouteSelector(),
-                          ],
-                          const SizedBox(height: 20),
-                          if (!Platform.isIOS) ...[
-                            _buildOutputSelector(),
-                            const SizedBox(height: 20)
-                          ],
-                          if (_supportsNativeBluetoothMonitorPolicy() &&
-                              (_audioRouteInfo.isBluetoothOutput ||
-                                  _audioRouteInfo.inputIsBluetoothHeadset ||
-                                  _allowedBluetoothMicKeys.isNotEmpty)) ...[
-                            _buildBluetoothRecordingPolicyCard(),
-                            const SizedBox(height: 20),
-                          ],
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildMetronomeToggle(),
-                              const SizedBox(height: 20),
-                              _buildMetronomeVolumeSlider(),
-                              const SizedBox(height: 16),
-                              _buildProducerCaptureUiToggle(),
+  Widget _buildToolbarPill({
+    required String current,
+    required String total,
+    required bool pluginAffordanceEnabled,
+    bool connected = false,
+  }) {
+    final subLabelColor = const Color(0xFFF4F4F4).withValues(alpha: 0.60);
+    final bool isSettingsConnected = _isProjectSettingsOpen;
+    final bool isTempoConnected = _showTempoRollDown;
+    final bool isMasterConnected = _showMasterRack;
+    final Widget rowContent = SizedBox(
+      key: _toolbarPillKey,
+      width: 232,
+      height: 48,
+      child: Row(
+        children: <Widget>[
+          Halo(
+            highlighter: _mixHighlighter,
+            haloKey: const HaloKey('tutorial:project_settings'),
+            borderRadius: BorderRadius.circular(24),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                key: _projectSettingsButtonKey,
+                borderRadius: BorderRadius.circular(24),
+                onTap: () {
+                  if (_isProjectSettingsOpen) {
+                    unawaited(_closeProjectSettings());
+                    return;
+                  }
+                  _openProjectSettings();
+                },
+                child: _buildToolbarSegment(
+                  active: false,
+                  borderRadius: BorderRadius.circular(22),
+                  width: 47,
+                  child: Center(
+                    child: SvgPicture.asset(
+                      kMixroomDawTopSettingsIconAsset,
+                      width: 17,
+                      height: 17,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Container(
+            width: 1,
+            height: 32,
+            color: Colors.white.withValues(
+              alpha: isSettingsConnected
+                  ? 0.0
+                  : isTempoConnected
+                      ? 0.10
+                      : 0.16,
+            ),
+          ),
+          Expanded(
+            child: GestureDetector(
+              key: _tempoButtonKey,
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _toggleTopPopup(_TopPopupType.tempo),
+              onLongPress: _promptTempoInput,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                margin: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          total,
+                          style: TextStyle(
+                            fontFamily: 'Pretendard',
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w400,
+                            color: _showTempoRollDown
+                                ? const Color(0xFFF4F4F4)
+                                    .withValues(alpha: 0.68)
+                                : subLabelColor,
+                            height: 1.0,
+                            fontFeatures: const <FontFeature>[
+                              FontFeature.tabularFigures(),
                             ],
                           ),
-                          const SizedBox(height: 20),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.035),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.08),
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Replay DAW tutorial',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.72),
-                                    fontSize: 12.5,
-                                    height: 1.35,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                TextButton.icon(
-                                  onPressed: () async {
-                                    reopenDawTour = true;
-                                    await commitProjectName();
-                                    if (!context.mounted) return;
-                                    Navigator.pop(context);
-                                  },
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: const Color(0xFF9BD8FF),
-                                    padding: EdgeInsets.zero,
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  icon: const Icon(
-                                    Icons.play_circle_outline_rounded,
-                                  ),
-                                  label: const Text(
-                                    'Show DAW Tutorial Again',
-                                    style:
-                                        TextStyle(fontWeight: FontWeight.w700),
-                                  ),
-                                ),
-                              ],
-                            ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          current,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFFF4F4F4),
+                            height: 1.0,
+                            fontFeatures: <FontFeature>[
+                              FontFeature.tabularFigures(),
+                            ],
                           ),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            key: _projectSettingsCloseButtonKey,
-                            onPressed: () async {
-                              await commitProjectName();
-                              if (!context.mounted) return;
-                              Navigator.pop(context);
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white10,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10)),
-                            ),
-                            child: const Text("Close"),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '${_formatTempoBpm(_tempo)} BPM',
+                          style: TextStyle(
+                            fontFamily: 'Pretendard',
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w400,
+                            color: _showTempoRollDown
+                                ? const Color(0xFFF4F4F4)
+                                    .withValues(alpha: 0.68)
+                                : subLabelColor,
+                            height: 1.0,
                           ),
-                        ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Container(
+            width: 1,
+            height: 32,
+            color: Colors.white.withValues(
+              alpha: isMasterConnected
+                  ? 0.0
+                  : isTempoConnected
+                      ? 0.10
+                      : 0.16,
+            ),
+          ),
+          MultiHalo(
+            highlighter: _mixHighlighter,
+            haloKeys: const <HaloKey>[
+              HaloKey('tutorial:plugins'),
+              HaloKey('tutorial:master_button'),
+            ],
+            borderRadius: BorderRadius.circular(24),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                key: _masterPluginsButtonKey,
+                borderRadius: BorderRadius.circular(24),
+                onTap: pluginAffordanceEnabled
+                    ? () {
+                        final bool willOpen =
+                            _toggleTopPopup(_TopPopupType.master);
+                        if (willOpen) {
+                          _handleDawOnboardingMasterOpened();
+                        }
+                      }
+                    : () {
+                        _showSmallNotice(
+                            'External plugins are not available on this platform.');
+                      },
+                child: _buildToolbarSegment(
+                  active: _showMasterRack,
+                  borderRadius: BorderRadius.circular(22),
+                  width: 45,
+                  child: Center(
+                    child: Opacity(
+                      opacity: pluginAffordanceEnabled ? 1 : 0.38,
+                      child: SvgPicture.asset(
+                        kMixroomDawTopMasterIconAsset,
+                        width: 17,
+                        height: 16.2,
                       ),
                     ),
                   ),
-                );
-              },
+                ),
+              ),
             ),
-          );
-        },
-      );
-    } finally {
-      await commitProjectName();
-      _projectSettingsStateSetter = null;
-      _isDialogOpen = false;
-      if (mounted) {
-        setState(() {});
-        if (reopenDawTour) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            _startDawOnboarding();
-          });
-        }
+          ),
+        ],
+      ),
+    );
+    if (connected) return rowContent;
+    return _buildDawConnectedSurface(
+      borderRadius: BorderRadius.circular(24),
+      child: rowContent,
+    );
+  }
+
+  Future<void> _commitProjectSettingsName() async {
+    final renamed = _projectSettingsDraftName.trim();
+    if (renamed.isEmpty) {
+      _projectSettingsDraftName = _projectName;
+      return;
+    }
+    if (renamed == _projectName) return;
+    final renamedOk = await _renameProjectAndSyncState(renamed);
+    if (!renamedOk) {
+      _projectSettingsDraftName = _projectName;
+      return;
+    }
+    _projectSettingsDraftName = _projectName;
+  }
+
+  void _openProjectSettings() {
+    if (!mounted) return;
+    setState(() {
+      _projectSettingsDraftName = _projectName;
+      _activeTopPopup = _TopPopupType.projectSettings;
+    });
+    unawaited(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      if (!mounted || !_isProjectSettingsOpen) return;
+      await _refreshMicrophonePermissionState();
+      if (_inputDevices.isEmpty && !_loadingDevices) {
+        await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
       }
+      await _refreshAudioRouteInfo();
+    }());
+  }
+
+  Future<void> _closeProjectSettings({bool reopenDawTour = false}) async {
+    await _commitProjectSettingsName();
+    _projectSettingsStateSetter = null;
+    if (!mounted) return;
+    setState(() {
+      if (_isProjectSettingsOpen) {
+        _activeTopPopup = _TopPopupType.none;
+      }
+    });
+    if (reopenDawTour) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _startDawOnboarding();
+      });
     }
   }
 
-  Widget _buildMetronomeToggle() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        const Text("Metronome",
-            style: TextStyle(
-                color: Color.fromARGB(210, 255, 255, 255), fontSize: 15)),
-        Switch(
-          key: _projectSettingsMetronomeSwitchKey,
-          value: _metronomeEnabled,
-          activeColor: Colors.blueAccent,
-          onChanged: (v) {
-            _setStateAndRefreshProjectSettings(() => _metronomeEnabled = v);
-            JuceAudioEngine.setMetronomeEnabled(v);
-          },
+  Widget _buildProjectSettingsPopup() {
+    if (!_isProjectSettingsOpen) return const SizedBox.shrink();
+    final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
+      anchorKey: _projectSettingsButtonKey,
+      desiredWidth: 242,
+      connectorWidth: 104,
+      centerOnToolbarPill: true,
+    );
+    return Positioned(
+      top: popupLayout.top,
+      left: popupLayout.left,
+      child: IgnorePointer(
+        ignoring: !_isProjectSettingsOpen,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 140),
+          opacity: _isProjectSettingsOpen ? 1.0 : 0.0,
+          child: AnimatedSlide(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+            offset:
+                _isProjectSettingsOpen ? Offset.zero : const Offset(0, -0.04),
+            child: Center(
+              child: TweenAnimationBuilder<double>(
+                duration: const Duration(milliseconds: 170),
+                curve: Curves.easeOutCubic,
+                tween: Tween<double>(
+                  begin: 0.985,
+                  end: _isProjectSettingsOpen ? 1.0 : 0.985,
+                ),
+                builder: (context, value, child) {
+                  return Transform.scale(
+                    scale: value,
+                    alignment: Alignment.topCenter,
+                    child: child,
+                  );
+                },
+                child: _buildConnectedTopPopupFrame(
+                  child: SizedBox(
+                    key: _projectSettingsDialogKey,
+                    width: popupLayout.width,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 428),
+                      child: _buildDawConnectedSurface(
+                        borderRadius: BorderRadius.circular(29),
+                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                        active: true,
+                        showOverlay: false,
+                        child: SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                L10n.translate(context, 'Project Settings'),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFFF4F4F4),
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              TextFormField(
+                                key: _projectSettingsNameFieldKey,
+                                initialValue: _projectSettingsDraftName,
+                                textInputAction: TextInputAction.done,
+                                onChanged: (value) {
+                                  _projectSettingsDraftName = value;
+                                },
+                                onFieldSubmitted: (_) {
+                                  unawaited(_commitProjectSettingsName());
+                                },
+                                onTapOutside: (_) {
+                                  FocusScope.of(context).unfocus();
+                                  unawaited(_commitProjectSettingsName());
+                                },
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                decoration: _projectSettingsFieldDecoration(
+                                  labelText: 'Project Name',
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              _buildInputSelector(),
+                              if (_numInputChannels > 0) ...[
+                                const SizedBox(height: 9),
+                                _buildInputChannelRouteSelector(),
+                              ],
+                              if (!Platform.isIOS) ...[
+                                const SizedBox(height: 9),
+                                _buildOutputSelector(),
+                              ],
+                              if (_supportsNativeBluetoothMonitorPolicy() &&
+                                  (_audioRouteInfo.isBluetoothOutput ||
+                                      _audioRouteInfo.inputIsBluetoothHeadset ||
+                                      _allowedBluetoothMicKeys.isNotEmpty)) ...[
+                                const SizedBox(height: 9),
+                                _buildBluetoothRecordingPolicyCard(),
+                              ],
+                              const SizedBox(height: 9),
+                              _buildMetronomeToggle(),
+                              const SizedBox(height: 9),
+                              _buildMetronomeVolumeSlider(),
+                              const SizedBox(height: 9),
+                              _buildProducerCaptureUiToggle(),
+                              const SizedBox(height: 12),
+                              const SizedBox(height: 2),
+                              Text(
+                                L10n.translate(context, 'Replay Tutorial'),
+                                style: TextStyle(
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.76),
+                                  fontSize: 12.5,
+                                  height: 1.35,
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton(
+                                  onPressed: () {
+                                    unawaited(
+                                      _closeProjectSettings(
+                                        reopenDawTour: true,
+                                      ),
+                                    );
+                                  },
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xFF258AE6),
+                                    foregroundColor: const Color(0xFFF4F4F4),
+                                    elevation: 0,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 14),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    L10n.translate(context, 'Replay Tutorial'),
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Center(
+                                child: TextButton(
+                                  key: _projectSettingsCloseButtonKey,
+                                  onPressed: () {
+                                    unawaited(_closeProjectSettings());
+                                  },
+                                  style: TextButton.styleFrom(
+                                    foregroundColor:
+                                        Colors.white.withValues(alpha: 0.82),
+                                  ),
+                                  child: Text(L10n.translate(context, 'Close')),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
-      ],
+      ),
+    );
+  }
+
+  Widget _buildMetronomeToggle() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            L10n.translate(context, 'Metronome'),
+            style: TextStyle(color: Colors.white, fontSize: 15),
+          ),
+          CupertinoSwitch(
+            key: _projectSettingsMetronomeSwitchKey,
+            value: _metronomeEnabled,
+            activeTrackColor: const Color(0xFF1F89E3),
+            onChanged: (v) {
+              _setStateAndRefreshProjectSettings(() => _metronomeEnabled = v);
+              JuceAudioEngine.setMetronomeEnabled(v);
+            },
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildMetronomeVolumeSlider() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text("Metronome Volume",
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                L10n.translate(context, 'Metronome Volume'),
+                style: TextStyle(color: Colors.white, fontSize: 15),
+              ),
+              Text(
+                (_metronomeVolume * 100).round().toString(),
                 style: TextStyle(
-                    color: Color.fromARGB(210, 255, 255, 255), fontSize: 15)),
-            Text(
-              (_metronomeVolume * 100).round().toString(),
-              style: const TextStyle(color: Color.fromARGB(210, 255, 255, 255)),
+                  color: Colors.white.withValues(alpha: 0.82),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: const Color(0xFF1F89E3),
+              inactiveTrackColor: Colors.white.withValues(alpha: 0.18),
+              thumbColor: Colors.white,
+              overlayColor: Colors.white.withValues(alpha: 0.08),
+              trackHeight: 6,
             ),
-          ],
-        ),
-        Slider(
-          value: _metronomeVolume,
-          min: 0.0,
-          max: 1.0,
-          activeColor: Colors.blueAccent,
-          inactiveColor: Colors.white12,
-          onChanged: (v) {
-            _setStateAndRefreshProjectSettings(() => _metronomeVolume = v);
-            JuceAudioEngine.setMetronomeVolume(v);
-          },
-        ),
-      ],
+            child: Slider(
+              value: _metronomeVolume,
+              min: 0.0,
+              max: 1.0,
+              onChanged: (v) {
+                _setStateAndRefreshProjectSettings(() => _metronomeVolume = v);
+                JuceAudioEngine.setMetronomeVolume(v);
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildProducerCaptureUiToggle() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        const Expanded(
-          child: Text(
-            "Show Producer Capture UI",
-            style: TextStyle(
-              color: Color.fromARGB(210, 255, 255, 255),
-              fontSize: 15,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(
+              L10n.translate(context, 'Show Producer Capture UI'),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Switch(
-          key: _projectSettingsProducerCaptureSwitchKey,
-          value: _showProducerCaptureUi,
-          activeColor: Colors.blueAccent,
-          onChanged: (v) {
-            _setStateAndRefreshProjectSettings(
-                () => _showProducerCaptureUi = v);
-          },
-        ),
-      ],
+          const SizedBox(width: 12),
+          CupertinoSwitch(
+            key: _projectSettingsProducerCaptureSwitchKey,
+            value: _showProducerCaptureUi,
+            activeTrackColor: const Color(0xFF1F89E3),
+            onChanged: (v) {
+              _setStateAndRefreshProjectSettings(
+                  () => _showProducerCaptureUi = v);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _projectSettingsFieldDecoration({
+    required String labelText,
+    Widget? suffixIcon,
+  }) {
+    final border = UnderlineInputBorder(
+      borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+    );
+    return InputDecoration(
+      labelText: labelText,
+      labelStyle: TextStyle(
+        fontFamily: 'Pretendard',
+        color: Colors.white.withValues(alpha: 0.72),
+      ),
+      isDense: true,
+      filled: false,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 2, vertical: 10),
+      border: border,
+      enabledBorder: border,
+      focusedBorder: border.copyWith(
+        borderSide: const BorderSide(color: Color(0xFF1F89E3), width: 1.3),
+      ),
+      disabledBorder: border,
+      suffixIcon: suffixIcon,
     );
   }
 
@@ -14480,7 +15703,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) async {
     if (!_supportsNativeBluetoothMonitorPolicy()) return;
     if (refreshNativeRoute) {
-      await JuceAudioEngine.refreshAudioRoute(reason: 'editorRouteInfo');
+      await _requestAndroidRouteRefresh(reason: 'editorRouteInfo');
     }
     final info = await JuceAudioEngine.getAudioRouteInfo();
     if (!mounted) return;
@@ -14856,8 +16079,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.white24),
-        borderRadius: BorderRadius.circular(10),
+        color: Colors.white.withValues(alpha: 0.08),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+        borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -14970,13 +16194,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final selector = DropdownButtonFormField<String>(
       value: _selectedDevice,
       isExpanded: true,
-      decoration: InputDecoration(
+      dropdownColor: const Color(0xFF6B7379),
+      style: const TextStyle(color: Colors.white),
+      selectedItemBuilder: (context) {
+        return _inputDevices
+            .map(
+              (d) => Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  d,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            )
+            .toList(growable: false);
+      },
+      decoration: _projectSettingsFieldDecoration(
         labelText: "Input Device",
-        labelStyle: TextStyle(color: Colors.white70),
-        enabledBorder:
-            OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
-        focusedBorder:
-            OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
         suffixIcon: IconButton(
           tooltip: "Refresh audio devices",
           icon: const Icon(Icons.refresh, color: Colors.white70),
@@ -14987,7 +16222,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       ),
       items: _inputDevices
-          .map((d) => DropdownMenuItem(value: d, child: Text(d)))
+          .map(
+            (d) => DropdownMenuItem(
+              value: d,
+              child: Text(
+                d,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          )
           .toList(),
       onChanged: (name) async {
         if (name == null) return;
@@ -15032,15 +16276,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       key: ValueKey(_numInputChannels),
       value: selected,
       isExpanded: true,
-      dropdownColor: const Color(0xFF2A2F3D),
-      decoration: const InputDecoration(
-        labelText: 'Input Channel',
-        labelStyle: TextStyle(color: Colors.white70),
-        enabledBorder:
-            OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
-        focusedBorder:
-            OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
-      ),
+      dropdownColor: const Color(0xFF6B7379),
+      style: const TextStyle(color: Colors.white),
+      decoration: _projectSettingsFieldDecoration(labelText: 'Input Channel'),
       items: options
           .map(
             (option) => DropdownMenuItem<_InputChannelRouteOption>(
@@ -15079,13 +16317,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ? 'System default (speaker / Bluetooth / audio interface)'
           : routeLabel;
       return InputDecorator(
-        decoration: InputDecoration(
+        decoration: _projectSettingsFieldDecoration(
           labelText: "Output Route",
-          labelStyle: const TextStyle(color: Colors.white70),
-          enabledBorder:
-              OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
-          focusedBorder:
-              OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
           suffixIcon: IconButton(
             tooltip: "Refresh output route",
             icon: const Icon(Icons.refresh, color: Colors.white70),
@@ -15107,13 +16340,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ? 'System default (speaker / Bluetooth / audio interface)'
           : routeLabel;
       return InputDecorator(
-        decoration: InputDecoration(
+        decoration: _projectSettingsFieldDecoration(
           labelText: "Output Route",
-          labelStyle: const TextStyle(color: Colors.white70),
-          enabledBorder:
-              OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
-          focusedBorder:
-              OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
           suffixIcon: IconButton(
             tooltip: "Refresh output route",
             icon: const Icon(Icons.refresh, color: Colors.white70),
@@ -15135,13 +16363,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ? 'System default (managed by macOS audio settings)'
           : routeLabel;
       return InputDecorator(
-        decoration: InputDecoration(
+        decoration: _projectSettingsFieldDecoration(
           labelText: "Output Device",
-          labelStyle: const TextStyle(color: Colors.white70),
-          enabledBorder:
-              OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
-          focusedBorder:
-              OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
           suffixIcon: IconButton(
             tooltip: "Refresh output device",
             icon: const Icon(Icons.refresh, color: Colors.white70),
@@ -15164,17 +16387,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     return DropdownButtonFormField<MediaDeviceInfo>(
-      dropdownColor: const Color(0xFF2A2F3D),
+      dropdownColor: const Color(0xFF6B7379),
       initialValue: _selectedOutput,
       isExpanded: true,
-      decoration: const InputDecoration(
-        labelText: "Output Device",
-        labelStyle: TextStyle(color: Colors.white70),
-        enabledBorder:
-            OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
-        focusedBorder:
-            OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
-      ),
+      style: const TextStyle(color: Colors.white),
+      decoration: _projectSettingsFieldDecoration(labelText: "Output Device"),
       items: _outputs.map((d) {
         return DropdownMenuItem(
           value: d,
@@ -15217,14 +16434,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final routeName = _audioRouteInfo.outputRouteName.trim();
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.035),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -15442,7 +16653,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Widget _timePill({required String current, required String total}) {
     return GestureDetector(
-      onTap: () => setState(() => _showTempoRollDown = !_showTempoRollDown),
+      onTap: () => _toggleTopPopup(_TopPopupType.tempo),
       child: LayoutBuilder(
         builder: (context, c) {
           return _Glass(
@@ -15519,10 +16730,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildTempoRollDownPanel() {
+    final panelRadius = BorderRadius.circular(29);
+    final selectedChipColor = const Color(0xFFF4F4F4).withValues(alpha: 0.20);
+    final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
+      anchorKey: _tempoButtonKey,
+      desiredWidth: 242,
+      connectorWidth: 152,
+      centerOnToolbarPill: true,
+    );
     return Positioned(
-      top: 72,
-      left: 0,
-      right: 0,
+      top: popupLayout.top,
+      left: popupLayout.left,
       child: IgnorePointer(
         ignoring: !_showTempoRollDown,
         child: AnimatedOpacity(
@@ -15533,250 +16751,294 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             curve: Curves.easeOutCubic,
             offset: _showTempoRollDown ? Offset.zero : const Offset(0, -0.08),
             child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 258),
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF111725).withOpacity(0.97),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+              child: TweenAnimationBuilder<double>(
+                duration: const Duration(milliseconds: 170),
+                curve: Curves.easeOutCubic,
+                tween: Tween<double>(
+                  begin: 0.96,
+                  end: _showTempoRollDown ? 1.0 : 0.96,
+                ),
+                builder: (context, value, child) {
+                  return Transform.scale(
+                    scale: value,
+                    alignment: Alignment.topCenter,
+                    child: child,
+                  );
+                },
+                child: _buildConnectedTopPopupFrame(
+                  child: SizedBox(
+                    key: _tempoRollDownPanelKey,
+                    width: popupLayout.width,
+                    child: _buildDawConnectedSurface(
+                      borderRadius: panelRadius,
+                      active: true,
+                      showOverlay: false,
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const Text(
-                            'Tempo',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const Spacer(),
-                          TextButton.icon(
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.white70,
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 0),
-                              minimumSize: const Size(0, 24),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                side: const BorderSide(color: Colors.white12),
-                              ),
-                            ),
-                            onPressed: _promptTempoInput,
-                            icon: const Icon(
-                              Icons.keyboard_alt_rounded,
-                              size: 14,
-                            ),
-                            label: const Text(
-                              'Type',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Container(
-                        height: 82,
-                        margin: const EdgeInsets.only(top: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.04),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.white10),
-                        ),
-                        child: CupertinoPicker.builder(
-                          scrollController: FixedExtentScrollController(
-                            initialItem: _clampTempo(_tempo).round() - 20,
-                          ),
-                          itemExtent: 24,
-                          diameterRatio: 1.35,
-                          squeeze: 1.16,
-                          magnification: 1.06,
-                          useMagnifier: true,
-                          backgroundColor: Colors.transparent,
-                          selectionOverlay: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.06),
-                              border: Border(
-                                top: BorderSide(color: Colors.white24),
-                                bottom: BorderSide(color: Colors.white24),
-                              ),
-                            ),
-                          ),
-                          onSelectedItemChanged: (index) {
-                            _setProjectTempoFromUi((index + 20).toDouble());
-                          },
-                          itemBuilder: (context, index) {
-                            if (index < 0 || index > 979) return null;
-                            final bpm = index + 20;
-                            return Center(
-                              child: Text(
-                                '$bpm',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
+                          Row(
+                            children: [
+                              const SizedBox(width: 28),
+                              const Spacer(),
+                              Text(
+                                L10n.translate(context, 'Tempo'),
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 15,
                                   fontWeight: FontWeight.w600,
-                                  fontFeatures: [FontFeature.tabularFigures()],
+                                  letterSpacing: -0.2,
                                 ),
                               ),
-                            );
-                          },
-                          childCount: 980,
-                        ),
-                      ),
-                      const SizedBox(height: 1),
-                      Row(
-                        children: [
-                          const Text(
-                            'Tempo Mode',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
+                              const Spacer(),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints.tightFor(
+                                  width: 28,
+                                  height: 28,
+                                ),
+                                padding: EdgeInsets.zero,
+                                splashRadius: 14,
+                                color: const Color(0xB8F4F4F4),
+                                onPressed: _promptTempoInput,
+                                icon: const Icon(
+                                  Icons.dialpad_rounded,
+                                  size: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            height: 82,
+                            decoration: BoxDecoration(
+                              color: const Color.fromRGBO(244, 244, 244, 0.14),
+                              borderRadius: BorderRadius.circular(22),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            child: CupertinoPicker.builder(
+                              scrollController: FixedExtentScrollController(
+                                initialItem: _clampTempo(_tempo).round() - 20,
+                              ),
+                              itemExtent: 28,
+                              diameterRatio: 1.35,
+                              squeeze: 1.16,
+                              magnification: 1.06,
+                              useMagnifier: true,
+                              backgroundColor: Colors.transparent,
+                              selectionOverlay: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  border: Border(
+                                    top: BorderSide(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.18),
+                                    ),
+                                    bottom: BorderSide(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.18),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              onSelectedItemChanged: (index) {
+                                _setProjectTempoFromUi((index + 20).toDouble());
+                              },
+                              itemBuilder: (context, index) {
+                                if (index < 0 || index > 979) return null;
+                                final bpm = index + 20;
+                                return Center(
+                                  child: Text(
+                                    '$bpm',
+                                    style: const TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color: Color(0xFFF4F4F4),
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w600,
+                                      fontFeatures: [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                              childCount: 980,
                             ),
                           ),
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            constraints: const BoxConstraints(
-                                minWidth: 22, minHeight: 22),
-                            padding: const EdgeInsets.only(right: 2),
-                            splashRadius: 12,
-                            onPressed: _showTempoModeInfoDialog,
-                            icon: const Icon(
-                              Icons.info_outline_rounded,
-                              size: 14,
-                              color: Colors.white54,
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Text(
+                                L10n.translate(context, 'Tempo Mode'),
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints(
+                                  minWidth: 22,
+                                  minHeight: 22,
+                                ),
+                                padding: const EdgeInsets.only(right: 2),
+                                splashRadius: 12,
+                                onPressed: _showTempoModeInfoDialog,
+                                icon: const Icon(
+                                  Icons.info_outline_rounded,
+                                  size: 14,
+                                  color: Color(0xB8F4F4F4),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Container(
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: const Color.fromRGBO(244, 244, 244, 0.12),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final selectedIndex = !_tempoStretchEnabled
+                                    ? 0
+                                    : (_tempoStretchPreservePitchDefault
+                                        ? 2
+                                        : 1);
+                                const bubbleMargin = 2.0;
+                                final bubbleWidth = (constraints.maxWidth -
+                                        (bubbleMargin * 2.0)) /
+                                    3.0;
+
+                                Widget buildModeOption({
+                                  required String label,
+                                  required int optionIndex,
+                                  required VoidCallback onTap,
+                                }) {
+                                  final isSelected =
+                                      selectedIndex == optionIndex;
+                                  return Expanded(
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(16),
+                                        onTap: onTap,
+                                        splashFactory: NoSplash.splashFactory,
+                                        overlayColor:
+                                            const WidgetStatePropertyAll<Color>(
+                                          Colors.transparent,
+                                        ),
+                                        splashColor: Colors.transparent,
+                                        highlightColor: Colors.transparent,
+                                        hoverColor: Colors.transparent,
+                                        focusColor: Colors.transparent,
+                                        child: Center(
+                                          child: FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 6,
+                                              ),
+                                              child: Text(
+                                                label,
+                                                maxLines: 1,
+                                                softWrap: false,
+                                                style: TextStyle(
+                                                  color: isSelected
+                                                      ? const Color(0xFFF4F4F4)
+                                                      : const Color(0xB8F4F4F4),
+                                                  fontSize: 14,
+                                                  fontWeight: isSelected
+                                                      ? FontWeight.w600
+                                                      : FontWeight.w500,
+                                                  letterSpacing: -0.15,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+
+                                return Stack(
+                                  children: [
+                                    AnimatedPositioned(
+                                      duration:
+                                          const Duration(milliseconds: 220),
+                                      curve: Curves.easeOutCubic,
+                                      left: bubbleMargin +
+                                          (bubbleWidth * selectedIndex),
+                                      top: bubbleMargin,
+                                      bottom: bubbleMargin,
+                                      width: bubbleWidth,
+                                      child: IgnorePointer(
+                                        child: DecoratedBox(
+                                          decoration: BoxDecoration(
+                                            color: selectedChipColor,
+                                            borderRadius:
+                                                BorderRadius.circular(16),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    Row(
+                                      children: [
+                                        buildModeOption(
+                                          label: L10n.translate(context, 'Off'),
+                                          optionIndex: 0,
+                                          onTap: () => unawaited(
+                                            _setTempoStretchUiMode(
+                                              enabled: false,
+                                              preservePitch:
+                                                  _tempoStretchPreservePitchDefault,
+                                            ),
+                                          ),
+                                        ),
+                                        buildModeOption(
+                                          label: L10n.translate(
+                                              context, 'Resample'),
+                                          optionIndex: 1,
+                                          onTap: () => unawaited(
+                                            _setTempoStretchUiMode(
+                                              enabled: true,
+                                              preservePitch: false,
+                                            ),
+                                          ),
+                                        ),
+                                        buildModeOption(
+                                          label: L10n.translate(
+                                              context, 'Stretch'),
+                                          optionIndex: 2,
+                                          onTap: () => unawaited(
+                                            _setTempoStretchUiMode(
+                                              enabled: true,
+                                              preservePitch: true,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                );
+                              },
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 2),
-                      Container(
-                        height: 30,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.06),
-                          borderRadius: BorderRadius.circular(9),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: () => unawaited(
-                                  _setTempoStretchUiMode(
-                                    enabled: false,
-                                    preservePitch:
-                                        _tempoStretchPreservePitchDefault,
-                                  ),
-                                ),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 120),
-                                  curve: Curves.easeOut,
-                                  margin: const EdgeInsets.all(2),
-                                  decoration: BoxDecoration(
-                                    color: !_tempoStretchEnabled
-                                        ? Colors.blueAccent.withOpacity(0.75)
-                                        : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    'Off',
-                                    style: TextStyle(
-                                      color: !_tempoStretchEnabled
-                                          ? Colors.white
-                                          : Colors.white70,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: () => unawaited(
-                                  _setTempoStretchUiMode(
-                                    enabled: true,
-                                    preservePitch: false,
-                                  ),
-                                ),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 120),
-                                  curve: Curves.easeOut,
-                                  margin: const EdgeInsets.all(2),
-                                  decoration: BoxDecoration(
-                                    color: _tempoStretchEnabled &&
-                                            !_tempoStretchPreservePitchDefault
-                                        ? Colors.blueAccent.withOpacity(0.75)
-                                        : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    'Resample',
-                                    style: TextStyle(
-                                      color: _tempoStretchEnabled &&
-                                              !_tempoStretchPreservePitchDefault
-                                          ? Colors.white
-                                          : Colors.white70,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: () => unawaited(
-                                  _setTempoStretchUiMode(
-                                    enabled: true,
-                                    preservePitch: true,
-                                  ),
-                                ),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 120),
-                                  curve: Curves.easeOut,
-                                  margin: const EdgeInsets.all(2),
-                                  decoration: BoxDecoration(
-                                    color: _tempoStretchEnabled &&
-                                            _tempoStretchPreservePitchDefault
-                                        ? Colors.blueAccent.withOpacity(0.75)
-                                        : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    'Stretch',
-                                    style: TextStyle(
-                                      color: _tempoStretchEnabled &&
-                                              _tempoStretchPreservePitchDefault
-                                          ? Colors.white
-                                          : Colors.white70,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -20696,7 +21958,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final targetMeta = _automationTargetMetaFromAnyRow(targetId) ??
         _fallbackAutomationTargetMeta(targetId);
     setState(() {
-      _showMasterRack = true;
+      _activeTopPopup = _TopPopupType.master;
     });
     await Future<void>.delayed(const Duration(milliseconds: 40));
     if (!mounted) return;
@@ -23836,28 +25098,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
   }
 
-  Widget _buildThinkingPlaceholderBubble() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: const Color.fromARGB(100, 170, 170, 170),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: const Text(
-          '...',
-          style: TextStyle(
-            fontFamily: 'Pretendard',
-            fontSize: 15,
-            height: 1.2,
-            color: Colors.white,
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _buildThinkingPlaceholderBubble() => const _ChatThinkingBubble();
 
   void _showCopiedChatMessageFeedback(String messageId) {
     _copiedChatMessageTimer?.cancel();
@@ -24056,74 +25297,177 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       context: context,
       builder: (dialogContext) {
         final blockedWait = _formatPromptWaitDuration(status.blockedResetAt);
-        return AlertDialog(
-          backgroundColor: const Color(0xFF17191F),
-          title: const Text(
-            'Prompt limits',
-            style: TextStyle(color: Colors.white),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                status.canSubmit
-                    ? 'All AI prompts count toward the same limit.'
-                    : 'Prompt sending is paused until the current limit resets.',
-                style: const TextStyle(color: Colors.white70),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                'Daily: ${status.daily.remaining} remaining of ${status.daily.limit}',
-                style: const TextStyle(color: Colors.white),
-              ),
-              Text(
-                'Resets: ${_formatPromptResetAt(status.daily.resetsAt)}',
-                style: const TextStyle(color: Colors.white54, fontSize: 12.5),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Weekly: ${status.weekly.remaining} remaining of ${status.weekly.limit}',
-                style: const TextStyle(color: Colors.white),
-              ),
-              Text(
-                'Resets: ${_formatPromptResetAt(status.weekly.resetsAt)}',
-                style: const TextStyle(color: Colors.white54, fontSize: 12.5),
-              ),
-              if (!status.canSubmit) ...[
-                const SizedBox(height: 14),
-                Container(
-                  width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF5A2020),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Text(
-                    'You can send prompts again in $blockedWait.',
-                    style: const TextStyle(color: Colors.white),
-                  ),
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: <Color>[
+                    Color(0xFFA0A7AB),
+                    Color(0xFF7D858C),
+                    Color(0xFF626B73),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-              ],
-            ],
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.34),
+                    blurRadius: 24,
+                    offset: const Offset(0, 14),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Center(
+                    child: Text(
+                      'Prompt usage limit',
+                      style: TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    status.canSubmit
+                        ? 'All AI prompts count toward the same shared allowance.'
+                        : 'Prompt sending is paused until the blocked allowance refreshes.',
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.80),
+                      height: 1.3,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _buildPromptLimitSummaryCard(
+                    label: 'Daily',
+                    remaining: status.daily.remaining,
+                    limit: status.daily.limit,
+                    resetsAt: status.daily.resetsAt,
+                  ),
+                  const SizedBox(height: 8),
+                  _buildPromptLimitSummaryCard(
+                    label: 'Weekly',
+                    remaining: status.weekly.remaining,
+                    limit: status.weekly.limit,
+                    resetsAt: status.weekly.resetsAt,
+                  ),
+                  if (!status.canSubmit) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 11, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0x49B95B4E),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.14)),
+                      ),
+                      child: Text(
+                        'Prompts unlock again in $blockedWait.\nRefresh: ${_formatPromptResetAt(status.blockedResetAt)}',
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white,
+                          height: 1.3,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(dialogContext).pop();
+                          unawaited(_refreshPromptRateLimitStatus());
+                        },
+                        child: const Text('Refresh'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: const Text('Close'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-                unawaited(_refreshPromptRateLimitStatus());
-              },
-              child: const Text('Refresh'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Close'),
-            ),
-          ],
         );
       },
+    );
+  }
+
+  Widget _buildPromptLimitSummaryCard({
+    required String label,
+    required int remaining,
+    required int limit,
+    required DateTime? resetsAt,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color.fromRGBO(74, 96, 118, 0.52),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$label  $remaining',
+            style: const TextStyle(
+              fontFamily: 'Pretendard',
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            'Remaining of $limit',
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color: Colors.white.withValues(alpha: 0.76),
+              fontSize: 12.5,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            'Refreshes in ${_formatPromptWaitDuration(resetsAt)}',
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color: Colors.white.withValues(alpha: 0.66),
+              fontSize: 11.8,
+            ),
+          ),
+          Text(
+            _formatPromptResetAt(resetsAt),
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color: Colors.white.withValues(alpha: 0.56),
+              fontSize: 11.8,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -25064,179 +26408,216 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return true;
   }
 
-  Widget _buildOneButtonMixDetail({
-    required IconData icon,
-    required String text,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: Colors.white70, size: 16),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                height: 1.35,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<bool> _confirmOneButtonMix() async {
+    var selectedProfile = _selectedOneButtonMixProfile;
     final shouldRun = await showDialog<bool>(
       context: context,
       builder: (context) {
-        return Dialog(
-          backgroundColor: const Color(0xFF1A1F2E),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
+        return StatefulBuilder(
+          builder: (context, setDialogState) => Dialog(
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.fromLTRB(24, 18, 24, 16),
                         decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0xFF5C7AFF), Color(0xFF3050FF)],
+                          color: const Color.fromRGBO(244, 244, 244, 0.20),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.18),
                           ),
-                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: const <BoxShadow>[
+                            BoxShadow(
+                              color: Color.fromRGBO(0, 0, 0, 0.25),
+                              blurRadius: 15,
+                              spreadRadius: 8,
+                              offset: Offset.zero,
+                            ),
+                          ],
                         ),
-                        child: const Icon(
-                          Icons.auto_awesome_rounded,
-                          color: Colors.white,
-                          size: 20,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              L10n.translate(context, 'One-Button Mix'),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                height: 22 / 18,
+                                color: Color(0xFFF4F4F4),
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            Container(
+                              height: 48,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 18),
+                              decoration: BoxDecoration(
+                                color:
+                                    const Color.fromRGBO(244, 244, 244, 0.20),
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.16),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Expanded(
+                                    child: Text(
+                                      'Select Profile',
+                                      style: TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w400,
+                                        color:
+                                            Color.fromRGBO(244, 244, 244, 0.50),
+                                      ),
+                                    ),
+                                  ),
+                                  DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: selectedProfile,
+                                      dropdownColor: const Color(0xFF5F6871),
+                                      style: const TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                        color: Color(0xFFF4F4F4),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.arrow_drop_down_rounded,
+                                        color:
+                                            Color.fromRGBO(244, 244, 244, 0.75),
+                                        size: 20,
+                                      ),
+                                      items: const [
+                                        DropdownMenuItem<String>(
+                                          value: 'Mixroom Producer',
+                                          child: Text('Mixroom Producer'),
+                                        ),
+                                      ],
+                                      onChanged: (nextProfile) {
+                                        if (nextProfile == null) return;
+                                        setDialogState(() {
+                                          selectedProfile = nextProfile;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'This will :\n'
+                                '  \u2022  Balance levels\n'
+                                '  \u2022  Reduce masking\n'
+                                '  \u2022  Improve clarity\n'
+                                '\n'
+                                'You can undo everything.',
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w400,
+                                  height: 18 / 15,
+                                  color: Color(0xFFF4F4F4),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          L10n.translate(context, 'One-Button Mix'),
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    L10n.translate(
-                      context,
-                      'Mixroom AI will make a fast finishing pass across the current project.',
-                    ),
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                      height: 1.45,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF22283A),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.08)),
-                    ),
-                    child: Column(
-                      children: [
-                        _buildOneButtonMixDetail(
-                          icon: Icons.tune_rounded,
-                          text: L10n.translate(
-                            context,
-                            'Balance levels across the mix.',
-                          ),
-                        ),
-                        Divider(
-                          height: 1,
-                          color: Colors.white.withOpacity(0.06),
-                        ),
-                        _buildOneButtonMixDetail(
-                          icon: Icons.graphic_eq_rounded,
-                          text: L10n.translate(
-                            context,
-                            'Reduce masking and clean up harsh areas.',
-                          ),
-                        ),
-                        Divider(
-                          height: 1,
-                          color: Colors.white.withOpacity(0.06),
-                        ),
-                        _buildOneButtonMixDetail(
-                          icon: Icons.waves_rounded,
-                          text: L10n.translate(
-                            context,
-                            'Improve clarity and add tasteful space.',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    L10n.translate(
-                      context,
-                      'You can undo everything after it runs.',
-                    ),
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 13,
                     ),
                   ),
                   const SizedBox(height: 20),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: Text(
-                          L10n.translate(context, 'Cancel'),
-                          style: TextStyle(color: Colors.white70),
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(24),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                            child: Container(
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color:
+                                    const Color.fromRGBO(244, 244, 244, 0.20),
+                                borderRadius: BorderRadius.circular(24),
+                                boxShadow: const <BoxShadow>[
+                                  BoxShadow(
+                                    color: Color.fromRGBO(0, 0, 0, 0.25),
+                                    blurRadius: 15,
+                                    spreadRadius: 8,
+                                    offset: Offset.zero,
+                                  ),
+                                ],
+                              ),
+                              child: TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFFF4F4F4),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(24),
+                                  ),
+                                  textStyle: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                ),
+                                child: Text(L10n.translate(context, 'Cancel')),
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2E6EEB),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Container(
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: const Color.fromRGBO(0, 149, 255, 0.60),
+                            borderRadius: BorderRadius.circular(24),
+                            boxShadow: const <BoxShadow>[
+                              BoxShadow(
+                                color: Color.fromRGBO(0, 0, 0, 0.25),
+                                blurRadius: 15,
+                                spreadRadius: 8,
+                                offset: Offset.zero,
+                              ),
+                            ],
                           ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 12,
+                          child: TextButton(
+                            onPressed: () {
+                              _selectedOneButtonMixProfile = selectedProfile;
+                              Navigator.pop(context, true);
+                            },
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFFF4F4F4),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              textStyle: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            child: Text(L10n.translate(context, 'Run')),
                           ),
-                        ),
-                        child: Text(
-                          L10n.translate(context, 'Run Mix'),
                         ),
                       ),
                     ],
@@ -25518,43 +26899,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // ScaffoldMessenger.of(context).showSnackBar(...)
   }
 
-  Widget _buildChatFeedbackButton() {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: const Color(0xFF152744).withValues(alpha: 0.96),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.12),
+  Widget _buildChatHeaderActionButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback? onPressed,
+  }) {
+    return TextButton.icon(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        minimumSize: const Size(0, 34),
+        padding: const EdgeInsets.symmetric(horizontal: 11),
+        foregroundColor: Colors.white70,
+        backgroundColor: const Color.fromRGBO(73, 84, 96, 0.56),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(999),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.28),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
-      child: IconButton(
-        tooltip: 'Send feedback or bug report',
-        onPressed:
-            _feedbackSubmissionInFlight ? null : _openDawFeedbackComposer,
-        icon: const Icon(
-          Icons.forum_outlined,
-          color: Colors.white,
+      icon: Icon(icon, size: 15),
+      label: Text(
+        label,
+        style: const TextStyle(
+          fontFamily: 'Pretendard',
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.1,
         ),
       ),
     );
   }
 
   double _androidTransportBottomInset(BuildContext context) {
-    const androidTransportBottomOffset = 10.0;
-    if (defaultTargetPlatform != TargetPlatform.android) {
-      return 0.0;
-    }
-    return math.max(
-      0.0,
-      MediaQuery.viewPaddingOf(context).bottom - androidTransportBottomOffset,
-    );
+    if (!Platform.isAndroid) return 0.0;
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final viewPadding = MediaQuery.viewPaddingOf(context).bottom;
+    final navInset = math.max(bottomPadding, viewPadding);
+    if (navInset <= 0.0) return 15.0;
+    return (navInset + 11.0).clamp(15.0, 25.0).toDouble();
   }
 
   Widget _buildBottomChatAndTransport({
@@ -25562,352 +26943,382 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool includeProducerCapture = true,
     bool includeTransport = true,
   }) {
-    final bottomInset =
+    final safeAreaBottomInset =
+        includeTransport ? MediaQuery.paddingOf(context).bottom : 0.0;
+    final effectiveTransportInset =
         includeTransport ? _androidTransportBottomInset(context) : 0.0;
-
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottomInset),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (includeProducerCapture)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: _producerCapturePanelMinimized ? 10 : 12,
-                      vertical: _producerCapturePanelMinimized ? 8 : 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(_kChatChromeOpacity),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.white.withOpacity(0.14)),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.science_outlined,
-                                color: Colors.white, size: 16),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _producerCapturePanelMinimized
-                                    ? _producerCaptureCompactStatusLabel()
-                                    : _producerCaptureStatusLabel(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            IconButton(
-                              constraints: const BoxConstraints(
-                                  minWidth: 32, minHeight: 32),
-                              padding: EdgeInsets.zero,
-                              tooltip:
-                                  'Capture current producer final after-state',
-                              onPressed: _producerDataMode &&
-                                      _producerCollector.hasPendingPromptCycle
-                                  ? () async {
-                                      await _finalizeProducerPromptCycle(
-                                        disposition: 'manual_mark',
-                                      );
-                                      if (mounted) setState(() {});
-                                    }
-                                  : null,
-                              icon: Icon(
-                                Icons.check_circle_outline,
-                                size: 17,
-                                color: _producerDataMode &&
-                                        _producerCollector.hasPendingPromptCycle
-                                    ? Colors.white
-                                    : Colors.white.withOpacity(0.35),
-                              ),
-                            ),
-                            IconButton(
-                              constraints: const BoxConstraints(
-                                  minWidth: 32, minHeight: 32),
-                              padding: EdgeInsets.zero,
-                              tooltip: 'Export producer session',
-                              onPressed: _producerDataMode
-                                  ? () async {
-                                      await _exportProducerSession();
-                                      if (mounted) setState(() {});
-                                    }
-                                  : null,
-                              icon: Icon(
-                                Icons.ios_share_rounded,
-                                size: 17,
-                                color: _producerDataMode
-                                    ? Colors.white
-                                    : Colors.white.withOpacity(0.35),
-                              ),
-                            ),
-                            IconButton(
-                              constraints: const BoxConstraints(
-                                  minWidth: 32, minHeight: 32),
-                              padding: EdgeInsets.zero,
-                              tooltip: _producerCapturePanelMinimized
-                                  ? 'Expand producer capture'
-                                  : 'Minimize producer capture',
-                              onPressed: _producerDataMode
-                                  ? () {
-                                      setState(() {
-                                        _producerCapturePanelMinimized =
-                                            !_producerCapturePanelMinimized;
-                                      });
-                                    }
-                                  : null,
-                              icon: Icon(
-                                _producerCapturePanelMinimized
-                                    ? Icons.unfold_more_rounded
-                                    : Icons.unfold_less_rounded,
-                                size: 17,
-                                color: _producerDataMode
-                                    ? Colors.white
-                                    : Colors.white.withOpacity(0.35),
-                              ),
-                            ),
-                            Switch.adaptive(
-                              value: _producerDataMode,
-                              onChanged: _producerUiBusy
-                                  ? null
-                                  : (v) async {
-                                      await _setProducerDataMode(v);
-                                      if (mounted) setState(() {});
-                                    },
-                            ),
-                          ],
-                        ),
-                        if (_producerDataMode &&
-                            !_producerCapturePanelMinimized)
-                          _buildProducerGuidedPromptPanel(),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (includeProducerCapture)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                child: Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: _producerCapturePanelMinimized ? 10 : 12,
+                    vertical: _producerCapturePanelMinimized ? 8 : 10,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: <Color>[
+                        Color.fromRGBO(94, 104, 114, 0.90),
+                        Color.fromRGBO(58, 66, 75, 0.94),
                       ],
                     ),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.24),
+                        blurRadius: 18,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.science_outlined,
+                              color: Colors.white, size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _producerCapturePanelMinimized
+                                  ? _producerCaptureCompactStatusLabel()
+                                  : _producerCaptureStatusLabel(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          IconButton(
+                            constraints: const BoxConstraints(
+                                minWidth: 32, minHeight: 32),
+                            padding: EdgeInsets.zero,
+                            tooltip:
+                                'Capture current producer final after-state',
+                            onPressed: _producerDataMode &&
+                                    _producerCollector.hasPendingPromptCycle
+                                ? () async {
+                                    await _finalizeProducerPromptCycle(
+                                      disposition: 'manual_mark',
+                                    );
+                                    if (mounted) setState(() {});
+                                  }
+                                : null,
+                            icon: Icon(
+                              Icons.check_circle_outline,
+                              size: 17,
+                              color: _producerDataMode &&
+                                      _producerCollector.hasPendingPromptCycle
+                                  ? Colors.white
+                                  : Colors.white.withOpacity(0.35),
+                            ),
+                          ),
+                          IconButton(
+                            constraints: const BoxConstraints(
+                                minWidth: 32, minHeight: 32),
+                            padding: EdgeInsets.zero,
+                            tooltip: 'Export producer session',
+                            onPressed: _producerDataMode
+                                ? () async {
+                                    await _exportProducerSession();
+                                    if (mounted) setState(() {});
+                                  }
+                                : null,
+                            icon: Icon(
+                              Icons.ios_share_rounded,
+                              size: 17,
+                              color: _producerDataMode
+                                  ? Colors.white
+                                  : Colors.white.withOpacity(0.35),
+                            ),
+                          ),
+                          IconButton(
+                            constraints: const BoxConstraints(
+                                minWidth: 32, minHeight: 32),
+                            padding: EdgeInsets.zero,
+                            tooltip: _producerCapturePanelMinimized
+                                ? 'Expand producer capture'
+                                : 'Minimize producer capture',
+                            onPressed: _producerDataMode
+                                ? () {
+                                    setState(() {
+                                      _producerCapturePanelMinimized =
+                                          !_producerCapturePanelMinimized;
+                                    });
+                                  }
+                                : null,
+                            icon: Icon(
+                              _producerCapturePanelMinimized
+                                  ? Icons.unfold_more_rounded
+                                  : Icons.unfold_less_rounded,
+                              size: 17,
+                              color: _producerDataMode
+                                  ? Colors.white
+                                  : Colors.white.withOpacity(0.35),
+                            ),
+                          ),
+                          Switch.adaptive(
+                            value: _producerDataMode,
+                            onChanged: _producerUiBusy
+                                ? null
+                                : (v) async {
+                                    await _setProducerDataMode(v);
+                                    if (mounted) setState(() {});
+                                  },
+                          ),
+                        ],
+                      ),
+                      if (_producerDataMode && !_producerCapturePanelMinimized)
+                        _buildProducerGuidedPromptPanel(),
+                    ],
                   ),
                 ),
               ),
             ),
-          // === Chat Field Section WITH padding ===
-          // Padding(
-          //   padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-          //   child: _Glass(
-          //     radius: 22,
-          //     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          //     opacity: 0.10,
-          //     child: Row(
-          //       children: [
-          //         Container(
-          //           width: 28,
-          //           height: 28,
-          //           decoration: BoxDecoration(
-          //             color: Colors.white.withOpacity(0.12),
-          //             borderRadius: BorderRadius.circular(10),
-          //             border: Border.all(color: Colors.white.withOpacity(0.14)),
-          //           ),
-          //           child: const Icon(Icons.chat_bubble_outline, size: 16, color: Colors.white),
-          //         ),
-          //         const SizedBox(width: 10),
-          //         Text(
-          //           'Type...',
-          //           style: TextStyle(
-          //             color: Colors.white.withOpacity(0.72),
-          //             fontSize: 15,
-          //           ),
-          //         ),
-          //       ],
-          //     ),
-          //   ),
-          // ),
-          if (includeChatBar)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // === GLASS CHAT BAR (fills available space) ===
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                    child: Builder(
-                      builder: (context) {
-                        Widget chatBar = _ChatBar(
-                          expanded: _chatInputActive,
-                          hasText: _chatHasText,
-                          controller: _chatTextController,
-                          focusNode: _chatFocusNode,
-                          readOnly: _dawTutorialChatPromptLocked,
-                          tutorialHighlighter: _mixHighlighter,
-                          promptRateLimitStatus: _promptRateLimitStatus,
-                          promptRateLimitLoading: _promptRateLimitLoading,
-                          onShowPromptRateLimits: () {
-                            unawaited(_showPromptRateLimitDialog());
-                          },
-                          onTapBar: () {
-                            unawaited(
-                                _refreshPromptRateLimitStatus(silent: true));
-                            if (_sampleBrowserVisible) {
-                              unawaited(_stopSampleAudition());
-                            }
-                            if (!_chatExpanded) {
-                              setState(() {
-                                _showAddActionsPanel = false;
-                                _sampleBrowserVisible = false;
-                                _sampleBrowserExpanded = false;
-                                _sampleDragActive = false;
-                                _reopenSampleBrowserAfterDrag = false;
-                                _reopenSampleBrowserExpanded = false;
-                                _chatExpanded = true;
-                                // Desktop chat should accept hardware keyboard
-                                // immediately on first click.
-                                _chatInputActive = Platform.isMacOS;
-                              });
-                              _handleDawOnboardingChatOpened();
-                              if (Platform.isMacOS) {
-                                WidgetsBinding.instance
-                                    .addPostFrameCallback((_) {
-                                  if (!mounted) return;
-                                  _chatFocusNode.requestFocus();
-                                });
-                              }
-                              if (!_hasTrackedAiAssistantScreen) {
-                                _hasTrackedAiAssistantScreen = true;
-                                unawaited(
-                                  AnalyticsService.instance.trackScreen(
-                                    AnalyticsScreenNames.aiAssistant,
-                                    properties: <String, Object?>{
-                                      'project_id': _projectId,
-                                    },
-                                  ),
-                                );
-                                unawaited(
-                                  AnalyticsService.instance.track(
-                                    AnalyticsEvents.aiFeatureViewed(
-                                      featureName: 'assistant_chat',
-                                    ),
-                                  ),
-                                );
-                              }
-                              return;
-                            }
-                            if (!_chatInputActive) {
-                              setState(() {
-                                _showAddActionsPanel = false;
-                                _sampleBrowserVisible = false;
-                                _sampleBrowserExpanded = false;
-                                _sampleDragActive = false;
-                                _reopenSampleBrowserAfterDrag = false;
-                                _reopenSampleBrowserExpanded = false;
-                                _chatInputActive = true;
-                              });
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (!mounted) return;
-                                _chatFocusNode.requestFocus();
-                              });
-                              return;
-                            }
-                            if (!_chatFocusNode.hasFocus) {
+          ),
+        // === Chat Field Section WITH padding ===
+        // Padding(
+        //   padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        //   child: _Glass(
+        //     radius: 22,
+        //     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        //     opacity: 0.10,
+        //     child: Row(
+        //       children: [
+        //         Container(
+        //           width: 28,
+        //           height: 28,
+        //           decoration: BoxDecoration(
+        //             color: Colors.white.withOpacity(0.12),
+        //             borderRadius: BorderRadius.circular(10),
+        //             border: Border.all(color: Colors.white.withOpacity(0.14)),
+        //           ),
+        //           child: const Icon(Icons.chat_bubble_outline, size: 16, color: Colors.white),
+        //         ),
+        //         const SizedBox(width: 10),
+        //         Text(
+        //           'Type...',
+        //           style: TextStyle(
+        //             color: Colors.white.withOpacity(0.72),
+        //             fontSize: 15,
+        //           ),
+        //         ),
+        //       ],
+        //     ),
+        //   ),
+        // ),
+        if (includeChatBar)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // === GLASS CHAT BAR (fills available space) ===
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                  child: Builder(
+                    builder: (context) {
+                      Widget chatBar = _ChatBar(
+                        expanded: _chatInputActive,
+                        hasText: _chatHasText,
+                        controller: _chatTextController,
+                        focusNode: _chatFocusNode,
+                        readOnly: _dawTutorialChatPromptLocked,
+                        tutorialHighlighter: _mixHighlighter,
+                        promptRateLimitStatus: _promptRateLimitStatus,
+                        promptRateLimitLoading: _promptRateLimitLoading,
+                        onShowPromptRateLimits: () {
+                          unawaited(_showPromptRateLimitDialog());
+                        },
+                        onTapBar: () {
+                          unawaited(
+                              _refreshPromptRateLimitStatus(silent: true));
+                          if (_sampleBrowserVisible) {
+                            unawaited(_stopSampleAudition());
+                          }
+                          if (!_chatExpanded) {
+                            setState(() {
+                              _showAddActionsPanel = false;
+                              _sampleBrowserVisible = false;
+                              _sampleBrowserExpanded = false;
+                              _sampleDragActive = false;
+                              _reopenSampleBrowserAfterDrag = false;
+                              _reopenSampleBrowserExpanded = false;
+                              _chatExpanded = true;
+                              // Desktop chat should accept hardware keyboard
+                              // immediately on first click.
+                              _chatInputActive = Platform.isMacOS;
+                            });
+                            _handleDawOnboardingChatOpened();
+                            if (Platform.isMacOS) {
                               WidgetsBinding.instance.addPostFrameCallback((_) {
                                 if (!mounted) return;
                                 _chatFocusNode.requestFocus();
                               });
                             }
-                          },
-                          onSubmit: () async {
-                            final text = _chatTextController.text.trim();
-                            if (text.isEmpty) return;
-                            _chatTextController.clear();
-                            _chatFocusNode.unfocus();
-                            await _submitChatPrompt(text);
-                          },
+                            if (!_hasTrackedAiAssistantScreen) {
+                              _hasTrackedAiAssistantScreen = true;
+                              unawaited(
+                                AnalyticsService.instance.trackScreen(
+                                  AnalyticsScreenNames.aiAssistant,
+                                  properties: <String, Object?>{
+                                    'project_id': _projectId,
+                                  },
+                                ),
+                              );
+                              unawaited(
+                                AnalyticsService.instance.track(
+                                  AnalyticsEvents.aiFeatureViewed(
+                                    featureName: 'assistant_chat',
+                                  ),
+                                ),
+                              );
+                            }
+                            return;
+                          }
+                          if (!_chatInputActive) {
+                            setState(() {
+                              _showAddActionsPanel = false;
+                              _sampleBrowserVisible = false;
+                              _sampleBrowserExpanded = false;
+                              _sampleDragActive = false;
+                              _reopenSampleBrowserAfterDrag = false;
+                              _reopenSampleBrowserExpanded = false;
+                              _chatInputActive = true;
+                            });
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (!mounted) return;
+                              _chatFocusNode.requestFocus();
+                            });
+                            return;
+                          }
+                          if (!_chatFocusNode.hasFocus) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (!mounted) return;
+                              _chatFocusNode.requestFocus();
+                            });
+                          }
+                        },
+                        onSubmit: () async {
+                          final text = _chatTextController.text.trim();
+                          if (text.isEmpty) return;
+                          _chatTextController.clear();
+                          _chatFocusNode.unfocus();
+                          await _submitChatPrompt(text);
+                        },
+                      );
+                      if (_showDawOnboarding) {
+                        chatBar = Halo(
+                          highlighter: _mixHighlighter,
+                          haloKey: const HaloKey('tutorial:chatbar'),
+                          borderRadius: BorderRadius.circular(18),
+                          child: chatBar,
                         );
-                        if (_showDawOnboarding) {
-                          chatBar = Halo(
-                            highlighter: _mixHighlighter,
-                            haloKey: const HaloKey('tutorial:chatbar'),
-                            borderRadius: BorderRadius.circular(18),
-                            child: chatBar,
-                          );
-                        }
-                        return chatBar;
-                      },
-                    ),
+                      }
+                      return chatBar;
+                    },
                   ),
                 ),
-                if (_chatExpanded)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(0, 10, 8, 10),
-                    child: _buildChatFeedbackButton(),
-                  ),
-
-                if (!_chatInputActive)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(0, 10, 16, 10),
+              ),
+              Padding(
+                key: _addButtonAnchorKey,
+                padding: const EdgeInsets.fromLTRB(0, 10, 16, 10),
+                child: IgnorePointer(
+                  ignoring: _chatInputActive,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 120),
+                    opacity: _chatInputActive ? 0.34 : 1.0,
                     child: Halo(
                       highlighter: _mixHighlighter,
                       haloKey: const HaloKey('tutorial:add_button'),
                       borderRadius: BorderRadius.circular(999),
                       child: ClipOval(
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                          child: AnimatedScale(
-                            duration: const Duration(milliseconds: 120),
-                            curve: Curves.easeOutCubic,
-                            scale: _addButtonPressed ? 0.94 : 1.0,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 140),
-                              width: 42,
-                              height: 42,
-                              decoration: BoxDecoration(
-                                color: _showAddActionsPanel
-                                    ? const Color(0x33558DFF)
-                                    : Colors.white
-                                        .withOpacity(_kChatChromeOpacity),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: _showAddActionsPanel
-                                      ? const Color(0xAA8BB6FF)
-                                      : Colors.white.withOpacity(0.14),
-                                ),
-                                boxShadow: _showAddActionsPanel
-                                    ? [
-                                        BoxShadow(
-                                          color: const Color(0x662E6EEB)
-                                              .withOpacity(0.45),
-                                          blurRadius: 14,
-                                          spreadRadius: 1.5,
-                                        ),
-                                      ]
-                                    : const [],
+                        child: AnimatedScale(
+                          duration: const Duration(milliseconds: 120),
+                          curve: Curves.easeOutCubic,
+                          scale: _addButtonPressed ? 0.94 : 1.0,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 140),
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                stops: <double>[0.5625, 1.0],
+                                colors: <Color>[
+                                  Color.fromRGBO(25, 94, 160, 0.50),
+                                  Color.fromRGBO(244, 244, 244, 0.50),
+                                ],
                               ),
-                              child: InkWell(
-                                customBorder: const CircleBorder(),
-                                onHighlightChanged: (pressed) {
-                                  if (!mounted) return;
-                                  setState(() {
-                                    _addButtonPressed = pressed;
-                                  });
+                              shape: BoxShape.circle,
+                              boxShadow: const <BoxShadow>[
+                                BoxShadow(
+                                  color: Color.fromRGBO(0, 0, 0, 0.25),
+                                  blurRadius: 15,
+                                  spreadRadius: 8,
+                                  offset: Offset.zero,
+                                ),
+                              ],
+                            ),
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onHighlightChanged: (pressed) {
+                                if (!mounted) return;
+                                setState(() {
+                                  _addButtonPressed = pressed;
+                                });
+                              },
+                              onTap: () {
+                                if (_sampleBrowserVisible) {
+                                  _closeAddActionsPanel();
+                                  unawaited(_closeSampleBrowser());
+                                  return;
+                                }
+                                if (_showAddActionsPanel) {
+                                  _closeAddActionsPanel();
+                                } else {
+                                  _openAddActionsPanel(userInitiated: true);
+                                }
+                              },
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 140),
+                                switchInCurve: Curves.easeOutCubic,
+                                switchOutCurve: Curves.easeInCubic,
+                                transitionBuilder: (child, animation) {
+                                  return RotationTransition(
+                                    turns: Tween<double>(
+                                      begin: 0.85,
+                                      end: 1.0,
+                                    ).animate(animation),
+                                    child: FadeTransition(
+                                      opacity: animation,
+                                      child: child,
+                                    ),
+                                  );
                                 },
-                                onTap: () {
-                                  if (_sampleBrowserVisible) {
-                                    _closeAddActionsPanel();
-                                    unawaited(_closeSampleBrowser());
-                                    return;
-                                  }
-                                  if (_showAddActionsPanel) {
-                                    _closeAddActionsPanel();
-                                  } else {
-                                    _openAddActionsPanel(userInitiated: true);
-                                  }
-                                },
-                                child: const Icon(Icons.add,
-                                    color: Colors.white, size: 26),
+                                child: Icon(
+                                  _showAddActionsPanel
+                                      ? Icons.close_rounded
+                                      : Icons.add,
+                                  key: ValueKey<bool>(_showAddActionsPanel),
+                                  color: Colors.white,
+                                  size: _showAddActionsPanel ? 20 : 16,
+                                ),
                               ),
                             ),
                           ),
@@ -25915,508 +27326,390 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+              ),
+            ],
+          ),
 
-          // ==== Transport Drawer =============================================
-          if (includeTransport)
-            Halo(
+        // ==== Transport Drawer =============================================
+        if (includeTransport)
+          Padding(
+            padding: EdgeInsets.only(bottom: effectiveTransportInset),
+            child: Halo(
               highlighter: _mixHighlighter,
               haloKey: const HaloKey('tutorial:toolbar'),
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(28)),
-              child: Container(
-                width: double.infinity,
-                decoration: const BoxDecoration(color: Colors.transparent),
-                child: ClipRRect(
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(28)),
-                  // child: BackdropFilter(
-                  // filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    decoration: BoxDecoration(
-                      color:
-                          Colors.white.withOpacity(0.07), // softer white glass
-                      borderRadius:
-                          const BorderRadius.vertical(top: Radius.circular(28)),
-                      border: Border(
-                          top: BorderSide(
-                              color: Colors.white.withOpacity(0.08))),
-                      boxShadow: [
-                        BoxShadow(
-                            color: Colors.black.withOpacity(0.3),
-                            blurRadius: 30,
-                            offset: const Offset(0, -12)),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Main transport drawer
-                        SizedBox(
-                          height: 84,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              // --- Left: Undo / Redo -----------------------------------
-                              Expanded(
-                                flex: 2,
-                                child: Padding(
-                                  padding: EdgeInsets.only(right: 6),
-                                  child: LayoutBuilder(
-                                    builder: (context, constraints) {
-                                      final height =
-                                          constraints.maxHeight * 0.6;
-                                      return Container(
-                                        height: height,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(34),
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth:
+                        math.min(MediaQuery.sizeOf(context).width - 24, 378),
+                  ),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      if (safeAreaBottomInset > 0)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: -safeAreaBottomInset,
+                          height: safeAreaBottomInset + 2.0,
+                          child: IgnorePointer(
+                            child: DecoratedBox(
+                              decoration: const BoxDecoration(
+                                color: Color.fromRGBO(244, 244, 244, 0.40),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(34),
+                        ),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                          child: Container(
+                            height: _kTransportBarHeight,
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                stops: <double>[0.5625, 1.0],
+                                colors: <Color>[
+                                  Color.fromRGBO(25, 94, 160, 0.40),
+                                  Color.fromRGBO(244, 244, 244, 0.40),
+                                ],
+                              ),
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(34),
+                              ),
+                              boxShadow: const <BoxShadow>[
+                                BoxShadow(
+                                  color: Color.fromRGBO(0, 0, 0, 0.25),
+                                  blurRadius: 15,
+                                  spreadRadius: 8,
+                                  offset: Offset.zero,
+                                ),
+                              ],
+                            ),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                const double baseUndoWidth = 96;
+                                const double baseCenterWidth = 168;
+                                const double baseMixWidth = 96;
+                                const double baseTransportGroupGap = 10;
+                                const double baseTotalWidth = baseUndoWidth +
+                                    baseCenterWidth +
+                                    baseMixWidth +
+                                    (baseTransportGroupGap * 2);
+                                final widthScale = constraints.maxWidth <= 0
+                                    ? 1.0
+                                    : math.min(
+                                        1.0,
+                                        constraints.maxWidth / baseTotalWidth,
+                                      );
+                                final undoWidth = baseUndoWidth * widthScale;
+                                final centerWidth =
+                                    baseCenterWidth * widthScale;
+                                final mixWidth = baseMixWidth * widthScale;
+                                final groupGap =
+                                    baseTransportGroupGap * widthScale;
+
+                                return Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    SizedBox(
+                                      width: undoWidth,
+                                      height: 48,
+                                      child: Container(
                                         decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.06),
+                                          color: const Color.fromRGBO(
+                                              244, 244, 244, 0.30),
                                           borderRadius:
-                                              BorderRadius.circular(22),
-                                          border: Border.all(
-                                              color: Colors.white
-                                                  .withOpacity(0.14)),
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.spaceEvenly,
-                                          children: [
-                                            Expanded(
-                                              child: Material(
-                                                color: Colors.transparent,
-                                                child: InkWell(
-                                                  borderRadius:
-                                                      const BorderRadius.only(
-                                                    topLeft:
-                                                        Radius.circular(22),
-                                                    bottomLeft:
-                                                        Radius.circular(22),
-                                                  ),
-                                                  onTap: _undoManager.canUndo
-                                                      ? () async {
-                                                          final action =
-                                                              await _undoManager
-                                                                  .undo();
-                                                          if (!mounted ||
-                                                              action == null)
-                                                            return;
-
-                                                          final messenger =
-                                                              ScaffoldMessenger
-                                                                  .of(context);
-                                                          messenger
-                                                              .hideCurrentSnackBar();
-                                                          messenger
-                                                              .showSnackBar(
-                                                            SnackBar(
-                                                              content: Text(
-                                                                  'Undo: ${action.description}'),
-                                                              duration:
-                                                                  const Duration(
-                                                                      milliseconds:
-                                                                          1200),
-                                                            ),
-                                                          );
-
-                                                          setState(() {});
-                                                        }
-                                                      : null,
-                                                  child: SizedBox.expand(
-                                                    child: Center(
-                                                      child: Icon(
-                                                        Icons.undo,
-                                                        size: 20,
-                                                        color: _undoManager
-                                                                .canUndo
-                                                            ? Colors.white
-                                                            : Colors.white
-                                                                .withOpacity(
-                                                                    0.3),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                            Container(
-                                                width: 1,
-                                                height: 28,
-                                                color: Colors.white
-                                                    .withOpacity(0.2)),
-                                            Expanded(
-                                              child: Material(
-                                                color: Colors.transparent,
-                                                child: InkWell(
-                                                  borderRadius:
-                                                      const BorderRadius.only(
-                                                    topRight:
-                                                        Radius.circular(22),
-                                                    bottomRight:
-                                                        Radius.circular(22),
-                                                  ),
-                                                  onTap: _undoManager.canRedo
-                                                      ? () async {
-                                                          final action =
-                                                              await _undoManager
-                                                                  .redo();
-                                                          if (!mounted ||
-                                                              action == null)
-                                                            return;
-
-                                                          final messenger =
-                                                              ScaffoldMessenger
-                                                                  .of(context);
-                                                          messenger
-                                                              .hideCurrentSnackBar();
-                                                          messenger
-                                                              .showSnackBar(
-                                                            SnackBar(
-                                                              content: Text(
-                                                                  'Redo: ${action.description}'),
-                                                              duration:
-                                                                  const Duration(
-                                                                      milliseconds:
-                                                                          1200),
-                                                            ),
-                                                          );
-                                                          setState(() {});
-                                                        }
-                                                      : null,
-                                                  child: SizedBox.expand(
-                                                    child: Center(
-                                                      child: Icon(
-                                                        Icons.redo,
-                                                        size: 20,
-                                                        color: _undoManager
-                                                                .canRedo
-                                                            ? Colors.white
-                                                            : Colors.white
-                                                                .withOpacity(
-                                                                    0.3),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
+                                              BorderRadius.circular(24),
+                                          boxShadow: const <BoxShadow>[
+                                            BoxShadow(
+                                              color:
+                                                  Color.fromRGBO(0, 0, 0, 0.25),
+                                              blurRadius: 15,
+                                              spreadRadius: 8,
+                                              offset: Offset.zero,
                                             ),
                                           ],
                                         ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-
-                              // --- Center Transport ------------------------------------
-                              Expanded(
-                                flex: 4,
-                                child: Padding(
-                                  padding: EdgeInsets.fromLTRB(3, 0, 3, 0),
-                                  child: LayoutBuilder(
-                                    builder: (context, constraints) {
-                                      final height =
-                                          constraints.maxHeight * 0.6;
-                                      final iconSize = height * 0.55;
-                                      final borderRadius =
-                                          BorderRadius.circular(height / 2);
-
-                                      return Container(
-                                        height: height,
+                                        child: Row(
+                                          children: [
+                                            _transportSegment(
+                                              icon: Icons.undo,
+                                              onTap: _undoManager.canUndo
+                                                  ? () async {
+                                                      final action =
+                                                          await _undoManager
+                                                              .undo();
+                                                      if (!mounted ||
+                                                          action == null) {
+                                                        return;
+                                                      }
+                                                      final messenger =
+                                                          ScaffoldMessenger.of(
+                                                              context);
+                                                      messenger
+                                                          .hideCurrentSnackBar();
+                                                      messenger.showSnackBar(
+                                                        SnackBar(
+                                                          content: Text(
+                                                            'Undo: ${action.description}',
+                                                          ),
+                                                          duration:
+                                                              const Duration(
+                                                            milliseconds: 1200,
+                                                          ),
+                                                        ),
+                                                      );
+                                                      setState(() {});
+                                                    }
+                                                  : () {},
+                                              radius: const BorderRadius.only(
+                                                topLeft: Radius.circular(24),
+                                                bottomLeft: Radius.circular(24),
+                                              ),
+                                              iconSize: 20,
+                                              iconColor: _undoManager.canUndo
+                                                  ? Colors.white
+                                                  : Colors.white.withValues(
+                                                      alpha: 0.32,
+                                                    ),
+                                            ),
+                                            _verticalDivider(48),
+                                            _transportSegment(
+                                              icon: Icons.redo,
+                                              onTap: _undoManager.canRedo
+                                                  ? () async {
+                                                      final action =
+                                                          await _undoManager
+                                                              .redo();
+                                                      if (!mounted ||
+                                                          action == null) {
+                                                        return;
+                                                      }
+                                                      final messenger =
+                                                          ScaffoldMessenger.of(
+                                                              context);
+                                                      messenger
+                                                          .hideCurrentSnackBar();
+                                                      messenger.showSnackBar(
+                                                        SnackBar(
+                                                          content: Text(
+                                                            'Redo: ${action.description}',
+                                                          ),
+                                                          duration:
+                                                              const Duration(
+                                                            milliseconds: 1200,
+                                                          ),
+                                                        ),
+                                                      );
+                                                      setState(() {});
+                                                    }
+                                                  : () {},
+                                              radius: const BorderRadius.only(
+                                                topRight: Radius.circular(24),
+                                                bottomRight:
+                                                    Radius.circular(24),
+                                              ),
+                                              iconSize: 20,
+                                              iconColor: _undoManager.canRedo
+                                                  ? Colors.white
+                                                  : Colors.white.withValues(
+                                                      alpha: 0.32,
+                                                    ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: groupGap),
+                                    SizedBox(
+                                      width: centerWidth,
+                                      height: 48,
+                                      child: Container(
                                         decoration: BoxDecoration(
-                                          color: Colors.white.withOpacity(0.06),
-                                          borderRadius: borderRadius,
-                                          border: Border.all(
-                                              color: Colors.white
-                                                  .withOpacity(0.14)),
+                                          color: const Color.fromRGBO(
+                                              244, 244, 244, 0.30),
+                                          borderRadius:
+                                              BorderRadius.circular(24),
+                                          boxShadow: const <BoxShadow>[
+                                            BoxShadow(
+                                              color:
+                                                  Color.fromRGBO(0, 0, 0, 0.25),
+                                              blurRadius: 15,
+                                              spreadRadius: 8,
+                                              offset: Offset.zero,
+                                            ),
+                                          ],
                                         ),
                                         child: Row(
                                           children: [
                                             _transportSegment(
                                               icon: Icons.skip_previous,
                                               onTap: () async {
-                                                if (_isRecording)
-                                                  return; // disabled during recording
+                                                if (_isRecording) return;
                                                 await _restartAudio(
-                                                    _safeAudioEditorStateSetter);
+                                                  _safeAudioEditorStateSetter,
+                                                );
                                               },
-                                              radius: BorderRadius.only(
-                                                topLeft:
-                                                    Radius.circular(height / 2),
-                                                bottomLeft:
-                                                    Radius.circular(height / 2),
+                                              radius: const BorderRadius.only(
+                                                topLeft: Radius.circular(24),
+                                                bottomLeft: Radius.circular(24),
                                               ),
-                                              iconSize: iconSize,
+                                              iconSize: 21,
                                               haloKey:
                                                   'tutorial:transport:restart',
                                             ),
-                                            _verticalDivider(height),
+                                            _verticalDivider(48),
                                             _transportSegment(
                                               icon: _isPlaying
                                                   ? Icons.pause
                                                   : Icons.play_arrow,
                                               onTap: () async {
                                                 if (_isRecording) {
-                                                  // Pause button should also stop recording and stop playback
                                                   await _stopRecordingJuce(
-                                                      keepPlaying: false);
+                                                    keepPlaying: false,
+                                                  );
                                                 } else {
                                                   await _togglePlayPause();
                                                 }
                                               },
-                                              iconSize: iconSize,
+                                              iconSize: 21,
                                               haloKey:
                                                   'tutorial:transport:play',
                                             ),
-                                            _verticalDivider(height),
+                                            _verticalDivider(48),
                                             _transportSegment(
                                               icon: _isRecording
                                                   ? Icons.stop_circle
                                                   : Icons.fiber_manual_record,
                                               onTap: _onRecordPressed,
-                                              radius: BorderRadius.only(
-                                                topRight:
-                                                    Radius.circular(height / 2),
+                                              radius: const BorderRadius.only(
+                                                topRight: Radius.circular(24),
                                                 bottomRight:
-                                                    Radius.circular(height / 2),
+                                                    Radius.circular(24),
                                               ),
-                                              iconSize: iconSize,
+                                              iconSize: 19,
                                               iconColor: _isRecording
                                                   ? Colors.white
-                                                  : Colors.red,
+                                                  : const Color(0xFFE53C31),
                                               backgroundColor: _isRecording
-                                                  ? const Color(0xCCFF3B30)
+                                                  ? const Color(0x66E53C31)
                                                   : Colors.transparent,
-                                              borderColor: _isRecording
-                                                  ? const Color(0xFFFF8A80)
-                                                  : null,
-                                              boxShadow: _isRecording
-                                                  ? [
-                                                      BoxShadow(
-                                                        color: Colors.redAccent
-                                                            .withOpacity(0.45),
-                                                        blurRadius: 12,
-                                                        spreadRadius: 1.5,
-                                                      ),
-                                                    ]
-                                                  : null,
                                               haloKey:
                                                   'tutorial:transport:record',
                                             ),
                                           ],
                                         ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
+                                      ),
+                                    ),
+                                    SizedBox(width: groupGap),
+                                    SizedBox(
+                                      width: mixWidth,
+                                      height: 48,
+                                      child: Halo(
+                                        highlighter: _mixHighlighter,
+                                        haloKey: const HaloKey(
+                                          'tutorial:one_button_mix',
+                                        ),
+                                        borderRadius: BorderRadius.circular(24),
+                                        child: Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            borderRadius:
+                                                BorderRadius.circular(24),
+                                            splashFactory:
+                                                NoSplash.splashFactory,
+                                            highlightColor: Colors.transparent,
+                                            overlayColor:
+                                                const WidgetStatePropertyAll<
+                                                    Color>(
+                                              Colors.transparent,
+                                            ),
+                                            onTap: () async {
+                                              final run =
+                                                  await _confirmOneButtonMix();
+                                              if (!run) return;
 
-                              // --- Right: AI Mixer -------------------------------------------------
-                              Expanded(
-                                flex: 2,
-                                child: Padding(
-                                  padding: EdgeInsets.only(left: 6),
-                                  child: LayoutBuilder(
-                                    builder: (context, constraints) {
-                                      final totalHeight = constraints.maxHeight;
-                                      final pillHeight = totalHeight *
-                                          0.6; // e.g. ~42 if container is 76
-                                      final logoSize =
-                                          pillHeight * 0.9; // keep proportional
-                                      final spacing = totalHeight * 0.08;
-                                      final fontSize = totalHeight * 0.2;
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                    L10n.translate(
+                                                      context,
+                                                      'Mixing…',
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
 
-                                      return Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          // --- Blue glossy pill with logo only ---
-                                          // --- Blue glossy pill with logo only ---
-                                          // Wrap with Material + InkWell for proper tap + ripple on rounded pill
-                                          Halo(
-                                            highlighter: _mixHighlighter,
-                                            haloKey: const HaloKey(
-                                                'tutorial:one_button_mix'),
-                                            borderRadius: BorderRadius.circular(
-                                                pillHeight / 2),
-                                            child: Material(
-                                              color: Colors.transparent,
-                                              child: InkWell(
+                                              await runOneButtonMix();
+
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                    L10n.translate(
+                                                      context,
+                                                      'One-Button Mix executed. Open chat for details.',
+                                                    ),
+                                                  ),
+                                                  duration: const Duration(
+                                                    seconds: 3,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                            child: Ink(
+                                              decoration: BoxDecoration(
+                                                color: const Color.fromRGBO(
+                                                  0,
+                                                  149,
+                                                  255,
+                                                  0.56,
+                                                ),
                                                 borderRadius:
-                                                    BorderRadius.circular(
-                                                        pillHeight / 2),
-                                                onTap: () async {
-                                                  final run =
-                                                      await _confirmOneButtonMix();
-                                                  if (!run) return;
-
-                                                  ScaffoldMessenger.of(
-                                                    context,
-                                                  ).showSnackBar(
-                                                    SnackBar(
-                                                      content: Text(
-                                                        L10n.translate(
-                                                          context,
-                                                          'Mixing…',
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  );
-
-                                                  await runOneButtonMix();
-
-                                                  ScaffoldMessenger.of(context)
-                                                      .showSnackBar(
-                                                    SnackBar(
-                                                      content: Text(
-                                                        L10n.translate(
-                                                          context,
-                                                          'One-Button Mix executed. Open chat for details.',
-                                                        ),
-                                                      ),
-                                                      duration:
-                                                          Duration(seconds: 3),
-                                                    ),
-                                                  );
-                                                },
+                                                    BorderRadius.circular(24),
+                                              ),
+                                              child: Center(
                                                 child: SizedBox(
-                                                  height: pillHeight,
-                                                  width: double.infinity,
-                                                  child: Ink(
-                                                    // height: pillHeight,
-                                                    // width: pillHeight * 1.7,
-                                                    decoration: BoxDecoration(
-                                                      gradient:
-                                                          const LinearGradient(
-                                                        begin:
-                                                            Alignment.topLeft,
-                                                        end: Alignment
-                                                            .bottomRight,
-                                                        colors: [
-                                                          Color(0xFF5C7AFF),
-                                                          Color(0xFF3050FF)
-                                                        ],
-                                                      ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              pillHeight / 2),
-                                                      border: Border.all(
-                                                          color: Colors.white
-                                                              .withOpacity(
-                                                                  0.18)),
-                                                      // boxShadow: [
-                                                      //   BoxShadow(
-                                                      //     color: const Color(0xFF4A6BFF).withOpacity(0.55),
-                                                      //     blurRadius: 20,
-                                                      //     offset: const Offset(0, 6),
-                                                      //   ),
-                                                      //   const BoxShadow(
-                                                      //     color: Color(0x22FFFFFF),
-                                                      //     blurRadius: 0,
-                                                      //     spreadRadius: 1,
-                                                      //     offset: Offset(0, -1),
-                                                      //   ),
-                                                      // ],
-                                                    ),
-                                                    child: Stack(
-                                                      children: [
-                                                        Positioned.fill(
-                                                          child: DecoratedBox(
-                                                            decoration:
-                                                                BoxDecoration(
-                                                              borderRadius:
-                                                                  BorderRadius
-                                                                      .circular(
-                                                                          pillHeight /
-                                                                              2),
-                                                              gradient:
-                                                                  LinearGradient(
-                                                                begin: Alignment
-                                                                    .topCenter,
-                                                                end: Alignment
-                                                                    .bottomCenter,
-                                                                colors: [
-                                                                  Colors.white
-                                                                      .withOpacity(
-                                                                          0.18),
-                                                                  Colors
-                                                                      .transparent,
-                                                                  Colors
-                                                                      .transparent,
-                                                                  Colors.white
-                                                                      .withOpacity(
-                                                                          0.12),
-                                                                ],
-                                                                stops: const [
-                                                                  0.0,
-                                                                  0.35,
-                                                                  0.65,
-                                                                  1.0
-                                                                ],
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        Center(
-                                                          child: Image.asset(
-                                                            // 'assets/mixroom_logo_202.png',
-                                                            'assets/fading_w_logo_crop.png',
-                                                            // width: logoSize,
-                                                            height: pillHeight *
-                                                                0.6,
-                                                            color: Colors.white,
-                                                            fit:
-                                                                BoxFit.fitWidth,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
+                                                  width: 35,
+                                                  height: 22,
+                                                  child: Image.asset(
+                                                    kMixroomDawTransportWaveIconAsset,
+                                                    fit: BoxFit.contain,
+                                                    filterQuality:
+                                                        FilterQuality.high,
                                                   ),
                                                 ),
                                               ),
                                             ),
                                           ),
-
-                                          // SizedBox(height: spacing),
-
-                                          // --- Label below pill ---
-                                          // Text(
-                                          //   'AI Mixer',
-                                          //   style: TextStyle(
-                                          //     color: Colors.white,
-                                          //     fontSize: fontSize,
-                                          //     fontWeight: FontWeight.w500,
-                                          //     letterSpacing: 0.3,
-                                          //   ),
-                                          // ),
-                                        ],
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                            ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
                           ),
                         ),
-
-                        // Bottom spacer with same translucent background
-                        ClipRRect(
-                          borderRadius: const BorderRadius.vertical(
-                              bottom: Radius.circular(0)),
-                          child: Container(
-                            height: 10, // or more
-                            width: double.infinity,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  // ),
                 ),
               ),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 
@@ -26434,15 +27727,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final resolvedRadius = radius ?? BorderRadius.zero;
     Widget segmentChild = InkWell(
       borderRadius: resolvedRadius,
+      splashFactory: NoSplash.splashFactory,
+      highlightColor: Colors.transparent,
+      overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
         decoration: BoxDecoration(
           color: backgroundColor ?? Colors.transparent,
           borderRadius: resolvedRadius,
-          border: borderColor != null
-              ? Border.all(color: borderColor, width: 1.2)
-              : null,
+          border: borderColor != null ? Border.all(color: borderColor) : null,
           boxShadow: boxShadow,
         ),
         child: Center(
@@ -26467,7 +27761,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Widget _verticalDivider(double height) {
     return Container(
-        width: 1, height: height * 0.6, color: Colors.white.withOpacity(0.2));
+      width: 1,
+      height: 32,
+      color: Colors.white.withValues(alpha: 0.14),
+    );
   }
 
   List<double> _buildOnsetEnvelopeFromSamples(
@@ -27901,6 +29198,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (context, localeProvider, child) {
         final editorLayoutSpec =
             _EditorLayoutSpec.fromSize(MediaQuery.of(context).size);
+        final snackBottomInset = _kTransportBarHeight +
+            (_showProducerCaptureUi ? _kProducerBannerHeightEstimate : 0.0) +
+            _androidTransportBottomInset(context) +
+            8.0;
         return WillPopScope(
           onWillPop: () async {
             await _handleBackPressed();
@@ -27911,1689 +29212,1963 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             child: Stack(
               clipBehavior: Clip.none,
               children: [
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Image.asset(
+                      kMixroomDawBackgroundAsset,
+                      fit: BoxFit.cover,
+                      alignment: Alignment.topCenter,
+                      filterQuality: FilterQuality.high,
+                    ),
+                  ),
+                ),
                 // Main app UI (Scaffold)
-                Scaffold(
-                  key: _editorScaffoldKey,
-                  extendBody: false,
-                  resizeToAvoidBottomInset: false,
-                  body: SafeArea(
-                    bottom: false,
-                    child: StatefulBuilder(
-                      builder:
-                          (BuildContext context, StateSetter setLocalState) {
-                        _audioEditorStateSetter = setLocalState;
-                        return Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Column(
-                              children: [
-                                // TOP ROW OF BUTTONS
-                                Padding(
-                                    padding: EdgeInsets.only(
+                Theme(
+                  data: Theme.of(context).copyWith(
+                    snackBarTheme: SnackBarThemeData(
+                      behavior: SnackBarBehavior.floating,
+                      backgroundColor: const Color.fromRGBO(70, 80, 95, 0.86),
+                      elevation: 0,
+                      showCloseIcon: true,
+                      closeIconColor: const Color(0xFFF4F4F4),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.14)),
+                      ),
+                      contentTextStyle: const TextStyle(
+                        fontFamily: 'Pretendard',
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w500,
+                        height: 1.2,
+                        color: Color(0xFFF4F4F4),
+                        letterSpacing: -0.05,
+                      ),
+                      insetPadding:
+                          EdgeInsets.fromLTRB(16, 0, 16, snackBottomInset),
+                    ),
+                  ),
+                  child: Scaffold(
+                    key: _editorScaffoldKey,
+                    backgroundColor: Colors.transparent,
+                    extendBody: true,
+                    resizeToAvoidBottomInset: false,
+                    body: SafeArea(
+                      bottom: false,
+                      child: StatefulBuilder(
+                        builder:
+                            (BuildContext context, StateSetter setLocalState) {
+                          _audioEditorStateSetter = setLocalState;
+                          return Stack(
+                            key: _editorContentStackKey,
+                            fit: StackFit.expand,
+                            clipBehavior: Clip.none,
+                            children: [
+                              Column(
+                                children: [
+                                  // TOP ROW OF BUTTONS
+                                  if (_activeTopPopup == _TopPopupType.none)
+                                    Padding(
+                                      padding: EdgeInsets.only(
                                         bottom:
-                                            editorLayoutSpec.topBarBottomGap),
+                                            editorLayoutSpec.topBarBottomGap,
+                                      ),
+                                      child: ValueListenableBuilder<Duration>(
+                                        valueListenable: _transportClock,
+                                        builder: (_, clock, __) => _buildTopBar(
+                                          clock,
+                                          editorLayoutSpec,
+                                        ),
+                                      ),
+                                    )
+                                  else
+                                    SizedBox(
+                                      height: _topBarReservedHeight(
+                                          editorLayoutSpec),
+                                    ),
+
+                                  Flexible(
+                                    fit: FlexFit.loose,
                                     child: ValueListenableBuilder<Duration>(
                                       valueListenable: _transportClock,
-                                      builder: (_, clock, __) =>
-                                          _buildTopBar(clock, editorLayoutSpec),
-                                    )),
-
-                                Flexible(
-                                  fit: FlexFit.loose,
-                                  child: ValueListenableBuilder<Duration>(
-                                    valueListenable: _transportClock,
-                                    builder: (_, clock, __) => Halo(
-                                      highlighter: _mixHighlighter,
-                                      haloKey:
-                                          const HaloKey('tutorial:timeline'),
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: AudioCanvasTimeline(
-                                        controller: _timelineController,
-                                        rows: _rows,
-                                        clips: _audioTracks, // your list
-                                        rowGain: _rowGain,
-                                        rowPan: _rowPan,
-                                        rowVolumeAutomation:
-                                            _rowVolumeAutomation,
-                                        getAutomationTargetsForRow:
-                                            _automationTargetsForRowUi,
-                                        getSelectedAutomationTargetId:
-                                            _selectedAutomationTargetIdForRow,
-                                        setSelectedAutomationTargetId:
-                                            (row, targetId) {
-                                          _setSelectedAutomationTargetIdForRow(
+                                      builder: (_, clock, __) => Halo(
+                                        highlighter: _mixHighlighter,
+                                        haloKey:
+                                            const HaloKey('tutorial:timeline'),
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: AudioCanvasTimeline(
+                                          controller: _timelineController,
+                                          rows: _rows,
+                                          clips: _audioTracks, // your list
+                                          rowGain: _rowGain,
+                                          rowPan: _rowPan,
+                                          rowVolumeAutomation:
+                                              _rowVolumeAutomation,
+                                          getAutomationTargetsForRow:
+                                              _automationTargetsForRowUi,
+                                          getSelectedAutomationTargetId:
+                                              _selectedAutomationTargetIdForRow,
+                                          setSelectedAutomationTargetId:
+                                              (row, targetId) {
+                                            _setSelectedAutomationTargetIdForRow(
+                                              row,
+                                              targetId,
+                                            );
+                                            unawaited(
+                                                _syncAutomationTargetToCurrentTime(
+                                              row,
+                                              targetId,
+                                            ));
+                                          },
+                                          getAutomationPointsForTarget:
+                                              (row, targetId) =>
+                                                  _pointsForAutomationTarget(
                                             row,
                                             targetId,
-                                          );
-                                          unawaited(
-                                              _syncAutomationTargetToCurrentTime(
-                                            row,
-                                            targetId,
-                                          ));
-                                        },
-                                        getAutomationPointsForTarget:
-                                            (row, targetId) =>
-                                                _pointsForAutomationTarget(
-                                          row,
-                                          targetId,
-                                        )
-                                                    .map((p) => p.copy())
-                                                    .toList(growable: false),
-                                        setAutomationPointsForTarget:
-                                            (row, targetId, points) {
-                                          if (row < 0 || row >= _rowCount)
-                                            return;
-                                          final safePoints =
-                                              _sanitizeAutomationPointsForTarget(
-                                            row,
-                                            targetId,
-                                            points,
-                                          );
-                                          if (targetId == 'volume') {
-                                            setState(() {
-                                              _rowVolumeAutomation[row] =
-                                                  safePoints
+                                          )
                                                       .map((p) => p.copy())
-                                                      .toList(growable: false);
+                                                      .toList(growable: false),
+                                          setAutomationPointsForTarget:
+                                              (row, targetId, points) {
+                                            if (row < 0 || row >= _rowCount)
+                                              return;
+                                            final safePoints =
+                                                _sanitizeAutomationPointsForTarget(
+                                              row,
+                                              targetId,
+                                              points,
+                                            );
+                                            if (targetId == 'volume') {
+                                              setState(() {
+                                                _rowVolumeAutomation[row] =
+                                                    safePoints
+                                                        .map((p) => p.copy())
+                                                        .toList(
+                                                            growable: false);
+                                              });
+                                              unawaited(
+                                                  _syncNativeAutomationForRow(
+                                                      row));
+                                              return;
+                                            }
+                                            setState(() {
+                                              final rowMap =
+                                                  _rowPluginAutomation
+                                                      .putIfAbsent(
+                                                row,
+                                                () => <String,
+                                                    List<AutomationPoint>>{},
+                                              );
+                                              rowMap[targetId] = safePoints
+                                                  .map((p) => p.copy())
+                                                  .toList(growable: false);
+                                            });
+                                            unawaited(
+                                                _syncNativePluginAutomationForRow(
+                                                    row));
+                                          },
+                                          getAutomationClipsForTarget:
+                                              (row, targetId) =>
+                                                  _copyAutomationClipList(
+                                            _clipsForAutomationTarget(
+                                                row, targetId),
+                                          ),
+                                          setAutomationClipsForTarget:
+                                              (row, targetId, clips) {
+                                            if (row < 0 || row >= _rowCount)
+                                              return;
+                                            final safeClips =
+                                                _sanitizeAutomationClipsForTarget(
+                                              row,
+                                              targetId,
+                                              clips,
+                                            );
+                                            setState(() {
+                                              final rowMap = _rowAutomationClips
+                                                  .putIfAbsent(
+                                                row,
+                                                () => <String,
+                                                    List<
+                                                        AutomationClipSnapshot>>{},
+                                              );
+                                              rowMap[targetId] =
+                                                  _copyAutomationClipList(
+                                                      safeClips);
                                             });
                                             unawaited(
                                                 _syncNativeAutomationForRow(
-                                                    row));
-                                            return;
-                                          }
-                                          setState(() {
-                                            final rowMap = _rowPluginAutomation
-                                                .putIfAbsent(
                                               row,
-                                              () => <String,
-                                                  List<AutomationPoint>>{},
-                                            );
-                                            rowMap[targetId] = safePoints
-                                                .map((p) => p.copy())
-                                                .toList(growable: false);
-                                          });
-                                          unawaited(
-                                              _syncNativePluginAutomationForRow(
-                                                  row));
-                                        },
-                                        getAutomationClipsForTarget:
-                                            (row, targetId) =>
-                                                _copyAutomationClipList(
-                                          _clipsForAutomationTarget(
-                                              row, targetId),
-                                        ),
-                                        setAutomationClipsForTarget:
-                                            (row, targetId, clips) {
-                                          if (row < 0 || row >= _rowCount)
-                                            return;
-                                          final safeClips =
-                                              _sanitizeAutomationClipsForTarget(
-                                            row,
-                                            targetId,
-                                            clips,
-                                          );
-                                          setState(() {
-                                            final rowMap =
-                                                _rowAutomationClips.putIfAbsent(
+                                            ));
+                                          },
+                                          onAutomationClipsCommit: (row,
+                                              targetId, oldClips, newClips) {
+                                            unawaited(
+                                                _setAutomationClipsForTargetWithUndo(
                                               row,
-                                              () => <String,
-                                                  List<
-                                                      AutomationClipSnapshot>>{},
-                                            );
-                                            rowMap[targetId] =
-                                                _copyAutomationClipList(
-                                                    safeClips);
-                                          });
-                                          unawaited(_syncNativeAutomationForRow(
-                                            row,
-                                          ));
-                                        },
-                                        onAutomationClipsCommit: (row, targetId,
-                                            oldClips, newClips) {
-                                          unawaited(
-                                              _setAutomationClipsForTargetWithUndo(
-                                            row,
-                                            targetId,
-                                            newClips,
-                                            oldClipsOverride: oldClips,
-                                          ));
-                                          _recordProducerManualEdit(
-                                              'row_automation_clips', {
-                                            'row': row,
-                                            'target_id': targetId,
-                                            'old_count': oldClips.length,
-                                            'new_count': newClips.length,
-                                          });
-                                        },
-                                        onAutomationTargetCommit: (row,
-                                            targetId, oldPoints, newPoints) {
-                                          unawaited(
-                                              _setAutomationTargetPointsWithUndo(
-                                            row,
-                                            targetId,
-                                            newPoints,
-                                            oldPointsOverride: oldPoints,
-                                          ));
-                                          _recordProducerManualEdit(
-                                              'row_automation_target', {
-                                            'row': row,
-                                            'target_id': targetId,
-                                            'old_count': oldPoints.length,
-                                            'new_count': newPoints.length,
-                                          });
-                                        },
-                                        onRevealAutomationTarget:
-                                            (row, targetId) async {
-                                          if (_parseAutomationTargetId(targetId)
-                                              .isMaster) {
-                                            await _revealMasterAutomationTarget(
                                               targetId,
-                                            );
-                                          }
-                                        },
-                                        // extractors
-                                        getStartMs: (t) =>
-                                            t.offset *
-                                            1000.0, // adjust to your model
-                                        getDurationMs: (t) =>
-                                            _clipTimelineDurationMs(t),
-                                        getTimelineDurationMs: (t) =>
-                                            _clipTimelineDurationMs(t),
-                                        getTrimStartMs: (t) => t
-                                            .trimStart.inMilliseconds
-                                            .toDouble(),
-                                        getTrimEndMs: (t) =>
-                                            t.trimEnd.inMilliseconds.toDouble(),
-                                        // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
-                                        getPeaks: (c) {
-                                          return c.displayWaveformData;
-                                        },
-                                        getY: (c) => c
-                                            .y, // store a visual Y in your model
-                                        // commit (persist in your model, then setState)
-                                        onMoveClipCommit:
-                                            (i, newStartMs, newRowIndex) async {
-                                          if (newRowIndex < 0 ||
-                                              newRowIndex >= _rowCount) return;
-                                          final clip = _audioTracks[i];
-                                          // clip.offset = newStartMs / 1000.0;
-                                          // clip.rowIndex = newRowIndex; // <-- move across rows
-                                          // setState(() {});
-                                          // JuceAudioEngine.moveClipToRow(i, newRowIndex);
-                                          // _updateOverallDurationIfNeeded();
-                                          await _undoManager.execute(
-                                            MoveClipAction(
-                                              tracks: _audioTracks,
-                                              // clip: clip,
-                                              originalIndex: i,
-                                              oldOffset: clip.offset,
-                                              oldRow: clip.rowIndex,
-                                              newOffset: newStartMs / 1000.0,
-                                              newRow: newRowIndex,
-                                              onChange: () {
-                                                clip.rowId =
-                                                    _rowIdAt(clip.rowIndex);
-                                                _syncClipTimingToEngine(i);
-                                                _updateOverallDurationIfNeeded();
-                                              },
-                                            ),
-                                          );
-                                          setState(() {});
-                                        },
-                                        onTrimClip: (i, s, e,
-                                            {double? newStartMs}) async {
-                                          final clip = _audioTracks[i];
-
-                                          // 1. Update the internal trim values (where in the source file we start/end)
-                                          clip.trimStart =
-                                              Duration(milliseconds: s.round());
-                                          clip.trimEnd =
-                                              Duration(milliseconds: e.round());
-
-                                          // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
-                                          // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
-                                          if (newStartMs != null) {
-                                            // newStartMs is the intended start time in milliseconds.
-                                            // Convert to seconds (assuming clip.offset is in seconds).
-                                            clip.offset = newStartMs / 1000.0;
-                                          }
-                                          // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
-                                          // await _undoManager.execute(
-                                          //   TrimClipAction(
-                                          //     clip: clip,
-                                          //     oldTrimStart: clip.trimStart,
-                                          //     oldTrimEnd: clip.trimEnd,
-                                          //     oldOffset: clip.offset,
-                                          //     newTrimStart: Duration(milliseconds: s.round()),
-                                          //     newTrimEnd: Duration(milliseconds: e.round()),
-                                          //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
-                                          //     onChange: _updateOverallDurationIfNeeded,
-                                          //   ),
-                                          // );
-                                          setState(() {});
-                                          _updateOverallDurationIfNeeded();
-                                          // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
-                                        },
-
-                                        // for the undo history
-                                        onTrimClipCommit: (i, s, e, os, oe, oo,
-                                            {double? newStartMs}) async {
-                                          // final clip = _audioTracks[i];
-                                          await _undoManager.execute(
-                                            TrimClipAction(
-                                              // clip: clip,
-                                              tracks: _audioTracks,
-                                              originalIndex: i,
-                                              oldTrimStart: Duration(
-                                                  milliseconds: os.round()),
-                                              oldTrimEnd: Duration(
-                                                  milliseconds: oe.round()),
-                                              oldOffset: oo / 1000.0,
-                                              newTrimStart: Duration(
-                                                  milliseconds: s.round()),
-                                              newTrimEnd: Duration(
-                                                  milliseconds: e.round()),
-                                              newOffset: newStartMs != null
-                                                  ? newStartMs / 1000.0
-                                                  : null,
-                                              onChange: () {
-                                                _syncClipTimingToEngine(i);
-                                                _updateOverallDurationIfNeeded();
-                                              },
-                                            ),
-                                          );
-                                        },
-
-                                        // selection + headers
-                                        // numRows: kNumRows,
-                                        // selectedRowIndex: _selectedRow,
-                                        onSelectRow: (row) =>
-                                            setState(() => _selectedRow = row),
-                                        // rowMuted: _rowMuted,
-                                        // rowExpanded: _rowExpanded,
-                                        recordingInProgress: _isRecording,
-                                        onToggleExpanded: (row) => setState(
-                                            () => _rowExpanded[row] =
-                                                !_rowExpanded[row]),
-                                        onAddRow: _addRow,
-                                        onInsertRowAbove: _insertRowAbove,
-                                        onInsertRowBelow: _insertRowBelow,
-                                        onDeleteRow: _deleteRow,
-                                        onMoveRow: _moveRow,
-                                        onRenameRow: _renameRow,
-                                        onSetRowIcon: _setRowIcon,
-
-                                        // transport
-                                        playheadMs: clock.inMilliseconds
-                                            .toDouble(), // your existing clock
-                                        // isPlaying: _isPlaying,
-                                        onScrubRequested: (ms) {
-                                          if (_isRecording) {
-                                            return; // do nothing while recording (hopefully no bug where you can still physically scrub but does nothing here)
-                                          }
-
-                                          final newPosition = Duration(
-                                              milliseconds: ms.toInt());
-                                          _syncTransportClock(
-                                            newPosition,
-                                            playing: _isPlaying,
-                                          );
-                                          // for (int i = 0; i < _audioTracks.length; i++) {
-                                          //   final track = _audioTracks[i];
-                                          //   final effectivePos = _calculateEffectiveAudioPositionForTrack(track, newPosition);
-                                          //   JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
-                                          //   setState(() {
-                                          //     track.currentPosition = effectivePos;
-                                          //   });
-                                          // }
-                                          JuceAudioEngine
-                                              .setAutomationTransport(
-                                            ms / 1000.0,
-                                          );
-                                          JuceAudioEngine
-                                              .setMetronomeTransportMs(ms);
-                                        },
-                                        maxDuration: _audioOnlyOverallDuration,
-                                        getFullDurationMs: (t) =>
-                                            _clipFullDurationMsForTrim(t),
-                                        isPlaying: _isPlaying,
-
-                                        // ruler/grid
-                                        bpm: _tempo,
-                                        beatsPerBar: 4,
-
-                                        // layout
-                                        // numRows: kNumRows,
-                                        height:
-                                            520, // THIS VALUE is effectively unused, the height is just natural now
-                                        // ============================
-                                        // NEW: Row FX callbacks
-                                        // ============================
-                                        getRowEffects: (row) => JuceAudioEngine
-                                            .getTrackEffectsForRow(row),
-                                        getRowEffectIds: (row) =>
-                                            JuceAudioEngine
-                                                .getTrackEffectIdsForRow(row),
-
-                                        getRowEffectBypassState:
-                                            (row, effectIndex) =>
-                                                JuceAudioEngine
-                                                    .getRowEffectBypassState(
-                                                        row, effectIndex),
-
-                                        insertRowEffect:
-                                            (row, pathOrName) async {
-                                          final before = await JuceAudioEngine
-                                              .getTrackEffectsForRow(row);
-                                          await _undoManager.execute(
-                                            InsertEffectAction(
-                                              row: row,
-                                              pathOrName: pathOrName,
-                                              onChange: () {
-                                                setState(() {});
-                                                _refreshRowFx(row);
-                                                unawaited(
-                                                    _refreshAutomationTargetsForRow(
-                                                        row));
-                                              },
-                                            ),
-                                          );
-                                          final after = await JuceAudioEngine
-                                              .getTrackEffectsForRow(row);
-                                          if (after.length <= before.length) {
-                                            _showSmallNotice(
-                                                'Could not load this effect plugin.');
-                                            return;
-                                          }
-                                          _recordProducerManualEdit(
-                                              'row_fx_insert', {
-                                            'row': row,
-                                            'effect': pathOrName
-                                          });
-                                          await _refreshAutomationTargetsForRow(
-                                            row,
-                                          );
-                                        }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
-                                        // need name of effects so undo action can add it back later
-                                        removeRowEffect: (row, effectIndex,
-                                            name, applyingPreset) async {
-                                          if (applyingPreset) {
-                                            await JuceAudioEngine
-                                                .removeTrackEffect(
-                                                    row, effectIndex);
-                                            return;
-                                          }
-                                          await _undoManager.execute(
-                                            RemoveEffectAction(
-                                              row: row,
-                                              effectIndex: effectIndex,
-                                              pathOrName: name,
-                                              onChange: () {
-                                                setState(() {});
-                                                _refreshRowFx(row);
-                                                unawaited(
-                                                    _refreshAutomationTargetsForRow(
-                                                        row));
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_fx_remove', {
-                                            'row': row,
-                                            'index': effectIndex,
-                                            'effect': name,
-                                          });
-                                          await _refreshAutomationTargetsForRow(
-                                            row,
-                                          );
-                                        }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
-
-                                        reorderRowEffects:
-                                            (row, from, to) async {
-                                          await _undoManager.execute(
-                                            ReorderEffectAction(
-                                              row: row,
-                                              from: from,
-                                              to: to,
-                                              onChange: () {
-                                                setState(() {});
-                                                _refreshRowFx(row);
-                                                unawaited(
-                                                    _refreshAutomationTargetsForRow(
-                                                        row));
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_fx_reorder', {
-                                            'row': row,
-                                            'from': from,
-                                            'to': to
-                                          });
-                                          await _refreshAutomationTargetsForRow(
-                                            row,
-                                          );
-                                        }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
-
-                                        setRowEffectBypassed:
-                                            (row, effectIndex, bypass) async {
-                                          await _undoManager.execute(
-                                            BypassEffectAction(
-                                              row: row,
-                                              effectIndex: effectIndex,
-                                              oldState: !bypass,
-                                              newState: bypass,
-                                              onChange: () {
-                                                setState(() {});
-                                                _refreshRowFx(row);
-                                                unawaited(
-                                                    _refreshAutomationTargetsForRow(
-                                                        row));
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_fx_bypass', {
-                                            'row': row,
-                                            'index': effectIndex,
-                                            'bypassed': bypass,
-                                          });
-                                        }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
-
-                                        getRowPluginParameters:
-                                            (row, effectIndex) =>
-                                                JuceAudioEngine
-                                                    .getTrackPluginParameters(
-                                                        row, effectIndex),
-
-                                        setRowEffectParam: (row, effectIndex,
-                                            paramId, value) async {
-                                          await JuceAudioEngine.setTrackEffect(
-                                            row,
-                                            effectIndex,
-                                            paramId,
-                                            value,
-                                          );
-                                          _updateAutomationTargetBaselineForEffectParameter(
-                                            row: row,
-                                            effectIndex: effectIndex,
-                                            paramId: paramId,
-                                            value: value,
-                                            master: false,
-                                          );
-                                        },
-
-                                        // for commiting to undo history
-                                        onPluginParamCommit: (row, idx, paramId,
-                                            oldValue, newValue) async {
-                                          await _undoManager.execute(
-                                            SetEffectParamAction(
-                                              row: row,
-                                              effectIndex: idx,
-                                              paramId: paramId,
-                                              oldValue: oldValue,
-                                              newValue: newValue,
-                                              onChange: () {
-                                                setState(() {});
-                                                _refreshRowFx(row);
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_fx_param', {
-                                            'row': row,
-                                            'index': idx,
-                                            'param_id': paramId,
-                                            'old_value': oldValue,
-                                            'new_value': newValue,
-                                          });
-                                        },
-
-                                        onPresetCommit: (before, after) async {
-                                          await _undoManager.execute(
-                                            TrackPresetChangeAction(
-                                              before: before,
-                                              after: after,
-                                              onChange: () {
-                                                setState(() {});
-                                                unawaited(
-                                                    _refreshAutomationTargetsForRow(
-                                                        before.row));
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_preset_commit', {
-                                            'row': before.row,
-                                            'before_count':
-                                                before.effects.length,
-                                            'after_count': after.effects.length,
-                                          });
-                                          await _refreshAutomationTargetsForRow(
-                                            before.row,
-                                          );
-                                        },
-
-                                        scanPlugins: () =>
-                                            JuceAudioEngine.scanPlugins(),
-
-                                        setTrackAutomationPoints: (row,
-                                                points) =>
-                                            _syncNativeAutomationForRow(row),
-
-                                        onAutomationCommit:
-                                            (row, oldPoints, newPoints) {
-                                          _undoManager.execute(
-                                            SetAutomationPointsAction(
-                                              row: row,
-                                              oldPoints: oldPoints,
-                                              newPoints: newPoints,
-                                              applyToState: (r, points) {
-                                                setState(() {
-                                                  _rowVolumeAutomation[r] =
-                                                      points
-                                                          .map((p) =>
-                                                              AutomationPoint(
-                                                                  x: p.x,
-                                                                  volume:
-                                                                      p.volume))
-                                                          .toList();
-                                                });
-                                              },
-                                              onApplied: (r, _) async {
-                                                await _syncNativeAutomationForRow(
-                                                    r);
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_automation', {
-                                            'row': row,
-                                            'old_count': oldPoints.length,
-                                            'new_count': newPoints.length,
-                                          });
-                                        },
-
-                                        setRowGain: (row, gain0to3) =>
-                                            JuceAudioEngine.setRowGain(
-                                                row, gain0to3),
-                                        onRowGainCommit:
-                                            (row, oldGain, newGain) {
-                                          _undoManager.execute(
-                                            SetRowGainAction(
-                                              row: row,
-                                              oldGain: oldGain,
-                                              newGain: newGain,
-                                              applyToState: (r, g) {
-                                                setState(() {
-                                                  _rowGain[r] = g;
-                                                });
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_gain', {
-                                            'row': row,
-                                            'old_gain': oldGain,
-                                            'new_gain': newGain,
-                                          });
-                                        },
-
-                                        muteRow: (row, mute) async {
-                                          // await JuceAudioEngine.muteRow(row, mute);
-                                          setState(() => _rowMuted[row] = mute);
-                                          await _recomputeAudibleState(); // this handles all mute/solo logic
-
-                                          // mute not counted in the undo history
-                                          // await _undoManager.execute(
-                                          //   MuteRowAction(row, !mute, mute, () => setState(() => _rowMuted[row] = mute)),
-                                          // );
-                                        },
-
-                                        // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
-                                        rowMuted: _rowMuted,
-
-                                        soloRow: (row, solo) async {
-                                          // await JuceAudioEngine.muteRow(row, mute);
-                                          setState(
-                                              () => _rowSoloed[row] = solo);
-                                          await _recomputeAudibleState(); // this handles all mute/solo logic
-                                        },
-
-                                        // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
-                                        rowSoloed: _rowSoloed,
-
-                                        setRowPan: (row, newPan) =>
-                                            JuceAudioEngine.setRowPan(
-                                                row, newPan),
-                                        onRowPanCommit: (row, oldPan, newPan) {
-                                          _undoManager.execute(
-                                            SetRowPanAction(
-                                              row: row,
-                                              oldPan: oldPan,
-                                              newPan: newPan,
-                                              applyToState: (r, p) {
-                                                setState(() {
-                                                  _rowPan[r] = p;
-                                                });
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit('row_pan', {
-                                            'row': row,
-                                            'old_pan': oldPan,
-                                            'new_pan': newPan,
-                                          });
-                                        },
-
-                                        setClipGain: _setClipGainLive,
-                                        onClipGainCommit:
-                                            (clipIndex, oldGain, newGain) {
-                                          _undoManager.execute(
-                                            SetClipGainAction(
-                                              tracks: _audioTracks,
-                                              originalIndex: clipIndex,
-                                              oldGain: oldGain,
-                                              newGain: newGain,
-                                              applyToState: (clip, gain) {
-                                                clip.gain = gain;
-                                                setState(() {});
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'clip_gain', {
-                                            'clip': clipIndex,
-                                            'old_gain': oldGain,
-                                            'new_gain': newGain,
-                                          });
-                                        },
-                                        setClipPitch: _setClipPitchLive,
-                                        onClipPitchCommit:
-                                            (clipIndex, oldPitch, newPitch) {
-                                          _undoManager.execute(
-                                            SetClipPitchAction(
-                                              tracks: _audioTracks,
-                                              originalIndex: clipIndex,
-                                              oldPitch: oldPitch,
-                                              newPitch: newPitch,
-                                              applyToState: (clip, pitch) {
-                                                clip.pitchSemitones = pitch;
-                                                setState(() {});
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'clip_pitch', {
-                                            'clip': clipIndex,
-                                            'old_pitch': oldPitch,
-                                            'new_pitch': newPitch,
-                                          });
-                                        },
-                                        onSetClipReversed:
-                                            (clipIndex, reversed) async {
-                                          if (clipIndex < 0 ||
-                                              clipIndex >=
-                                                  _audioTracks.length) {
-                                            return;
-                                          }
-                                          final clip = _audioTracks[clipIndex];
-                                          if (clip.isMidi ||
-                                              clip.isReversed == reversed) {
-                                            return;
-                                          }
-                                          await _undoManager.execute(
-                                            SetClipReverseAction(
-                                              tracks: _audioTracks,
-                                              originalIndex: clipIndex,
-                                              oldReversed: clip.isReversed,
-                                              newReversed: reversed,
-                                              applyToState: (target, value) {
-                                                target.isReversed = value;
-                                                setState(() {});
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'clip_reverse', {
-                                            'clip': clipIndex,
-                                            'reversed': reversed,
-                                          });
-                                        },
-                                        onAdjustClipToTempo:
-                                            _handleAdjustClipToTempo,
-                                        onStretchClipToTempoPreservePitch:
-                                            _handleStretchClipToTempoPreservePitch,
-                                        onDisableClipTempoFollow:
-                                            _handleDisableClipTempoFollow,
-                                        onDetectClipTempoAndSetProjectTempo:
-                                            _handleDetectClipTempoAndSetProjectTempo,
-                                        onStretchClip: _handleStretchClipResize,
-                                        onStretchClipCommit:
-                                            _handleStretchClipResizeCommit,
-                                        onRenameClip:
-                                            (clipIndex, newLabel) async {
-                                          if (clipIndex < 0 ||
-                                              clipIndex >=
-                                                  _audioTracks.length) {
-                                            return;
-                                          }
-                                          final oldLabel =
-                                              _audioTracks[clipIndex].label;
-                                          final nextLabel = newLabel.trim();
-                                          if (nextLabel.isEmpty ||
-                                              oldLabel == nextLabel) {
-                                            return;
-                                          }
-
-                                          await _undoManager.execute(
-                                            SetClipLabelAction(
-                                              tracks: _audioTracks,
-                                              originalIndex: clipIndex,
-                                              oldLabel: oldLabel,
-                                              newLabel: nextLabel,
-                                              applyToState: (clip, label) {
-                                                clip.label = label;
-                                                setState(() {});
-                                              },
-                                            ),
-                                          );
-
-                                          _recordProducerManualEdit(
-                                              'clip_rename', {
-                                            'clip': clipIndex,
-                                            'old_label': oldLabel,
-                                            'new_label': nextLabel,
-                                          });
-                                        },
-
-                                        onCopyClip: _handleCopyClip,
-                                        onDeleteClip: _handleDeleteClip,
-                                        onCopyClips: _handleCopyClips,
-                                        onDeleteClips: _handleDeleteClips,
-                                        onCutClipAt: _handleCutClipAt,
-                                        hasCopiedClip: _copiedClip != null ||
-                                            (_copiedClipGroup?.isNotEmpty ??
-                                                false),
-                                        onPasteClipAt: _handlePasteClipAt,
-                                        onClearCopiedClip: _clearCopiedClip,
-                                        onOpenMidiClip: _openMidiClipEditor,
-                                        onStemSeparation:
-                                            _handleStemSeparationForClip,
-                                        onSelectionChanged:
-                                            (selectedClipIndices,
-                                                primaryClipIndex) {
-                                          _timelineSelectedClipIndices =
-                                              List<int>.from(
-                                                  selectedClipIndices);
-                                          _timelinePrimarySelectedClipIndex =
-                                              primaryClipIndex;
-                                          unawaited(
-                                            _syncLiveMidiInputTargetClip(),
-                                          );
-                                        },
-                                        onSnapSettingsChanged: (magnetEnabled,
-                                            quantizeDivisionsPerBar) {
-                                          if (_timelineMagnetEnabled ==
-                                                  magnetEnabled &&
-                                              _timelineQuantizeDivisionsPerBar ==
-                                                  quantizeDivisionsPerBar) {
-                                            return;
-                                          }
-                                          setState(() {
-                                            _timelineMagnetEnabled =
-                                                magnetEnabled;
-                                            _timelineQuantizeDivisionsPerBar =
-                                                quantizeDivisionsPerBar;
-                                          });
-                                        },
-                                        onLoopToggle: (enabled) {
-                                          setState(
-                                              () => _loopEnabled = enabled);
-                                        },
-
-                                        onLoopRegionChanged: (start, end) {
-                                          setState(() {
-                                            _loopStartMs = start;
-                                            _loopEndMs = end;
-                                          });
-                                        },
-                                        isRecording: _isRecording,
-                                        recordingRowIndex: _selectedRow,
-                                        recordingStartMs: _recordingStartMs,
-                                        recordingPeaks:
-                                            _recordingPeaks, // TODO: FIX TO USE WITH JUCE
-                                        registerRowFxRefresher: (fn) {
-                                          _refreshRowFx = fn;
-                                          WidgetsBinding.instance
-                                              .addPostFrameCallback((_) {
-                                            if (!mounted) return;
-                                            for (int row = 0;
-                                                row < _rowCount;
-                                                row++) {
-                                              _refreshRowFx(row);
+                                              newClips,
+                                              oldClipsOverride: oldClips,
+                                            ));
+                                            _recordProducerManualEdit(
+                                                'row_automation_clips', {
+                                              'row': row,
+                                              'target_id': targetId,
+                                              'old_count': oldClips.length,
+                                              'new_count': newClips.length,
+                                            });
+                                          },
+                                          onAutomationTargetCommit: (row,
+                                              targetId, oldPoints, newPoints) {
+                                            unawaited(
+                                                _setAutomationTargetPointsWithUndo(
+                                              row,
+                                              targetId,
+                                              newPoints,
+                                              oldPointsOverride: oldPoints,
+                                            ));
+                                            _recordProducerManualEdit(
+                                                'row_automation_target', {
+                                              'row': row,
+                                              'target_id': targetId,
+                                              'old_count': oldPoints.length,
+                                              'new_count': newPoints.length,
+                                            });
+                                          },
+                                          onRevealAutomationTarget:
+                                              (row, targetId) async {
+                                            if (_parseAutomationTargetId(
+                                                    targetId)
+                                                .isMaster) {
+                                              await _revealMasterAutomationTarget(
+                                                targetId,
+                                              );
                                             }
-                                          });
-                                        },
-                                        registerRowFxPlaybackRefresher: (fn) {
-                                          _refreshRowFxPlayback = fn;
-                                        },
-                                        meters: _meters,
-                                        getRowCompressorMeter: (row, fx) =>
-                                            JuceAudioEngine
-                                                .getRowCompressorMeter(row, fx),
-                                        getRowEqWaveform: (row, fx,
-                                                sampleCount) =>
-                                            JuceAudioEngine.getRowEqWaveform(
-                                                row, fx,
-                                                sampleCount: sampleCount),
-                                        onExternalSampleDrop:
-                                            (data, row, timeMs) async {
-                                          await _insertAudioFileAtTimeline(
-                                            data.filePath,
-                                            row: row,
-                                            timeMs: timeMs,
-                                            uploadMethod: 'dragdrop',
-                                          );
-                                        },
-                                        onExternalSampleDragEntered: () {
-                                          _handleSampleDragExitedBrowserPanel();
-                                        },
-                                        externalSampleDragActive:
-                                            _sampleDragActive,
-                                        onTutorialTimelineScrolled:
-                                            _handleDawOnboardingTimelineScrolled,
-                                        onTutorialTimelineZoomed:
-                                            _handleDawOnboardingTimelineZoomed,
-                                        onTutorialRowExpansionChanged:
-                                            _handleDawOnboardingRowExpansionChanged,
-                                        onTutorialRowTabSelected:
-                                            _handleDawOnboardingRowTabSelected,
-                                        onTutorialRowEffectAdded:
-                                            _handleDawOnboardingEffectAdded,
-                                        onTutorialRowEffectOpened:
-                                            _handleDawOnboardingEffectOpened,
-                                        tutorialHighlighter: _mixHighlighter,
-                                        bottomDockInset: _kChatBarStackHeight +
-                                            (_showProducerCaptureUi
-                                                ? _kProducerBannerHeightEstimate
-                                                : 0.0),
+                                          },
+                                          // extractors
+                                          getStartMs: (t) =>
+                                              t.offset *
+                                              1000.0, // adjust to your model
+                                          getDurationMs: (t) =>
+                                              _clipTimelineDurationMs(t),
+                                          getTimelineDurationMs: (t) =>
+                                              _clipTimelineDurationMs(t),
+                                          getTrimStartMs: (t) => t
+                                              .trimStart.inMilliseconds
+                                              .toDouble(),
+                                          getTrimEndMs: (t) => t
+                                              .trimEnd.inMilliseconds
+                                              .toDouble(),
+                                          // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
+                                          getPeaks: (c) {
+                                            return c.displayWaveformData;
+                                          },
+                                          getY: (c) => c
+                                              .y, // store a visual Y in your model
+                                          // commit (persist in your model, then setState)
+                                          onMoveClipCommit: (i, newStartMs,
+                                              newRowIndex) async {
+                                            if (newRowIndex < 0 ||
+                                                newRowIndex >= _rowCount)
+                                              return;
+                                            final clip = _audioTracks[i];
+                                            // clip.offset = newStartMs / 1000.0;
+                                            // clip.rowIndex = newRowIndex; // <-- move across rows
+                                            // setState(() {});
+                                            // JuceAudioEngine.moveClipToRow(i, newRowIndex);
+                                            // _updateOverallDurationIfNeeded();
+                                            await _undoManager.execute(
+                                              MoveClipAction(
+                                                tracks: _audioTracks,
+                                                // clip: clip,
+                                                originalIndex: i,
+                                                oldOffset: clip.offset,
+                                                oldRow: clip.rowIndex,
+                                                newOffset: newStartMs / 1000.0,
+                                                newRow: newRowIndex,
+                                                onChange: () {
+                                                  clip.rowId =
+                                                      _rowIdAt(clip.rowIndex);
+                                                  _syncClipTimingToEngine(i);
+                                                  _updateOverallDurationIfNeeded();
+                                                },
+                                              ),
+                                            );
+                                            setState(() {});
+                                          },
+                                          onTrimClip: (i, s, e,
+                                              {double? newStartMs}) async {
+                                            final clip = _audioTracks[i];
 
-                                        mode: _resolvedMode,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            Builder(
-                              builder: (overlayContext) {
-                                final keyboardInset =
-                                    MediaQuery.viewInsetsOf(overlayContext)
-                                        .bottom;
-                                final transportBottomInset =
-                                    _androidTransportBottomInset(
-                                        overlayContext);
-                                final chatTypingActive =
-                                    _chatFocusNode.hasFocus;
-                                final chatLift = math.max(
-                                  0.0,
-                                  chatTypingActive
-                                      ? keyboardInset -
-                                          (_kTransportBarHeight +
-                                              transportBottomInset)
-                                      : 0.0,
-                                );
-                                final mediaSize =
-                                    MediaQuery.sizeOf(overlayContext);
-                                final samplePanelBottom = chatLift +
-                                    _kChatBarStackHeight +
-                                    (_showProducerCaptureUi
-                                        ? _kProducerBannerHeightEstimate
-                                        : 0.0) +
-                                    _kSamplePanelBottomGap;
-                                final collapsedTop = math.max(
-                                  _kSamplePanelExpandedTop + 24.0,
-                                  mediaSize.height *
-                                      _kSamplePanelCollapsedTopFactor,
-                                );
-                                final maxPanelTop = math.max(
-                                  _kSamplePanelExpandedTop,
-                                  mediaSize.height - samplePanelBottom - 120.0,
-                                );
-                                final desiredPanelTop = _sampleBrowserExpanded
-                                    ? _kSamplePanelExpandedTop
-                                    : collapsedTop;
-                                final samplePanelTop = desiredPanelTop
-                                    .clamp(
-                                        _kSamplePanelExpandedTop, maxPanelTop)
-                                    .toDouble();
-                                final addActionsBottom = chatLift + 54.0;
-                                final addActionsRight = 10.0;
-                                final addActionsWidth = math.min(
-                                    _kAddActionsPanelWidth,
-                                    mediaSize.width - 20.0);
-                                return Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    if (_showAddActionsPanel)
-                                      Positioned.fill(
-                                        child: GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTap: _closeAddActionsPanel,
-                                          child: const SizedBox.shrink(),
-                                        ),
-                                      ),
-                                    Positioned(
-                                      left: 0,
-                                      right: 0,
-                                      bottom: chatLift,
-                                      child: _buildBottomChatAndTransport(
-                                        includeChatBar: true,
-                                        includeProducerCapture:
-                                            _showProducerCaptureUi,
-                                        includeTransport: false,
-                                      ),
-                                    ),
-                                    Positioned(
-                                      right: addActionsRight,
-                                      bottom: addActionsBottom,
-                                      child: IgnorePointer(
-                                        ignoring: !_showAddActionsPanel,
-                                        child: TweenAnimationBuilder<double>(
-                                          duration:
-                                              const Duration(milliseconds: 120),
-                                          curve: _showAddActionsPanel
-                                              ? Curves.easeOutCubic
-                                              : Curves.easeInCubic,
-                                          tween: Tween<double>(
-                                            begin: 0.0,
-                                            end: _showAddActionsPanel
-                                                ? 1.0
-                                                : 0.0,
-                                          ),
-                                          builder: (context, t, child) {
-                                            final clampedT = t.clamp(0.0, 1.0);
-                                            return Transform.translate(
-                                              offset: Offset(
-                                                  0, (1 - clampedT) * 22),
-                                              child: Opacity(
-                                                opacity: clampedT,
-                                                child: ClipRect(
-                                                  child: Align(
-                                                    alignment:
-                                                        Alignment.bottomRight,
-                                                    heightFactor: math.max(
-                                                        0.0001, clampedT),
-                                                    child: child,
-                                                  ),
-                                                ),
+                                            // 1. Update the internal trim values (where in the source file we start/end)
+                                            clip.trimStart = Duration(
+                                                milliseconds: s.round());
+                                            clip.trimEnd = Duration(
+                                                milliseconds: e.round());
+
+                                            // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
+                                            // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
+                                            if (newStartMs != null) {
+                                              // newStartMs is the intended start time in milliseconds.
+                                              // Convert to seconds (assuming clip.offset is in seconds).
+                                              clip.offset = newStartMs / 1000.0;
+                                            }
+                                            // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
+                                            // await _undoManager.execute(
+                                            //   TrimClipAction(
+                                            //     clip: clip,
+                                            //     oldTrimStart: clip.trimStart,
+                                            //     oldTrimEnd: clip.trimEnd,
+                                            //     oldOffset: clip.offset,
+                                            //     newTrimStart: Duration(milliseconds: s.round()),
+                                            //     newTrimEnd: Duration(milliseconds: e.round()),
+                                            //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
+                                            //     onChange: _updateOverallDurationIfNeeded,
+                                            //   ),
+                                            // );
+                                            setState(() {});
+                                            _updateOverallDurationIfNeeded();
+                                            // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
+                                          },
+
+                                          // for the undo history
+                                          onTrimClipCommit:
+                                              (i, s, e, os, oe, oo,
+                                                  {double? newStartMs}) async {
+                                            // final clip = _audioTracks[i];
+                                            await _undoManager.execute(
+                                              TrimClipAction(
+                                                // clip: clip,
+                                                tracks: _audioTracks,
+                                                originalIndex: i,
+                                                oldTrimStart: Duration(
+                                                    milliseconds: os.round()),
+                                                oldTrimEnd: Duration(
+                                                    milliseconds: oe.round()),
+                                                oldOffset: oo / 1000.0,
+                                                newTrimStart: Duration(
+                                                    milliseconds: s.round()),
+                                                newTrimEnd: Duration(
+                                                    milliseconds: e.round()),
+                                                newOffset: newStartMs != null
+                                                    ? newStartMs / 1000.0
+                                                    : null,
+                                                onChange: () {
+                                                  _syncClipTimingToEngine(i);
+                                                  _updateOverallDurationIfNeeded();
+                                                },
                                               ),
                                             );
                                           },
-                                          child: Container(
-                                            width: addActionsWidth,
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFF1D2435),
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              border: Border.all(
-                                                  color: Colors.white12),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black
-                                                      .withOpacity(0.28),
-                                                  blurRadius: 24,
-                                                  offset: const Offset(0, -8),
-                                                ),
-                                              ],
+
+                                          // selection + headers
+                                          // numRows: kNumRows,
+                                          // selectedRowIndex: _selectedRow,
+                                          onSelectRow: (row) => setState(
+                                              () => _selectedRow = row),
+                                          // rowMuted: _rowMuted,
+                                          // rowExpanded: _rowExpanded,
+                                          recordingInProgress: _isRecording,
+                                          onToggleExpanded: (row) => setState(
+                                              () => _rowExpanded[row] =
+                                                  !_rowExpanded[row]),
+                                          onAddRow: _addRow,
+                                          onInsertRowAbove: _insertRowAbove,
+                                          onInsertRowBelow: _insertRowBelow,
+                                          onDeleteRow: _deleteRow,
+                                          onMoveRow: _moveRow,
+                                          onRenameRow: _renameRow,
+                                          onSetRowIcon: _setRowIcon,
+
+                                          // transport
+                                          playheadMs: clock.inMilliseconds
+                                              .toDouble(), // your existing clock
+                                          // isPlaying: _isPlaying,
+                                          onScrubRequested: (ms) {
+                                            if (_isRecording) {
+                                              return; // do nothing while recording (hopefully no bug where you can still physically scrub but does nothing here)
+                                            }
+
+                                            final newPosition = Duration(
+                                                milliseconds: ms.toInt());
+                                            _syncTransportClock(
+                                              newPosition,
+                                              playing: _isPlaying,
+                                            );
+                                            // for (int i = 0; i < _audioTracks.length; i++) {
+                                            //   final track = _audioTracks[i];
+                                            //   final effectivePos = _calculateEffectiveAudioPositionForTrack(track, newPosition);
+                                            //   JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
+                                            //   setState(() {
+                                            //     track.currentPosition = effectivePos;
+                                            //   });
+                                            // }
+                                            JuceAudioEngine
+                                                .setAutomationTransport(
+                                              ms / 1000.0,
+                                            );
+                                            JuceAudioEngine
+                                                .setMetronomeTransportMs(ms);
+                                          },
+                                          maxDuration:
+                                              _audioOnlyOverallDuration,
+                                          getFullDurationMs: (t) =>
+                                              _clipFullDurationMsForTrim(t),
+                                          isPlaying: _isPlaying,
+
+                                          // ruler/grid
+                                          bpm: _tempo,
+                                          beatsPerBar: 4,
+
+                                          // layout
+                                          // numRows: kNumRows,
+                                          height:
+                                              520, // THIS VALUE is effectively unused, the height is just natural now
+                                          // ============================
+                                          // NEW: Row FX callbacks
+                                          // ============================
+                                          getRowEffects: (row) =>
+                                              JuceAudioEngine
+                                                  .getTrackEffectsForRow(row),
+                                          getRowEffectIds: (row) =>
+                                              JuceAudioEngine
+                                                  .getTrackEffectIdsForRow(row),
+
+                                          getRowEffectBypassState:
+                                              (row, effectIndex) =>
+                                                  JuceAudioEngine
+                                                      .getRowEffectBypassState(
+                                                          row, effectIndex),
+
+                                          insertRowEffect:
+                                              (row, pathOrName) async {
+                                            final before = await JuceAudioEngine
+                                                .getTrackEffectsForRow(row);
+                                            await _undoManager.execute(
+                                              InsertEffectAction(
+                                                row: row,
+                                                pathOrName: pathOrName,
+                                                onChange: () {
+                                                  setState(() {});
+                                                  _refreshRowFx(row);
+                                                  unawaited(
+                                                      _refreshAutomationTargetsForRow(
+                                                          row));
+                                                },
+                                              ),
+                                            );
+                                            final after = await JuceAudioEngine
+                                                .getTrackEffectsForRow(row);
+                                            if (after.length <= before.length) {
+                                              _showSmallNotice(
+                                                  'Could not load this effect plugin.');
+                                              return;
+                                            }
+                                            _recordProducerManualEdit(
+                                                'row_fx_insert', {
+                                              'row': row,
+                                              'effect': pathOrName
+                                            });
+                                            await _refreshAutomationTargetsForRow(
+                                              row,
+                                            );
+                                          }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
+                                          // need name of effects so undo action can add it back later
+                                          removeRowEffect: (row, effectIndex,
+                                              name, applyingPreset) async {
+                                            if (applyingPreset) {
+                                              await JuceAudioEngine
+                                                  .removeTrackEffect(
+                                                      row, effectIndex);
+                                              return;
+                                            }
+                                            await _undoManager.execute(
+                                              RemoveEffectAction(
+                                                row: row,
+                                                effectIndex: effectIndex,
+                                                pathOrName: name,
+                                                onChange: () {
+                                                  setState(() {});
+                                                  _refreshRowFx(row);
+                                                  unawaited(
+                                                      _refreshAutomationTargetsForRow(
+                                                          row));
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_fx_remove', {
+                                              'row': row,
+                                              'index': effectIndex,
+                                              'effect': name,
+                                            });
+                                            await _refreshAutomationTargetsForRow(
+                                              row,
+                                            );
+                                          }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
+
+                                          reorderRowEffects:
+                                              (row, from, to) async {
+                                            await _undoManager.execute(
+                                              ReorderEffectAction(
+                                                row: row,
+                                                from: from,
+                                                to: to,
+                                                onChange: () {
+                                                  setState(() {});
+                                                  _refreshRowFx(row);
+                                                  unawaited(
+                                                      _refreshAutomationTargetsForRow(
+                                                          row));
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_fx_reorder', {
+                                              'row': row,
+                                              'from': from,
+                                              'to': to
+                                            });
+                                            await _refreshAutomationTargetsForRow(
+                                              row,
+                                            );
+                                          }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
+
+                                          setRowEffectBypassed:
+                                              (row, effectIndex, bypass) async {
+                                            await _undoManager.execute(
+                                              BypassEffectAction(
+                                                row: row,
+                                                effectIndex: effectIndex,
+                                                oldState: !bypass,
+                                                newState: bypass,
+                                                onChange: () {
+                                                  setState(() {});
+                                                  _refreshRowFx(row);
+                                                  unawaited(
+                                                      _refreshAutomationTargetsForRow(
+                                                          row));
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_fx_bypass', {
+                                              'row': row,
+                                              'index': effectIndex,
+                                              'bypassed': bypass,
+                                            });
+                                          }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
+
+                                          getRowPluginParameters:
+                                              (row, effectIndex) =>
+                                                  JuceAudioEngine
+                                                      .getTrackPluginParameters(
+                                                          row, effectIndex),
+
+                                          setRowEffectParam: (row, effectIndex,
+                                              paramId, value) async {
+                                            await JuceAudioEngine
+                                                .setTrackEffect(
+                                              row,
+                                              effectIndex,
+                                              paramId,
+                                              value,
+                                            );
+                                            _updateAutomationTargetBaselineForEffectParameter(
+                                              row: row,
+                                              effectIndex: effectIndex,
+                                              paramId: paramId,
+                                              value: value,
+                                              master: false,
+                                            );
+                                          },
+
+                                          // for commiting to undo history
+                                          onPluginParamCommit: (row,
+                                              idx,
+                                              paramId,
+                                              oldValue,
+                                              newValue) async {
+                                            await _undoManager.execute(
+                                              SetEffectParamAction(
+                                                row: row,
+                                                effectIndex: idx,
+                                                paramId: paramId,
+                                                oldValue: oldValue,
+                                                newValue: newValue,
+                                                onChange: () {
+                                                  setState(() {});
+                                                  _refreshRowFx(row);
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_fx_param', {
+                                              'row': row,
+                                              'index': idx,
+                                              'param_id': paramId,
+                                              'old_value': oldValue,
+                                              'new_value': newValue,
+                                            });
+                                          },
+
+                                          onPresetCommit:
+                                              (before, after) async {
+                                            await _undoManager.execute(
+                                              TrackPresetChangeAction(
+                                                before: before,
+                                                after: after,
+                                                onChange: () {
+                                                  setState(() {});
+                                                  unawaited(
+                                                      _refreshAutomationTargetsForRow(
+                                                          before.row));
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_preset_commit', {
+                                              'row': before.row,
+                                              'before_count':
+                                                  before.effects.length,
+                                              'after_count':
+                                                  after.effects.length,
+                                            });
+                                            await _refreshAutomationTargetsForRow(
+                                              before.row,
+                                            );
+                                          },
+
+                                          scanPlugins: () =>
+                                              JuceAudioEngine.scanPlugins(),
+
+                                          setTrackAutomationPoints: (row,
+                                                  points) =>
+                                              _syncNativeAutomationForRow(row),
+
+                                          onAutomationCommit:
+                                              (row, oldPoints, newPoints) {
+                                            _undoManager.execute(
+                                              SetAutomationPointsAction(
+                                                row: row,
+                                                oldPoints: oldPoints,
+                                                newPoints: newPoints,
+                                                applyToState: (r, points) {
+                                                  setState(() {
+                                                    _rowVolumeAutomation[r] =
+                                                        points
+                                                            .map((p) =>
+                                                                AutomationPoint(
+                                                                    x: p.x,
+                                                                    volume: p
+                                                                        .volume))
+                                                            .toList();
+                                                  });
+                                                },
+                                                onApplied: (r, _) async {
+                                                  await _syncNativeAutomationForRow(
+                                                      r);
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_automation', {
+                                              'row': row,
+                                              'old_count': oldPoints.length,
+                                              'new_count': newPoints.length,
+                                            });
+                                          },
+
+                                          setRowGain: (row, gain0to3) =>
+                                              JuceAudioEngine.setRowGain(
+                                                  row, gain0to3),
+                                          onRowGainCommit:
+                                              (row, oldGain, newGain) {
+                                            _undoManager.execute(
+                                              SetRowGainAction(
+                                                row: row,
+                                                oldGain: oldGain,
+                                                newGain: newGain,
+                                                applyToState: (r, g) {
+                                                  setState(() {
+                                                    _rowGain[r] = g;
+                                                  });
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_gain', {
+                                              'row': row,
+                                              'old_gain': oldGain,
+                                              'new_gain': newGain,
+                                            });
+                                          },
+
+                                          muteRow: (row, mute) async {
+                                            // await JuceAudioEngine.muteRow(row, mute);
+                                            setState(
+                                                () => _rowMuted[row] = mute);
+                                            await _recomputeAudibleState(); // this handles all mute/solo logic
+
+                                            // mute not counted in the undo history
+                                            // await _undoManager.execute(
+                                            //   MuteRowAction(row, !mute, mute, () => setState(() => _rowMuted[row] = mute)),
+                                            // );
+                                          },
+
+                                          // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
+                                          rowMuted: _rowMuted,
+
+                                          soloRow: (row, solo) async {
+                                            // await JuceAudioEngine.muteRow(row, mute);
+                                            setState(
+                                                () => _rowSoloed[row] = solo);
+                                            await _recomputeAudibleState(); // this handles all mute/solo logic
+                                          },
+
+                                          // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
+                                          rowSoloed: _rowSoloed,
+
+                                          setRowPan: (row, newPan) =>
+                                              JuceAudioEngine.setRowPan(
+                                                  row, newPan),
+                                          onRowPanCommit:
+                                              (row, oldPan, newPan) {
+                                            _undoManager.execute(
+                                              SetRowPanAction(
+                                                row: row,
+                                                oldPan: oldPan,
+                                                newPan: newPan,
+                                                applyToState: (r, p) {
+                                                  setState(() {
+                                                    _rowPan[r] = p;
+                                                  });
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_pan', {
+                                              'row': row,
+                                              'old_pan': oldPan,
+                                              'new_pan': newPan,
+                                            });
+                                          },
+
+                                          setClipGain: _setClipGainLive,
+                                          onClipGainCommit:
+                                              (clipIndex, oldGain, newGain) {
+                                            _undoManager.execute(
+                                              SetClipGainAction(
+                                                tracks: _audioTracks,
+                                                originalIndex: clipIndex,
+                                                oldGain: oldGain,
+                                                newGain: newGain,
+                                                applyToState: (clip, gain) {
+                                                  clip.gain = gain;
+                                                  setState(() {});
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'clip_gain', {
+                                              'clip': clipIndex,
+                                              'old_gain': oldGain,
+                                              'new_gain': newGain,
+                                            });
+                                          },
+                                          setClipPitch: _setClipPitchLive,
+                                          onClipPitchCommit:
+                                              (clipIndex, oldPitch, newPitch) {
+                                            _undoManager.execute(
+                                              SetClipPitchAction(
+                                                tracks: _audioTracks,
+                                                originalIndex: clipIndex,
+                                                oldPitch: oldPitch,
+                                                newPitch: newPitch,
+                                                applyToState: (clip, pitch) {
+                                                  clip.pitchSemitones = pitch;
+                                                  setState(() {});
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'clip_pitch', {
+                                              'clip': clipIndex,
+                                              'old_pitch': oldPitch,
+                                              'new_pitch': newPitch,
+                                            });
+                                          },
+                                          onSetClipReversed:
+                                              (clipIndex, reversed) async {
+                                            if (clipIndex < 0 ||
+                                                clipIndex >=
+                                                    _audioTracks.length) {
+                                              return;
+                                            }
+                                            final clip =
+                                                _audioTracks[clipIndex];
+                                            if (clip.isMidi ||
+                                                clip.isReversed == reversed) {
+                                              return;
+                                            }
+                                            await _undoManager.execute(
+                                              SetClipReverseAction(
+                                                tracks: _audioTracks,
+                                                originalIndex: clipIndex,
+                                                oldReversed: clip.isReversed,
+                                                newReversed: reversed,
+                                                applyToState: (target, value) {
+                                                  target.isReversed = value;
+                                                  setState(() {});
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'clip_reverse', {
+                                              'clip': clipIndex,
+                                              'reversed': reversed,
+                                            });
+                                          },
+                                          onAdjustClipToTempo:
+                                              _handleAdjustClipToTempo,
+                                          onStretchClipToTempoPreservePitch:
+                                              _handleStretchClipToTempoPreservePitch,
+                                          onDisableClipTempoFollow:
+                                              _handleDisableClipTempoFollow,
+                                          onDetectClipTempoAndSetProjectTempo:
+                                              _handleDetectClipTempoAndSetProjectTempo,
+                                          onStretchClip:
+                                              _handleStretchClipResize,
+                                          onStretchClipCommit:
+                                              _handleStretchClipResizeCommit,
+                                          onRenameClip:
+                                              (clipIndex, newLabel) async {
+                                            if (clipIndex < 0 ||
+                                                clipIndex >=
+                                                    _audioTracks.length) {
+                                              return;
+                                            }
+                                            final oldLabel =
+                                                _audioTracks[clipIndex].label;
+                                            final nextLabel = newLabel.trim();
+                                            if (nextLabel.isEmpty ||
+                                                oldLabel == nextLabel) {
+                                              return;
+                                            }
+
+                                            await _undoManager.execute(
+                                              SetClipLabelAction(
+                                                tracks: _audioTracks,
+                                                originalIndex: clipIndex,
+                                                oldLabel: oldLabel,
+                                                newLabel: nextLabel,
+                                                applyToState: (clip, label) {
+                                                  clip.label = label;
+                                                  setState(() {});
+                                                },
+                                              ),
+                                            );
+
+                                            _recordProducerManualEdit(
+                                                'clip_rename', {
+                                              'clip': clipIndex,
+                                              'old_label': oldLabel,
+                                              'new_label': nextLabel,
+                                            });
+                                          },
+
+                                          onCopyClip: _handleCopyClip,
+                                          onDeleteClip: _handleDeleteClip,
+                                          onCopyClips: _handleCopyClips,
+                                          onDeleteClips: _handleDeleteClips,
+                                          onCutClipAt: _handleCutClipAt,
+                                          hasCopiedClip: _copiedClip != null ||
+                                              (_copiedClipGroup?.isNotEmpty ??
+                                                  false),
+                                          onPasteClipAt: _handlePasteClipAt,
+                                          onClearCopiedClip: _clearCopiedClip,
+                                          onOpenMidiClip: _openMidiClipEditor,
+                                          onStemSeparation:
+                                              _handleStemSeparationForClip,
+                                          onSelectionChanged:
+                                              (selectedClipIndices,
+                                                  primaryClipIndex) {
+                                            _timelineSelectedClipIndices =
+                                                List<int>.from(
+                                                    selectedClipIndices);
+                                            _timelinePrimarySelectedClipIndex =
+                                                primaryClipIndex;
+                                            unawaited(
+                                              _syncLiveMidiInputTargetClip(),
+                                            );
+                                          },
+                                          onSnapSettingsChanged: (magnetEnabled,
+                                              quantizeDivisionsPerBar) {
+                                            if (_timelineMagnetEnabled ==
+                                                    magnetEnabled &&
+                                                _timelineQuantizeDivisionsPerBar ==
+                                                    quantizeDivisionsPerBar) {
+                                              return;
+                                            }
+                                            setState(() {
+                                              _timelineMagnetEnabled =
+                                                  magnetEnabled;
+                                              _timelineQuantizeDivisionsPerBar =
+                                                  quantizeDivisionsPerBar;
+                                            });
+                                          },
+                                          onLoopToggle: (enabled) {
+                                            setState(
+                                                () => _loopEnabled = enabled);
+                                          },
+
+                                          onLoopRegionChanged: (start, end) {
+                                            setState(() {
+                                              _loopStartMs = start;
+                                              _loopEndMs = end;
+                                            });
+                                          },
+                                          isRecording: _isRecording,
+                                          recordingRowIndex: _selectedRow,
+                                          recordingStartMs: _recordingStartMs,
+                                          recordingPeaks:
+                                              _recordingPeaks, // TODO: FIX TO USE WITH JUCE
+                                          registerRowFxRefresher: (fn) {
+                                            _refreshRowFx = fn;
+                                            WidgetsBinding.instance
+                                                .addPostFrameCallback((_) {
+                                              if (!mounted) return;
+                                              for (int row = 0;
+                                                  row < _rowCount;
+                                                  row++) {
+                                                _refreshRowFx(row);
+                                              }
+                                            });
+                                          },
+                                          registerRowFxPlaybackRefresher: (fn) {
+                                            _refreshRowFxPlayback = fn;
+                                          },
+                                          meters: _meters,
+                                          getRowCompressorMeter: (row, fx) =>
+                                              JuceAudioEngine
+                                                  .getRowCompressorMeter(
+                                                      row, fx),
+                                          getRowEqWaveform: (row, fx,
+                                                  sampleCount) =>
+                                              JuceAudioEngine.getRowEqWaveform(
+                                                  row, fx,
+                                                  sampleCount: sampleCount),
+                                          onExternalSampleDrop:
+                                              (data, row, timeMs) async {
+                                            await _insertAudioFileAtTimeline(
+                                              data.filePath,
+                                              row: row,
+                                              timeMs: timeMs,
+                                              uploadMethod: 'dragdrop',
+                                            );
+                                          },
+                                          onExternalSampleDragEntered: () {
+                                            _handleSampleDragExitedBrowserPanel();
+                                          },
+                                          externalSampleDragActive:
+                                              _sampleDragActive,
+                                          onTutorialTimelineScrolled:
+                                              _handleDawOnboardingTimelineScrolled,
+                                          onTutorialTimelineZoomed:
+                                              _handleDawOnboardingTimelineZoomed,
+                                          onTutorialRowExpansionChanged:
+                                              _handleDawOnboardingRowExpansionChanged,
+                                          onTutorialRowTabSelected:
+                                              _handleDawOnboardingRowTabSelected,
+                                          onTutorialRowEffectAdded:
+                                              _handleDawOnboardingEffectAdded,
+                                          onTutorialRowEffectOpened:
+                                              _handleDawOnboardingEffectOpened,
+                                          tutorialHighlighter: _mixHighlighter,
+                                          bottomDockInset: _kChatBarStackHeight +
+                                              _kTransportBarHeight +
+                                              (_showProducerCaptureUi
+                                                  ? _kProducerBannerHeightEstimate
+                                                  : 0.0),
+
+                                          mode: _resolvedMode,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Builder(
+                                builder: (overlayContext) {
+                                  final keyboardInset =
+                                      MediaQuery.viewInsetsOf(overlayContext)
+                                          .bottom;
+                                  final transportBottomInset =
+                                      _androidTransportBottomInset(
+                                          overlayContext);
+                                  final chatTypingActive =
+                                      _chatFocusNode.hasFocus ||
+                                          keyboardInset > 0.0;
+                                  const transportVisualBottomInset = 0.0;
+                                  final chatLift = math.max(
+                                    0.0,
+                                    chatTypingActive
+                                        ? keyboardInset -
+                                            (_kTransportBarHeight +
+                                                transportBottomInset)
+                                        : 0.0,
+                                  );
+                                  final mediaSize =
+                                      MediaQuery.sizeOf(overlayContext);
+                                  final samplePanelBottom = chatLift +
+                                      _kChatBarStackHeight +
+                                      _kTransportBarHeight +
+                                      (_showProducerCaptureUi
+                                          ? _kProducerBannerHeightEstimate
+                                          : 0.0) +
+                                      (Platform.isAndroid ? 10.0 : 0.0) +
+                                      _kSamplePanelBottomGap;
+                                  final collapsedTop = math.max(
+                                    _kSamplePanelExpandedTop + 24.0,
+                                    mediaSize.height *
+                                        _kSamplePanelCollapsedTopFactor,
+                                  );
+                                  final maxPanelTop = math.max(
+                                    _kSamplePanelExpandedTop,
+                                    mediaSize.height -
+                                        samplePanelBottom -
+                                        120.0,
+                                  );
+                                  final desiredPanelTop = _sampleBrowserExpanded
+                                      ? _kSamplePanelExpandedTop
+                                      : collapsedTop;
+                                  final samplePanelTop = desiredPanelTop
+                                      .clamp(
+                                          _kSamplePanelExpandedTop, maxPanelTop)
+                                      .toDouble();
+                                  var addActionsBottom = chatLift +
+                                      transportVisualBottomInset +
+                                      _kTransportBarHeight +
+                                      6.0;
+                                  final addButtonAnchorContext =
+                                      _addButtonAnchorKey.currentContext;
+                                  final addButtonAnchorObject =
+                                      addButtonAnchorContext
+                                          ?.findRenderObject();
+                                  if (addButtonAnchorObject is RenderBox &&
+                                      addButtonAnchorObject.hasSize) {
+                                    final anchorTop = addButtonAnchorObject
+                                        .localToGlobal(Offset.zero)
+                                        .dy;
+                                    final addButtonTop = anchorTop;
+                                    final anchoredBottom =
+                                        mediaSize.height - addButtonTop + 4.0;
+                                    addActionsBottom = anchoredBottom
+                                        .clamp(
+                                          chatLift +
+                                              transportVisualBottomInset +
+                                              _kTransportBarHeight +
+                                              4.0,
+                                          mediaSize.height - 48.0,
+                                        )
+                                        .toDouble();
+                                  }
+                                  final addActionsRight = 10.0;
+                                  final addActionsWidth = math.min(
+                                      _kAddActionsPanelWidth,
+                                      mediaSize.width - 20.0);
+                                  return Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      if (_showAddActionsPanel)
+                                        Positioned.fill(
+                                          child: GestureDetector(
+                                            behavior: HitTestBehavior.opaque,
+                                            onTap: _closeAddActionsPanel,
+                                            child: const SizedBox.shrink(),
+                                          ),
+                                        ),
+                                      Positioned(
+                                        left: 0,
+                                        right: 0,
+                                        bottom: chatLift +
+                                            transportVisualBottomInset,
+                                        child: _buildBottomChatAndTransport(
+                                          includeChatBar: true,
+                                          includeProducerCapture:
+                                              _showProducerCaptureUi,
+                                          includeTransport: true,
+                                        ),
+                                      ),
+                                      Positioned(
+                                        right: addActionsRight,
+                                        bottom: addActionsBottom,
+                                        child: IgnorePointer(
+                                          ignoring: !_showAddActionsPanel,
+                                          child: TweenAnimationBuilder<double>(
+                                            duration: const Duration(
+                                                milliseconds: 120),
+                                            curve: _showAddActionsPanel
+                                                ? Curves.easeOutCubic
+                                                : Curves.easeInCubic,
+                                            tween: Tween<double>(
+                                              begin: 0.0,
+                                              end: _showAddActionsPanel
+                                                  ? 1.0
+                                                  : 0.0,
                                             ),
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
+                                            builder: (context, t, child) {
+                                              final clampedT =
+                                                  t.clamp(0.0, 1.0);
+                                              return Transform.translate(
+                                                offset: Offset(
+                                                    0, (1 - clampedT) * 22),
+                                                child: Opacity(
+                                                  opacity: clampedT,
+                                                  child: ClipRect(
+                                                    child: Align(
+                                                      alignment:
+                                                          Alignment.bottomRight,
+                                                      heightFactor: math.max(
+                                                          0.0001, clampedT),
+                                                      child: child,
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                            child: Stack(
+                                              clipBehavior: Clip.none,
                                               children: [
-                                                _buildAddActionTile(
-                                                  id: 'audio',
-                                                  icon: Icons.audiotrack,
-                                                  title: L10n.translate(context,
-                                                      'Add Audio Clip'),
-                                                  onTap: () {
-                                                    unawaited(
-                                                        _handleAddActionSelection(
-                                                            'audio'));
-                                                  },
-                                                ),
-                                                _buildAddActionTile(
-                                                  id: 'instrument',
-                                                  icon: Icons.piano,
-                                                  title: L10n.translate(context,
-                                                      'Add Instrument Clip'),
-                                                  onTap: () {
-                                                    unawaited(
-                                                        _handleAddActionSelection(
-                                                            'instrument'));
-                                                  },
-                                                ),
-                                                _buildAddActionTile(
-                                                  id: 'sample_browser',
-                                                  icon: Icons.folder_open,
-                                                  title: 'Open File Browser',
-                                                  topPadding: 0,
-                                                  bottomPadding: 4,
-                                                  subtitle:
-                                                      'Audition folders and drag files to timeline',
-                                                  onTap: () {
-                                                    unawaited(
-                                                        _handleAddActionSelection(
-                                                            'sample_browser'));
-                                                  },
+                                                ClipRRect(
+                                                  borderRadius:
+                                                      BorderRadius.circular(24),
+                                                  child: BackdropFilter(
+                                                    filter: ImageFilter.blur(
+                                                      sigmaX: 16,
+                                                      sigmaY: 16,
+                                                    ),
+                                                    child: Container(
+                                                      width: addActionsWidth,
+                                                      decoration: BoxDecoration(
+                                                        gradient:
+                                                            const LinearGradient(
+                                                          colors: <Color>[
+                                                            Color.fromRGBO(90,
+                                                                99, 110, 0.38),
+                                                            Color.fromRGBO(56,
+                                                                64, 75, 0.34),
+                                                            Color.fromRGBO(35,
+                                                                42, 52, 0.32),
+                                                          ],
+                                                          begin: Alignment
+                                                              .topCenter,
+                                                          end: Alignment
+                                                              .bottomCenter,
+                                                        ),
+                                                        color: const Color
+                                                            .fromRGBO(
+                                                          52,
+                                                          60,
+                                                          70,
+                                                          0.22,
+                                                        ),
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(24),
+                                                        border: Border.all(
+                                                          color: Colors.white
+                                                              .withValues(
+                                                                  alpha: 0.14),
+                                                        ),
+                                                        boxShadow: [
+                                                          BoxShadow(
+                                                            color: Colors.black
+                                                                .withValues(
+                                                                    alpha:
+                                                                        0.24),
+                                                            blurRadius: 24,
+                                                            offset:
+                                                                const Offset(
+                                                                    0, 10),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      child: Column(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          _buildAddActionTile(
+                                                            id: 'audio',
+                                                            icon: Icons
+                                                                .audiotrack,
+                                                            title:
+                                                                L10n.translate(
+                                                              context,
+                                                              'Add Audio Clip',
+                                                            ),
+                                                            onTap: () {
+                                                              unawaited(
+                                                                _handleAddActionSelection(
+                                                                    'audio'),
+                                                              );
+                                                            },
+                                                          ),
+                                                          Container(
+                                                            height: 1,
+                                                            margin:
+                                                                const EdgeInsets
+                                                                    .symmetric(
+                                                                    horizontal:
+                                                                        16),
+                                                            color: Colors.white
+                                                                .withValues(
+                                                                    alpha:
+                                                                        0.08),
+                                                          ),
+                                                          _buildAddActionTile(
+                                                            id: 'instrument',
+                                                            icon: Icons.piano,
+                                                            title:
+                                                                L10n.translate(
+                                                              context,
+                                                              'Add Instrument Clip',
+                                                            ),
+                                                            onTap: () {
+                                                              unawaited(
+                                                                _handleAddActionSelection(
+                                                                    'instrument'),
+                                                              );
+                                                            },
+                                                          ),
+                                                          Container(
+                                                            height: 1,
+                                                            margin:
+                                                                const EdgeInsets
+                                                                    .symmetric(
+                                                                    horizontal:
+                                                                        16),
+                                                            color: Colors.white
+                                                                .withValues(
+                                                                    alpha:
+                                                                        0.08),
+                                                          ),
+                                                          _buildAddActionTile(
+                                                            id: 'sample_browser',
+                                                            icon: Icons
+                                                                .folder_open,
+                                                            title:
+                                                                'Open File Browser',
+                                                            topPadding: 0,
+                                                            bottomPadding: 8,
+                                                            subtitle:
+                                                                'Audition folders and drag and drop',
+                                                            onTap: () {
+                                                              unawaited(
+                                                                _handleAddActionSelection(
+                                                                    'sample_browser'),
+                                                              );
+                                                            },
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
                                                 ),
                                               ],
                                             ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                    if (_sampleBrowserVisible)
-                                      AnimatedPositioned(
-                                        duration:
-                                            const Duration(milliseconds: 190),
-                                        curve: Curves.easeOutCubic,
+                                      if (_sampleBrowserVisible)
+                                        AnimatedPositioned(
+                                          duration:
+                                              const Duration(milliseconds: 190),
+                                          curve: Curves.easeOutCubic,
+                                          left: 0,
+                                          right: 0,
+                                          top: samplePanelTop,
+                                          bottom: samplePanelBottom,
+                                          child: SampleBrowserPanel(
+                                            rootFolders: _sampleBrowserRoots,
+                                            auditioningPath:
+                                                _auditioningSamplePath,
+                                            onAuditionTap: _auditionSampleFile,
+                                            onInsertSample: (filePath) =>
+                                                _insertAudioFileAtTimeline(
+                                                    filePath),
+                                            onAddFolder:
+                                                _addSampleBrowserRootFolder,
+                                            onRemoveFolder:
+                                                _removeSampleBrowserRoot,
+                                            resolveDuration:
+                                                _resolveSampleDuration,
+                                            previewPositionStream:
+                                                _samplePreviewPlayer
+                                                    .positionStream,
+                                            previewDurationStream:
+                                                _samplePreviewPlayer
+                                                    .durationStream,
+                                            previewPlaying:
+                                                _samplePreviewPlaying,
+                                            onPreviewSeek: (pos) =>
+                                                _samplePreviewPlayer.seek(pos),
+                                            onOpenSystemSettings:
+                                                _openAppPermissionsSettings,
+                                            onDragActivityChanged:
+                                                _setSampleDragActive,
+                                            onClose: () {
+                                              unawaited(_closeSampleBrowser());
+                                            },
+                                            expanded: _sampleBrowserExpanded,
+                                            onExpandedChanged: (expanded) {
+                                              setState(() {
+                                                _sampleBrowserExpanded =
+                                                    expanded;
+                                              });
+                                            },
+                                          ),
+                                        ),
+                                      Positioned(
                                         left: 0,
                                         right: 0,
-                                        top: samplePanelTop,
-                                        bottom: samplePanelBottom,
-                                        child: SampleBrowserPanel(
-                                          rootFolders: _sampleBrowserRoots,
-                                          auditioningPath:
-                                              _auditioningSamplePath,
-                                          onAuditionTap: _auditionSampleFile,
-                                          onInsertSample: (filePath) =>
-                                              _insertAudioFileAtTimeline(
-                                                  filePath),
-                                          onAddFolder:
-                                              _addSampleBrowserRootFolder,
-                                          onRemoveFolder:
-                                              _removeSampleBrowserRoot,
-                                          resolveDuration:
-                                              _resolveSampleDuration,
-                                          previewPositionStream:
-                                              _samplePreviewPlayer
-                                                  .positionStream,
-                                          previewDurationStream:
-                                              _samplePreviewPlayer
-                                                  .durationStream,
-                                          previewPlaying: _samplePreviewPlaying,
-                                          onPreviewSeek: (pos) =>
-                                              _samplePreviewPlayer.seek(pos),
-                                          onOpenSystemSettings:
-                                              _openAppPermissionsSettings,
-                                          onDragActivityChanged:
-                                              _setSampleDragActive,
-                                          onClose: () {
-                                            unawaited(_closeSampleBrowser());
-                                          },
-                                          expanded: _sampleBrowserExpanded,
-                                          onExpandedChanged: (expanded) {
-                                            setState(() {
-                                              _sampleBrowserExpanded = expanded;
-                                            });
-                                          },
-                                        ),
-                                      ),
-                                    Positioned(
-                                      left: 0,
-                                      right: 0,
-                                      bottom: _kChatBarStackHeight + chatLift,
-                                      child: AnimatedSlide(
-                                        offset: _chatExpanded
-                                            ? Offset.zero
-                                            : const Offset(0, 0.3),
-                                        duration:
-                                            const Duration(milliseconds: 160),
-                                        curve: Curves.easeOutCubic,
-                                        child: SizedBox(
-                                          height: _kChatHistoryHeight,
-                                          child: _chatWarm
-                                              ? Container(
-                                                  margin: const EdgeInsets
-                                                      .symmetric(
-                                                      horizontal: 12),
-                                                  child: IgnorePointer(
-                                                    ignoring: !_chatExpanded,
-                                                    child: AnimatedOpacity(
-                                                      duration: const Duration(
-                                                          milliseconds: 140),
-                                                      curve:
-                                                          Curves.easeOutCubic,
-                                                      opacity:
-                                                          _chatExpanded ? 1 : 0,
-                                                      child: ClipRRect(
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(22),
-                                                        child: BackdropFilter(
-                                                          filter:
-                                                              ImageFilter.blur(
-                                                                  sigmaX: 18,
-                                                                  sigmaY: 18),
-                                                          child: Container(
-                                                            decoration:
-                                                                BoxDecoration(
-                                                              color: Colors
-                                                                  .white
-                                                                  .withOpacity(
-                                                                      _kChatChromeOpacity),
-                                                              borderRadius:
-                                                                  BorderRadius
-                                                                      .circular(
-                                                                          22),
-                                                              border: Border.all(
-                                                                  color: Colors
-                                                                      .white
-                                                                      .withOpacity(
-                                                                          0.14)),
-                                                            ),
-                                                            child: Builder(
-                                                              builder:
-                                                                  (context) {
-                                                                final canClearChatHistory =
-                                                                    !_isThinking &&
-                                                                        _chatController
-                                                                            .messages
-                                                                            .isNotEmpty;
-                                                                return Column(
-                                                                  children: [
-                                                                    Padding(
-                                                                      padding: const EdgeInsets
-                                                                          .fromLTRB(
-                                                                          16,
-                                                                          12,
-                                                                          12,
-                                                                          6),
-                                                                      child:
-                                                                          Row(
-                                                                        children: [
-                                                                          const Expanded(
-                                                                            child:
-                                                                                Text(
-                                                                              'Project Chat',
-                                                                              style: TextStyle(
-                                                                                fontFamily: 'Pretendard',
-                                                                                fontSize: 13,
-                                                                                fontWeight: FontWeight.w700,
-                                                                                letterSpacing: 0.3,
-                                                                                color: Colors.white70,
-                                                                              ),
-                                                                            ),
-                                                                          ),
-                                                                          TextButton
-                                                                              .icon(
-                                                                            onPressed: canClearChatHistory
-                                                                                ? _confirmClearChatHistory
-                                                                                : null,
-                                                                            style:
-                                                                                TextButton.styleFrom(
-                                                                              minimumSize: const Size(0, 32),
-                                                                              padding: const EdgeInsets.symmetric(horizontal: 10),
-                                                                              foregroundColor: Colors.white70,
-                                                                              backgroundColor: Colors.white.withOpacity(0.05),
-                                                                              shape: RoundedRectangleBorder(
-                                                                                borderRadius: BorderRadius.circular(999),
-                                                                              ),
-                                                                            ),
-                                                                            icon:
-                                                                                const Icon(
-                                                                              Icons.delete_outline_rounded,
-                                                                              size: 16,
-                                                                            ),
-                                                                            label:
-                                                                                const Text(
-                                                                              'Clear',
-                                                                              style: TextStyle(
-                                                                                fontSize: 12,
-                                                                                fontWeight: FontWeight.w600,
-                                                                              ),
-                                                                            ),
-                                                                          ),
-                                                                        ],
-                                                                      ),
+                                        bottom: _kChatBarStackHeight +
+                                            _kTransportBarHeight +
+                                            chatLift +
+                                            transportVisualBottomInset +
+                                            _chatHistoryBottomGap,
+                                        child: AnimatedSlide(
+                                          offset: _chatExpanded
+                                              ? Offset.zero
+                                              : const Offset(0, 0.3),
+                                          duration:
+                                              const Duration(milliseconds: 160),
+                                          curve: Curves.easeOutCubic,
+                                          child: SizedBox(
+                                            height: _kChatHistoryHeight,
+                                            child: _chatWarm
+                                                ? Container(
+                                                    margin: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 12),
+                                                    child: IgnorePointer(
+                                                      ignoring: !_chatExpanded,
+                                                      child: AnimatedOpacity(
+                                                        duration:
+                                                            const Duration(
+                                                                milliseconds:
+                                                                    140),
+                                                        curve:
+                                                            Curves.easeOutCubic,
+                                                        opacity: _chatExpanded
+                                                            ? 1
+                                                            : 0,
+                                                        child: ClipRRect(
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(29),
+                                                          child: BackdropFilter(
+                                                            filter: ImageFilter
+                                                                .blur(
+                                                                    sigmaX: 18,
+                                                                    sigmaY: 18),
+                                                            child: Container(
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                color: const Color
+                                                                    .fromRGBO(
+                                                                  244,
+                                                                  244,
+                                                                  244,
+                                                                  _kChatChromeOpacity,
+                                                                ),
+                                                                borderRadius:
+                                                                    BorderRadius
+                                                                        .circular(
+                                                                            29),
+                                                                boxShadow: [
+                                                                  BoxShadow(
+                                                                    color: Colors
+                                                                        .black
+                                                                        .withValues(
+                                                                      alpha:
+                                                                          0.25,
                                                                     ),
-                                                                    Expanded(
-                                                                      child: MediaQuery
-                                                                          .removePadding(
-                                                                        context:
-                                                                            overlayContext,
-                                                                        removeBottom:
-                                                                            true,
+                                                                    blurRadius:
+                                                                        15,
+                                                                    spreadRadius:
+                                                                        8,
+                                                                    offset: Offset
+                                                                        .zero,
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                              child: Builder(
+                                                                builder:
+                                                                    (context) {
+                                                                  final canClearChatHistory = !_isThinking &&
+                                                                      _chatController
+                                                                          .messages
+                                                                          .isNotEmpty;
+                                                                  return Column(
+                                                                    children: [
+                                                                      Padding(
+                                                                        padding: const EdgeInsets
+                                                                            .fromLTRB(
+                                                                            16,
+                                                                            12,
+                                                                            12,
+                                                                            6),
+                                                                        child:
+                                                                            Row(
+                                                                          children: [
+                                                                            Expanded(
+                                                                              child: Text(
+                                                                                L10n.translate(
+                                                                                  context,
+                                                                                  'Project Chat',
+                                                                                ),
+                                                                                style: const TextStyle(
+                                                                                  fontFamily: 'Pretendard',
+                                                                                  fontSize: 13,
+                                                                                  fontWeight: FontWeight.w700,
+                                                                                  letterSpacing: 0.3,
+                                                                                  color: Colors.white70,
+                                                                                ),
+                                                                              ),
+                                                                            ),
+                                                                            _buildChatHeaderActionButton(
+                                                                              label: 'Feedback',
+                                                                              icon: Icons.feedback_outlined,
+                                                                              onPressed: _feedbackSubmissionInFlight ? null : _openDawFeedbackComposer,
+                                                                            ),
+                                                                            const SizedBox(width: 8),
+                                                                            _buildChatHeaderActionButton(
+                                                                              label: 'Clear',
+                                                                              icon: Icons.delete_outline_rounded,
+                                                                              onPressed: canClearChatHistory ? _confirmClearChatHistory : null,
+                                                                            ),
+                                                                          ],
+                                                                        ),
+                                                                      ),
+                                                                      Expanded(
                                                                         child: MediaQuery
-                                                                            .removeViewInsets(
+                                                                            .removePadding(
                                                                           context:
                                                                               overlayContext,
                                                                           removeBottom:
                                                                               true,
                                                                           child:
-                                                                              Chat(
-                                                                            chatController:
-                                                                                _chatController,
-                                                                            currentUserId:
-                                                                                'user',
-                                                                            onMessageSend:
-                                                                                null,
-                                                                            timeFormat:
-                                                                                null,
-                                                                            onMessageLongPress:
-                                                                                (
-                                                                              BuildContext context,
-                                                                              Message message, {
-                                                                              required LongPressStartDetails details,
-                                                                              required int index,
-                                                                            }) async {
-                                                                              if (message is TextMessage) {
-                                                                                await Clipboard.setData(
-                                                                                  ClipboardData(text: message.text),
-                                                                                );
-
-                                                                                await AppHaptics.impact(
-                                                                                  AppHapticImpact.light,
-                                                                                );
-
-                                                                                _showCopiedChatMessageFeedback(
-                                                                                  message.id,
-                                                                                );
-                                                                              }
-                                                                            },
-                                                                            builders:
-                                                                                Builders(
-                                                                              composerBuilder: (_) => const SizedBox.shrink(),
-                                                                              emptyChatListBuilder: (_) => Center(
-                                                                                child: Padding(
-                                                                                  padding: const EdgeInsets.symmetric(horizontal: 28),
-                                                                                  child: Text(
-                                                                                    'Chat context now stays with this project.\nStart a conversation and it will still be here when you reopen it.',
-                                                                                    textAlign: TextAlign.center,
-                                                                                    style: const TextStyle(
-                                                                                      fontFamily: 'Pretendard',
-                                                                                      fontSize: 14,
-                                                                                      height: 1.45,
-                                                                                      color: Colors.white60,
-                                                                                    ),
-                                                                                  ),
-                                                                                ),
-                                                                              ),
-                                                                              scrollToBottomBuilder: (
+                                                                              MediaQuery.removeViewInsets(
+                                                                            context:
+                                                                                overlayContext,
+                                                                            removeBottom:
+                                                                                true,
+                                                                            child:
+                                                                                Chat(
+                                                                              chatController: _chatController,
+                                                                              currentUserId: 'user',
+                                                                              onMessageSend: null,
+                                                                              timeFormat: null,
+                                                                              onMessageLongPress: (
                                                                                 BuildContext context,
-                                                                                Animation<double> animation,
-                                                                                VoidCallback onPressed,
-                                                                              ) {
-                                                                                return Positioned(
-                                                                                  left: 0,
-                                                                                  right: 0,
-                                                                                  bottom: 16,
-                                                                                  child: IgnorePointer(
-                                                                                    ignoring: animation.value <= 0.01,
-                                                                                    child: Center(
-                                                                                      child: ScaleTransition(
-                                                                                        scale: animation,
-                                                                                        child: FloatingActionButton(
-                                                                                          heroTag: null,
-                                                                                          mini: true,
-                                                                                          backgroundColor: const Color.fromARGB(210, 34, 38, 48),
-                                                                                          foregroundColor: Colors.white,
-                                                                                          onPressed: onPressed,
-                                                                                          child: const Icon(Icons.keyboard_arrow_down_rounded),
-                                                                                        ),
+                                                                                Message message, {
+                                                                                required LongPressStartDetails details,
+                                                                                required int index,
+                                                                              }) async {
+                                                                                if (message is TextMessage) {
+                                                                                  await Clipboard.setData(
+                                                                                    ClipboardData(text: message.text),
+                                                                                  );
+
+                                                                                  await AppHaptics.impact(
+                                                                                    AppHapticImpact.light,
+                                                                                  );
+
+                                                                                  _showCopiedChatMessageFeedback(
+                                                                                    message.id,
+                                                                                  );
+                                                                                }
+                                                                              },
+                                                                              builders: Builders(
+                                                                                composerBuilder: (_) => const SizedBox.shrink(),
+                                                                                emptyChatListBuilder: (_) => Center(
+                                                                                  child: Padding(
+                                                                                    padding: const EdgeInsets.symmetric(horizontal: 28),
+                                                                                    child: Text(
+                                                                                      'Chat context now stays with this project.\nStart a conversation and it will still be here when you reopen it.',
+                                                                                      textAlign: TextAlign.center,
+                                                                                      style: const TextStyle(
+                                                                                        fontFamily: 'Pretendard',
+                                                                                        fontSize: 14,
+                                                                                        height: 1.45,
+                                                                                        color: Colors.white60,
                                                                                       ),
                                                                                     ),
                                                                                   ),
-                                                                                );
-                                                                              },
-                                                                              textMessageBuilder: (
-                                                                                BuildContext context,
-                                                                                TextMessage message,
-                                                                                int index, {
-                                                                                required bool isSentByMe,
-                                                                                MessageGroupStatus? groupStatus,
-                                                                              }) {
-                                                                                if (message.authorId == 'system') {
-                                                                                  return Padding(
-                                                                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                                                                    child: Center(
-                                                                                      child: Text(
-                                                                                        message.text,
-                                                                                        textAlign: TextAlign.center,
-                                                                                        style: const TextStyle(
-                                                                                          fontFamily: 'Pretendard',
-                                                                                          fontSize: 13,
-                                                                                          fontWeight: FontWeight.w600,
-                                                                                          letterSpacing: 0.4,
-                                                                                          color: Colors.white70,
+                                                                                ),
+                                                                                scrollToBottomBuilder: (
+                                                                                  BuildContext context,
+                                                                                  Animation<double> animation,
+                                                                                  VoidCallback onPressed,
+                                                                                ) {
+                                                                                  return Positioned(
+                                                                                    left: 0,
+                                                                                    right: 0,
+                                                                                    bottom: 16,
+                                                                                    child: IgnorePointer(
+                                                                                      ignoring: animation.value <= 0.01,
+                                                                                      child: Center(
+                                                                                        child: ScaleTransition(
+                                                                                          scale: animation,
+                                                                                          child: FloatingActionButton(
+                                                                                            heroTag: null,
+                                                                                            mini: true,
+                                                                                            backgroundColor: const Color.fromARGB(210, 34, 38, 48),
+                                                                                            foregroundColor: Colors.white,
+                                                                                            onPressed: onPressed,
+                                                                                            child: const Icon(Icons.keyboard_arrow_down_rounded),
+                                                                                          ),
                                                                                         ),
                                                                                       ),
                                                                                     ),
                                                                                   );
-                                                                                }
-                                                                                final isCopied = _copiedChatMessageId == message.id;
-                                                                                final bubbleColor = isSentByMe
-                                                                                    ? const Color.fromARGB(
-                                                                                        180,
-                                                                                        56,
-                                                                                        98,
-                                                                                        161,
-                                                                                      )
-                                                                                    : const Color.fromARGB(
-                                                                                        100,
-                                                                                        170,
-                                                                                        170,
-                                                                                        170,
-                                                                                      );
-                                                                                return Align(
-                                                                                  alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
-                                                                                  child: Column(
-                                                                                    crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                                                                    children: [
-                                                                                      AnimatedSwitcher(
-                                                                                        duration: const Duration(milliseconds: 120),
-                                                                                        child: isCopied
-                                                                                            ? Padding(
-                                                                                                key: const ValueKey('copied_badge'),
-                                                                                                padding: const EdgeInsets.symmetric(
-                                                                                                  horizontal: 14,
-                                                                                                  vertical: 2,
-                                                                                                ),
-                                                                                                child: Container(
-                                                                                                  padding: const EdgeInsets.symmetric(
-                                                                                                    horizontal: 8,
-                                                                                                    vertical: 4,
-                                                                                                  ),
-                                                                                                  decoration: BoxDecoration(
-                                                                                                    color: const Color(0xFF1F8F63),
-                                                                                                    borderRadius: BorderRadius.circular(999),
-                                                                                                  ),
-                                                                                                  child: const Row(
-                                                                                                    mainAxisSize: MainAxisSize.min,
-                                                                                                    children: [
-                                                                                                      Icon(
-                                                                                                        Icons.check_rounded,
-                                                                                                        size: 13,
-                                                                                                        color: Colors.white,
-                                                                                                      ),
-                                                                                                      SizedBox(width: 4),
-                                                                                                      Text(
-                                                                                                        'Copied',
-                                                                                                        style: TextStyle(
-                                                                                                          fontFamily: 'Pretendard',
-                                                                                                          fontSize: 11,
-                                                                                                          fontWeight: FontWeight.w700,
-                                                                                                          color: Colors.white,
-                                                                                                        ),
-                                                                                                      ),
-                                                                                                    ],
-                                                                                                  ),
-                                                                                                ),
-                                                                                              )
-                                                                                            : const SizedBox.shrink(),
-                                                                                      ),
-                                                                                      AnimatedContainer(
-                                                                                        duration: const Duration(milliseconds: 140),
-                                                                                        margin: const EdgeInsets.symmetric(
-                                                                                          horizontal: 12,
-                                                                                          vertical: 4,
-                                                                                        ),
-                                                                                        padding: const EdgeInsets.symmetric(
-                                                                                          horizontal: 14,
-                                                                                          vertical: 10,
-                                                                                        ),
-                                                                                        decoration: BoxDecoration(
-                                                                                          color: bubbleColor,
-                                                                                          borderRadius: BorderRadius.circular(14),
-                                                                                          border: Border.all(
-                                                                                            color: isCopied ? const Color(0xFF6FE1AA) : Colors.transparent,
-                                                                                            width: 1.2,
-                                                                                          ),
-                                                                                          boxShadow: isCopied
-                                                                                              ? const [
-                                                                                                  BoxShadow(
-                                                                                                    color: Color(0x336FE1AA),
-                                                                                                    blurRadius: 12,
-                                                                                                    offset: Offset(0, 2),
-                                                                                                  ),
-                                                                                                ]
-                                                                                              : null,
-                                                                                        ),
+                                                                                },
+                                                                                textMessageBuilder: (
+                                                                                  BuildContext context,
+                                                                                  TextMessage message,
+                                                                                  int index, {
+                                                                                  required bool isSentByMe,
+                                                                                  MessageGroupStatus? groupStatus,
+                                                                                }) {
+                                                                                  if (message.authorId == 'system') {
+                                                                                    return Padding(
+                                                                                      padding: const EdgeInsets.symmetric(vertical: 10),
+                                                                                      child: Center(
                                                                                         child: Text(
                                                                                           message.text,
+                                                                                          textAlign: TextAlign.center,
                                                                                           style: const TextStyle(
                                                                                             fontFamily: 'Pretendard',
-                                                                                            fontSize: 15,
-                                                                                            height: 1.2,
-                                                                                            color: Colors.white,
+                                                                                            fontSize: 13,
+                                                                                            fontWeight: FontWeight.w600,
+                                                                                            letterSpacing: 0.4,
+                                                                                            color: Colors.white70,
                                                                                           ),
                                                                                         ),
                                                                                       ),
-                                                                                    ],
+                                                                                    );
+                                                                                  }
+                                                                                  final isCopied = _copiedChatMessageId == message.id;
+                                                                                  final bubbleColor = isSentByMe
+                                                                                      ? const Color.fromRGBO(
+                                                                                          25,
+                                                                                          94,
+                                                                                          160,
+                                                                                          0.42,
+                                                                                        )
+                                                                                      : const Color.fromRGBO(
+                                                                                          244,
+                                                                                          244,
+                                                                                          244,
+                                                                                          0.18,
+                                                                                        );
+                                                                                  return Align(
+                                                                                    alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
+                                                                                    child: Column(
+                                                                                      crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                                                                      children: [
+                                                                                        AnimatedSwitcher(
+                                                                                          duration: const Duration(milliseconds: 120),
+                                                                                          child: isCopied
+                                                                                              ? Padding(
+                                                                                                  key: const ValueKey('copied_badge'),
+                                                                                                  padding: const EdgeInsets.symmetric(
+                                                                                                    horizontal: 14,
+                                                                                                    vertical: 2,
+                                                                                                  ),
+                                                                                                  child: Container(
+                                                                                                    padding: const EdgeInsets.symmetric(
+                                                                                                      horizontal: 8,
+                                                                                                      vertical: 4,
+                                                                                                    ),
+                                                                                                    decoration: BoxDecoration(
+                                                                                                      color: const Color(0xFF7A8E73),
+                                                                                                      borderRadius: BorderRadius.circular(999),
+                                                                                                    ),
+                                                                                                    child: const Row(
+                                                                                                      mainAxisSize: MainAxisSize.min,
+                                                                                                      children: [
+                                                                                                        Icon(
+                                                                                                          Icons.check_rounded,
+                                                                                                          size: 13,
+                                                                                                          color: Colors.white,
+                                                                                                        ),
+                                                                                                        SizedBox(width: 4),
+                                                                                                        Text(
+                                                                                                          'Copied',
+                                                                                                          style: TextStyle(
+                                                                                                            fontFamily: 'Pretendard',
+                                                                                                            fontSize: 11,
+                                                                                                            fontWeight: FontWeight.w700,
+                                                                                                            color: Colors.white,
+                                                                                                          ),
+                                                                                                        ),
+                                                                                                      ],
+                                                                                                    ),
+                                                                                                  ),
+                                                                                                )
+                                                                                              : const SizedBox.shrink(),
+                                                                                        ),
+                                                                                        AnimatedContainer(
+                                                                                          duration: const Duration(milliseconds: 140),
+                                                                                          margin: const EdgeInsets.symmetric(
+                                                                                            horizontal: 12,
+                                                                                            vertical: 4,
+                                                                                          ),
+                                                                                          padding: const EdgeInsets.symmetric(
+                                                                                            horizontal: 14,
+                                                                                            vertical: 10,
+                                                                                          ),
+                                                                                          decoration: BoxDecoration(
+                                                                                            color: bubbleColor,
+                                                                                            borderRadius: BorderRadius.circular(18),
+                                                                                            border: Border.all(
+                                                                                              color: isCopied ? const Color(0xFFD6E8C9) : Colors.transparent,
+                                                                                              width: 1.2,
+                                                                                            ),
+                                                                                            boxShadow: isCopied
+                                                                                                ? const [
+                                                                                                    BoxShadow(
+                                                                                                      color: Color(0x33D6E8C9),
+                                                                                                      blurRadius: 12,
+                                                                                                      offset: Offset(0, 2),
+                                                                                                    ),
+                                                                                                  ]
+                                                                                                : null,
+                                                                                          ),
+                                                                                          child: Text(
+                                                                                            message.text,
+                                                                                            style: const TextStyle(
+                                                                                              fontFamily: 'Pretendard',
+                                                                                              fontSize: 15,
+                                                                                              height: 1.2,
+                                                                                              color: Colors.white,
+                                                                                            ),
+                                                                                          ),
+                                                                                        ),
+                                                                                      ],
+                                                                                    ),
+                                                                                  );
+                                                                                },
+                                                                              ),
+                                                                              theme: const ChatTheme(
+                                                                                colors: ChatColors(
+                                                                                  // User message bubble (you)
+                                                                                  primary: Color.fromRGBO(25, 94, 160, 0.42),
+                                                                                  onPrimary: Colors.white,
+                                                                                  // Message list surface layers (kill them)
+                                                                                  surface: Colors.transparent,
+                                                                                  onSurface: Colors.white,
+                                                                                  surfaceContainer: Colors.transparent, //Color.fromARGB(100, 170, 170, 170),
+                                                                                  surfaceContainerLow: Colors.transparent,
+                                                                                  surfaceContainerHigh: Colors.transparent,
+                                                                                ),
+                                                                                typography: ChatTypography(
+                                                                                  bodyLarge: TextStyle(
+                                                                                    fontFamily: 'Pretendard',
+                                                                                    fontSize: 15,
+                                                                                    height: 1.35,
+                                                                                    color: Colors.white,
                                                                                   ),
-                                                                                );
+                                                                                  bodyMedium: TextStyle(
+                                                                                    fontFamily: 'Pretendard',
+                                                                                    fontSize: 14,
+                                                                                    height: 1.35,
+                                                                                    color: Colors.white70,
+                                                                                  ),
+                                                                                  bodySmall: TextStyle(
+                                                                                    fontFamily: 'Pretendard',
+                                                                                    fontSize: 13,
+                                                                                    height: 1.3,
+                                                                                    color: Colors.white60,
+                                                                                  ),
+                                                                                  labelLarge: TextStyle(
+                                                                                    fontFamily: 'Pretendard',
+                                                                                    fontSize: 13,
+                                                                                    fontWeight: FontWeight.w500,
+                                                                                    color: Colors.white70,
+                                                                                  ),
+                                                                                  labelMedium: TextStyle(
+                                                                                    fontFamily: 'Pretendard',
+                                                                                    fontSize: 12,
+                                                                                    color: Colors.white60,
+                                                                                  ),
+                                                                                  labelSmall: TextStyle(
+                                                                                    fontFamily: 'Pretendard',
+                                                                                    fontSize: 11,
+                                                                                    color: Colors.white54,
+                                                                                  ),
+                                                                                ),
+
+                                                                                // Message bubble shape — keep subtle, not “chat app rounded”
+                                                                                shape: BorderRadius.all(Radius.circular(14)),
+                                                                              ),
+                                                                              resolveUser: (UserID id) async {
+                                                                                if (id == 'user') {
+                                                                                  return const User(id: 'user', name: 'You');
+                                                                                }
+                                                                                return const User(id: 'assistant', name: 'MixAssistant');
                                                                               },
                                                                             ),
-                                                                            theme:
-                                                                                const ChatTheme(
-                                                                              colors: ChatColors(
-                                                                                // User message bubble (you)
-                                                                                primary: Color.fromARGB(180, 56, 98, 161),
-                                                                                onPrimary: Colors.white,
-                                                                                // Message list surface layers (kill them)
-                                                                                surface: Colors.transparent,
-                                                                                onSurface: Colors.white,
-                                                                                surfaceContainer: Colors.transparent, //Color.fromARGB(100, 170, 170, 170),
-                                                                                surfaceContainerLow: Colors.transparent,
-                                                                                surfaceContainerHigh: Colors.transparent,
-                                                                              ),
-                                                                              typography: ChatTypography(
-                                                                                bodyLarge: TextStyle(
-                                                                                  fontFamily: 'Pretendard',
-                                                                                  fontSize: 15,
-                                                                                  height: 1.35,
-                                                                                  color: Colors.white,
-                                                                                ),
-                                                                                bodyMedium: TextStyle(
-                                                                                  fontFamily: 'Pretendard',
-                                                                                  fontSize: 14,
-                                                                                  height: 1.35,
-                                                                                  color: Colors.white70,
-                                                                                ),
-                                                                                bodySmall: TextStyle(
-                                                                                  fontFamily: 'Pretendard',
-                                                                                  fontSize: 13,
-                                                                                  height: 1.3,
-                                                                                  color: Colors.white60,
-                                                                                ),
-                                                                                labelLarge: TextStyle(
-                                                                                  fontFamily: 'Pretendard',
-                                                                                  fontSize: 13,
-                                                                                  fontWeight: FontWeight.w500,
-                                                                                  color: Colors.white70,
-                                                                                ),
-                                                                                labelMedium: TextStyle(
-                                                                                  fontFamily: 'Pretendard',
-                                                                                  fontSize: 12,
-                                                                                  color: Colors.white60,
-                                                                                ),
-                                                                                labelSmall: TextStyle(
-                                                                                  fontFamily: 'Pretendard',
-                                                                                  fontSize: 11,
-                                                                                  color: Colors.white54,
-                                                                                ),
-                                                                              ),
-
-                                                                              // Message bubble shape — keep subtle, not “chat app rounded”
-                                                                              shape: BorderRadius.all(Radius.circular(14)),
-                                                                            ),
-                                                                            resolveUser:
-                                                                                (UserID id) async {
-                                                                              if (id == 'user') {
-                                                                                return const User(id: 'user', name: 'You');
-                                                                              }
-                                                                              return const User(id: 'assistant', name: 'MixAssistant');
-                                                                            },
                                                                           ),
                                                                         ),
                                                                       ),
-                                                                    ),
-                                                                    AnimatedSwitcher(
-                                                                      duration: const Duration(
-                                                                          milliseconds:
-                                                                              140),
-                                                                      switchInCurve:
-                                                                          Curves
-                                                                              .easeOutCubic,
-                                                                      switchOutCurve:
-                                                                          Curves
-                                                                              .easeInCubic,
-                                                                      child: _isThinking
-                                                                          ? _buildThinkingPlaceholderBubble()
-                                                                          : const SizedBox
-                                                                              .shrink(),
-                                                                    ),
-                                                                  ],
-                                                                );
-                                                              },
+                                                                      AnimatedSwitcher(
+                                                                        duration:
+                                                                            const Duration(milliseconds: 140),
+                                                                        switchInCurve:
+                                                                            Curves.easeOutCubic,
+                                                                        switchOutCurve:
+                                                                            Curves.easeInCubic,
+                                                                        child: _isThinking
+                                                                            ? _buildThinkingPlaceholderBubble()
+                                                                            : const SizedBox.shrink(),
+                                                                      ),
+                                                                    ],
+                                                                  );
+                                                                },
+                                                              ),
                                                             ),
                                                           ),
                                                         ),
                                                       ),
                                                     ),
-                                                  ),
-                                                )
-                                              : const SizedBox(),
+                                                  )
+                                                : const SizedBox(),
+                                          ),
                                         ),
                                       ),
+                                    ],
+                                  );
+                                },
+                              ),
+                              if (_showPianoRoll &&
+                                  _activeMidiClipEngineId != null)
+                                ValueListenableBuilder<Duration>(
+                                  valueListenable: _transportClock,
+                                  builder: (_, clock, __) => Builder(
+                                    builder: (panelContext) {
+                                      final idx = _clipIndexForEngineId(
+                                          _activeMidiClipEngineId!);
+                                      if (idx < 0 ||
+                                          idx >= _audioTracks.length) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      final clip = _audioTracks[idx];
+                                      if (!clip.isMidi) {
+                                        return const SizedBox.shrink();
+                                      }
+
+                                      final media = MediaQuery.of(panelContext);
+                                      final screenH = media.size.height;
+                                      final safeTopInset = media.padding.top;
+                                      final fullscreenTopGap = math.max(
+                                        152.0,
+                                        safeTopInset +
+                                            _kTransportBarHeight +
+                                            44.0,
+                                      );
+                                      final maxFullscreenHeight = math.max(
+                                        280.0,
+                                        screenH -
+                                            _kChatBarStackHeight -
+                                            _kTransportBarHeight -
+                                            (_showProducerCaptureUi
+                                                ? _kProducerBannerHeightEstimate
+                                                : 0.0) -
+                                            fullscreenTopGap,
+                                      );
+                                      final targetHeight = _pianoRollFullscreen
+                                          ? maxFullscreenHeight
+                                          : (screenH * 0.42);
+                                      final panelHeight =
+                                          math.max(260.0, targetHeight);
+
+                                      return AnimatedPositioned(
+                                        duration:
+                                            const Duration(milliseconds: 190),
+                                        curve: Curves.easeOutCubic,
+                                        left: 0,
+                                        right: 0,
+                                        bottom: _kChatBarStackHeight +
+                                            _kTransportBarHeight +
+                                            (_showProducerCaptureUi
+                                                ? _kProducerBannerHeightEstimate
+                                                : 0.0) +
+                                            14.0,
+                                        height: panelHeight,
+                                        child: Halo(
+                                          highlighter: _mixHighlighter,
+                                          haloKey: const HaloKey(
+                                              'tutorial:piano_roll'),
+                                          borderRadius:
+                                              BorderRadius.circular(18),
+                                          child: PianoRollEditor(
+                                            clip: clip,
+                                            availableInstruments:
+                                                _activeInstrumentCatalog(),
+                                            bpm: _tempo,
+                                            projectPlayheadMs:
+                                                clock.inMilliseconds.toDouble(),
+                                            isPlaying: _isPlaying,
+                                            beatsPerBar: 4,
+                                            magnetEnabled:
+                                                _timelineMagnetEnabled,
+                                            quantizeDivisionsPerBar:
+                                                _timelineQuantizeDivisionsPerBar,
+                                            fullscreen: _pianoRollFullscreen,
+                                            onFullscreenChanged: (v) {
+                                              setState(() =>
+                                                  _pianoRollFullscreen = v);
+                                            },
+                                            onClose: _closeMidiClipEditor,
+                                            onCommit:
+                                                _commitMidiClipFromPianoRoll,
+                                            onPreviewNote:
+                                                _previewPianoRollNote,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              if (_showTempoRollDown)
+                                Positioned.fill(
+                                  bottom: _kChatBarStackHeight +
+                                      _kTransportBarHeight +
+                                      (_showProducerCaptureUi
+                                          ? _kProducerBannerHeightEstimate
+                                          : 0.0),
+                                  child: Listener(
+                                    behavior: HitTestBehavior.translucent,
+                                    onPointerDown:
+                                        _onTopPopupTapAwayPointerDown,
+                                    onPointerMove:
+                                        _onTopPopupTapAwayPointerMove,
+                                    onPointerCancel:
+                                        _onTopPopupTapAwayPointerCancel,
+                                    onPointerUp: (event) {
+                                      if (!_consumeTopPopupTapAwayPointerUp(
+                                          event)) {
+                                        return;
+                                      }
+                                      if (_isGlobalPointInsideKeyRect(
+                                        _tempoRollDownPanelKey,
+                                        event.position,
+                                      )) {
+                                        return;
+                                      }
+                                      _closeTopPopup(_TopPopupType.tempo);
+                                    },
+                                    child: const SizedBox.expand(),
+                                  ),
+                                ),
+                              if (_isProjectSettingsOpen)
+                                Positioned.fill(
+                                  bottom: _kChatBarStackHeight +
+                                      _kTransportBarHeight +
+                                      (_showProducerCaptureUi
+                                          ? _kProducerBannerHeightEstimate
+                                          : 0.0),
+                                  child: Listener(
+                                    behavior: HitTestBehavior.translucent,
+                                    onPointerDown:
+                                        _onTopPopupTapAwayPointerDown,
+                                    onPointerMove:
+                                        _onTopPopupTapAwayPointerMove,
+                                    onPointerCancel:
+                                        _onTopPopupTapAwayPointerCancel,
+                                    onPointerUp: (event) {
+                                      if (!_consumeTopPopupTapAwayPointerUp(
+                                          event)) {
+                                        return;
+                                      }
+                                      if (_isGlobalPointInsideKeyRect(
+                                        _projectSettingsDialogKey,
+                                        event.position,
+                                      )) {
+                                        return;
+                                      }
+                                      unawaited(_closeProjectSettings());
+                                    },
+                                    child: const SizedBox.expand(),
+                                  ),
+                                ),
+                              _buildProjectSettingsPopup(),
+                              _buildTempoRollDownPanel(),
+                              // tap-away closing
+                              if (_showMasterRack)
+                                Positioned.fill(
+                                  bottom: _kChatBarStackHeight +
+                                      _kTransportBarHeight +
+                                      (_showProducerCaptureUi
+                                          ? _kProducerBannerHeightEstimate
+                                          : 0.0),
+                                  child: Listener(
+                                    behavior: HitTestBehavior.translucent,
+                                    onPointerDown:
+                                        _onTopPopupTapAwayPointerDown,
+                                    onPointerMove:
+                                        _onTopPopupTapAwayPointerMove,
+                                    onPointerCancel:
+                                        _onTopPopupTapAwayPointerCancel,
+                                    onPointerUp: (event) {
+                                      if (!_isMasterPopupOpen) return;
+                                      if (!_consumeTopPopupTapAwayPointerUp(
+                                          event)) {
+                                        return;
+                                      }
+                                      if (_isGlobalPointInsideKeyRect(
+                                        _masterRackKey,
+                                        event.position,
+                                      )) {
+                                        return;
+                                      }
+                                      _closeTopPopup(_TopPopupType.master);
+                                    },
+                                    child: const SizedBox.expand(),
+                                  ),
+                                ),
+                              _buildMasterPopup(),
+                              if (_activeTopPopup != _TopPopupType.none)
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  child: ValueListenableBuilder<Duration>(
+                                    valueListenable: _transportClock,
+                                    builder: (_, clock, __) => _buildTopBar(
+                                      clock,
+                                      editorLayoutSpec,
                                     ),
-                                  ],
-                                );
-                              },
-                            ),
-                            if (_showPianoRoll &&
-                                _activeMidiClipEngineId != null)
-                              ValueListenableBuilder<Duration>(
-                                valueListenable: _transportClock,
-                                builder: (_, clock, __) => Builder(
-                                  builder: (panelContext) {
-                                    final idx = _clipIndexForEngineId(
-                                        _activeMidiClipEngineId!);
-                                    if (idx < 0 || idx >= _audioTracks.length) {
-                                      return const SizedBox.shrink();
-                                    }
-                                    final clip = _audioTracks[idx];
-                                    if (!clip.isMidi) {
-                                      return const SizedBox.shrink();
-                                    }
-
-                                    final media = MediaQuery.of(panelContext);
-                                    final screenH = media.size.height;
-                                    final safeTopInset = media.padding.top;
-                                    final fullscreenTopGap = math.max(
-                                      152.0,
-                                      safeTopInset +
-                                          _kTransportBarHeight +
-                                          44.0,
-                                    );
-                                    final maxFullscreenHeight = math.max(
-                                      280.0,
-                                      screenH -
-                                          _kChatBarStackHeight -
-                                          fullscreenTopGap,
-                                    );
-                                    final targetHeight = _pianoRollFullscreen
-                                        ? maxFullscreenHeight
-                                        : (screenH * 0.42);
-                                    final panelHeight =
-                                        math.max(260.0, targetHeight);
-
-                                    return AnimatedPositioned(
-                                      duration:
-                                          const Duration(milliseconds: 190),
-                                      curve: Curves.easeOutCubic,
-                                      left: 0,
-                                      right: 0,
-                                      bottom: _kChatBarStackHeight,
-                                      height: panelHeight,
-                                      child: Halo(
-                                        highlighter: _mixHighlighter,
-                                        haloKey: const HaloKey(
-                                            'tutorial:piano_roll'),
-                                        borderRadius: BorderRadius.circular(18),
-                                        child: PianoRollEditor(
-                                          clip: clip,
-                                          availableInstruments:
-                                              _activeInstrumentCatalog(),
-                                          bpm: _tempo,
-                                          projectPlayheadMs:
-                                              clock.inMilliseconds.toDouble(),
-                                          isPlaying: _isPlaying,
-                                          beatsPerBar: 4,
-                                          magnetEnabled: _timelineMagnetEnabled,
-                                          quantizeDivisionsPerBar:
-                                              _timelineQuantizeDivisionsPerBar,
-                                          fullscreen: _pianoRollFullscreen,
-                                          onFullscreenChanged: (v) {
-                                            setState(
-                                                () => _pianoRollFullscreen = v);
-                                          },
-                                          onClose: _closeMidiClipEditor,
-                                          onCommit:
-                                              _commitMidiClipFromPianoRoll,
-                                          onPreviewNote: _previewPianoRollNote,
-                                        ),
-                                      ),
-                                    );
-                                  },
+                                  ),
                                 ),
-                              ),
-                            if (_showTempoRollDown)
-                              Positioned.fill(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () => setState(
-                                      () => _showTempoRollDown = false),
-                                  child: Container(color: Colors.transparent),
-                                ),
-                              ),
-                            _buildTempoRollDownPanel(),
-                            // tap-away closing
-                            if (_showMasterRack)
-                              Positioned.fill(
-                                child: GestureDetector(
-                                  onTap: () {
-                                    if (!_isMasterPopupOpen) return;
-                                    setState(() {
-                                      _isMasterPopupOpen = false;
-                                      _showMasterRack = false;
-                                    });
-                                  },
-                                  child: Container(color: Colors.transparent),
-                                ),
-                              ),
-                            _buildMasterPopup(),
-                          ],
-                        );
-                      },
+                            ],
+                          );
+                        },
+                      ),
                     ),
+                    // floatingActionButton: Padding(
+                    //   padding: const EdgeInsets.only(bottom: 0.0, right: 0.0), // above bottom nav
+                    //   child: FloatingActionButton(
+                    //     onPressed: () => _showAddMediaOptions(),
+                    //     backgroundColor: const Color.fromARGB(255, 212, 212, 212),
+                    //     child: const Icon(Icons.add, color: Colors.black),
+                    //     shape: const CircleBorder(),
+                    //     elevation: 4,
+                    //   ),
+                    // ),
                   ),
-                  bottomNavigationBar: _buildBottomChatAndTransport(
-                    includeChatBar: false,
-                    includeProducerCapture: false,
-                    includeTransport: true,
-                  ),
-                  // floatingActionButton: Padding(
-                  //   padding: const EdgeInsets.only(bottom: 0.0, right: 0.0), // above bottom nav
-                  //   child: FloatingActionButton(
-                  //     onPressed: () => _showAddMediaOptions(),
-                  //     backgroundColor: const Color.fromARGB(255, 212, 212, 212),
-                  //     child: const Icon(Icons.add, color: Colors.black),
-                  //     shape: const CircleBorder(),
-                  //     elevation: 4,
-                  //   ),
-                  // ),
                 ),
                 if (_isSyncing)
                   Positioned.fill(
@@ -29639,7 +31214,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     top: 0,
                     bottom: _kChatHistoryHeight +
                         _kChatBarStackHeight +
-                        _kTransportBarHeight,
+                        _kTransportBarHeight +
+                        _chatHistoryBottomGap,
                     child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
                       onTap: () {
@@ -29721,31 +31297,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final cardAlignment = _dawOnboardingCardAlignment(step.placement);
     final cardPadding =
         step.cardPadding ?? _dawOnboardingCardPadding(step.placement);
-    final skipButton = TextButton.icon(
-      onPressed: () {
-        unawaited(_finishDawOnboarding());
-      },
-      style: TextButton.styleFrom(
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.white.withValues(alpha: 0.06),
-        padding: const EdgeInsets.symmetric(
-          horizontal: 10,
-          vertical: 6,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(999),
-          side: BorderSide(
-            color: Colors.white.withValues(alpha: 0.08),
-          ),
-        ),
-      ),
-      icon: const Icon(Icons.close_rounded, size: 16),
-      label: Text(
-        _dawTutorialText('skip'),
-        style: const TextStyle(fontWeight: FontWeight.w700),
-      ),
-    );
-
     return Positioned.fill(
       child: Stack(
         children: [
@@ -29766,6 +31317,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   step.cardMaxWidth ?? 360.0,
                   availableWidth,
                 );
+                final skipButton = Tooltip(
+                  message: _dawTutorialText('skip'),
+                  child: TextButton(
+                    onPressed: () {
+                      unawaited(_finishDawOnboarding());
+                    },
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.white.withValues(alpha: 0.06),
+                      padding: const EdgeInsets.all(4),
+                      minimumSize: const Size(28, 28),
+                      maximumSize: const Size(28, 28),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      shape: const CircleBorder(
+                        side: BorderSide(
+                          color: Colors.white12,
+                        ),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      size: 14,
+                    ),
+                  ),
+                );
+
                 return AnimatedAlign(
                   duration: const Duration(milliseconds: 150),
                   curve: Curves.easeOutCubic,
@@ -29845,40 +31423,66 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     children: [
                                       Row(
                                         children: [
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: step.accent
-                                                  .withValues(alpha: 0.18),
-                                              borderRadius:
-                                                  BorderRadius.circular(999),
-                                            ),
-                                            child: Text(
-                                              _dawTutorialText(
-                                                'step_badge',
-                                                params: <String, String>{
-                                                  'current':
-                                                      stepNumber.toString(),
-                                                  'total': stepCount.toString(),
-                                                },
+                                          Expanded(
+                                            child: ConstrainedBox(
+                                              constraints: const BoxConstraints(
+                                                maxWidth: 160,
                                               ),
-                                              style: theme.textTheme.labelMedium
-                                                  ?.copyWith(
-                                                color: step.accent,
-                                                fontWeight: FontWeight.w800,
+                                              child: FittedBox(
+                                                fit: BoxFit.scaleDown,
+                                                alignment: Alignment.centerLeft,
+                                                child: Container(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 6,
+                                                  ),
+                                                  decoration: BoxDecoration(
+                                                    color: step.accent
+                                                        .withValues(
+                                                            alpha: 0.18),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            999),
+                                                  ),
+                                                  child: Text(
+                                                    _dawTutorialText(
+                                                      'step_badge',
+                                                      params: <String, String>{
+                                                        'current': stepNumber
+                                                            .toString(),
+                                                        'total': stepCount
+                                                            .toString(),
+                                                      },
+                                                    ),
+                                                    style: theme
+                                                        .textTheme.labelMedium
+                                                        ?.copyWith(
+                                                      color: step.accent,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           ),
-                                          const Spacer(),
-                                          skipButton,
+                                          const SizedBox(width: 8),
+                                          Flexible(
+                                            flex: 0,
+                                            child: skipButton,
+                                          ),
                                         ],
                                       ),
                                       const SizedBox(height: 10),
                                       Text(
                                         step.title,
+                                        softWrap: true,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
                                         style: theme.textTheme.titleLarge
                                             ?.copyWith(
                                           color: Colors.white,
@@ -29889,6 +31493,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       const SizedBox(height: 8),
                                       Text(
                                         step.body,
+                                        softWrap: true,
                                         style: theme.textTheme.bodyMedium
                                             ?.copyWith(
                                           color: Colors.white
@@ -29940,6 +31545,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               Expanded(
                                                 child: Text(
                                                   step.helperText!,
+                                                  softWrap: true,
+                                                  maxLines: 3,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                   style: theme
                                                       .textTheme.bodySmall
                                                       ?.copyWith(
@@ -30098,30 +31707,39 @@ class _Glass extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final effectiveGradient = overlay ??
+        const LinearGradient(
+          colors: <Color>[
+            Color(0xFF5C6268),
+            Color(0xFF3C4146),
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        );
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      // child: BackdropFilter(
-      // filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-      child: Container(
-        padding: padding,
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(opacity),
-          gradient: overlay,
-          borderRadius: BorderRadius.circular(radius),
-          border: Border.all(color: Colors.white.withOpacity(0.08)),
-          boxShadow: shadows ??
-              [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.35),
-                  blurRadius: 24,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+        child: Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: opacity * 0.5),
+            gradient: effectiveGradient,
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+            boxShadow: shadows ??
+                [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 24,
+                    spreadRadius: 1,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+          ),
+          child: child,
         ),
-        child: child,
       ),
-      // ),
     );
   }
 }
@@ -30131,6 +31749,119 @@ class DotsLoader extends StatefulWidget {
 
   @override
   State<DotsLoader> createState() => _DotsLoaderState();
+}
+
+class _ChatThinkingBubble extends StatefulWidget {
+  const _ChatThinkingBubble();
+
+  @override
+  State<_ChatThinkingBubble> createState() => _ChatThinkingBubbleState();
+}
+
+class _ChatThinkingBubbleState extends State<_ChatThinkingBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final t = _controller.value;
+        final glow = 0.08 + ((math.sin((t * math.pi * 2)) + 1) * 0.05);
+        double dotOpacity(double offset) =>
+            0.30 + (((math.sin(((t + offset) * math.pi * 2)) + 1) * 0.5) * 0.7);
+
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: <Color>[
+                  Color.fromRGBO(244, 244, 244, 0.20),
+                  Color.fromRGBO(244, 244, 244, 0.12),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: const Color.fromRGBO(167, 204, 255, 1)
+                      .withValues(alpha: glow),
+                  blurRadius: 14,
+                  spreadRadius: 1,
+                  offset: Offset.zero,
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Thinking',
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 14,
+                    height: 1.2,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _ThinkingDot(opacity: dotOpacity(0.0)),
+                const SizedBox(width: 4),
+                _ThinkingDot(opacity: dotOpacity(0.18)),
+                const SizedBox(width: 4),
+                _ThinkingDot(opacity: dotOpacity(0.36)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ThinkingDot extends StatelessWidget {
+  const _ThinkingDot({required this.opacity});
+
+  final double opacity;
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: opacity.clamp(0.0, 1.0),
+      child: const SizedBox(
+        width: 5,
+        height: 5,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Color(0xFFF4F4F4),
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _DotsLoaderState extends State<DotsLoader>
@@ -31395,9 +33126,9 @@ class _DynamicRackContentState extends State<DynamicRackContent>
             height: 36,
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
-              color: const Color(0xFF121927),
+              color: const Color.fromRGBO(95, 108, 126, 0.24),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white.withOpacity(0.10)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
             child: TabBar(
               controller: _tabController,
@@ -31405,11 +33136,11 @@ class _DynamicRackContentState extends State<DynamicRackContent>
               indicatorSize: TabBarIndicatorSize.tab,
               indicatorPadding: EdgeInsets.zero,
               indicator: BoxDecoration(
-                color: const Color(0xFF2D3F5D),
+                color: const Color.fromRGBO(90, 117, 154, 0.68),
                 borderRadius: BorderRadius.circular(8),
               ),
               labelColor: Colors.white,
-              unselectedLabelColor: Colors.white70,
+              unselectedLabelColor: Colors.white.withValues(alpha: 0.72),
               labelStyle: const TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w700,
@@ -31420,8 +33151,8 @@ class _DynamicRackContentState extends State<DynamicRackContent>
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.15,
               ),
-              overlayColor:
-                  MaterialStatePropertyAll(Colors.white.withOpacity(0.03)),
+              overlayColor: MaterialStatePropertyAll(
+                  Colors.white.withValues(alpha: 0.03)),
               splashBorderRadius: BorderRadius.circular(8),
               onTap: (newIndex) {
                 // Keep the instant jump for TabBarView to avoid flicker
@@ -33071,15 +34802,13 @@ AudioTrack? _resolveClip(List<AudioTrack> tracks, int index) {
 }
 
 Widget _chatIcon() {
-  return Container(
-    width: 26,
-    height: 26,
-    decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.12),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: Colors.white.withOpacity(0.14)),
+  return SizedBox(
+    width: 20,
+    height: 18,
+    child: SvgPicture.asset(
+      kMixroomDawChatBarIconAsset,
+      fit: BoxFit.contain,
     ),
-    child: const Icon(Icons.chat_bubble_outline, size: 16, color: Colors.white),
   );
 }
 
@@ -33114,11 +34843,12 @@ class _ChatBar extends StatelessWidget {
   String _badgeLabel() {
     if (promptRateLimitStatus == null) return 'Limits';
     if (promptRateLimitStatus!.canSubmit) {
-      return '${promptRateLimitStatus!.daily.remaining} left';
+      return '${promptRateLimitStatus!.daily.remaining} Left';
     }
     final resetsAt = promptRateLimitStatus!.blockedResetAt?.toLocal();
     if (resetsAt == null) return 'Wait';
     final remaining = resetsAt.difference(DateTime.now());
+    if (remaining.inDays >= 1) return '${remaining.inDays}d wait';
     if (remaining.inHours >= 1) return '${remaining.inHours}h wait';
     if (remaining.inMinutes >= 1) return '${remaining.inMinutes}m wait';
     return 'Wait';
@@ -33143,9 +34873,9 @@ class _ChatBar extends StatelessWidget {
         width: 26,
         height: 26,
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.08),
+          color: const Color.fromRGBO(48, 86, 126, 0.46),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white10),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
         ),
         alignment: Alignment.center,
         child: const SizedBox(
@@ -33160,10 +34890,10 @@ class _ChatBar extends StatelessWidget {
     } else {
       final status = promptRateLimitStatus;
       final backgroundColor = status == null
-          ? Colors.white.withOpacity(0.08)
+          ? const Color.fromRGBO(56, 88, 122, 0.48)
           : status.canSubmit
-              ? const Color(0xFF11305A)
-              : const Color(0xFF5A2020);
+              ? const Color.fromRGBO(46, 82, 120, 0.52)
+              : const Color.fromRGBO(122, 84, 80, 0.58);
 
       badge = Tooltip(
         message: _badgeTooltip(),
@@ -33171,24 +34901,59 @@ class _ChatBar extends StatelessWidget {
           behavior: HitTestBehavior.opaque,
           onTap: onShowPromptRateLimits,
           child: Container(
-            height: 28,
+            height: 34,
+            constraints: const BoxConstraints(minWidth: 66),
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
               color: backgroundColor,
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: Colors.white10),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             alignment: Alignment.center,
-            child: Text(
-              _badgeLabel(),
-              style: const TextStyle(
-                fontFamily: 'Pretendard',
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-                letterSpacing: -0.1,
-              ),
-            ),
+            child: status != null && status.canSubmit
+                ? RichText(
+                    textAlign: TextAlign.center,
+                    text: TextSpan(
+                      style: const TextStyle(
+                        fontFamily: 'Pretendard',
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w400,
+                        height: 1.0,
+                        color: Colors.white,
+                      ),
+                      children: <InlineSpan>[
+                        TextSpan(
+                          text: '${status.daily.remaining}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const TextSpan(
+                          text: ' Left',
+                          style: TextStyle(fontSize: 11.5),
+                        ),
+                      ],
+                    ),
+                  )
+                : Text(
+                    _badgeLabel(),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white,
+                      letterSpacing: -0.1,
+                      height: 1.0,
+                    ),
+                  ),
           ),
         ),
       );
@@ -33209,146 +34974,166 @@ class _ChatBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final barHeight = _AudioEditorScreenState2._kChatBarFixedHeight;
     final isSubmitBlocked = promptRateLimitStatus?.canSubmit == false;
+    final typeHint = L10n.translate(context, 'Type...');
     const collapsedTextStyle = TextStyle(
       fontFamily: 'Pretendard',
-      fontSize: 15.5,
-      fontWeight: FontWeight.w500,
+      fontSize: 15,
+      fontWeight: FontWeight.w400,
       height: 1.16,
       letterSpacing: -0.15,
-      color: Colors.white70,
+      color: Color(0xFFF4F4F4),
     );
     const inputTextStyle = TextStyle(
       fontFamily: 'Pretendard',
       fontSize: 15,
-      fontWeight: FontWeight.w500,
+      fontWeight: FontWeight.w400,
       height: 1.16,
       letterSpacing: -0.15,
-      color: Colors.white,
+      color: Color(0xFFF4F4F4),
     );
     const hintTextStyle = TextStyle(
       fontFamily: 'Pretendard',
       fontSize: 15,
-      fontWeight: FontWeight.w500,
+      fontWeight: FontWeight.w400,
       height: 1.16,
       letterSpacing: -0.15,
-      color: Colors.white70,
+      color: Color(0xB8F4F4F4),
     );
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTapBar,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(
-            height: barHeight,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: Colors.white
-                  .withOpacity(_AudioEditorScreenState2._kChatChromeOpacity),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: Colors.white.withOpacity(0.14)),
+        borderRadius: BorderRadius.circular(24),
+        child: Container(
+          height: barHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: <double>[0.5625, 1.0],
+              colors: <Color>[
+                Color.fromRGBO(25, 94, 160, 0.80),
+                Color.fromRGBO(244, 244, 244, 0.80),
+              ],
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: !expanded
-                      ? Row(
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 15,
+                spreadRadius: 8,
+                offset: Offset.zero,
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: !expanded
+                    ? Row(
+                        children: [
+                          _chatIcon(),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              typeHint,
+                              style: collapsedTextStyle,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          _buildPromptLimitBadge(),
+                        ],
+                      )
+                    : Material(
+                        color: Colors.transparent,
+                        child: Row(
                           children: [
-                            _chatIcon(),
-                            const SizedBox(width: 10),
                             Expanded(
-                              child: Text(
-                                isSubmitBlocked
-                                    ? 'Prompt limit reached'
-                                    : 'Ask Mixroom AI...',
-                                style: collapsedTextStyle,
-                                overflow: TextOverflow.ellipsis,
+                              child: TextField(
+                                controller: controller,
+                                focusNode: focusNode,
+                                readOnly: readOnly,
+                                style: inputTextStyle,
+                                cursorColor: Colors.white,
+                                decoration: InputDecoration(
+                                  hintText: typeHint,
+                                  hintStyle: hintTextStyle,
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding:
+                                      EdgeInsets.symmetric(vertical: 7),
+                                ),
+                                textAlignVertical: TextAlignVertical.center,
+                                textInputAction: TextInputAction.send,
+                                onSubmitted: (_) => onSubmit(),
                               ),
                             ),
                             const SizedBox(width: 10),
                             _buildPromptLimitBadge(),
-                          ],
-                        )
-                      : Material(
-                          color: Colors.transparent,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: controller,
-                                  focusNode: focusNode,
-                                  readOnly: readOnly,
-                                  style: inputTextStyle,
-                                  cursorColor: Colors.white,
-                                  decoration: const InputDecoration(
-                                    hintText: 'Ask Mixroom AI...',
-                                    hintStyle: hintTextStyle,
-                                    border: InputBorder.none,
-                                    isDense: true,
-                                    contentPadding:
-                                        EdgeInsets.symmetric(vertical: 7),
-                                  ),
-                                  textAlignVertical: TextAlignVertical.center,
-                                  textInputAction: TextInputAction.send,
-                                  onSubmitted: (_) => onSubmit(),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              _buildPromptLimitBadge(),
-                              const SizedBox(width: 10),
-                              SizedBox(
-                                width: 30,
-                                height: 30,
-                                child: Builder(
-                                  builder: (context) {
-                                    Widget sendButton = IgnorePointer(
-                                      ignoring: !hasText || isSubmitBlocked,
-                                      child: Opacity(
-                                        opacity: (hasText && !isSubmitBlocked)
-                                            ? 1
-                                            : 0.32,
-                                        child: GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTap: onSubmit,
-                                          child: Container(
-                                            width: 30,
-                                            height: 30,
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFF2E6EEB),
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                  color: Colors.white24),
+                            const SizedBox(width: 10),
+                            SizedBox(
+                              width: 30,
+                              height: 30,
+                              child: Builder(
+                                builder: (context) {
+                                  Widget sendButton = IgnorePointer(
+                                    ignoring: !hasText || isSubmitBlocked,
+                                    child: Opacity(
+                                      opacity: (hasText && !isSubmitBlocked)
+                                          ? 1
+                                          : 0.32,
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTap: onSubmit,
+                                        child: Container(
+                                          width: 30,
+                                          height: 30,
+                                          decoration: BoxDecoration(
+                                            gradient: const LinearGradient(
+                                              begin: Alignment.topCenter,
+                                              end: Alignment.bottomCenter,
+                                              colors: <Color>[
+                                                Color.fromRGBO(
+                                                    111, 133, 157, 0.80),
+                                                Color.fromRGBO(
+                                                    72, 92, 113, 0.84),
+                                              ],
                                             ),
-                                            child: const Icon(
-                                              Icons.arrow_upward_rounded,
-                                              color: Colors.white,
-                                              size: 18,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.24),
                                             ),
+                                          ),
+                                          child: const Icon(
+                                            Icons.near_me_rounded,
+                                            color: Colors.white,
+                                            size: 18,
                                           ),
                                         ),
                                       ),
+                                    ),
+                                  );
+                                  if (tutorialHighlighter != null) {
+                                    sendButton = Halo(
+                                      highlighter: tutorialHighlighter!,
+                                      haloKey:
+                                          const HaloKey('tutorial:chat_send'),
+                                      borderRadius: BorderRadius.circular(999),
+                                      child: sendButton,
                                     );
-                                    if (tutorialHighlighter != null) {
-                                      sendButton = Halo(
-                                        highlighter: tutorialHighlighter!,
-                                        haloKey:
-                                            const HaloKey('tutorial:chat_send'),
-                                        borderRadius:
-                                            BorderRadius.circular(999),
-                                        child: sendButton,
-                                      );
-                                    }
-                                    return sendButton;
-                                  },
-                                ),
+                                  }
+                                  return sendButton;
+                                },
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                ),
-              ],
-            ),
+                      ),
+              ),
+            ],
           ),
         ),
       ),
@@ -33596,7 +35381,7 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
     const laneGap = 2.0;
     const labelStripH = 8.0;
 
-    final bg = Paint()..color = const Color(0xFF101622);
+    final bg = Paint()..color = const Color(0xFF353E4A);
     final border = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
@@ -33611,7 +35396,8 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
     final innerHeight = math.max(0.0, meterBottomY - pad);
     final laneHeight = math.max(0.0, (innerHeight - laneGap) / 2);
 
-    final laneBgPaint = Paint()..color = Colors.white.withOpacity(0.07);
+    final laneBgPaint = Paint()
+      ..color = const Color.fromRGBO(244, 244, 244, 0.14);
     final tickPaint = Paint()
       ..color = Colors.white.withOpacity(0.08)
       ..strokeWidth = 1;

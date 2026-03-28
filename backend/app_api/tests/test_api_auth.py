@@ -56,11 +56,15 @@ if "botocore.exceptions" not in sys.modules:
     botocore_stub = ModuleType("botocore")
     exceptions_stub = ModuleType("botocore.exceptions")
 
+    class _BotoCoreError(Exception):
+        pass
+
     class _ClientError(Exception):
         def __init__(self, response: dict, operation_name: str = "") -> None:
             super().__init__(operation_name)
             self.response = response
 
+    exceptions_stub.BotoCoreError = _BotoCoreError
     exceptions_stub.ClientError = _ClientError
     botocore_stub.exceptions = exceptions_stub
     sys.modules["botocore"] = botocore_stub
@@ -102,10 +106,12 @@ class ApiAuthHandlerTests(unittest.TestCase):
     def setUp(self):
         self.original_rate_limiter = module.rate_limiter
         self.original_register_email_account = module.register_email_account
+        self.original_confirm_email_account = module.confirm_email_account
 
     def tearDown(self):
         module.rate_limiter = self.original_rate_limiter
         module.register_email_account = self.original_register_email_account
+        module.confirm_email_account = self.original_confirm_email_account
 
     def test_sign_up_returns_429_when_rate_limited(self):
         module.rate_limiter = mock.Mock()
@@ -171,6 +177,34 @@ class ApiAuthHandlerTests(unittest.TestCase):
 
         self.assertEqual(response["statusCode"], 200)
         module.register_email_account.assert_called_once()
+
+    def test_confirm_sign_up_returns_409_for_already_verified_account(self):
+        module.confirm_email_account = mock.Mock(
+            side_effect=module.AppUserAuthError(
+                "This email is already verified. Sign in instead.",
+                code="ACCOUNT_ALREADY_VERIFIED",
+                status_code=409,
+                details={"email": "user@example.com"},
+            )
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/auth/confirm-sign-up",
+                "requestContext": {"http": {"method": "POST", "sourceIp": "1.2.3.4"}},
+                "body": json.dumps(
+                    {
+                        "email": "user@example.com",
+                        "code": "123456",
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 409)
+        self.assertIn('"code": "ACCOUNT_ALREADY_VERIFIED"', response["body"])
+        module.confirm_email_account.assert_called_once()
 
 
 if __name__ == "__main__":

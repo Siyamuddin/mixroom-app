@@ -238,6 +238,44 @@ bool JuceEngine::prepareRecordingInputs(int desiredInputChannels,
     return applyPreferredAudioDeviceSetup(desiredInputChannels, true, reason);
 }
 
+bool JuceEngine::preparePlaybackRoute(const juce::String &reason)
+{
+    auto *dev = deviceManager.getCurrentAudioDevice();
+    const bool missingOutputRoute =
+        (dev == nullptr) || (dev->getActiveOutputChannels().countNumberOfSetBits() <= 0);
+    if (!missingOutputRoute)
+        return true;
+
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.useDefaultOutputChannels = true;
+    const bool detachLiveCallback = metronomeCallback != nullptr;
+    if (detachLiveCallback)
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+
+    ignoredDeviceChangeCallbacks.fetch_add(1, std::memory_order_acq_rel);
+    const auto error = deviceManager.setAudioDeviceSetup(setup, true);
+    if (!error.isEmpty())
+    {
+        if (detachLiveCallback)
+            deviceManager.addAudioCallback(metronomeCallback.get());
+        ignoredDeviceChangeCallbacks.fetch_sub(1, std::memory_order_acq_rel);
+        juceLogToFlutter(("preparePlaybackRoute failed [" + reason + "]: " + error).toRawUTF8());
+        return false;
+    }
+
+    if (detachLiveCallback)
+        deviceManager.addAudioCallback(metronomeCallback.get());
+
+    const double sr =
+        getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
+    if (sr > 1000.0)
+        hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
+
+    armOutputSafetyForCurrentRoute();
+    logCurrentAudioDeviceState(reason);
+    return true;
+}
+
 void JuceEngine::refreshAudioRouteAsync(const juce::String &reason)
 {
     applyPreferredAudioDeviceSetup(
@@ -1679,38 +1717,7 @@ void JuceEngine::play()
         ensureMasterOutputRouting();
     }
 
-    auto *dev = deviceManager.getCurrentAudioDevice();
-    const bool missingOutputRoute =
-        (dev == nullptr) || (dev->getActiveOutputChannels().countNumberOfSetBits() <= 0);
-    if (missingOutputRoute)
-    {
-        auto setup = deviceManager.getAudioDeviceSetup();
-        setup.useDefaultOutputChannels = true;
-        const bool detachLiveCallback = metronomeCallback != nullptr;
-        if (detachLiveCallback)
-            deviceManager.removeAudioCallback(metronomeCallback.get());
-
-        ignoredDeviceChangeCallbacks.fetch_add(1, std::memory_order_acq_rel);
-        const auto error = deviceManager.setAudioDeviceSetup(setup, true);
-        if (!error.isEmpty())
-        {
-            if (detachLiveCallback)
-                deviceManager.addAudioCallback(metronomeCallback.get());
-            ignoredDeviceChangeCallbacks.fetch_sub(1, std::memory_order_acq_rel);
-            juceLogToFlutter(("play: failed to recover output route: " + error).toRawUTF8());
-        }
-        else
-        {
-            if (detachLiveCallback)
-                deviceManager.addAudioCallback(metronomeCallback.get());
-            const double sr =
-                getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
-            if (sr > 1000.0)
-                hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
-            armOutputSafetyForCurrentRoute();
-            logCurrentAudioDeviceState("play:recovered-output-route");
-        }
-    }
+    preparePlaybackRoute("play:recovered-output-route");
 
     isPlayingAtomic.store(true, std::memory_order_relaxed);
 

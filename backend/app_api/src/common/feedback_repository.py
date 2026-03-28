@@ -185,6 +185,7 @@ class FeedbackRepository:
         safe_limit = max(1, min(_safe_int(limit) or 50, 100))
         items: list[Dict[str, Any]] = []
         warnings: list[str] = []
+        has_more = False
 
         if Key is not None:
             try:
@@ -192,14 +193,15 @@ class FeedbackRepository:
                     IndexName="created_at_idx",
                     KeyConditionExpression=Key("bucket").eq(FEEDBACK_BUCKET),
                     ScanIndexForward=False,
-                    Limit=safe_limit,
+                    Limit=safe_limit + 1,
                 )
                 items = [item for item in result.get("Items", []) if isinstance(item, dict)]
+                has_more = len(items) > safe_limit or bool(result.get("LastEvaluatedKey"))
             except (BotoCoreError, ClientError):
                 warnings.append("feedback_created_at_idx_unavailable")
 
         if not items:
-            scan_limit = max(safe_limit, 100)
+            scan_limit = max(safe_limit + 1, 100)
             result = self._table.scan(Limit=scan_limit)
             items = [
                 item
@@ -208,11 +210,14 @@ class FeedbackRepository:
                 and _safe_str(item.get("bucket")) == FEEDBACK_BUCKET
             ]
             items.sort(key=lambda item: _safe_str(item.get("created_at")), reverse=True)
-            items = items[:safe_limit]
+            has_more = len(items) > safe_limit
+
+        items = items[:safe_limit]
 
         return {
             "generated_at": _utc_now_iso(),
             "limit": safe_limit,
+            "has_more": has_more,
             "warnings": warnings,
             "submissions": [self._serialize_summary(item) for item in items],
         }

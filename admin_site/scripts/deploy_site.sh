@@ -154,6 +154,15 @@ done
 cp "${SITE_DIR}/index.html" "${BUILD_DIR}/index.html"
 cp "${SITE_DIR}/styles.css" "${BUILD_DIR}/styles.css"
 cp "${SITE_DIR}/app.js" "${BUILD_DIR}/app.js"
+if [[ -f "${PROJECT_ROOT}/assets/fonts/Pretendard-Regular.otf" ]]; then
+  cp "${PROJECT_ROOT}/assets/fonts/Pretendard-Regular.otf" "${BUILD_DIR}/Pretendard-Regular.otf"
+fi
+if [[ -f "${PROJECT_ROOT}/assets/fonts/Pretendard-SemiBold.otf" ]]; then
+  cp "${PROJECT_ROOT}/assets/fonts/Pretendard-SemiBold.otf" "${BUILD_DIR}/Pretendard-SemiBold.otf"
+fi
+if [[ -f "${PROJECT_ROOT}/assets/fonts/Pretendard-Bold.otf" ]]; then
+  cp "${PROJECT_ROOT}/assets/fonts/Pretendard-Bold.otf" "${BUILD_DIR}/Pretendard-Bold.otf"
+fi
 if [[ -f "${PROJECT_ROOT}/assets/short_white.png" ]]; then
   cp "${PROJECT_ROOT}/assets/short_white.png" "${BUILD_DIR}/mixroom-wordmark.png"
 fi

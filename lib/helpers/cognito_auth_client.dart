@@ -274,10 +274,20 @@ class CognitoAuthClient {
 
   Future<void> deleteUser({
     required String accessToken,
+    required String confirmationText,
+    String? currentPassword,
+    Map<String, dynamic>? socialReauthPayload,
   }) async {
     await _delete(
       path: '/v1/users/me',
       authToken: accessToken,
+      body: <String, dynamic>{
+        'confirmation_text': confirmationText,
+        if ((currentPassword ?? '').isNotEmpty)
+          'current_password': currentPassword,
+        if (socialReauthPayload != null && socialReauthPayload.isNotEmpty)
+          'social_reauth': socialReauthPayload,
+      },
     );
   }
 
@@ -339,10 +349,12 @@ class CognitoAuthClient {
   Future<Map<String, dynamic>> _delete({
     required String path,
     required String authToken,
+    Map<String, dynamic>? body,
   }) {
     return _request(
       method: 'DELETE',
       path: path,
+      body: body,
       authToken: authToken,
     );
   }
@@ -383,7 +395,11 @@ class CognitoAuthClient {
           break;
         case 'DELETE':
           response = await _httpClient
-              .delete(uri, headers: headers)
+              .delete(
+                uri,
+                headers: headers,
+                body: body == null ? null : jsonEncode(body),
+              )
               .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds));
           break;
         default:

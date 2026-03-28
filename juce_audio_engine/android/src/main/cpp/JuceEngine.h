@@ -8,7 +8,9 @@
 #include <array>
 #include <atomic>
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
+#include <cstdlib>
 #include <cmath>
 #include <deque>
 #include <limits>
@@ -1009,6 +1011,12 @@ private:
 class TimelineMidiClipProcessor : public juce::AudioProcessor, public TimelineClipProcessorBase
 {
 public:
+    static void setFlutterAssetRootPath(const juce::String &rootPath)
+    {
+        const juce::ScopedLock lock(flutterAssetRootLock());
+        flutterAssetRoot() = rootPath.trim();
+    }
+
     TimelineMidiClipProcessor(std::atomic<double> *blockTransportStartSecPtr,
                               std::atomic<double> *hostSampleRatePtr,
                               std::atomic<bool> *isPlayingPtr)
@@ -1661,9 +1669,34 @@ private:
 
     static juce::File resolveFlutterAssetFile(const juce::String &assetPathRaw)
     {
+        const juce::String raw = assetPathRaw.trim();
+        if (raw.isNotEmpty())
+        {
+            const juce::File direct(raw);
+            if (direct.existsAsFile())
+                return direct;
+        }
+
         const juce::String assetPath = normalizeAssetPath(assetPathRaw);
         if (assetPath.isEmpty())
             return {};
+
+        {
+            const juce::ScopedLock lock(flutterAssetRootLock());
+            const juce::String rootPath = flutterAssetRoot();
+            if (rootPath.isNotEmpty())
+            {
+                const juce::File root(rootPath);
+                const juce::File rootDirect = root.getChildFile(assetPath);
+                if (rootDirect.existsAsFile())
+                    return rootDirect;
+
+                const juce::File nested = root.getChildFile("flutter_assets")
+                                              .getChildFile(assetPath);
+                if (nested.existsAsFile())
+                    return nested;
+            }
+        }
 
         const juce::File appBundle =
             juce::File::getSpecialLocation(juce::File::currentApplicationFile)
@@ -1788,10 +1821,90 @@ private:
         const juce::String raw = opcodeValue(values, key).trim();
         if (raw.isEmpty())
             return fallback;
-        const double parsed = raw.getDoubleValue();
-        if (!std::isfinite(parsed))
+
+        const std::string utf8 = raw.toStdString();
+        const char *start = utf8.c_str();
+        char *end = nullptr;
+        const double parsed = std::strtod(start, &end);
+        if (end != start)
+        {
+            while (*end != '\0' && std::isspace((unsigned char)*end) != 0)
+                ++end;
+            if (*end == '\0' && std::isfinite(parsed))
+                return parsed;
+        }
+
+        juce::String token = raw.trim();
+        if (token.startsWith("\"") && token.endsWith("\"") && token.length() >= 2)
+            token = token.substring(1, token.length() - 1).trim();
+        if (token.isEmpty())
             return fallback;
-        return parsed;
+
+        const juce::juce_wchar stepRaw = token[0];
+        if (!std::isalpha((int)stepRaw))
+            return fallback;
+        const juce::juce_wchar step = (juce::juce_wchar)std::toupper((int)stepRaw);
+
+        int semitone = 0;
+        switch (step)
+        {
+        case 'C':
+            semitone = 0;
+            break;
+        case 'D':
+            semitone = 2;
+            break;
+        case 'E':
+            semitone = 4;
+            break;
+        case 'F':
+            semitone = 5;
+            break;
+        case 'G':
+            semitone = 7;
+            break;
+        case 'A':
+            semitone = 9;
+            break;
+        case 'B':
+            semitone = 11;
+            break;
+        default:
+            return fallback;
+        }
+
+        int index = 1;
+        if (index < token.length())
+        {
+            const juce::juce_wchar accidental = token[index];
+            if (accidental == '#')
+            {
+                semitone += 1;
+                ++index;
+            }
+            else if (accidental == 'b' || accidental == 'B')
+            {
+                semitone -= 1;
+                ++index;
+            }
+        }
+
+        const juce::String octaveRaw = token.substring(index).trim();
+        if (octaveRaw.isEmpty())
+            return fallback;
+        const std::string octaveUtf8 = octaveRaw.toStdString();
+        const char *octStart = octaveUtf8.c_str();
+        char *octEnd = nullptr;
+        const long octave = std::strtol(octStart, &octEnd, 10);
+        if (octEnd == octStart)
+            return fallback;
+        while (*octEnd != '\0' && std::isspace((unsigned char)*octEnd) != 0)
+            ++octEnd;
+        if (*octEnd != '\0')
+            return fallback;
+
+        const long midi = ((octave + 1L) * 12L) + (long)semitone;
+        return (double)midi;
     }
 
     static juce::String resolveSfzSampleAssetPath(const juce::String &sfzAssetPath,
@@ -2040,7 +2153,7 @@ private:
 
             const double regionVolDb = juce::jlimit(
                 -24.0,
-                20.0,
+                12.0,
                 readSfzNumeric(r, "volume", globalVol));
             regionDef.gainLinear = std::pow(10.0, regionVolDb / 20.0);
             regionDef.attackSec = juce::jlimit(
@@ -2072,34 +2185,87 @@ private:
             return normalizeAssetPath(instrumentId.substring(10));
 
         static const std::unordered_map<std::string, std::string> knownMap = {
-            {"sfz.vsco.violin_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsSusVib.sfz"},
-            {"sfz.vsco.cello_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/CelloEnsSusVib.sfz"},
-            {"sfz.vsco.trumpet_sus", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetSus.sfz"},
-            {"sfz.vsco.fhorn_sus", "assets/instruments/VSCO-2-CE-1.1.0/FHornSus.sfz"},
-            {"sfz.vsco.flute_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/FluteSusVib.sfz"},
-            {"sfz.vsco.clarinet_sus", "assets/instruments/VSCO-2-CE-1.1.0/ClarinetSus.sfz"},
+            {"sfz.vsco.mixroom_acoustic_drum_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz"},
+            {"sfz.vsco.mixroom_dry_drum_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz"},
+            {"sfz.vsco.mixroom_drum_starter", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz"},
+            {"sfz.vsco.mixroom_electro_punch_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomElectroPunchKit.sfz"},
+            {"sfz.vsco.mixroom_synthwave_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomSynthwaveKit.sfz"},
+            {"sfz.vsco.tictokmen_moogdrums1", "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenMoogdrums1.sfz"},
+            {"sfz.vsco.tictokmen_retrodrums1", "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenRetroDrums1.sfz"},
+            // IDs generated from assets/instruments/index.json.
+            {"sfz.vsco_2_ce_1_1_0_mixroomdrumstarter", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz"},
+            {"sfz.vsco_2_ce_1_1_0_mixroomacousticdrumkit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz"},
+            {"sfz.vsco_2_ce_1_1_0_mixroomdrydrumkit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz"},
+            {"sfz.vsco_2_ce_1_1_0_tictokmenmoogdrums1", "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenMoogdrums1.sfz"},
+            {"sfz.vsco_2_ce_1_1_0_tictokmenretrodrums1", "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenRetroDrums1.sfz"},
+            {"sfz.vsco_2_ce_1_1_0_mixroomelectropunchkit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomElectroPunchKit.sfz"},
+            {"sfz.vsco_2_ce_1_1_0_mixroomsynthwavekit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomSynthwaveKit.sfz"},
+            {"sfz.vsco.violin_ens_pizz", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz"},
+            {"sfz.vsco.trumpet_stac", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
+            {"sfz.vsco.tuba_stac", "assets/instruments/VSCO-2-CE-1.1.0/TubaStac.sfz"},
+            {"sfz.vsco.flute_stac", "assets/instruments/VSCO-2-CE-1.1.0/FluteStac.sfz"},
+            {"sfz.vsco.clarinet_stac", "assets/instruments/VSCO-2-CE-1.1.0/ClarinetStac.sfz"},
+            {"sfz.vsco.bassoon_stac", "assets/instruments/VSCO-2-CE-1.1.0/BassoonStac.sfz"},
+            {"sfz.vsco.oboe_stac", "assets/instruments/VSCO-2-CE-1.1.0/OboeStac.sfz"},
+            {"sfz.vsco.piccolo_sus", "assets/instruments/VSCO-2-CE-1.1.0/PiccoloSus.sfz"},
+            {"sfz.vsco.piccolo_stac", "assets/instruments/VSCO-2-CE-1.1.0/PiccoloStac.sfz"},
             {"sfz.vsco.organ_quiet", "assets/instruments/VSCO-2-CE-1.1.0/OrganQuiet.sfz"},
             {"sfz.vsco.organ_loud", "assets/instruments/VSCO-2-CE-1.1.0/OrganLoud.sfz"},
             {"sfz.vsco.marimba", "assets/instruments/VSCO-2-CE-1.1.0/Marimba.sfz"},
             {"sfz.vsco.glockenspiel", "assets/instruments/VSCO-2-CE-1.1.0/Glockenspiel.sfz"},
+            {"sfz.vsco.xylophone", "assets/instruments/VSCO-2-CE-1.1.0/Xylophone.sfz"},
+            {"sfz.vsco.tubular_bells", "assets/instruments/VSCO-2-CE-1.1.0/TubularBells.sfz"},
+            // Legacy aliases kept for backward compatibility with older projects.
+            {"sfz.vsco.violin_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz"},
+            {"sfz.vsco.cello_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz"},
+            {"sfz.vsco.trumpet_sus", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
+            {"sfz.vsco.fhorn_sus", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
+            {"sfz.vsco.flute_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/FluteStac.sfz"},
+            {"sfz.vsco.clarinet_sus", "assets/instruments/VSCO-2-CE-1.1.0/ClarinetStac.sfz"},
         };
         if (auto found = knownMap.find(id.toStdString()); found != knownMap.end())
             return found->second.c_str();
 
         const juce::String text = (id + " " + instrumentName.toLowerCase());
         auto contains = [&](const char *needle) { return text.contains(needle); };
+        if (contains("moogdrums"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenMoogdrums1.sfz";
+        if (contains("retrodrums"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenRetroDrums1.sfz";
+        if (contains("electro punch"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomElectroPunchKit.sfz";
+        if (contains("synthwave"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomSynthwaveKit.sfz";
+        if (contains("drum starter"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz";
+        if (contains("acoustic drum"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz";
+        if (contains("dry drum"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz";
+        if (contains("drum"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz";
         if (contains("violin"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsSusVib.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz";
         if (contains("cello"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/CelloEnsSusVib.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz";
         if (contains("trumpet"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/TrumpetSus.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz";
         if (contains("horn"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/FHornSus.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz";
+        if (contains("tuba"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/TubaStac.sfz";
         if (contains("flute"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/FluteSusVib.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/FluteStac.sfz";
         if (contains("clarinet"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/ClarinetSus.sfz";
+            return "assets/instruments/VSCO-2-CE-1.1.0/ClarinetStac.sfz";
+        if (contains("bassoon"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/BassoonStac.sfz";
+        if (contains("oboe"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/OboeStac.sfz";
+        if (contains("piccolo sustain"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/PiccoloSus.sfz";
+        if (contains("piccolo"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/PiccoloStac.sfz";
         if (contains("organ quiet"))
             return "assets/instruments/VSCO-2-CE-1.1.0/OrganQuiet.sfz";
         if (contains("organ"))
@@ -2108,6 +2274,10 @@ private:
             return "assets/instruments/VSCO-2-CE-1.1.0/Marimba.sfz";
         if (contains("glock"))
             return "assets/instruments/VSCO-2-CE-1.1.0/Glockenspiel.sfz";
+        if (contains("xylo"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/Xylophone.sfz";
+        if (contains("tubular") || contains("bell"))
+            return "assets/instruments/VSCO-2-CE-1.1.0/TubularBells.sfz";
         return {};
     }
 
@@ -2451,8 +2621,26 @@ private:
         {
             const int kitStyle = juce::jlimit(0, 3, preset.oscillator);
             const double kitBody = juce::jlimit(0.5, 1.2, 0.62 + preset.tone * 0.55);
+            const bool isKick = (pitch == 35 || pitch == 36);
+            const bool isSnare = (pitch == 38 || pitch == 40);
+            const bool isClap = (pitch == 37 || pitch == 39);
+            const bool isTom = (pitch == 41 || pitch == 43 || pitch == 45 ||
+                                pitch == 47 || pitch == 48 || pitch == 50);
+            const bool isHat = (pitch == 42 || pitch == 44 || pitch == 46 ||
+                                pitch == 49 || pitch == 51 || pitch == 52 ||
+                                pitch == 53 || pitch == 55 || pitch == 57 ||
+                                pitch == 59);
 
-            if (pitch <= 36)
+            const bool treatAsKick = isKick || pitch < 35;
+            const bool treatAsSnare =
+                isSnare || (!isClap && !isTom && !isHat && pitch <= 44);
+            const bool treatAsClap =
+                isClap || (!isTom && !isHat && pitch > 44 && pitch <= 52);
+            const bool treatAsTom =
+                isTom || (!isHat && pitch > 52 && pitch <= 63);
+
+            // Prefer GM-like drum note routing so common MIDI drum clips sound expected.
+            if (treatAsKick)
             {
                 const double extraDrop = (kitStyle == 0 ? 22.0 : kitStyle == 1 ? 12.0 : kitStyle == 2 ? 16.0
                                                                                                          : 14.0);
@@ -2469,7 +2657,7 @@ private:
                                              std::sin(juce::MathConstants<double>::twoPi * phaseFor(1700.0 + frequencyHz * 4.0)));
                 return (body + sub + click + beater) * (float)(brightness * kitBody);
             }
-            if (pitch <= 44)
+            if (treatAsSnare)
             {
                 const double toneMult = kitStyle == 0 ? 1.25 : kitStyle == 1 ? 1.6 : kitStyle == 2 ? 1.85
                                                                                                       : 1.45;
@@ -2481,7 +2669,7 @@ private:
                                                  (0.55 + 0.16 * kitStyle + preset.noise * 0.55));
                 return (toneA + toneB + noiseBurst) * (float)(0.66 + brightness * 0.34);
             }
-            if (pitch <= 52)
+            if (treatAsClap)
             {
                 if (kitStyle == 1)
                 {
@@ -2498,7 +2686,7 @@ private:
                 const double tail = std::exp(-(10.0 + kitStyle * 1.5) * noteProgress);
                 return (float)(noise(127) * (clapEnv * 0.78 + tail * 0.22));
             }
-            if (pitch <= 63)
+            if (treatAsTom)
             {
                 const double tomMul = kitStyle == 0 ? 0.85 : kitStyle == 1 ? 1.0 : kitStyle == 2 ? 1.18
                                                                                                     : 0.95;
@@ -2641,6 +2829,18 @@ private:
         cachedSampledAttackOverride = local.sampledAttackOverride;
         cachedSampledReleaseOverride = local.sampledReleaseOverride;
         cachedSourceTempoBpm = local.sourceTempoBpm;
+    }
+
+    static juce::CriticalSection &flutterAssetRootLock()
+    {
+        static juce::CriticalSection lock;
+        return lock;
+    }
+
+    static juce::String &flutterAssetRoot()
+    {
+        static juce::String root;
+        return root;
     }
 
     std::atomic<double> *blockTransportStartSec = nullptr;

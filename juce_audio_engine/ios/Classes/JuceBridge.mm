@@ -1583,6 +1583,12 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
     return JuceEngine::get().prepareRecordingInputs((int)desiredInputChannels, why);
 }
 
++ (BOOL)preparePlaybackRouteObjC:(NSString *)reason
+{
+    const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);
+    return JuceEngine::get().preparePlaybackRoute(why);
+}
+
 + (void)refreshAudioRouteObjC:(NSString *)reason
 {
     const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);

@@ -30,6 +30,15 @@ Parameters:
   OpenAiModel:
     Type: String
     Default: gpt-4.1-mini
+  AiChatDefaultTemperature:
+    Type: String
+    Default: '0.2'
+  VideoEditorDefaultTemperature:
+    Type: String
+    Default: '0.1'
+  AiChatExtendedPromptCacheRetentionModels:
+    Type: String
+    Default: 'gpt-4.1,gpt-5,gpt-5-codex,gpt-5.1,gpt-5.1-codex,gpt-5.1-codex-mini,gpt-5.1-chat-latest,gpt-5.2'
   AllowClientModelOverride:
     Type: String
     AllowedValues:
@@ -84,6 +93,10 @@ Globals:
         ANTHROPIC_VERSION: 2023-06-01
         OPENAI_API_KEY_SECRET_ARN: !Ref OpenAiApiKeySecretArn
         OPENAI_MODEL: !Ref OpenAiModel
+        AI_RUNTIME_DEFAULT_MODEL: !Ref OpenAiModel
+        AI_CHAT_DEFAULT_TEMPERATURE: !Ref AiChatDefaultTemperature
+        VIDEO_EDITOR_DEFAULT_TEMPERATURE: !Ref VideoEditorDefaultTemperature
+        AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS: !Ref AiChatExtendedPromptCacheRetentionModels
         ALLOW_CLIENT_MODEL_OVERRIDE: !Ref AllowClientModelOverride
         OPENAI_SECRET_CACHE_TTL_SECONDS: !Ref OpenAiSecretCacheTtlSeconds
         MAX_REQUEST_BYTES: !Ref MaxRequestBytes
@@ -100,6 +113,7 @@ Globals:
         AI_USAGE_STATE_TABLE: !Ref AiUsageMetricsTable
         AI_USAGE_METRICS_TABLE: !Ref AiUsageMetricsTable
         AI_USAGE_EVENTS_TABLE: !Ref AiUsageEventsTable
+        AI_PROMPT_LIMIT_SETTINGS_TABLE: !Ref AiPromptLimitSettingsTable
         ENTITLEMENTS_TABLE: !Ref EntitlementsTableName
         LLM_MAX_OUTPUT_TOKENS: !Ref LlmMaxOutputTokens
 
@@ -116,9 +130,14 @@ Conditions:
 Resources:
   AiUsageMetricsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-ai-usage-metrics-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -128,9 +147,14 @@ Resources:
 
   AiUsageEventsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-ai-usage-events-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
@@ -171,6 +195,23 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  AiPromptLimitSettingsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub mixroom-ai-prompt-limit-settings-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: setting_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: setting_key
+          KeyType: HASH
+
   LlmApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -190,13 +231,6 @@ Resources:
           - POST
           - OPTIONS
 
-  LlmApiWebAclAssociation:
-    Type: AWS::WAFv2::WebACLAssociation
-    Condition: HasWebAclArn
-    Properties:
-      ResourceArn: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/${LlmApi}/stages/${StageName}
-      WebACLArn: !Ref WebAclArn
-
   ProxyResponsesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -214,6 +248,8 @@ Resources:
             TableName: !Ref AiUsageMetricsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AiUsageEventsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref AiPromptLimitSettingsTable
         - DynamoDBReadPolicy:
             TableName: !Ref EntitlementsTableName
         - DynamoDBReadPolicy:
@@ -307,3 +343,5 @@ Outputs:
     Value: !Ref AiUsageMetricsTable
   AiUsageEventsTableName:
     Value: !Ref AiUsageEventsTable
+  AiPromptLimitSettingsTableName:
+    Value: !Ref AiPromptLimitSettingsTable

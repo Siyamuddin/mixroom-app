@@ -19,6 +19,7 @@ abstract class MixingMagnitudePredictor {
   bool get isReady;
 
   Future<void> load();
+  Future<void> dispose();
 
   Future<MagnitudeRefineResult> refine({
     required ProjectState project,
@@ -39,6 +40,9 @@ class NoopMixingMagnitudePredictor implements MixingMagnitudePredictor {
 
   @override
   Future<void> load() async {}
+
+  @override
+  Future<void> dispose() async {}
 
   @override
   Future<MagnitudeRefineResult> refine({

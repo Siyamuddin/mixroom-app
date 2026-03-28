@@ -52,6 +52,18 @@ class AppUserAuthError(ValueError):
         self.details = details or {}
 
 
+def _validate_password_policy(password: str) -> None:
+    issues = _password_policy_issues(password)
+    if not issues:
+        return
+    raise AppUserAuthError(
+        issues[0],
+        code="WEAK_PASSWORD",
+        status_code=400,
+        details={"issues": issues},
+    )
+
+
 def register_email_account(
     repo: BillingRepository,
     *,
@@ -70,6 +82,7 @@ def register_email_account(
             code="INVALID_REQUEST",
             status_code=400,
         )
+    _validate_password_policy(password)
 
     account = repo.get_auth_account_by_email(safe_email)
     legacy_user = find_legacy_cognito_user_by_email(safe_email)
@@ -196,7 +209,34 @@ def confirm_email_account(
     if account:
         if bool(account.get("email_verified")):
             profile = repo.get_user_profile(str(account.get("user_id") or "").strip()) or {}
-            return issue_session(repo, account=account, profile=profile)
+            provider = str(account.get("auth_provider") or "").strip().lower() or "email"
+            if provider != "email":
+                raise _auth_method_conflict(
+                    email=safe_email,
+                    existing_provider=provider,
+                    verification_required=False,
+                )
+            if password.strip():
+                try:
+                    return complete_password_sign_in(
+                        repo,
+                        identifier=safe_email,
+                        password=password,
+                    )
+                except AppUserAuthError as exc:
+                    if exc.code != "INVALID_CREDENTIALS":
+                        raise
+            raise AppUserAuthError(
+                "This email is already verified. Sign in instead.",
+                code="ACCOUNT_ALREADY_VERIFIED",
+                status_code=409,
+                details={
+                    "email": safe_email,
+                    "existing_provider": "email",
+                    "existing_provider_label": "Email",
+                    "suggested_action": "sign_in",
+                },
+            )
 
         if not _code_matches(account.get("verification_code_hash"), code):
             raise AppUserAuthError(
@@ -476,6 +516,7 @@ def confirm_password_reset(
     new_password: str,
 ) -> Dict[str, Any]:
     safe_email = _normalize_email(email)
+    _validate_password_policy(new_password)
     account = repo.get_auth_account_by_email(safe_email)
     if not account or _can_attempt_legacy_cognito_email_flow(account):
         try:
@@ -554,6 +595,7 @@ def change_password(
             code="INVALID_CURRENT_PASSWORD",
             status_code=400,
         )
+    _validate_password_policy(new_password)
     password_salt = secrets.token_hex(16)
     account["password_salt"] = password_salt
     account["password_hash"] = _hash_password(password=new_password, salt=password_salt)
@@ -562,6 +604,40 @@ def change_password(
     repo.put_auth_account(account)
     repo.delete_auth_sessions_for_user(user_id)
     return {"changed": True}
+
+
+def verify_current_password(
+    repo: BillingRepository,
+    *,
+    user_id: str,
+    current_password: str,
+) -> Dict[str, Any]:
+    account = repo.get_auth_account(user_id)
+    if not account:
+        raise AppUserAuthError(
+            "Account not found.",
+            code="ACCOUNT_NOT_FOUND",
+            status_code=404,
+        )
+    provider = str(account.get("auth_provider") or "").strip().lower()
+    if provider != "email":
+        raise AppUserAuthError(
+            "Password sign-in is not available for this account.",
+            code="PASSWORD_SIGN_IN_UNAVAILABLE",
+            status_code=409,
+            details={"provider": provider},
+        )
+    if not _verify_password(
+        password=current_password,
+        salt=str(account.get("password_salt") or ""),
+        expected_hash=str(account.get("password_hash") or ""),
+    ):
+        raise AppUserAuthError(
+            "Current password is incorrect.",
+            code="INVALID_CURRENT_PASSWORD",
+            status_code=400,
+        )
+    return account
 
 
 def update_account_display_name(
@@ -749,8 +825,16 @@ def upsert_social_account(
     if linked_account:
         user_id = str(linked_account.get("user_id") or "").strip()
         account = repo.get_auth_account(user_id)
+        existing_profile = repo.get_user_profile(user_id) or {}
+        resolved_email = _resolve_linked_social_email(
+            repo,
+            user_id=user_id,
+            current_email=str(
+                (account or {}).get("email") or existing_profile.get("email") or ""
+            ).strip().lower(),
+            candidate_email=email,
+        )
         if not account:
-            existing_profile = repo.get_user_profile(user_id) or {}
             if not user_id:
                 raise AppUserAuthError(
                     "Linked account could not be loaded.",
@@ -765,7 +849,7 @@ def upsert_social_account(
                 },
                 claims={
                     "sub": user_id,
-                    "email": email,
+                    "email": resolved_email,
                     "email_verified": email_verified,
                     "provider": normalized_provider,
                     "name": display_name,
@@ -774,9 +858,9 @@ def upsert_social_account(
                 allow_passwordless_email=True,
             )
             repo.put_auth_account(account)
-        if email:
-            account["email"] = _normalize_email(email)
-            account["email_lc"] = _normalize_email(email)
+        if resolved_email:
+            account["email"] = resolved_email
+            account["email_lc"] = resolved_email
         account["email_verified"] = bool(email_verified) or bool(account.get("email_verified"))
         account["auth_provider"] = normalized_provider
         account["updated_at"] = _utc_now_iso()
@@ -1101,6 +1185,25 @@ def _create_social_seed_account(
         password="",
         allow_passwordless_email=provider != "email",
     )
+
+
+def _resolve_linked_social_email(
+    repo: BillingRepository,
+    *,
+    user_id: str,
+    current_email: str,
+    candidate_email: str,
+) -> str:
+    safe_current_email = _normalize_email(current_email)
+    safe_candidate_email = _normalize_email(candidate_email)
+    if not safe_candidate_email or safe_candidate_email == safe_current_email:
+        return safe_current_email or safe_candidate_email
+
+    existing = repo.get_auth_account_by_email(safe_candidate_email)
+    existing_user_id = str((existing or {}).get("user_id") or "").strip()
+    if existing_user_id and existing_user_id != user_id:
+        return safe_current_email
+    return safe_candidate_email
 
 
 def _can_attempt_legacy_cognito_password_sign_in(account: Dict[str, Any]) -> bool:
@@ -1530,6 +1633,32 @@ def _social_link_key(subject: str) -> str:
 
 def _new_user_id() -> str:
     return f"user_{secrets.token_hex(16)}"
+
+
+def _password_policy_issues(password: str) -> list[str]:
+    safe_password = str(password or "").strip()
+    issues: list[str] = []
+    if len(safe_password) < config.AUTH_PASSWORD_MIN_LENGTH:
+        issues.append(
+            f"Password must be at least {config.AUTH_PASSWORD_MIN_LENGTH} characters."
+        )
+    if config.AUTH_PASSWORD_REQUIRE_UPPERCASE and not any(
+        char.isupper() for char in safe_password
+    ):
+        issues.append("Password must include an uppercase letter.")
+    if config.AUTH_PASSWORD_REQUIRE_LOWERCASE and not any(
+        char.islower() for char in safe_password
+    ):
+        issues.append("Password must include a lowercase letter.")
+    if config.AUTH_PASSWORD_REQUIRE_NUMBER and not any(
+        char.isdigit() for char in safe_password
+    ):
+        issues.append("Password must include a number.")
+    if config.AUTH_PASSWORD_REQUIRE_SYMBOL and not any(
+        not char.isalnum() for char in safe_password
+    ):
+        issues.append("Password must include a symbol.")
+    return issues
 
 
 def _hash_password(*, password: str, salt: str) -> str:

@@ -68,8 +68,10 @@ overview_module = importlib.import_module("src.common.admin_overview_repository"
 class _FakeRepo:
     def __init__(self, payload):
         self.payload = payload
+        self.calls = []
 
-    def build_overview(self):
+    def build_overview(self, **kwargs):
+        self.calls.append(dict(kwargs))
         return dict(self.payload)
 
 
@@ -159,15 +161,65 @@ class AdminOverviewHandlerTests(unittest.TestCase):
             }
         )
 
-        result = admin_module.handler({}, object())
+        result = admin_module.handler(
+            {
+                "queryStringParameters": {
+                    "user_limit": "6",
+                    "project_limit": "5",
+                }
+            },
+            object(),
+        )
 
         self.assertEqual(result["statusCode"], 200)
         self.assertIn('"requested_by": "admin-user"', result["body"])
         self.assertIn('"requested_email": "admin@example.com"', result["body"])
         self.assertIn('"total_users": 2', result["body"])
+        self.assertIn('"can_edit_ai_settings": false', result["body"])
+        self.assertEqual(admin_module.repo.calls[0]["user_limit"], 6)
+        self.assertEqual(admin_module.repo.calls[0]["project_limit"], 5)
 
 
 class AdminOverviewRepositoryTests(unittest.TestCase):
+    def test_build_overview_includes_product_analytics(self):
+        repo = overview_module.AdminOverviewRepository.__new__(
+            overview_module.AdminOverviewRepository
+        )
+        repo._entitlements = None
+        repo._ai_usage_state = None
+        repo._ai_usage_events = None
+        repo._billing_repo = None
+        repo._posthog_metrics = mock.Mock(
+            fetch=mock.Mock(
+                return_value={
+                    "source": "posthog",
+                    "status": "live",
+                    "metrics": {"dau": 5, "wau": 12, "mau": 22, "hours_24h": 3.5},
+                    "daily_active_users": [{"day": "2026-03-27", "active_users": 5}],
+                    "daily_hours_used": [{"day": "2026-03-27", "hours_used": 3.5}],
+                    "top_countries": [{"country": "South Korea", "users": 4}],
+                    "updated_at": "2026-03-27T00:00:00+00:00",
+                }
+            )
+        )
+        repo._recent_user_profiles = mock.Mock(return_value=[])
+        repo._scan_state_items = mock.Mock(return_value=[])
+        repo._list_recent_ai_events = mock.Mock(return_value=[])
+        repo._build_tier_breakdown_fast = mock.Mock(
+            return_value=[
+                {"tier": "free", "user_count": 0, "active_user_count": 0},
+                {"tier": "pro", "user_count": 0, "active_user_count": 0},
+                {"tier": "studio", "user_count": 0, "active_user_count": 0},
+            ]
+        )
+        repo._describe_item_count = mock.Mock(return_value=0)
+
+        result = overview_module.AdminOverviewRepository.build_overview(repo)
+
+        self.assertEqual(result["product_analytics"]["status"], "live")
+        self.assertEqual(result["product_analytics"]["metrics"]["mau"], 22)
+        self.assertEqual(result["product_analytics"]["top_countries"][0]["country"], "South Korea")
+
     def test_tier_breakdown_falls_back_to_scan_when_indexes_are_stale(self):
         repo = overview_module.AdminOverviewRepository.__new__(
             overview_module.AdminOverviewRepository

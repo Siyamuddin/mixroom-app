@@ -666,7 +666,7 @@ class AiUsageRepository:
             raise RuntimeError("AI usage state table is not configured.")
 
         current = now or _utc_now()
-        prompt_limits = get_prompt_limits()
+        prompt_limits = get_prompt_limits(subscription_tier)
         daily_prompt_limit = int(prompt_limits.get("daily_prompts") or 0)
         weekly_prompt_limit = int(prompt_limits.get("weekly_prompts") or 0)
         state = self.get_usage_state(user_id)

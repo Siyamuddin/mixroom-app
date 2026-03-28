@@ -571,6 +571,35 @@ class AuthService extends ChangeNotifier {
     await _signInWithNativeSocial(NativeSocialSignInClient.signInWithKakao);
   }
 
+  Future<NativeSocialSignInPayload> beginDeleteAccountSocialReauth() async {
+    final user = _currentUser;
+    if (user == null) {
+      throw StateError('No active account.');
+    }
+
+    switch (user.provider) {
+      case AuthProviderType.email:
+        throw StateError(
+          'Enter your current password to delete this account.',
+        );
+      case AuthProviderType.google:
+        if (!CognitoConfig.enableGoogleSignIn) {
+          throw StateError('Google sign-in is not enabled in this build.');
+        }
+        return NativeSocialSignInClient.signInWithGoogle();
+      case AuthProviderType.apple:
+        if (!CognitoConfig.enableAppleSignIn) {
+          throw StateError('Apple sign-in is not enabled in this build.');
+        }
+        return NativeSocialSignInClient.signInWithApple();
+      case AuthProviderType.kakao:
+        if (!CognitoConfig.enableKakaoSignIn) {
+          throw StateError('Kakao sign-in is not enabled in this build.');
+        }
+        return NativeSocialSignInClient.signInWithKakao();
+    }
+  }
+
   Future<void> _signInWithNativeSocial(
     Future<NativeSocialSignInPayload> Function() beginSignIn,
   ) async {
@@ -873,11 +902,24 @@ class AuthService extends ChangeNotifier {
     });
   }
 
-  Future<void> deleteAccount() async {
+  Future<void> deleteAccount({
+    required String confirmationText,
+    String? currentPassword,
+    NativeSocialSignInPayload? socialReauth,
+  }) async {
     await _runBusyTask(() async {
+      final previousUser = _currentUser;
       try {
         final accessToken = await _requireAccessToken();
-        await _cognito.deleteUser(accessToken: accessToken);
+        await _cognito.deleteUser(
+          accessToken: accessToken,
+          confirmationText: confirmationText.trim(),
+          currentPassword: currentPassword,
+          socialReauthPayload: socialReauth?.body,
+        );
+        if (previousUser != null) {
+          await NativeSocialSignInClient.signOut(previousUser.provider);
+        }
         await _clearSession();
         await _syncObservabilityUser();
       } on CognitoApiException catch (e) {
@@ -1233,6 +1275,16 @@ class AuthService extends ChangeNotifier {
       case 'UserNotConfirmedException':
       case 'EMAIL_CONFIRMATION_REQUIRED':
         return 'Please verify your email first.';
+      case 'ACCOUNT_ALREADY_VERIFIED':
+        return 'This email is already verified. Sign in instead.';
+      case 'DELETE_CONFIRMATION_REQUIRED':
+        return 'Type DELETE to confirm account deletion.';
+      case 'DELETE_PASSWORD_REQUIRED':
+        return 'Enter your current password to delete this account.';
+      case 'SOCIAL_REAUTH_REQUIRED':
+        return 'Re-authenticate with your social provider to delete this account.';
+      case 'SOCIAL_REAUTH_MISMATCH':
+        return 'That re-authentication did not match your Mixroom account. Please try again.';
       case 'EMAIL_DELIVERY_UNAVAILABLE':
         return 'Email delivery is not configured yet. Please try again later.';
       case 'EMAIL_SUPPRESSED':

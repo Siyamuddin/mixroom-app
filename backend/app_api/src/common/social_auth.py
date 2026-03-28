@@ -43,19 +43,7 @@ def complete_social_sign_in(
     provider: str,
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
-    normalized_provider = str(provider or "").strip().lower()
-    if normalized_provider == "google":
-        identity = _verify_google_identity(payload)
-    elif normalized_provider == "apple":
-        identity = _verify_apple_identity(payload)
-    elif normalized_provider == "kakao":
-        identity = _verify_kakao_identity(payload)
-    else:
-        raise SocialAuthError(
-            "Unsupported social provider.",
-            code="UNSUPPORTED_SOCIAL_PROVIDER",
-            status_code=400,
-        )
+    identity = _verify_social_identity(provider, payload)
 
     try:
         result = upsert_social_account(
@@ -82,6 +70,64 @@ def complete_social_sign_in(
             status_code=exc.status_code,
             details=exc.details,
         ) from exc
+
+
+def verify_social_reauthentication(
+    repo: BillingRepository,
+    *,
+    user_id: str,
+    payload: Dict[str, Any],
+) -> SocialIdentity:
+    safe_user_id = str(user_id or "").strip()
+    if not safe_user_id:
+        raise SocialAuthError(
+            "Account not found.",
+            code="ACCOUNT_NOT_FOUND",
+            status_code=404,
+        )
+
+    account = repo.get_auth_account(safe_user_id)
+    if not account:
+        raise SocialAuthError(
+            "Account not found.",
+            code="ACCOUNT_NOT_FOUND",
+            status_code=404,
+        )
+
+    provider = str(account.get("auth_provider") or "").strip().lower()
+    if provider not in ("google", "apple", "kakao"):
+        raise SocialAuthError(
+            "Password re-authentication is required for this account.",
+            code="DELETE_PASSWORD_REQUIRED",
+            status_code=400,
+            details={"provider": provider or "email"},
+        )
+
+    identity = _verify_social_identity(provider, payload)
+    linked_account = repo.get_customer_link(provider, _social_link_key(identity.subject))
+    if str((linked_account or {}).get("user_id") or "").strip() != safe_user_id:
+        raise SocialAuthError(
+            f"{_provider_label(provider)} re-authentication did not match this Mixroom account.",
+            code="SOCIAL_REAUTH_MISMATCH",
+            status_code=403,
+            details={"provider": provider},
+        )
+    return identity
+
+
+def _verify_social_identity(provider: str, payload: Dict[str, Any]) -> SocialIdentity:
+    normalized_provider = str(provider or "").strip().lower()
+    if normalized_provider == "google":
+        return _verify_google_identity(payload)
+    if normalized_provider == "apple":
+        return _verify_apple_identity(payload)
+    if normalized_provider == "kakao":
+        return _verify_kakao_identity(payload)
+    raise SocialAuthError(
+        "Unsupported social provider.",
+        code="UNSUPPORTED_SOCIAL_PROVIDER",
+        status_code=400,
+    )
 
 
 def _verify_google_identity(payload: Dict[str, Any]) -> SocialIdentity:
@@ -257,6 +303,21 @@ def _bool_claim(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() == "true"
+
+
+def _provider_label(provider: str) -> str:
+    normalized = str(provider or "").strip().lower()
+    if normalized == "google":
+        return "Google"
+    if normalized == "apple":
+        return "Apple"
+    if normalized == "kakao":
+        return "KakaoTalk"
+    return "Social"
+
+
+def _social_link_key(subject: str) -> str:
+    return f"auth:{str(subject or '').strip()}"
 
 
 def _apple_signing_key(key_id: str) -> Any:

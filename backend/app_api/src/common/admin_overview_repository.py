@@ -32,6 +32,7 @@ from .models import (
     normalize_tier,
     status_has_active_access,
 )
+from .posthog_admin_metrics import PosthogAdminMetricsClient
 from .repository import BillingRepository
 
 
@@ -85,6 +86,7 @@ class AdminOverviewRepository:
         self._ai_usage_state = None
         self._ai_usage_events = None
         self._billing_repo = BillingRepository() if boto3 is not None else None
+        self._posthog_metrics = PosthogAdminMetricsClient()
 
         if self._ddb is not None and config.ENTITLEMENTS_TABLE:
             self._entitlements = self._ddb.Table(config.ENTITLEMENTS_TABLE)
@@ -289,7 +291,44 @@ class AdminOverviewRepository:
                 "rate_limited_requests": rate_limited_count,
                 "top_features": top_features,
             },
+            "product_analytics": self._build_product_analytics(warnings),
         }
+
+    def _build_product_analytics(self, warnings: list[str]) -> Dict[str, Any]:
+        client = getattr(self, "_posthog_metrics", None)
+        if client is None:
+            return {
+                "source": "posthog",
+                "status": "unconfigured",
+                "metrics": {
+                    "dau": 0,
+                    "wau": 0,
+                    "mau": 0,
+                    "hours_24h": 0.0,
+                },
+                "daily_active_users": [],
+                "daily_hours_used": [],
+                "top_countries": [],
+                "updated_at": "",
+            }
+        try:
+            return client.fetch()
+        except Exception as exc:
+            warnings.append(f"posthog_metrics_unavailable:{exc.__class__.__name__}")
+            return {
+                "source": "posthog",
+                "status": "error",
+                "metrics": {
+                    "dau": 0,
+                    "wau": 0,
+                    "mau": 0,
+                    "hours_24h": 0.0,
+                },
+                "daily_active_users": [],
+                "daily_hours_used": [],
+                "top_countries": [],
+                "updated_at": "",
+            }
 
     def _base_user_record(
         self,

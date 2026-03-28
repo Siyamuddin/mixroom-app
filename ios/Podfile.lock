@@ -19,8 +19,6 @@ PODS:
   - audioplayers_darwin (0.0.1):
     - Flutter
     - FlutterMacOS
-  - background_downloader (0.0.1):
-    - Flutter
   - better_player (0.0.1):
     - Cache (~> 6.0.0)
     - Flutter
@@ -75,12 +73,6 @@ PODS:
     - Flutter
   - flutter_file_dialog (0.0.1):
     - Flutter
-  - flutter_gemma (0.11.16):
-    - Flutter
-    - MediaPipeTasksGenAI (= 0.10.24)
-    - MediaPipeTasksGenAIC (= 0.10.24)
-    - TensorFlowLiteC (= 0.0.1-nightly.20250619)
-    - TensorFlowLiteSwift (= 0.0.1-nightly.20250619)
   - flutter_native_splash (2.4.3):
     - Flutter
   - flutter_onnxruntime (0.0.1):
@@ -138,8 +130,6 @@ PODS:
     - FlutterMacOS
   - kakao_flutter_sdk_common (1.10.0):
     - Flutter
-  - large_file_handler (0.0.1):
-    - Flutter
   - libwebp (1.5.0):
     - libwebp/demux (= 1.5.0)
     - libwebp/mux (= 1.5.0)
@@ -152,9 +142,6 @@ PODS:
   - libwebp/sharpyuv (1.5.0)
   - libwebp/webp (1.5.0):
     - libwebp/sharpyuv
-  - MediaPipeTasksGenAI (0.10.24):
-    - MediaPipeTasksGenAIC (= 0.10.24)
-  - MediaPipeTasksGenAIC (0.10.24)
   - onnxruntime-c (1.22.0)
   - onnxruntime-objc (1.22.0):
     - onnxruntime-objc/Core (= 1.22.0)
@@ -198,15 +185,6 @@ PODS:
   - sign_in_with_apple (0.0.1):
     - Flutter
   - SwiftyGif (5.4.5)
-  - TensorFlowLiteC (0.0.1-nightly.20250619):
-    - TensorFlowLiteC/Core (= 0.0.1-nightly.20250619)
-  - TensorFlowLiteC/Core (0.0.1-nightly.20250619)
-  - TensorFlowLiteSwift (0.0.1-nightly.20250619):
-    - TensorFlowLiteSwift/Core (= 0.0.1-nightly.20250619)
-  - TensorFlowLiteSwift/Core (0.0.1-nightly.20250619):
-    - TensorFlowLiteC (= 0.0.1-nightly.20250619)
-    - TensorFlowLiteSwift/Privacy (= 0.0.1-nightly.20250619)
-  - TensorFlowLiteSwift/Privacy (0.0.1-nightly.20250619)
   - url_launcher_ios (0.0.1):
     - Flutter
   - video_player_avfoundation (0.0.1):
@@ -224,7 +202,6 @@ DEPENDENCIES:
   - audio_session (from `.symlinks/plugins/audio_session/ios`)
   - audio_waveforms (from `.symlinks/plugins/audio_waveforms/ios`)
   - audioplayers_darwin (from `.symlinks/plugins/audioplayers_darwin/darwin`)
-  - background_downloader (from `.symlinks/plugins/background_downloader/ios`)
   - better_player (from `.symlinks/plugins/better_player/ios`)
   - easy_video_editor (from `.symlinks/plugins/easy_video_editor/ios`)
   - ffmpeg_kit_flutter_new_full (from `.symlinks/plugins/ffmpeg_kit_flutter_new_full/ios`)
@@ -232,7 +209,6 @@ DEPENDENCIES:
   - Flutter (from `Flutter`)
   - flutter_appauth (from `.symlinks/plugins/flutter_appauth/ios`)
   - flutter_file_dialog (from `.symlinks/plugins/flutter_file_dialog/ios`)
-  - flutter_gemma (from `.symlinks/plugins/flutter_gemma/ios`)
   - flutter_native_splash (from `.symlinks/plugins/flutter_native_splash/ios`)
   - flutter_onnxruntime (from `.symlinks/plugins/flutter_onnxruntime/ios`)
   - flutter_secure_storage (from `.symlinks/plugins/flutter_secure_storage/ios`)
@@ -244,7 +220,6 @@ DEPENDENCIES:
   - juce_audio_engine (from `.symlinks/plugins/juce_audio_engine/ios`)
   - just_audio (from `.symlinks/plugins/just_audio/darwin`)
   - kakao_flutter_sdk_common (from `.symlinks/plugins/kakao_flutter_sdk_common/ios`)
-  - large_file_handler (from `.symlinks/plugins/large_file_handler/ios`)
   - open_file_ios (from `.symlinks/plugins/open_file_ios/ios`)
   - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
   - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
@@ -273,8 +248,6 @@ SPEC REPOS:
     - GTMSessionFetcher
     - HLSCachingReverseProxyServer
     - libwebp
-    - MediaPipeTasksGenAI
-    - MediaPipeTasksGenAIC
     - onnxruntime-c
     - onnxruntime-objc
     - PINCache
@@ -284,8 +257,6 @@ SPEC REPOS:
     - SDWebImage
     - Sentry
     - SwiftyGif
-    - TensorFlowLiteC
-    - TensorFlowLiteSwift
     - WebRTC-SDK
 
 EXTERNAL SOURCES:
@@ -297,8 +268,6 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/audio_waveforms/ios"
   audioplayers_darwin:
     :path: ".symlinks/plugins/audioplayers_darwin/darwin"
-  background_downloader:
-    :path: ".symlinks/plugins/background_downloader/ios"
   better_player:
     :path: ".symlinks/plugins/better_player/ios"
   easy_video_editor:
@@ -313,8 +282,6 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/flutter_appauth/ios"
   flutter_file_dialog:
     :path: ".symlinks/plugins/flutter_file_dialog/ios"
-  flutter_gemma:
-    :path: ".symlinks/plugins/flutter_gemma/ios"
   flutter_native_splash:
     :path: ".symlinks/plugins/flutter_native_splash/ios"
   flutter_onnxruntime:
@@ -337,8 +304,6 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/just_audio/darwin"
   kakao_flutter_sdk_common:
     :path: ".symlinks/plugins/kakao_flutter_sdk_common/ios"
-  large_file_handler:
-    :path: ".symlinks/plugins/large_file_handler/ios"
   open_file_ios:
     :path: ".symlinks/plugins/open_file_ios/ios"
   package_info_plus:
@@ -373,7 +338,6 @@ SPEC CHECKSUMS:
   audio_session: 9bb7f6c970f21241b19f5a3658097ae459681ba0
   audio_waveforms: a6dde7fe7c0ea05f06ffbdb0f7c1b2b2ba6cedcf
   audioplayers_darwin: 4f9ca89d92d3d21cec7ec580e78ca888e5fb68bd
-  background_downloader: 50e91d979067b82081aba359d7d916b3ba5fadad
   better_player: 472a1f3471b8991bde82327c91498b0f7934245d
   Cache: 4ca7e00363fca5455f26534e5607634c820ffc2d
   DKImagePickerController: 946cec48c7873164274ecc4624d19e3da4c1ef3c
@@ -384,7 +348,6 @@ SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_appauth: d4abcf54856e5d8ba82ed7646ffc83245d4aa448
   flutter_file_dialog: ca8d7fbd1772d4f0c2777b4ab20a7787ef4e7dd8
-  flutter_gemma: 8f20d538be02f322bbca5877b09aaaa344edae6b
   flutter_native_splash: c32d145d68aeda5502d5f543ee38c192065986cf
   flutter_onnxruntime: 744f037980e9fb685736bfeceaf4c2dd8c381f8a
   flutter_secure_storage: 1ed9476fba7e7a782b22888f956cce43e2c62f13
@@ -402,10 +365,7 @@ SPEC CHECKSUMS:
   juce_audio_engine: e2de7a1dd97265f4de031bf7f96d17cc0727f79d
   just_audio: 4e391f57b79cad2b0674030a00453ca5ce817eed
   kakao_flutter_sdk_common: 682b3606698f87467788598dc2dc09d4e6867fbd
-  large_file_handler: b37481e9b4972562ffcdc8f75700f47cd592bcec
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
-  MediaPipeTasksGenAI: 076ba7032a6e9da16db9c7cf0c3b67c751c18bc1
-  MediaPipeTasksGenAIC: ec35d9f431f6a6b651a0bc9f67a4ed149ffa575c
   onnxruntime-c: 7f778680e96145956c0a31945f260321eed2611a
   onnxruntime-objc: 83d28b87525bd971259a66e153ea32b5d023de19
   open_file_ios: 46184d802ee7959203f6392abcfa0dd49fdb5be0
@@ -424,14 +384,12 @@ SPEC CHECKSUMS:
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
   sign_in_with_apple: c5dcc141574c8c54d5ac99dd2163c0c72ad22418
   SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
-  TensorFlowLiteC: 215ef57653dd0fa09a474e7d94d79ae64a870b28
-  TensorFlowLiteSwift: 6de8da348de331778167a0f751ad74c41d8b0554
   url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
   video_player_avfoundation: dd410b52df6d2466a42d28550e33e4146928280a
   video_thumbnail: b637e0ad5f588ca9945f6e2c927f73a69a661140
   wakelock_plus: e29112ab3ef0b318e58cfa5c32326458be66b556
   WebRTC-SDK: 40d4f5ba05cadff14e4db5614aec402a633f007e
 
-PODFILE CHECKSUM: b0374f872ab893eeae686357a044739abc5f082a
+PODFILE CHECKSUM: 3a9cb0e062cf36fea2227b5e87ffb4e1a22d41a7
 
 COCOAPODS: 1.16.2

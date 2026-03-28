@@ -26,6 +26,9 @@ Parameters:
   AiUsageEventsTableName:
     Type: String
     Default: ''
+  AiPromptLimitSettingsTableName:
+    Type: String
+    Default: ''
   AdminCognitoAppClientId:
     Type: String
     Default: ''
@@ -35,6 +38,21 @@ Parameters:
   AdminAllowedEmails:
     Type: String
     Default: ''
+  AiAdminEditorEmails:
+    Type: String
+    Default: 'andrew@mixroom.ai'
+  AiRuntimeDefaultModel:
+    Type: String
+    Default: 'gpt-4.1-mini'
+  AiChatDefaultTemperature:
+    Type: String
+    Default: '0.2'
+  VideoEditorDefaultTemperature:
+    Type: String
+    Default: '0.1'
+  AiChatExtendedPromptCacheRetentionModels:
+    Type: String
+    Default: 'gpt-4.1,gpt-5,gpt-5-codex,gpt-5.1,gpt-5.1-codex,gpt-5.1-codex-mini,gpt-5.1-chat-latest,gpt-5.2'
   SocialAuthSecretArn:
     Type: String
     Default: ''
@@ -132,6 +150,22 @@ Parameters:
   PostHogHost:
     Type: String
     Default: 'https://us.i.posthog.com'
+  PostHogAppHost:
+    Type: String
+    Default: 'https://us.posthog.com'
+  PostHogProjectId:
+    Type: String
+    Default: ''
+  PostHogPersonalApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+  PostHogPersonalApiKeySecretArn:
+    Type: String
+    Default: ''
+  PostHogMetricsCacheTtlSeconds:
+    Type: Number
+    Default: 300
   SentryDsn:
     Type: String
     Default: 'https://5e8e9f0b08714d2c26591bce7b3e057f@o4511009749729280.ingest.us.sentry.io/4511012111712256'
@@ -142,6 +176,7 @@ Parameters:
 Conditions:
   HasAiUsageStateTableName: !Not [!Equals [!Ref AiUsageStateTableName, '']]
   HasAiUsageEventsTableName: !Not [!Equals [!Ref AiUsageEventsTableName, '']]
+  HasAiPromptLimitSettingsTableName: !Not [!Equals [!Ref AiPromptLimitSettingsTableName, '']]
   HasCognitoUserPool: !Not [!Equals [!Ref CognitoUserPoolId, '']]
   HasAdminCognitoAppClientId: !Not [!Equals [!Ref AdminCognitoAppClientId, '']]
   HasAdminCognitoUserPoolId: !Not [!Equals [!Ref AdminCognitoUserPoolId, '']]
@@ -154,6 +189,7 @@ Conditions:
   HasPaddleWebhookSecretArn: !Not [!Equals [!Ref PaddleWebhookSecretArn, '']]
   HasTossWebhookSecretArn: !Not [!Equals [!Ref TossWebhookSecretArn, '']]
   HasAlarmTopicArn: !Not [!Equals [!Ref AlarmTopicArn, '']]
+  HasPostHogPersonalApiKeySecretArn: !Not [!Equals [!Ref PostHogPersonalApiKeySecretArn, '']]
   HasBillingSecrets: !Or
     - !Condition HasAppleRootCaSecretArn
     - !Condition HasAppleSharedSecretSecretArn
@@ -188,6 +224,7 @@ Globals:
         USER_TOMBSTONES_TABLE: !Ref UserTombstonesTable
         AI_USAGE_STATE_TABLE: !Ref AiUsageStateTableName
         AI_USAGE_EVENTS_TABLE: !Ref AiUsageEventsTableName
+        AI_PROMPT_LIMIT_SETTINGS_TABLE: !Ref AiPromptLimitSettingsTableName
         FEEDBACK_SUBMISSIONS_TABLE: !Ref FeedbackSubmissionsTable
         ADMIN_ALLOWLIST_TABLE: !Ref AdminAllowlistTable
         ADMIN_COGNITO_APP_CLIENT_ID: !If
@@ -199,6 +236,11 @@ Globals:
           - !Ref AdminCognitoUserPoolId
           - !Ref CognitoUserPoolId
         ADMIN_ALLOWED_EMAILS: !Ref AdminAllowedEmails
+        AI_ADMIN_EDITOR_EMAILS: !Ref AiAdminEditorEmails
+        AI_RUNTIME_DEFAULT_MODEL: !Ref AiRuntimeDefaultModel
+        AI_CHAT_DEFAULT_TEMPERATURE: !Ref AiChatDefaultTemperature
+        VIDEO_EDITOR_DEFAULT_TEMPERATURE: !Ref VideoEditorDefaultTemperature
+        AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS: !Ref AiChatExtendedPromptCacheRetentionModels
         SOCIAL_AUTH_SECRET_ARN: !Ref SocialAuthSecretArn
         APP_AUTH_SECRET_ARN: !Ref AppAuthSecretArn
         APP_AUTH_ISSUER: !Ref AppAuthIssuer
@@ -233,6 +275,11 @@ Globals:
         TOSS_WEBHOOK_SECRET_ARN: !Ref TossWebhookSecretArn
         POSTHOG_API_KEY: !Ref PostHogApiKey
         POSTHOG_HOST: !Ref PostHogHost
+        POSTHOG_APP_HOST: !Ref PostHogAppHost
+        POSTHOG_PROJECT_ID: !Ref PostHogProjectId
+        POSTHOG_PERSONAL_API_KEY: !Ref PostHogPersonalApiKey
+        POSTHOG_PERSONAL_API_KEY_SECRET_ARN: !Ref PostHogPersonalApiKeySecretArn
+        POSTHOG_METRICS_CACHE_TTL_SECONDS: !Ref PostHogMetricsCacheTtlSeconds
         SENTRY_DSN: !Ref SentryDsn
         ENVIRONMENT: !Ref StageName
 
@@ -277,9 +324,14 @@ Resources:
 
   BillingEventsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-billing-events-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: event_id
           AttributeType: S
@@ -298,9 +350,14 @@ Resources:
 
   SubscriptionsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-subscriptions-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: subscription_id
           AttributeType: S
@@ -341,9 +398,14 @@ Resources:
 
   EntitlementsCurrentTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-entitlements-current-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -372,9 +434,14 @@ Resources:
 
   UsersTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-users-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -405,9 +472,14 @@ Resources:
 
   UsernameClaimsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-user-username-claims-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: username_lc
           AttributeType: S
@@ -417,9 +489,14 @@ Resources:
 
   AuthAccountsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-auth-accounts-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -438,9 +515,14 @@ Resources:
 
   AuthSessionsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-auth-sessions-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       TimeToLiveSpecification:
         AttributeName: expires_at_ttl
         Enabled: true
@@ -462,9 +544,14 @@ Resources:
 
   AuthRateLimitsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-auth-rate-limits-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       TimeToLiveSpecification:
         AttributeName: expires_at_ttl
         Enabled: true
@@ -477,9 +564,14 @@ Resources:
 
   CatalogMappingsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-catalog-mappings-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: provider_product_key
           AttributeType: S
@@ -489,9 +581,14 @@ Resources:
 
   CustomerLinksTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-customer-links-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: provider_customer_key
           AttributeType: S
@@ -510,9 +607,14 @@ Resources:
 
   PurchaseTokensTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-purchase-tokens-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: provider_token_hash
           AttributeType: S
@@ -531,9 +633,14 @@ Resources:
 
   ReconciliationJobsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-reconciliation-jobs-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: job_id
           AttributeType: S
@@ -543,9 +650,14 @@ Resources:
 
   AdminAllowlistTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-admin-allowlist-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: email
           AttributeType: S
@@ -555,9 +667,14 @@ Resources:
 
   UserTombstonesTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-user-tombstones-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: user_id
           AttributeType: S
@@ -571,9 +688,14 @@ Resources:
 
   FeedbackSubmissionsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub mixroom-feedback-submissions-${StageName}
       BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: submission_id
           AttributeType: S
@@ -841,6 +963,14 @@ Resources:
               Action:
                 - dynamodb:DescribeTable
               Resource: !GetAtt UsersTable.Arn
+        - !If
+          - HasPostHogPersonalApiKeySecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref PostHogPersonalApiKeySecretArn
+          - !Ref AWS::NoValue
       Events:
         AdminOverview:
           Type: Api
@@ -925,6 +1055,60 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/feedback
             Method: get
+
+  AdminAiPromptLimitsApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_admin_ai_prompt_limits.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AdminAllowlistTable
+        - !If
+          - HasAiPromptLimitSettingsTableName
+          - DynamoDBCrudPolicy:
+              TableName: !Ref AiPromptLimitSettingsTableName
+          - !Ref AWS::NoValue
+      Events:
+        AdminAiPromptLimitsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/ai-prompt-limits
+            Method: get
+        AdminAiPromptLimitsPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/ai-prompt-limits
+            Method: put
+
+  AdminAiRuntimeApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_admin_ai_runtime.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AdminAllowlistTable
+        - !If
+          - HasAiPromptLimitSettingsTableName
+          - DynamoDBCrudPolicy:
+              TableName: !Ref AiPromptLimitSettingsTableName
+          - !Ref AWS::NoValue
+      Events:
+        AdminAiRuntimeGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/ai-runtime
+            Method: get
+        AdminAiRuntimePut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/ai-runtime
+            Method: put
 
   BillingApiFunction:
     Type: AWS::Serverless::Function
@@ -1536,3 +1720,5 @@ Outputs:
     Value: !Ref AdminAllowlistTable
   FeedbackSubmissionsTableName:
     Value: !Ref FeedbackSubmissionsTable
+  AiPromptLimitSettingsTableName:
+    Value: !Ref AiPromptLimitSettingsTableName

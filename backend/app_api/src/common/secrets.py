@@ -205,6 +205,46 @@ def load_postmark_server_token() -> str:
     return value
 
 
+def load_posthog_personal_api_key() -> str:
+    if config.POSTHOG_PERSONAL_API_KEY:
+        return config.POSTHOG_PERSONAL_API_KEY
+    if not config.POSTHOG_PERSONAL_API_KEY_SECRET_ARN:
+        raise ValueError(
+            (
+                "POSTHOG_PERSONAL_API_KEY or "
+                "POSTHOG_PERSONAL_API_KEY_SECRET_ARN must be configured."
+            )
+        )
+
+    raw = get_secret_string(config.POSTHOG_PERSONAL_API_KEY_SECRET_ARN)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = raw
+
+    if isinstance(parsed, dict):
+        for key in (
+            "token",
+            "api_key",
+            "personal_api_key",
+            "POSTHOG_PERSONAL_API_KEY",
+        ):
+            value = str(parsed.get(key) or "").strip()
+            if value:
+                return value
+        raise ValueError(
+            (
+                "PostHog personal API key secret JSON must include one of: "
+                "token, api_key, personal_api_key, POSTHOG_PERSONAL_API_KEY."
+            )
+        )
+
+    value = str(parsed).strip()
+    if not value:
+        raise ValueError("PostHog personal API key is empty.")
+    return value
+
+
 def _split_pem_bundle(bundle: str) -> List[bytes]:
     blocks: List[bytes] = []
     current: List[str] = []

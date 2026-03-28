@@ -637,9 +637,14 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setAndroidContextJNI(JNIEnv *env
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setFlutterAssetRootJNI(JNIEnv *env, jclass, jstring rootPath)
 {
-    juce::ignoreUnused(env, rootPath);
-    // iOS-derived engine resolves Flutter assets from standard app locations.
-    // Keep this JNI method for ABI compatibility with Kotlin call sites.
+    if (rootPath == nullptr)
+        return;
+    const char *c = env->GetStringUTFChars(rootPath, nullptr);
+    if (c == nullptr)
+        return;
+    const juce::String jucePath = juce::String::fromUTF8(c);
+    env->ReleaseStringUTFChars(rootPath, c);
+    TimelineMidiClipProcessor::setFlutterAssetRootPath(jucePath);
 }
 
 extern "C" JNIEXPORT void JNICALL

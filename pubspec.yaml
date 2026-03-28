@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.8+11
+version: 1.0.9+15
 
 environment:
   sdk: ^3.6.0
@@ -109,7 +109,6 @@ dependencies:
   flutter_chat_ui: ^2.11.1
   flutter_chat_types: ^3.6.2
   flutter_chat_core: ^2.9.0
-  flutter_gemma: ^0.11.13 # probably unused
   # onnxruntime: ^1.4.1
   flutter_onnxruntime: ^1.6.1
   uuid: ^4.5.2
@@ -138,7 +137,7 @@ flutter_native_splash:
   fullscreen: true
   android: true
   ios: true
-  background_image: assets/mixroom_launch_screen.png
+  background_image: assets/mixroom_launch_screen_native.png
   android_12:
     # Android 12+ requires a centered splash icon. Use a transparent 1x1 icon
     # so the full-screen background remains visible without a center mark.
@@ -184,13 +183,15 @@ flutter:
     - assets/mixroom_logo_202.png
     - assets/mixroom_logo202_home_4x.png
     - assets/mixroom_logo202_home.png
-    - assets/mixroom_launch_screen.png
+    - assets/mixroom_launch_screen.webp
     - assets/short_white.png
+    - assets/auth/
+    - assets/daw/
+    - assets/app_shell/
     - assets/magnet-solid-full.svg
     - assets/instruments/
     - assets/models/
     # Enable after exporting trained models:
-    # - assets/models/gemma-2b-it-gpu-int4.bin
     # - assets/models/phi3-mini.gguf (don't use)
     # - assets/models/hammer-2.1-0.5b-gpu-int8.task
     # - assets/models/instrument_classifier.onnx

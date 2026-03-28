@@ -22,6 +22,7 @@ from common.ai_limits import (
     get_user_tier,
     validate_feature,
 )
+from common.ai_runtime_config import get_ai_feature_runtime
 from common.analytics import (
     analytics_enabled_from_body,
     build_event_properties,
@@ -31,6 +32,7 @@ from common.analytics import (
 from common.auth import extract_user_id_from_event, json_response, unauthorized
 from common.llm_contract import (
     DEFAULT_MODEL,
+    _supports_temperature,
     build_llm_request_from_mixroom_payload,
     normalize_openai_compatible_request,
 )
@@ -445,8 +447,6 @@ def _sanitize_user_facing_text(
     if any(marker in lower for marker in _TOOL_TEXT_LEAK_MARKERS):
         return fallback
     if raw.startswith("{") or raw.startswith("["):
-        return fallback
-    if _is_probably_english(user_text) and _contains_non_ascii_letters(raw):
         return fallback
     return raw
 
@@ -982,6 +982,50 @@ def _get_prompt_rate_limit_status(
     )
 
 
+def _apply_ai_runtime_overrides(
+    request_body: Dict[str, Any],
+    *,
+    ai_feature: str,
+    runtime_config: Dict[str, Any],
+    is_structured_request: bool,
+) -> None:
+    resolved_model = str(request_body.get("model") or runtime_config.get("model") or "").strip()
+    if runtime_config.get("has_model_override"):
+        resolved_model = str(runtime_config.get("model") or resolved_model).strip()
+    if runtime_config.get("has_model_override") and resolved_model:
+        request_body["model"] = resolved_model
+
+    if is_structured_request and runtime_config.get("has_system_prompt_override"):
+        system_prompt = str(runtime_config.get("system_prompt") or "").strip()
+        if system_prompt:
+            request_body["instructions"] = system_prompt
+
+    prompt_cache_retention = str(runtime_config.get("prompt_cache_retention") or "").strip()
+    if runtime_config.get("has_prompt_cache_retention_override") and prompt_cache_retention:
+        request_body["prompt_cache_retention"] = prompt_cache_retention
+
+    max_output_tokens = runtime_config.get("max_output_tokens")
+    if (
+        runtime_config.get("has_max_output_tokens_override")
+        and isinstance(max_output_tokens, int)
+        and max_output_tokens > 0
+    ):
+        request_body["max_output_tokens"] = max_output_tokens
+
+    if _supports_temperature(resolved_model):
+        temperature = runtime_config.get("temperature")
+        if runtime_config.get("has_temperature_override") and isinstance(temperature, (int, float)):
+            request_body["temperature"] = max(0.0, min(float(temperature), 2.0))
+        elif "temperature" not in request_body and str(ai_feature).strip() == "video_editor_chat":
+            request_body["temperature"] = 0.1
+    else:
+        request_body.pop("temperature", None)
+
+    reasoning = runtime_config.get("reasoning")
+    if runtime_config.get("has_reasoning_override") and isinstance(reasoning, dict) and reasoning:
+        request_body["reasoning"] = reasoning
+
+
 def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     started_at = time.perf_counter()
     user_id = extract_user_id_from_event(event)
@@ -1008,7 +1052,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     user_context = _usage_repo.load_user_context(user_id)
     subscription_tier = get_user_tier(user_context)
-    prompt_limits = get_prompt_limits()
+    prompt_limits = get_prompt_limits(subscription_tier)
 
     if http_method == "GET" and request_path.endswith("/v1/llm/limits"):
         try:
@@ -1086,11 +1130,13 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     configured_model = _configured_model()
     default_model = configured_model or DEFAULT_MODEL
+    runtime_config = get_ai_feature_runtime(ai_feature, fallback_model=default_model)
+    is_structured_request = any(key in body for key in _STRUCTURED_MIXROOM_FIELDS)
 
     try:
         request_body = _normalize_request_body(
             body,
-            default_model=default_model,
+            default_model=str(runtime_config.get("model") or default_model),
             ai_feature=ai_feature,
         )
     except ValueError as error:
@@ -1106,6 +1152,13 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         not allow_model_override or not request_body.get("model")
     ):
         request_body["model"] = configured_model
+
+    _apply_ai_runtime_overrides(
+        request_body,
+        ai_feature=ai_feature,
+        runtime_config=runtime_config,
+        is_structured_request=is_structured_request,
+    )
 
     apply_server_output_token_cap(request_body)
     _update_request_log_context_with_cache_request(request_log_context, request_body)

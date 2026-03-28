@@ -86,7 +86,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
 
   final Set<String> _expandedDirs = <String>{};
   final Set<String> _loadingDirs = <String>{};
-  final Map<String, List<FileSystemEntity>> _childrenByDir = <String, List<FileSystemEntity>>{};
+  final Map<String, List<FileSystemEntity>> _childrenByDir =
+      <String, List<FileSystemEntity>>{};
   final Map<String, String> _dirErrors = <String, String>{};
   final Map<String, Duration?> _durationByFile = <String, Duration?>{};
   final Set<String> _durationLoading = <String>{};
@@ -118,7 +119,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         _syncSelectedRoot();
       });
     }
-    if (widget.auditioningPath != null && widget.auditioningPath != _previewFocusPath) {
+    if (widget.auditioningPath != null &&
+        widget.auditioningPath != _previewFocusPath) {
       _previewFocusPath = widget.auditioningPath;
       _ensureWaveformForFile(widget.auditioningPath!);
     }
@@ -198,10 +200,12 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   String _friendlyDirError(Object error) {
     final raw = error.toString();
     final lower = raw.toLowerCase();
-    if (lower.contains('permission denied') || lower.contains('operation not permitted')) {
+    if (lower.contains('permission denied') ||
+        lower.contains('operation not permitted')) {
       return 'Mixroom needs permission to read this folder.';
     }
-    if (lower.contains('folder is unavailable') || lower.contains('no such file')) {
+    if (lower.contains('folder is unavailable') ||
+        lower.contains('no such file')) {
       return 'This folder is no longer available.';
     }
     return 'Unable to open this folder.';
@@ -215,7 +219,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         lower.contains('operation not permitted');
   }
 
-  Future<void> _ensureDirectoryLoaded(String dirPath, {bool force = false}) async {
+  Future<void> _ensureDirectoryLoaded(String dirPath,
+      {bool force = false}) async {
     if (!force && _childrenByDir.containsKey(dirPath)) return;
     if (_loadingDirs.contains(dirPath)) return;
     setState(() {
@@ -240,7 +245,10 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         final aDir = a is Directory;
         final bDir = b is Directory;
         if (aDir != bDir) return aDir ? -1 : 1;
-        return p.basename(a.path).toLowerCase().compareTo(p.basename(b.path).toLowerCase());
+        return p
+            .basename(a.path)
+            .toLowerCase()
+            .compareTo(p.basename(b.path).toLowerCase());
       });
       if (!mounted) return;
       setState(() {
@@ -317,8 +325,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         });
         return;
       }
-      final normalized =
-          abs.map((v) => (v / maxVal).clamp(0.0, 1.0)).toList();
+      final normalized = abs.map((v) => (v / maxVal).clamp(0.0, 1.0)).toList();
       setState(() {
         _waveformByFile[filePath] = normalized;
         _waveformLoading.remove(filePath);
@@ -356,7 +363,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         return const <double>[];
       }
 
-      final out = List<double>.filled(_kPreviewWaveformBars, 0.0, growable: false);
+      final out =
+          List<double>.filled(_kPreviewWaveformBars, 0.0, growable: false);
       for (int i = 0; i < _kPreviewWaveformBars; i++) {
         int start = (i * totalSamples / _kPreviewWaveformBars).floor();
         int end = ((i + 1) * totalSamples / _kPreviewWaveformBars).floor();
@@ -469,29 +477,31 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
 
   Widget _buildRootSelector() {
     return SizedBox(
-      height: 32,
+      height: 40,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
         itemCount: widget.rootFolders.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 4),
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (context, index) {
           final root = widget.rootFolders[index];
           final selected = root == _selectedRoot;
-          final label = p.basename(root).trim().isEmpty ? root : p.basename(root);
+          final label =
+              p.basename(root).trim().isEmpty ? root : p.basename(root);
           return Listener(
-            onPointerDown: (event) => _startFolderHold(root, label, event.position),
+            onPointerDown: (event) =>
+                _startFolderHold(root, label, event.position),
             onPointerMove: (event) => _updateFolderHoldMove(event.position),
             onPointerUp: (_) => _endFolderHold(),
             onPointerCancel: (_) => _endFolderHold(),
             child: InputChip(
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              visualDensity: const VisualDensity(horizontal: -3, vertical: -4),
+              visualDensity: const VisualDensity(horizontal: -3, vertical: -3),
               selected: selected,
               showCheckmark: false,
               avatar: Icon(
                 Icons.folder_outlined,
-                size: 12,
+                size: 14,
                 color: Colors.white.withOpacity(selected ? 0.95 : 0.75),
               ),
               label: Text(
@@ -500,12 +510,15 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                 style: TextStyle(
                   color: Colors.white.withOpacity(selected ? 1.0 : 0.85),
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  fontSize: 10.5,
+                  fontSize: 11.2,
                 ),
               ),
-              selectedColor: const Color(0xFF2E6EEB).withOpacity(0.5),
-              backgroundColor: Colors.white.withOpacity(0.06),
+              selectedColor: const Color(0xFFA48E76).withOpacity(0.5),
+              backgroundColor: Colors.white.withOpacity(0.08),
               side: BorderSide(color: Colors.white.withOpacity(0.16)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(999),
+              ),
               onSelected: (_) => _selectRoot(root),
             ),
           );
@@ -514,14 +527,16 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     );
   }
 
-  Future<void> _showFolderActions(String rootPath, String label, Offset globalPosition) async {
+  Future<void> _showFolderActions(
+      String rootPath, String label, Offset globalPosition) async {
     if (!mounted) return;
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
     if (overlay == null) return;
     final selected = await showMenu<String>(
       context: context,
-      color: const Color(0xFF1D2639),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: const Color(0xFF7D7973),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       position: RelativeRect.fromLTRB(
         globalPosition.dx,
         math.max(0, globalPosition.dy - 36),
@@ -533,7 +548,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
           value: 'remove',
           child: Row(
             children: [
-              const Icon(Icons.folder_delete_outlined, color: Color(0xFFFFA4A4), size: 16),
+              const Icon(Icons.folder_delete_outlined,
+                  color: Color(0xFFFFA4A4), size: 16),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
@@ -558,8 +574,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          backgroundColor: const Color(0xFF1D2639),
-          title: const Text('File Browser Help', style: TextStyle(color: Colors.white)),
+          backgroundColor: const Color(0xFF7B7772),
+          title: const Text('File Browser Help',
+              style: TextStyle(color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -619,14 +636,23 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       hoverColor: Colors.white.withOpacity(0.02),
       focusColor: Colors.white.withOpacity(0.03),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
         child: Row(
           children: [
             SizedBox(width: indent),
-            Icon(
-              isExpanded ? Icons.folder_open : Icons.folder_outlined,
-              color: hasError ? Colors.orangeAccent : const Color(0xFF7AB5FF),
-              size: 17,
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                isExpanded ? Icons.folder_open : Icons.folder_outlined,
+                color: hasError ? Colors.orangeAccent : const Color(0xFFF7F0E8),
+                size: 15,
+              ),
             ),
             const SizedBox(width: 6),
             Expanded(
@@ -636,7 +662,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: Colors.white.withOpacity(0.96),
-                  fontSize: 12.4,
+                  fontSize: 12.7,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -661,7 +687,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
               )
             else
               Icon(
-                isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
+                isExpanded
+                    ? Icons.keyboard_arrow_down
+                    : Icons.keyboard_arrow_right,
                 color: Colors.white54,
                 size: 17,
               ),
@@ -689,23 +717,31 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
             widget.onAuditionTap(filePath);
           },
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 1, horizontal: 3),
+            padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 130),
               decoration: BoxDecoration(
-                color: isAuditioning ? const Color(0x2A6EE7B7) : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
+                color: isAuditioning
+                    ? const Color(0x33C89C67)
+                    : Colors.white.withOpacity(0.035),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: isAuditioning ? const Color(0x6678EBC3) : Colors.transparent,
+                  color: isAuditioning
+                      ? const Color(0x99EFB67D)
+                      : Colors.white.withOpacity(0.04),
                 ),
               ),
               child: Row(
                 children: [
                   SizedBox(width: indent),
                   Icon(
-                    isAuditioning ? Icons.stop_circle : Icons.play_circle_outline,
+                    isAuditioning
+                        ? Icons.stop_circle
+                        : Icons.play_circle_outline,
                     size: 16,
-                    color: isAuditioning ? const Color(0xFF6EE7B7) : Colors.white70,
+                    color: isAuditioning
+                        ? const Color(0xFFFFD1A6)
+                        : Colors.white70,
                   ),
                   const SizedBox(width: 5),
                   Expanded(
@@ -728,17 +764,23 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                         style: const TextStyle(
                           color: Colors.white60,
                           fontSize: 10.5,
-                          fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+                          fontFeatures: <FontFeature>[
+                            FontFeature.tabularFigures()
+                          ],
                         ),
                       ),
                     ),
                   if (showInsertButton)
                     IconButton(
                       tooltip: 'Insert at playhead',
-                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                      constraints:
+                          const BoxConstraints(minWidth: 20, minHeight: 20),
                       padding: EdgeInsets.zero,
-                      visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
-                      icon: const Icon(Icons.add_circle_outline, size: 14, color: Colors.white70),
+                      visualDensity:
+                          const VisualDensity(horizontal: -4, vertical: -4),
+                      icon: const Icon(Icons.add_circle_outline,
+                          size: 14, color: Colors.white70),
+                      color: Colors.white70,
                       onPressed: () => widget.onInsertSample(filePath),
                     ),
                   if (!showInsertButton) const SizedBox(width: 2),
@@ -756,7 +798,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         label: p.basenameWithoutExtension(fileName),
         duration: _durationByFile[filePath],
       ),
-      dragAnchorStrategy: (draggable, context, position) => const Offset(42, 48),
+      dragAnchorStrategy: (draggable, context, position) =>
+          const Offset(42, 48),
       delay: const Duration(milliseconds: 135),
       onDragStarted: () {
         _dragOutsideNotified = false;
@@ -783,8 +826,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
           constraints: const BoxConstraints(maxWidth: 220),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFF1F2C46).withOpacity(0.94),
-            borderRadius: BorderRadius.circular(12),
+            color: const Color(0xFF7C7872).withOpacity(0.96),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: Colors.white24),
           ),
           child: Row(
@@ -826,8 +869,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
 
     final rootError = _dirErrors[root];
     final rootExists = Directory(root).existsSync();
-    final showSettingsCta =
-        _isPermissionErrorMessage(rootError) && widget.onOpenSystemSettings != null;
+    final showSettingsCta = _isPermissionErrorMessage(rootError) &&
+        widget.onOpenSystemSettings != null;
     if (!rootExists || rootError != null) {
       return Center(
         child: Padding(
@@ -838,7 +881,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
               const Icon(Icons.folder_off_outlined, color: Colors.white54),
               const SizedBox(height: 8),
               Text(
-                rootError == null ? 'This folder is currently unavailable.' : rootError,
+                rootError == null
+                    ? 'This folder is currently unavailable.'
+                    : rootError,
                 style: const TextStyle(color: Colors.white70),
                 textAlign: TextAlign.center,
               ),
@@ -928,11 +973,18 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
 
     return Container(
       margin: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-      padding: const EdgeInsets.fromLTRB(8, 5, 8, 5),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
+        gradient: const LinearGradient(
+          colors: <Color>[
+            Color(0xB39A948A),
+            Color(0xA06B747D),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withOpacity(0.16)),
       ),
       child: StreamBuilder<Duration?>(
         stream: widget.previewDurationStream,
@@ -943,12 +995,15 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
             builder: (context, posSnap) {
               final pos = posSnap.data ?? Duration.zero;
               final totalMs = total.inMilliseconds;
-              final progress = totalMs <= 0 ? 0.0 : (pos.inMilliseconds / totalMs).clamp(0.0, 1.0);
+              final progress = totalMs <= 0
+                  ? 0.0
+                  : (pos.inMilliseconds / totalMs).clamp(0.0, 1.0);
 
               Future<void> seekFromDx(double localX, double width) async {
                 if (totalMs <= 0 || width <= 1) return;
                 final ratio = (localX / width).clamp(0.0, 1.0);
-                final target = Duration(milliseconds: (totalMs * ratio).round());
+                final target =
+                    Duration(milliseconds: (totalMs * ratio).round());
                 await widget.onPreviewSeek(target);
               }
 
@@ -959,7 +1014,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                     children: [
                       GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        onTapDown: (d) => seekFromDx(d.localPosition.dx, constraints.maxWidth),
+                        onTapDown: (d) => seekFromDx(
+                            d.localPosition.dx, constraints.maxWidth),
                         child: SizedBox(
                           height: 28,
                           child: loading
@@ -967,7 +1023,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                                   child: SizedBox(
                                     width: 14,
                                     height: 14,
-                                    child: CircularProgressIndicator(strokeWidth: 1.8),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 1.8),
                                   ),
                                 )
                               : CustomPaint(
@@ -997,7 +1054,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                           const SizedBox(width: 8),
                           Text(
                             '${_formatPreviewClock(pos)} / ${_formatPreviewClock(total)}',
-                            style: const TextStyle(color: Colors.white60, fontSize: 10.5),
+                            style: const TextStyle(
+                                color: Colors.white60, fontSize: 10.5),
                           ),
                         ],
                       ),
@@ -1018,22 +1076,30 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     return Material(
       color: Colors.transparent,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(24),
         child: Container(
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            color: const Color(0xC6141B2B),
-            borderRadius: BorderRadius.circular(18),
+            gradient: const LinearGradient(
+              colors: <Color>[
+                Color(0xBC9B8E7E),
+                Color(0xB088837E),
+                Color(0xB86B7780),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+            borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.35),
-                blurRadius: 22,
-                offset: const Offset(0, -8),
+                blurRadius: 28,
+                offset: const Offset(0, -10),
               ),
             ],
           ),
           foregroundDecoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(24),
             border: Border.all(color: Colors.white.withOpacity(0.14)),
           ),
           child: Stack(
@@ -1050,7 +1116,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                 child: Column(
                   children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 4, 8, 0),
+                      padding: const EdgeInsets.fromLTRB(14, 8, 8, 2),
                       child: Row(
                         children: [
                           const Expanded(
@@ -1059,7 +1125,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w700,
-                                fontSize: 14,
+                                fontSize: 15,
                               ),
                             ),
                           ),
@@ -1067,36 +1133,54 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                             tooltip: 'How to use',
                             onPressed: _showUsageInfo,
                             padding: EdgeInsets.zero,
-                            visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-                            constraints: const BoxConstraints.tightFor(width: 36, height: 34),
-                            icon: const Icon(Icons.info_outline, color: Colors.white70, size: 19),
+                            visualDensity: const VisualDensity(
+                                horizontal: -2, vertical: -2),
+                            constraints: const BoxConstraints.tightFor(
+                                width: 36, height: 34),
+                            icon: const Icon(Icons.info_outline,
+                                color: Colors.white70, size: 19),
                           ),
                           IconButton(
                             tooltip: 'Add folder',
                             onPressed: widget.onAddFolder,
                             padding: EdgeInsets.zero,
-                            visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-                            constraints: const BoxConstraints.tightFor(width: 36, height: 34),
-                            icon: const Icon(Icons.create_new_folder_outlined, color: Colors.white70, size: 19),
+                            visualDensity: const VisualDensity(
+                                horizontal: -2, vertical: -2),
+                            constraints: const BoxConstraints.tightFor(
+                                width: 36, height: 34),
+                            icon: const Icon(Icons.create_new_folder_outlined,
+                                color: Colors.white70, size: 19),
                           ),
                           if (selectedRoot != null)
                             IconButton(
                               tooltip: 'Refresh folder',
-                              onPressed: () => _ensureDirectoryLoaded(selectedRoot, force: true),
+                              onPressed: () => _ensureDirectoryLoaded(
+                                  selectedRoot,
+                                  force: true),
                               padding: EdgeInsets.zero,
-                              visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-                              constraints: const BoxConstraints.tightFor(width: 36, height: 34),
-                              icon: const Icon(Icons.refresh, color: Colors.white70, size: 19),
+                              visualDensity: const VisualDensity(
+                                  horizontal: -2, vertical: -2),
+                              constraints: const BoxConstraints.tightFor(
+                                  width: 36, height: 34),
+                              icon: const Icon(Icons.refresh,
+                                  color: Colors.white70, size: 19),
                             ),
                           if (selectedRoot != null)
                             IconButton(
-                              tooltip: widget.expanded ? 'Collapse panel' : 'Expand panel',
-                              onPressed: () => widget.onExpandedChanged(!widget.expanded),
+                              tooltip: widget.expanded
+                                  ? 'Collapse panel'
+                                  : 'Expand panel',
+                              onPressed: () =>
+                                  widget.onExpandedChanged(!widget.expanded),
                               padding: EdgeInsets.zero,
-                              visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-                              constraints: const BoxConstraints.tightFor(width: 36, height: 34),
+                              visualDensity: const VisualDensity(
+                                  horizontal: -2, vertical: -2),
+                              constraints: const BoxConstraints.tightFor(
+                                  width: 36, height: 34),
                               icon: Icon(
-                                widget.expanded ? Icons.fullscreen_exit_outlined : Icons.fullscreen_outlined,
+                                widget.expanded
+                                    ? Icons.fullscreen_exit_outlined
+                                    : Icons.fullscreen_outlined,
                                 color: Colors.white70,
                                 size: 19,
                               ),
@@ -1105,9 +1189,12 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                             tooltip: 'Close',
                             onPressed: widget.onClose,
                             padding: EdgeInsets.zero,
-                            visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-                            constraints: const BoxConstraints.tightFor(width: 36, height: 34),
-                            icon: const Icon(Icons.close, color: Colors.white70, size: 19),
+                            visualDensity: const VisualDensity(
+                                horizontal: -2, vertical: -2),
+                            constraints: const BoxConstraints.tightFor(
+                                width: 36, height: 34),
+                            icon: const Icon(Icons.close,
+                                color: Colors.white70, size: 19),
                           ),
                         ],
                       ),
@@ -1170,7 +1257,9 @@ class _WaveformPreviewPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _WaveformPreviewPainter oldDelegate) {
-    return oldDelegate.waveform != waveform || oldDelegate.progress != progress || oldDelegate.active != active;
+    return oldDelegate.waveform != waveform ||
+        oldDelegate.progress != progress ||
+        oldDelegate.active != active;
   }
 }
 

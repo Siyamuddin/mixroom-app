@@ -2,7 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mixroom/models/feedback_models.dart';
+import 'package:mixroom/widgets/app_shell_figma.dart';
 
 Future<FeedbackDraft?> showFeedbackSheet(
   BuildContext context, {
@@ -11,6 +13,7 @@ Future<FeedbackDraft?> showFeedbackSheet(
   return showDialog<FeedbackDraft>(
     context: context,
     barrierDismissible: true,
+    barrierColor: Colors.black.withValues(alpha: 0.62),
     builder: (context) => _FeedbackSheet(source: source),
   );
 }
@@ -65,7 +68,8 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
     final message = FeedbackTextSanitizer.sanitize(_messageController.text);
     if (message.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your feedback or bug report first.')),
+        const SnackBar(
+            content: Text('Please enter your feedback or bug report first.')),
       );
       return;
     }
@@ -83,246 +87,277 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final mediaQuery = MediaQuery.of(context);
     final remaining = FeedbackTextSanitizer.maxChars -
         FeedbackTextSanitizer.sanitize(
           _messageController.text,
           maxCharacters: FeedbackTextSanitizer.maxChars,
         ).length;
-    final maxWidth = math.min(mediaQuery.size.width - 24, 560.0);
+    final maxWidth = math.min(
+      mediaQuery.size.width - 24,
+      _showDawOptions ? 460.0 : 440.0,
+    );
     final maxHeight = math.min(
       mediaQuery.size.height * 0.88,
-      _showDawOptions ? 720.0 : 620.0,
+      _showDawOptions ? 780.0 : 700.0,
+    );
+    final keyboardInset = math.min(
+      mediaQuery.viewInsets.bottom,
+      mediaQuery.size.height * 0.28,
     );
 
     return AnimatedPadding(
       duration: const Duration(milliseconds: 140),
       curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.all(12),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: maxWidth,
-            maxHeight: maxHeight,
-          ),
+      padding: EdgeInsets.fromLTRB(12, 12, 12, 12 + keyboardInset),
+      child: MediaQuery.removeViewInsets(
+        context: context,
+        removeBottom: true,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: maxWidth,
+              maxHeight: maxHeight,
+            ),
             child: Material(
-              color: const Color(0xFF131A24),
-              elevation: 24,
-              shadowColor: Colors.black.withValues(alpha: 0.45),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-              side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-              ),
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: () => _messageFocusNode.unfocus(),
-              child: SingleChildScrollView(
-                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                  Row(
+              color: Colors.transparent,
+              child: MixroomShellSurface(
+                radius: 32,
+                strong: true,
+                color: const Color.fromRGBO(24, 34, 48, 0.92),
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => _messageFocusNode.unfocus(),
+                  child: Stack(
                     children: [
-                      Expanded(
-                        child: Text(
-                          'Send feedback or report a bug',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
+                      SingleChildScrollView(
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Image.asset(
+                              kMixroomShellBrandMarkAsset,
+                              width: 54,
+                              fit: BoxFit.contain,
+                              filterQuality: FilterQuality.high,
+                            ),
+                            const SizedBox(height: 18),
+                            const Text(
+                              'Send feedback or report a bug',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 24,
+                                fontWeight: FontWeight.w400,
+                                height: 30 / 24,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _showDawOptions
+                                  ? 'Choose feedback or bug report, then describe it. You can also attach current editor context.'
+                                  : 'Choose feedback or bug report, then describe it. Account details are attached automatically.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.72),
+                                fontSize: 13,
+                                height: 18 / 13,
+                              ),
+                            ),
+                            const SizedBox(height: 22),
+                            MixroomShellSegmentedControl<FeedbackCategory>(
+                              value: _category,
+                              options: const [
+                                FeedbackCategory.feedback,
+                                FeedbackCategory.bugReport,
+                              ],
+                              labelBuilder: (category) =>
+                                  category == FeedbackCategory.feedback
+                                      ? 'Feedback'
+                                      : 'Bug Report',
+                              onChanged: (next) {
+                                HapticFeedback.selectionClick();
+                                setState(() => _category = next);
+                              },
+                            ),
+                            const SizedBox(height: 22),
+                            MixroomShellSurface(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              color: const Color.fromRGBO(244, 244, 244, 0.10),
+                              child: TextField(
+                                controller: _messageController,
+                                focusNode: _messageFocusNode,
+                                autofocus: false,
+                                minLines: 5,
+                                maxLines: 7,
+                                keyboardType: TextInputType.multiline,
+                                textInputAction: TextInputAction.done,
+                                textCapitalization:
+                                    TextCapitalization.sentences,
+                                onSubmitted: (_) => _messageFocusNode.unfocus(),
+                                onEditingComplete: _messageFocusNode.unfocus,
+                                onTapOutside: (_) =>
+                                    _messageFocusNode.unfocus(),
+                                inputFormatters: <TextInputFormatter>[
+                                  LengthLimitingTextInputFormatter(
+                                    FeedbackTextSanitizer.maxChars,
+                                  ),
+                                ],
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 15,
+                                  height: 22 / 15,
+                                ),
+                                decoration: InputDecoration(
+                                  border: InputBorder.none,
+                                  isCollapsed: true,
+                                  hintText: _category ==
+                                          FeedbackCategory.feedback
+                                      ? 'Tell us what is working, missing, or would make this better.'
+                                      : 'Describe the bug, what you expected, and what happened.',
+                                  hintStyle: TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Colors.white.withValues(alpha: 0.48),
+                                    fontSize: 15,
+                                    height: 22 / 15,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                '$remaining characters left',
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: remaining < 120
+                                      ? const Color(0xFFFFC26B)
+                                      : Colors.white.withValues(alpha: 0.56),
+                                  fontSize: 11,
+                                  height: 14 / 11,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            _ShellCheckboxRow(
+                              value: _allowEmailContact,
+                              title: 'Allow Mixroom to respond by email.',
+                              subtitle:
+                                  'Optional. We may follow up using your account email about this submission.',
+                              onChanged: (value) {
+                                setState(() => _allowEmailContact = value);
+                              },
+                            ),
+                            if (_showDawOptions) ...[
+                              const SizedBox(height: 16),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  'Include with this report',
+                                  style: TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Colors.white.withValues(alpha: 0.88),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    height: 16 / 13,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              MixroomShellSurface(
+                                radius: 24,
+                                padding: EdgeInsets.zero,
+                                color:
+                                    const Color.fromRGBO(244, 244, 244, 0.10),
+                                child: Column(
+                                  children: [
+                                    _ShellCheckboxRow(
+                                      value: _includeDawContext,
+                                      title:
+                                          'Include AI chat history and project settings.',
+                                      subtitle:
+                                          'Attach recent assistant messages and current DAW settings.',
+                                      padded: true,
+                                      onChanged: (value) {
+                                        setState(
+                                          () => _includeDawContext = value,
+                                        );
+                                      },
+                                    ),
+                                    Divider(
+                                      height: 1,
+                                      color: Colors.white.withValues(
+                                        alpha: 0.08,
+                                      ),
+                                    ),
+                                    _ShellCheckboxRow(
+                                      value: _includeDawScreenshot,
+                                      title: 'Include a DAW screenshot.',
+                                      subtitle:
+                                          'Mixroom captures the editor view with chat closed.',
+                                      padded: true,
+                                      onChanged: (value) {
+                                        setState(
+                                          () => _includeDawScreenshot = value,
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 22),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _FeedbackDialogActionButton(
+                                    label: 'Cancel',
+                                    fillColor: const Color.fromRGBO(
+                                        244, 244, 244, 0.18),
+                                    onTap: () => Navigator.of(context).pop(),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _FeedbackDialogActionButton(
+                                    label: 'Submit',
+                                    fillColor: const Color.fromRGBO(
+                                        244, 244, 244, 0.58),
+                                    onTap: _submit,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      Positioned(
+                        top: 0,
+                        right: 0,
+                        child: MixroomShellRoundButton(
+                          size: 42,
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            size: 18,
                             color: Colors.white,
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.close, color: Colors.white70),
-                        tooltip: 'Close',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Choose feedback or bug report, then describe it. Account details are attached automatically.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.white70,
-                      height: 1.35,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  SegmentedButton<FeedbackCategory>(
-                    multiSelectionEnabled: false,
-                    selected: <FeedbackCategory>{_category},
-                    style: ButtonStyle(
-                      foregroundColor: WidgetStateProperty.resolveWith<Color>(
-                        (states) => states.contains(WidgetState.selected)
-                            ? Colors.white
-                            : Colors.white70,
-                      ),
-                      backgroundColor: WidgetStateProperty.resolveWith<Color>(
-                        (states) => states.contains(WidgetState.selected)
-                            ? const Color(0xFF3E82FF)
-                            : Colors.white.withValues(alpha: 0.05),
-                      ),
-                      side: WidgetStateProperty.all(
-                        BorderSide(color: Colors.white.withValues(alpha: 0.10)),
-                      ),
-                    ),
-                    segments: const <ButtonSegment<FeedbackCategory>>[
-                      ButtonSegment<FeedbackCategory>(
-                        value: FeedbackCategory.feedback,
-                        label: Text('Feedback'),
-                        icon: Icon(Icons.forum_outlined),
-                      ),
-                      ButtonSegment<FeedbackCategory>(
-                        value: FeedbackCategory.bugReport,
-                        label: Text('Bug report'),
-                        icon: Icon(Icons.bug_report_outlined),
-                      ),
-                    ],
-                    onSelectionChanged: (selection) {
-                      if (selection.isEmpty) return;
-                      HapticFeedback.selectionClick();
-                      setState(() => _category = selection.first);
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _messageController,
-                    focusNode: _messageFocusNode,
-                    autofocus: false,
-                    minLines: 4,
-                    maxLines: 7,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.done,
-                    textCapitalization: TextCapitalization.sentences,
-                    onSubmitted: (_) => _messageFocusNode.unfocus(),
-                    onEditingComplete: _messageFocusNode.unfocus,
-                    onTapOutside: (_) => _messageFocusNode.unfocus(),
-                    inputFormatters: <TextInputFormatter>[
-                      LengthLimitingTextInputFormatter(FeedbackTextSanitizer.maxChars),
-                    ],
-                    decoration: InputDecoration(
-                      hintText: _category == FeedbackCategory.feedback
-                          ? 'Tell us what is working, missing, or would make this better.'
-                          : 'Describe the bug, what you expected, and what happened.',
-                      filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.05),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide:
-                            BorderSide(color: Colors.white.withValues(alpha: 0.12)),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide:
-                            BorderSide(color: Colors.white.withValues(alpha: 0.10)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: const BorderSide(color: Color(0xFF6EA6FF)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      '$remaining characters left',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color:
-                            remaining < 120 ? const Color(0xFFFFC26B) : Colors.white60,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  _CompactCheckboxRow(
-                    value: _allowEmailContact,
-                    title: 'Allow Mixroom to respond by email',
-                    subtitle: 'Optional. We may follow up using your account email about this submission.',
-                    hasBackground: false,
-                    onChanged: (value) {
-                      setState(() => _allowEmailContact = value);
-                    },
-                  ),
-                  if (_showDawOptions) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.04),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.08),
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          _CompactCheckboxRow(
-                            value: _includeDawContext,
-                            title: 'Include AI chat history and project settings',
-                            subtitle: 'Attach recent assistant messages and current DAW settings.',
-                            onChanged: (value) {
-                              setState(() => _includeDawContext = value);
-                            },
-                          ),
-                          Divider(
-                            height: 1,
-                            color: Colors.white.withValues(alpha: 0.08),
-                          ),
-                          _CompactCheckboxRow(
-                            value: _includeDawScreenshot,
-                            title: 'Include a DAW screenshot',
-                            subtitle: 'Mixroom captures the editor view with chat closed.',
-                            onChanged: (value) {
-                              setState(() => _includeDawScreenshot = value);
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size.fromHeight(46),
-                            side: BorderSide(
-                              color: Colors.white.withValues(alpha: 0.12),
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          child: const Text('Cancel'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: _submit,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF3E82FF),
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size.fromHeight(46),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          child: const Text('Submit'),
+                          onTap: () => Navigator.of(context).pop(),
                         ),
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
-            ),
             ),
           ),
         ),
@@ -331,70 +366,121 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
   }
 }
 
-class _CompactCheckboxRow extends StatelessWidget {
-  const _CompactCheckboxRow({
+class _ShellCheckboxRow extends StatelessWidget {
+  const _ShellCheckboxRow({
     required this.value,
     required this.title,
     required this.subtitle,
     required this.onChanged,
-    this.hasBackground = true,
+    this.padded = false,
   });
 
   final bool value;
   final String title;
   final String subtitle;
   final ValueChanged<bool> onChanged;
-  final bool hasBackground;
+  final bool padded;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: hasBackground ? Colors.white.withValues(alpha: 0.04) : Colors.transparent,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => onChanged(!value),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Transform.translate(
-                offset: const Offset(-4, -2),
-                child: Checkbox(
-                  value: value,
-                  visualDensity: VisualDensity.compact,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  onChanged: (next) => onChanged(next ?? false),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
-                        height: 1.2,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onChanged(!value);
+      },
+      child: Padding(
+        padding: padded
+            ? const EdgeInsets.fromLTRB(14, 12, 14, 12)
+            : EdgeInsets.zero,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: value
+                  ? SvgPicture.asset(
+                      kMixroomShellCheckboxCheckedAsset,
+                      width: 20,
+                      height: 20,
+                    )
+                  : Container(
+                      width: 20,
+                      height: 20,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.65),
+                          width: 1.4,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                        height: 1.3,
-                      ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 15,
+                      height: 15 / 15,
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.72),
+                      fontSize: 10,
+                      height: 15 / 10,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FeedbackDialogActionButton extends StatelessWidget {
+  const _FeedbackDialogActionButton({
+    required this.label,
+    required this.fillColor,
+    required this.onTap,
+  });
+
+  final String label;
+  final Color fillColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: MixroomShellSurface(
+        radius: 24,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        color: fillColor,
+        child: SizedBox(
+          width: double.infinity,
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color: Colors.white.withValues(alpha: 0.96),
+              fontSize: 15,
+              fontWeight: FontWeight.w400,
+              height: 22 / 15,
+            ),
           ),
         ),
       ),

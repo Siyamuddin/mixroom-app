@@ -77,6 +77,7 @@ class _FakeRepo:
                 }
             ],
             "limit": limit,
+            "has_more": True,
         }
 
     def get_submission(self, submission_id):
@@ -156,6 +157,7 @@ class AdminFeedbackHandlerTests(unittest.TestCase):
         self.assertEqual(result["statusCode"], 200)
         self.assertIn('"submission_id": "feedback_1"', result["body"])
         self.assertIn('"requested_email": "admin@example.com"', result["body"])
+        self.assertIn('"has_more": true', result["body"])
 
     def test_returns_feedback_detail(self):
         self._authenticate()

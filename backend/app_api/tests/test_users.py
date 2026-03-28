@@ -51,6 +51,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
         self.assertIsNone(record["given_name"])
         self.assertIsNone(record["family_name"])
         self.assertIsNone(record["birthdate"])
+        self.assertIsNone(record["music_profile"])
 
     def test_preserves_existing_platform_fields(self) -> None:
         record = build_user_profile_from_claims(
@@ -64,6 +65,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
                 "given_name": "Existing",
                 "family_name": "Name",
                 "birthdate": "1999-04-11",
+                "music_profile": "producer",
                 "avatar_url": "https://cdn.mixroom.ai/avatar.png",
                 "profile_status": "active",
                 "onboarding_state": "signup_complete",
@@ -82,6 +84,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
         self.assertEqual(record["given_name"], "Existing")
         self.assertEqual(record["family_name"], "Name")
         self.assertEqual(record["birthdate"], "1999-04-11")
+        self.assertEqual(record["music_profile"], "producer")
         self.assertEqual(
             record["avatar_url"],
             "https://cdn.mixroom.ai/avatar.png",
@@ -138,6 +141,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
                 "family_name": "  Room  ",
                 "birthdate": "1998-08-09",
                 "bio": "  producer and vocalist  ",
+                "music_profile": "artist",
             },
         )
 
@@ -147,6 +151,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
         self.assertEqual(updated["family_name"], "Room")
         self.assertEqual(updated["birthdate"], "1998-08-09")
         self.assertEqual(updated["bio"], "producer and vocalist")
+        self.assertEqual(updated["music_profile"], "artist")
         self.assertEqual(updated["onboarding_state"], "profile_ready")
 
     def test_apply_patch_records_legal_consent(self) -> None:
@@ -183,6 +188,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
                 "accepted_at": "2026-03-10T01:02:03Z",
                 "username": "hello_user",
                 "birthdate": "1997-12-24",
+                "music_profile": "music_for_work",
                 "newsletter_opt_in": True,
                 "newsletter_opt_in_at": "2026-03-10T01:02:03Z",
             },
@@ -197,7 +203,46 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
             "2026-03-10T01:02:03+00:00",
         )
         self.assertEqual(updated["birthdate"], "1997-12-24")
+        self.assertEqual(updated["music_profile"], "music_for_work")
         self.assertEqual(updated["onboarding_state"], "signup_complete")
+
+    def test_rejects_unsupported_music_profile(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "Music profile must be one of the supported options.",
+        ):
+            apply_user_profile_patch(
+                {
+                    "user_id": "user-123",
+                    "email": "hello@example.com",
+                    "display_name": "Existing Name",
+                    "email_verified": True,
+                    "cognito_username": "hello@example.com",
+                    "auth_provider": "email",
+                    "username": "hello_user",
+                    "username_lc": "hello_user",
+                    "given_name": None,
+                    "family_name": None,
+                    "birthdate": "1997-12-24",
+                    "music_profile": None,
+                    "avatar_url": None,
+                    "bio": None,
+                    "profile_status": "active",
+                    "onboarding_state": "bootstrap_only",
+                    "accepted_terms_version": None,
+                    "accepted_privacy_version": None,
+                    "accepted_at": None,
+                    "newsletter_opt_in": False,
+                    "newsletter_opt_in_at": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                    "last_seen_at": "2026-01-01T00:00:00+00:00",
+                    "schema_version": 1,
+                },
+                {
+                    "music_profile": "professional_vibes",
+                },
+            )
 
     def test_rejects_underage_birthdate(self) -> None:
         with self.assertRaisesRegex(

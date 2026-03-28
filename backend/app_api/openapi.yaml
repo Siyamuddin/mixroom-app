@@ -180,6 +180,70 @@ paths:
       responses:
         '200':
           description: Prompt allowance granted
+  /v1/internal/admin/settings/ai-prompt-limits:
+    get:
+      summary: Get internal admin AI prompt limit settings
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current AI prompt limit settings
+    put:
+      summary: Update internal admin AI prompt limit settings
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [free_daily_prompt_limit, free_weekly_prompt_limit]
+              properties:
+                free_daily_prompt_limit:
+                  type: integer
+                free_weekly_prompt_limit:
+                  type: integer
+      responses:
+        '200':
+          description: AI prompt limit settings updated
+  /v1/internal/admin/settings/ai-runtime:
+    get:
+      summary: Get internal admin AI runtime settings
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current AI runtime settings
+    put:
+      summary: Update internal admin AI runtime settings for a feature
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [feature]
+              properties:
+                feature:
+                  type: string
+                model_override:
+                  type: string
+                system_prompt_override:
+                  type: string
+                max_output_tokens_override:
+                  type: integer
+                temperature_override:
+                  type: number
+                reasoning_effort_override:
+                  type: string
+                prompt_cache_retention_override:
+                  type: string
+      responses:
+        '200':
+          description: AI runtime settings updated
   /v1/billing/web/checkout-session:
     post:
       summary: Create web checkout session (Paddle/Toss)
@@ -308,6 +372,9 @@ components:
         username:
           type: string
           nullable: true
+        music_profile:
+          type: string
+          nullable: true
         avatar_url:
           type: string
           nullable: true
@@ -349,6 +416,9 @@ components:
         display_name:
           type: string
         username:
+          type: string
+          nullable: true
+        music_profile:
           type: string
           nullable: true
         bio:

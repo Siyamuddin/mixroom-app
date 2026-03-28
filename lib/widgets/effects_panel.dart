@@ -16,6 +16,142 @@ import 'package:juce_audio_engine/juce_audio_engine.dart';
 
 const int maxNumEffects = 10;
 
+const Color _kFxPanelText = Color(0xFFF4F4F4);
+const Color _kFxPanelMutedText = Color(0xB8F4F4F4);
+const Color _kFxPanelBorder = Color.fromRGBO(255, 255, 255, 0.12);
+const Color _kFxPanelFill = Color.fromRGBO(244, 244, 244, 0.08);
+const Color _kFxPanelFillStrong = Color.fromRGBO(244, 244, 244, 0.14);
+const Color _kFxWarmAccent = Color(0xFFC89762);
+const Color _kFxWarmAccentBorder = Color(0xFFE0B27F);
+const Color _kFxCoolAccent = Color(0xFFBBD3E4);
+const Color _kFxCoolAccentSoft = Color(0xFFA7C4D9);
+
+BoxDecoration _mixroomFxSurfaceDecoration({
+  double radius = 24,
+  bool active = false,
+}) {
+  return BoxDecoration(
+    borderRadius: BorderRadius.circular(radius),
+    gradient: LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: active
+          ? const <Color>[
+              Color(0xFF727982),
+              Color(0xFF474F58),
+            ]
+          : const <Color>[
+              Color.fromRGBO(87, 96, 106, 0.94),
+              Color.fromRGBO(49, 58, 68, 0.94),
+            ],
+    ),
+    border: Border.all(
+      color: Colors.white.withValues(alpha: active ? 0.16 : 0.10),
+    ),
+    boxShadow: const <BoxShadow>[
+      BoxShadow(
+        color: Color.fromRGBO(0, 0, 0, 0.26),
+        blurRadius: 18,
+        spreadRadius: 2,
+      ),
+    ],
+  );
+}
+
+BoxDecoration _mixroomFxInsetDecoration({
+  double radius = 18,
+  bool selected = false,
+}) {
+  return BoxDecoration(
+    color: selected ? _kFxPanelFillStrong : _kFxPanelFill,
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(
+      color: Colors.white.withValues(alpha: selected ? 0.20 : 0.12),
+    ),
+  );
+}
+
+ButtonStyle _mixroomFxGhostButtonStyle({
+  bool emphasized = false,
+}) {
+  return TextButton.styleFrom(
+    visualDensity: VisualDensity.compact,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+    minimumSize: const Size(0, 34),
+    backgroundColor:
+        emphasized ? _kFxPanelFillStrong : Colors.white.withValues(alpha: 0.08),
+    foregroundColor: _kFxPanelText,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(999),
+      side: BorderSide(
+        color: Colors.white.withValues(alpha: emphasized ? 0.18 : 0.12),
+      ),
+    ),
+  );
+}
+
+Widget _buildFxParamsHeader({
+  required BuildContext context,
+  required String title,
+  required VoidCallback onBack,
+  VoidCallback? onReset,
+}) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: _mixroomFxInsetDecoration(radius: 18, selected: true),
+    child: Row(
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: onBack,
+            child: Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+              ),
+              child:
+                  const Icon(Icons.arrow_back, size: 18, color: _kFxPanelText),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontFamily: 'Pretendard',
+              color: _kFxPanelText,
+              fontSize: 14.2,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        if (onReset != null)
+          TextButton.icon(
+            onPressed: onReset,
+            style: _mixroomFxGhostButtonStyle(),
+            icon: const Icon(Icons.restart_alt, size: 16),
+            label: const Text(
+              'Reset',
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                fontSize: 12.4,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 bool _shouldShowDefaultReorderHandles(BuildContext context) {
   return Theme.of(context).platform != TargetPlatform.macOS;
 }
@@ -209,6 +345,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   List<String> _effectKeys = [];
   List<bool> _bypassed = [];
   bool _loading = true;
+  int? _draggingEffectIndex;
 
   int? _selectedEffectIndex;
   List<Map<String, dynamic>> _currentParams = [];
@@ -1489,7 +1626,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
 
     // Otherwise: presets + FX list + Add FX
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1530,6 +1667,17 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                   buildDefaultDragHandles:
                       _shouldShowDefaultReorderHandles(context),
                   padding: EdgeInsets.zero,
+                  onReorderStart: (index) {
+                    setState(() {
+                      _draggingEffectIndex = index;
+                    });
+                  },
+                  onReorderEnd: (_) {
+                    if (_draggingEffectIndex == null) return;
+                    setState(() {
+                      _draggingEffectIndex = null;
+                    });
+                  },
                   children: [
                     for (int i = 0; i < _effects.length; i++)
                       _buildEffectTile(i)
@@ -1558,7 +1706,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           // --- Add FX Button ---
           if (_effects.length < maxNumEffects)
             Padding(
-                padding: const EdgeInsets.only(top: 0.0, left: 0.0),
+                padding: const EdgeInsets.only(top: 4.0, left: 0.0),
                 child: _buildAddTile()),
         ],
       ),
@@ -1609,7 +1757,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           const VisualDensity(horizontal: -2, vertical: -2), // ← reduce height
       backgroundColor: isLocked
           ? const Color.fromARGB(255, 61, 61, 61)
-          : const Color.fromARGB(255, 88, 107, 200),
+          : const Color.fromRGBO(244, 244, 244, 0.16),
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1622,7 +1770,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               fontSize: 12,
               color: isLocked
                   ? const Color.fromARGB(255, 122, 122, 122)
-                  : const Color.fromARGB(255, 255, 255, 255),
+                  : _kFxPanelText,
             ),
           ),
           if (isLocked)
@@ -1661,6 +1809,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF5F666D),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+        ),
         title: Text(L10n.translate(context, presetName)),
         content: Text(description),
         actions: [
@@ -1772,63 +1926,93 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   // =========================
 
   Widget _buildEffectTile(int idx) {
-    final tile = ListTile(
+    final isDragging = _draggingEffectIndex == idx;
+    final tile = Container(
       key: ValueKey("effect_${_effectKeys[idx]}"),
-      contentPadding: EdgeInsets.zero,
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: isDragging
+          ? _mixroomFxInsetDecoration(radius: 14, selected: true)
+          : const BoxDecoration(color: Colors.transparent),
+      child: ListTile(
+        dense: true,
+        minLeadingWidth: 22,
+        horizontalTitleGap: 4,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 2),
 
-      // only this area starts the reorder gesture
-      leading: ReorderableDragStartListener(
-        index: idx,
-        child: const Padding(
-          padding: EdgeInsets.only(left: 6.0, right: 6.0),
-          child: Icon(Icons.drag_handle),
+        // only this area starts the reorder gesture
+        leading: ReorderableDragStartListener(
+          index: idx,
+          child: const Padding(
+            padding: EdgeInsets.only(left: 2.0, right: 2.0),
+            child: Icon(
+              Icons.drag_handle_rounded,
+              size: 18,
+              color: Color(0xCCF4F4F4),
+            ),
+          ),
         ),
-      ),
 
-      title: Text(
-        _effects[idx],
-        maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 15),
-      ),
-
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Switch(
-            value: !_bypassed[idx],
-            onChanged: (active) async {
-              final shouldBypass = !active;
-              final previous = _bypassed[idx];
-
-              setState(() => _bypassed[idx] = shouldBypass);
-              try {
-                await widget.setBypassForRow(
-                    widget.rowIndex, idx, shouldBypass);
-              } catch (_) {
-                if (!mounted) return;
-                setState(() => _bypassed[idx] = previous);
-              }
-            },
-            activeColor: const Color.fromARGB(255, 231, 231, 231),
-            inactiveThumbColor: const Color.fromARGB(255, 186, 186, 186),
-            inactiveTrackColor: const Color.fromARGB(255, 235, 235, 235),
-            activeTrackColor: const Color.fromARGB(255, 54, 54, 54),
+        title: Text(
+          _effects[idx],
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: _kFxPanelText,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
           ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline,
-                color: Color.fromARGB(255, 255, 164, 164)),
-            onPressed: () => _confirmRemove(idx),
-          ),
-        ],
-      ),
+        ),
 
-      onTap: () async {
-        final liveIdx = await _resolveLiveEffectIndex(idx);
-        final targetIdx = liveIdx >= 0 ? liveIdx : idx;
-        await _openPluginParams(targetIdx);
-      },
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 42,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Switch(
+                  value: !_bypassed[idx],
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onChanged: (active) async {
+                    final shouldBypass = !active;
+                    final previous = _bypassed[idx];
+
+                    setState(() => _bypassed[idx] = shouldBypass);
+                    try {
+                      await widget.setBypassForRow(
+                          widget.rowIndex, idx, shouldBypass);
+                    } catch (_) {
+                      if (!mounted) return;
+                      setState(() => _bypassed[idx] = previous);
+                    }
+                  },
+                  activeColor: const Color(0xFFF4F4F4),
+                  inactiveThumbColor: const Color(0xFFB8BDC3),
+                  inactiveTrackColor: const Color(0xFFDFE2E5),
+                  activeTrackColor: const Color(0xFF545A60),
+                ),
+              ),
+            ),
+            IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 18,
+                color: Color.fromARGB(255, 255, 164, 164),
+              ),
+              onPressed: () => _confirmRemove(idx),
+            ),
+          ],
+        ),
+
+        onTap: () async {
+          final liveIdx = await _resolveLiveEffectIndex(idx);
+          final targetIdx = liveIdx >= 0 ? liveIdx : idx;
+          await _openPluginParams(targetIdx);
+        },
+      ),
     );
 
     return _wrapWithHalos(
@@ -1842,15 +2026,33 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   }
 
   Widget _buildAddTile() {
-    final tile = ListTile(
-      contentPadding: EdgeInsets.zero,
+    final tile = Container(
       key: const ValueKey("add_effect"),
-      leading: const Icon(Icons.add_circle_outline),
-      title: Text(
-        L10n.translate(context, 'Add Effect'),
-        style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 15),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+        ),
       ),
-      onTap: _showAddEffectModal,
+      child: ListTile(
+        dense: true,
+        minLeadingWidth: 26,
+        horizontalTitleGap: 6,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 2),
+        leading: const Icon(
+          Icons.add_circle_outline,
+          color: _kFxPanelText,
+          size: 19,
+        ),
+        title: Text(
+          L10n.translate(context, 'Add Effect'),
+          style: const TextStyle(
+            color: _kFxPanelText,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        onTap: _showAddEffectModal,
+      ),
     );
     return _wrapWithHalos(
       child: tile,
@@ -1866,6 +2068,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     final yes = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF5F666D),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+        ),
         title: Text(L10n.translate(context, 'Delete Effect?')),
         actions: [
           TextButton(
@@ -1944,29 +2152,28 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         return DefaultTabController(
           length: 2,
           child: AlertDialog(
-            backgroundColor: const Color(0xFF1A2233),
+            backgroundColor: const Color(0xFF5F666D),
             surfaceTintColor: Colors.transparent,
             titlePadding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
             contentPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: BorderSide(color: Colors.white.withOpacity(0.12)),
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
             ),
             title: Container(
               height: 36,
               padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                color: const Color(0xFF121927),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white.withOpacity(0.10)),
-              ),
+              decoration: _mixroomFxInsetDecoration(radius: 18),
               child: TabBar(
                 dividerColor: Colors.transparent,
                 indicatorSize: TabBarIndicatorSize.tab,
                 indicatorPadding: EdgeInsets.zero,
                 indicator: BoxDecoration(
-                  color: const Color(0xFF2D3F5D),
-                  borderRadius: BorderRadius.circular(8),
+                  color: _kFxPanelFillStrong,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.18),
+                  ),
                 ),
                 labelColor: Colors.white,
                 unselectedLabelColor: Colors.white70,
@@ -1994,7 +2201,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     separatorBuilder: (_, __) => Divider(
                       height: 1,
                       thickness: 1,
-                      color: Colors.white.withOpacity(0.07),
+                      color: Colors.white.withValues(alpha: 0.07),
                     ),
                     itemBuilder: (context, i) {
                       final name = fxChoices[i];
@@ -2055,12 +2262,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                           contentPadding:
                               const EdgeInsets.symmetric(horizontal: 10),
                           title: Text(
-                            L10n.translate(context, 'No external plugins found'),
+                            L10n.translate(
+                                context, 'No external plugins found'),
                             maxLines: 1,
                             softWrap: false,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: Colors.white.withOpacity(0.72),
+                              color: Colors.white.withValues(alpha: 0.72),
                               fontSize: 13.0,
                             ),
                           ),
@@ -2500,97 +2708,57 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Header row with back button
-                Row(
-                  children: [
-                    IconButton(
-                      padding: EdgeInsets.zero,
-                      visualDensity: VisualDensity.compact,
-                      constraints:
-                          const BoxConstraints.tightFor(width: 26, height: 26),
-                      splashRadius: 14,
-                      icon: const Icon(Icons.arrow_back, size: 18),
-                      onPressed: () {
-                        _stopEqWaveformPolling();
-                        setState(() {
-                          _selectedEffectIndex = null;
-                          _currentParams = [];
-                        });
-                        widget.onHeightChanged(widget.minHeight);
-                      },
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        effectName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: Colors.white.withOpacity(1.00),
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () async {
-                        final changes = <Map<String, dynamic>>[];
-                        for (final p in _currentParams) {
-                          final next = _paramDefaultValue(p);
-                          if (next == null) continue;
-                          final old = p['value'];
-                          if (_paramValuesEqual(old, next)) continue;
-                          changes.add({
-                            'param': p,
-                            'old': old,
-                            'next': next,
-                          });
-                        }
-                        if (changes.isEmpty) return;
+                _buildFxParamsHeader(
+                  context: context,
+                  title: effectName,
+                  onBack: () {
+                    _stopEqWaveformPolling();
+                    setState(() {
+                      _selectedEffectIndex = null;
+                      _currentParams = [];
+                    });
+                    widget.onHeightChanged(widget.minHeight);
+                  },
+                  onReset: () async {
+                    final changes = <Map<String, dynamic>>[];
+                    for (final p in _currentParams) {
+                      final next = _paramDefaultValue(p);
+                      if (next == null) continue;
+                      final old = p['value'];
+                      if (_paramValuesEqual(old, next)) continue;
+                      changes.add({
+                        'param': p,
+                        'old': old,
+                        'next': next,
+                      });
+                    }
+                    if (changes.isEmpty) return;
 
-                        setState(() {
-                          for (final c in changes) {
-                            (c['param'] as Map<String, dynamic>)['value'] =
-                                c['next'];
-                          }
-                        });
+                    setState(() {
+                      for (final c in changes) {
+                        (c['param'] as Map<String, dynamic>)['value'] =
+                            c['next'];
+                      }
+                    });
 
-                        for (final c in changes) {
-                          final p = c['param'] as Map<String, dynamic>;
-                          final oldVal = c['old'];
-                          final newVal = c['next'];
-                          final name = p['name'] as String;
-                          await _setTrackEffectParam(
-                              widget.rowIndex, idx, name, newVal);
-                          _commitTrackEffectParam(
-                            widget.rowIndex,
-                            idx,
-                            name,
-                            oldVal,
-                            newVal,
-                          );
-                        }
-                      },
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 0),
-                        minimumSize: const Size(0, 28),
-                      ),
-                      icon: const Icon(Icons.restart_alt, size: 16),
-                      label:
-                          const Text('Reset', style: TextStyle(fontSize: 12)),
-                    ),
-                  ],
+                    for (final c in changes) {
+                      final p = c['param'] as Map<String, dynamic>;
+                      final oldVal = c['old'];
+                      final newVal = c['next'];
+                      final name = p['name'] as String;
+                      await _setTrackEffectParam(
+                          widget.rowIndex, idx, name, newVal);
+                      _commitTrackEffectParam(
+                        widget.rowIndex,
+                        idx,
+                        name,
+                        oldVal,
+                        newVal,
+                      );
+                    }
+                  },
                 ),
-                const SizedBox(height: 4),
-                const Divider(
-                  height: 1,
-                  thickness: 0.9,
-                  color: Color.fromARGB(213, 104, 104, 104),
-                ),
-                const SizedBox(height: 6),
-
+                const SizedBox(height: 10),
                 LayoutBuilder(
                   builder: (context, constraints) {
                     return ConstrainedBox(
@@ -2656,45 +2824,19 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    IconButton(
-                      padding: EdgeInsets.zero,
-                      visualDensity: VisualDensity.compact,
-                      constraints:
-                          const BoxConstraints.tightFor(width: 26, height: 26),
-                      splashRadius: 14,
-                      icon: const Icon(Icons.arrow_back, size: 18),
-                      onPressed: () {
-                        _stopEqWaveformPolling();
-                        setState(() {
-                          _selectedEffectIndex = null;
-                          _currentParams = [];
-                        });
-                        widget.onHeightChanged(widget.minHeight);
-                      },
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        effectName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: Colors.white.withOpacity(1.00),
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ],
+                _buildFxParamsHeader(
+                  context: context,
+                  title: effectName,
+                  onBack: () {
+                    _stopEqWaveformPolling();
+                    setState(() {
+                      _selectedEffectIndex = null;
+                      _currentParams = [];
+                    });
+                    widget.onHeightChanged(widget.minHeight);
+                  },
                 ),
-                const SizedBox(height: 4),
-                const Divider(
-                  height: 1,
-                  thickness: 0.9,
-                  color: Color.fromARGB(213, 104, 104, 104),
-                ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 10),
                 LayoutBuilder(
                   builder: (context, constraints) {
                     return ConstrainedBox(
@@ -2968,46 +3110,20 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                children: [
-                  IconButton(
-                    padding: EdgeInsets.zero,
-                    visualDensity: VisualDensity.compact,
-                    constraints:
-                        const BoxConstraints.tightFor(width: 26, height: 26),
-                    splashRadius: 14,
-                    icon: const Icon(Icons.arrow_back, size: 18),
-                    onPressed: () {
-                      _stopCompressorMetering();
-                      _stopEqWaveformPolling();
-                      setState(() {
-                        _selectedEffectIndex = null;
-                        _currentParams = [];
-                      });
-                      widget.onHeightChanged(widget.minHeight);
-                    },
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      effectName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: Colors.white.withOpacity(1.00),
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
+              _buildFxParamsHeader(
+                context: context,
+                title: effectName,
+                onBack: () {
+                  _stopCompressorMetering();
+                  _stopEqWaveformPolling();
+                  setState(() {
+                    _selectedEffectIndex = null;
+                    _currentParams = [];
+                  });
+                  widget.onHeightChanged(widget.minHeight);
+                },
               ),
-              const SizedBox(height: 4),
-              const Divider(
-                height: 1,
-                thickness: 0.9,
-                color: Color.fromARGB(213, 104, 104, 104),
-              ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 10),
 
               if (_showsDynamicsReductionMeter(effectName)) ...[
                 // _buildCompressorMeterStrip(),
@@ -3696,7 +3812,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         child: _wrapWithHalos(
           haloKeys: haloKeys,
           borderRadius: borderRadius,
-          child: child,
+          child: Container(
+            decoration: _mixroomFxInsetDecoration(
+              radius: (borderRadius?.topLeft.x ?? 18).toDouble(),
+            ),
+            child: child,
+          ),
         ),
       ),
     );
@@ -4238,8 +4359,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       return _buildEffectParamsPage(context, _selectedEffectIndex!);
     }
     return Container(
-      // color: const Color(0xFF151A26).withOpacity(0.9),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -4317,7 +4437,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           const VisualDensity(horizontal: -2, vertical: -2), // ← reduce height
       backgroundColor: isLocked
           ? const Color.fromARGB(255, 61, 61, 61)
-          : const Color.fromARGB(255, 88, 107, 200),
+          : const Color.fromRGBO(244, 244, 244, 0.16),
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -4330,7 +4450,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               fontSize: 12,
               color: isLocked
                   ? const Color.fromARGB(255, 122, 122, 122)
-                  : const Color.fromARGB(255, 255, 255, 255),
+                  : _kFxPanelText,
             ),
           ),
           if (isLocked)
@@ -4369,6 +4489,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF5F666D),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+        ),
         title: Text(L10n.translate(context, presetName)),
         content: Text(description),
         actions: [
@@ -4481,71 +4607,116 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   // =========================
 
   Widget _buildMasterEffectTile(int idx) {
-    return ListTile(
+    return Container(
       key: ValueKey("master_effect_${_effectKeys[idx]}"),
-      contentPadding: EdgeInsets.zero,
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: const BoxDecoration(color: Colors.transparent),
+      child: ListTile(
+        dense: true,
+        minLeadingWidth: 22,
+        horizontalTitleGap: 4,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 2),
 
-      // only this handle starts reorder drag
-      leading: ReorderableDragStartListener(
-        index: idx,
-        child: const Padding(
-          padding: EdgeInsets.only(left: 6.0, right: 6.0),
-          child: Icon(Icons.drag_handle),
+        // only this handle starts reorder drag
+        leading: ReorderableDragStartListener(
+          index: idx,
+          child: const Padding(
+            padding: EdgeInsets.only(left: 2.0, right: 2.0),
+            child: Icon(
+              Icons.drag_handle_rounded,
+              size: 18,
+              color: Color(0xCCF4F4F4),
+            ),
+          ),
         ),
-      ),
 
-      title: Text(
-        _effects[idx],
-        maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 15),
-      ),
-
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Switch(
-            value: !_bypassed[idx],
-            onChanged: (active) async {
-              final shouldBypass = !active;
-              final previous = _bypassed[idx];
-
-              setState(() => _bypassed[idx] = shouldBypass);
-              try {
-                await widget.bypassMasterEffect(idx, shouldBypass);
-              } catch (_) {
-                if (!mounted) return;
-                setState(() => _bypassed[idx] = previous);
-              }
-            },
-            activeColor: const Color.fromARGB(255, 231, 231, 231),
-            inactiveThumbColor: const Color.fromARGB(255, 186, 186, 186),
-            inactiveTrackColor: const Color.fromARGB(255, 235, 235, 235),
-            activeTrackColor: const Color.fromARGB(255, 54, 54, 54),
+        title: Text(
+          _effects[idx],
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: _kFxPanelText,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
           ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline,
-                color: Color.fromARGB(255, 255, 164, 164)),
-            onPressed: () => _confirmRemove(idx),
-          ),
-        ],
-      ),
+        ),
 
-      onTap: () => _openPluginParams(idx),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 42,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Switch(
+                  value: !_bypassed[idx],
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onChanged: (active) async {
+                    final shouldBypass = !active;
+                    final previous = _bypassed[idx];
+
+                    setState(() => _bypassed[idx] = shouldBypass);
+                    try {
+                      await widget.bypassMasterEffect(idx, shouldBypass);
+                    } catch (_) {
+                      if (!mounted) return;
+                      setState(() => _bypassed[idx] = previous);
+                    }
+                  },
+                  activeColor: const Color(0xFFF4F4F4),
+                  inactiveThumbColor: const Color(0xFFB8BDC3),
+                  inactiveTrackColor: const Color(0xFFDFE2E5),
+                  activeTrackColor: const Color(0xFF545A60),
+                ),
+              ),
+            ),
+            IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 18,
+                color: Color.fromARGB(255, 255, 164, 164),
+              ),
+              onPressed: () => _confirmRemove(idx),
+            ),
+          ],
+        ),
+
+        onTap: () => _openPluginParams(idx),
+      ),
     );
   }
 
   Widget _buildAddTile() {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
+    return Container(
       key: const ValueKey("add_effect"),
-      leading: const Icon(Icons.add_circle_outline),
-      title: Text(
-        L10n.translate(context, 'Add Effect'),
-        style: TextStyle(color: Colors.white.withOpacity(1.00), fontSize: 15),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+        ),
       ),
-      onTap: _showAddEffectModal,
+      child: ListTile(
+        dense: true,
+        minLeadingWidth: 26,
+        horizontalTitleGap: 6,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 2),
+        leading: const Icon(
+          Icons.add_circle_outline,
+          color: _kFxPanelText,
+          size: 19,
+        ),
+        title: const Text(
+          'Add Effect',
+          style: TextStyle(
+            color: _kFxPanelText,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        onTap: _showAddEffectModal,
+      ),
     );
   }
 
@@ -4553,6 +4724,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     final yes = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF5F666D),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+        ),
         title: Text(L10n.translate(context, 'Delete Effect?')),
         actions: [
           TextButton(
@@ -4627,29 +4804,28 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         return DefaultTabController(
           length: 2,
           child: AlertDialog(
-            backgroundColor: const Color(0xFF1A2233),
+            backgroundColor: const Color(0xFF5F666D),
             surfaceTintColor: Colors.transparent,
             titlePadding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
             contentPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: BorderSide(color: Colors.white.withOpacity(0.12)),
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
             ),
             title: Container(
               height: 36,
               padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                color: const Color(0xFF121927),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white.withOpacity(0.10)),
-              ),
+              decoration: _mixroomFxInsetDecoration(radius: 18),
               child: TabBar(
                 dividerColor: Colors.transparent,
                 indicatorSize: TabBarIndicatorSize.tab,
                 indicatorPadding: EdgeInsets.zero,
                 indicator: BoxDecoration(
-                  color: const Color(0xFF2D3F5D),
-                  borderRadius: BorderRadius.circular(8),
+                  color: _kFxPanelFillStrong,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.18),
+                  ),
                 ),
                 labelColor: Colors.white,
                 unselectedLabelColor: Colors.white70,
@@ -4728,7 +4904,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                           contentPadding:
                               const EdgeInsets.symmetric(horizontal: 10),
                           title: Text(
-                            L10n.translate(context, 'No external plugins found'),
+                            L10n.translate(
+                                context, 'No external plugins found'),
                             maxLines: 1,
                             softWrap: false,
                             overflow: TextOverflow.ellipsis,
@@ -5188,93 +5365,53 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header row with back button
-            Row(
-              children: [
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  constraints:
-                      const BoxConstraints.tightFor(width: 26, height: 26),
-                  splashRadius: 14,
-                  icon: const Icon(Icons.arrow_back, size: 18),
-                  onPressed: () {
-                    _stopEqWaveformPolling();
-                    setState(() {
-                      _selectedEffectIndex = null;
-                      _currentParams = [];
-                    });
-                  },
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    effectName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: Colors.white.withOpacity(1.00),
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600),
-                  ),
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () async {
-                    final changes = <Map<String, dynamic>>[];
-                    for (final p in _currentParams) {
-                      final next = _paramDefaultValue(p);
-                      if (next == null) continue;
-                      final old = p['value'];
-                      if (_paramValuesEqual(old, next)) continue;
-                      changes.add({
-                        'param': p,
-                        'old': old,
-                        'next': next,
-                      });
-                    }
-                    if (changes.isEmpty) return;
+            _buildFxParamsHeader(
+              context: context,
+              title: effectName,
+              onBack: () {
+                _stopEqWaveformPolling();
+                setState(() {
+                  _selectedEffectIndex = null;
+                  _currentParams = [];
+                });
+              },
+              onReset: () async {
+                final changes = <Map<String, dynamic>>[];
+                for (final p in _currentParams) {
+                  final next = _paramDefaultValue(p);
+                  if (next == null) continue;
+                  final old = p['value'];
+                  if (_paramValuesEqual(old, next)) continue;
+                  changes.add({
+                    'param': p,
+                    'old': old,
+                    'next': next,
+                  });
+                }
+                if (changes.isEmpty) return;
 
-                    setState(() {
-                      for (final c in changes) {
-                        (c['param'] as Map<String, dynamic>)['value'] =
-                            c['next'];
-                      }
-                    });
+                setState(() {
+                  for (final c in changes) {
+                    (c['param'] as Map<String, dynamic>)['value'] = c['next'];
+                  }
+                });
 
-                    for (final c in changes) {
-                      final p = c['param'] as Map<String, dynamic>;
-                      final oldVal = c['old'];
-                      final newVal = c['next'];
-                      final name = p['name'] as String;
-                      await widget.setMasterEffectParam(idx, name, newVal);
-                      widget.onMasterPluginParamCommit?.call(
-                        idx,
-                        name,
-                        oldVal,
-                        newVal,
-                      );
-                    }
-                  },
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                    minimumSize: const Size(0, 28),
-                  ),
-                  icon: const Icon(Icons.restart_alt, size: 16),
-                  label: const Text('Reset', style: TextStyle(fontSize: 12)),
-                ),
-              ],
+                for (final c in changes) {
+                  final p = c['param'] as Map<String, dynamic>;
+                  final oldVal = c['old'];
+                  final newVal = c['next'];
+                  final name = p['name'] as String;
+                  await widget.setMasterEffectParam(idx, name, newVal);
+                  widget.onMasterPluginParamCommit?.call(
+                    idx,
+                    name,
+                    oldVal,
+                    newVal,
+                  );
+                }
+              },
             ),
-            const SizedBox(height: 4),
-            const Divider(
-              height: 1,
-              thickness: 0.9,
-              color: Color.fromARGB(213, 104, 104, 104),
-            ),
-            const SizedBox(height: 6),
-
+            const SizedBox(height: 10),
             LayoutBuilder(
               builder: (context, constraints) {
                 return ConstrainedBox(
@@ -5337,44 +5474,18 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  constraints:
-                      const BoxConstraints.tightFor(width: 26, height: 26),
-                  splashRadius: 14,
-                  icon: const Icon(Icons.arrow_back, size: 18),
-                  onPressed: () {
-                    _stopEqWaveformPolling();
-                    setState(() {
-                      _selectedEffectIndex = null;
-                      _currentParams = [];
-                    });
-                  },
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    effectName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: Colors.white.withOpacity(1.00),
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
+            _buildFxParamsHeader(
+              context: context,
+              title: effectName,
+              onBack: () {
+                _stopEqWaveformPolling();
+                setState(() {
+                  _selectedEffectIndex = null;
+                  _currentParams = [];
+                });
+              },
             ),
-            const SizedBox(height: 4),
-            const Divider(
-              height: 1,
-              thickness: 0.9,
-              color: Color.fromARGB(213, 104, 104, 104),
-            ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 10),
             LayoutBuilder(
               builder: (context, constraints) {
                 return ConstrainedBox(
@@ -6752,9 +6863,9 @@ class _EqPreviewFull extends StatelessWidget {
     return Container(
       height: 120,
       decoration: BoxDecoration(
-        color: const Color(0x1A000000),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x33888888)),
+        color: _kFxPanelFill,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _kFxPanelBorder),
       ),
       padding: const EdgeInsets.all(8),
       child: SizedBox.expand(
@@ -6863,7 +6974,7 @@ class _EqPreviewFullPainter extends CustomPainter {
     const markerHz = [80.0, 300.0, 1200.0, 5000.0, 12000.0];
 
     final divider = Paint()
-      ..color = const Color(0x2A8F8F8F)
+      ..color = Colors.white.withValues(alpha: 0.08)
       ..strokeWidth = 1.0;
 
     for (int i = 0; i < regionEdgesHz.length - 1; i++) {
@@ -6872,8 +6983,9 @@ class _EqPreviewFullPainter extends CustomPainter {
       final x0 = _xForHz(f0, w);
       final x1 = _xForHz(f1, w);
       final shade = Paint()
-        ..color =
-            (i.isEven ? const Color(0x0DFFFFFF) : const Color(0x05000000));
+        ..color = i.isEven
+            ? Colors.white.withValues(alpha: 0.035)
+            : Colors.black.withValues(alpha: 0.03);
       canvas.drawRect(Rect.fromLTRB(x0, 0, x1, h), shade);
       canvas.drawLine(Offset(x0, 0), Offset(x0, h), divider);
     }
@@ -6887,7 +6999,7 @@ class _EqPreviewFullPainter extends CustomPainter {
         text: TextSpan(
           text: _fmtHz(hz),
           style: const TextStyle(
-            color: Color(0x88D8D8D8),
+            color: _kFxPanelMutedText,
             fontSize: 9,
             fontWeight: FontWeight.w500,
           ),
@@ -6908,11 +7020,11 @@ class _EqPreviewFullPainter extends CustomPainter {
 
     // baseline axis
     final axis = Paint()
-      ..color = const Color(0x55888888)
+      ..color = Colors.white.withValues(alpha: 0.12)
       ..strokeWidth = 1;
     canvas.drawLine(Offset(0, h - 1), Offset(w, h - 1), axis);
     final zeroLine = Paint()
-      ..color = const Color(0x33888888)
+      ..color = Colors.white.withValues(alpha: 0.08)
       ..strokeWidth = 1;
     canvas.drawLine(Offset(0, h * 0.5), Offset(w, h * 0.5), zeroLine);
 
@@ -6929,7 +7041,7 @@ class _EqPreviewFullPainter extends CustomPainter {
     final xHPF = _xForHz(hpf, w);
     final xLPF = _xForHz(lpf, w);
     final marker = Paint()
-      ..color = const Color(0xFF888888)
+      ..color = _kFxCoolAccentSoft.withValues(alpha: 0.55)
       ..strokeWidth = 1.5;
     canvas.drawLine(Offset(xHPF, 0), Offset(xHPF, h), marker);
     canvas.drawLine(Offset(xLPF, 0), Offset(xLPF, h), marker);
@@ -6982,7 +7094,7 @@ class _EqPreviewFullPainter extends CustomPainter {
 
     // draw fill under curve
     final fillPaint = Paint()
-      ..color = const Color(0x33B03A2E)
+      ..color = _kFxWarmAccent.withValues(alpha: 0.20)
       ..style = PaintingStyle.fill;
     final fillPath = Path.from(path)
       ..lineTo(w, h)
@@ -7029,13 +7141,13 @@ class _EqPreviewFullPainter extends CustomPainter {
       canvas.drawPath(
         spectrumFill,
         Paint()
-          ..color = const Color(0x223DADEB)
+          ..color = _kFxCoolAccent.withValues(alpha: 0.18)
           ..style = PaintingStyle.fill,
       );
       canvas.drawPath(
         spectrumPath,
         Paint()
-          ..color = const Color(0xAA72C8F2)
+          ..color = _kFxCoolAccentSoft.withValues(alpha: 0.82)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.2
           ..isAntiAlias = true,
@@ -7044,7 +7156,7 @@ class _EqPreviewFullPainter extends CustomPainter {
 
     // draw stroke curve
     final strokePaint = Paint()
-      ..color = const Color(0xFFB03A2E)
+      ..color = _kFxWarmAccentBorder
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
       ..isAntiAlias = true;
@@ -7087,9 +7199,9 @@ class _Eq3Preview extends StatelessWidget {
     return Container(
       height: 120,
       decoration: BoxDecoration(
-        color: const Color(0x1A000000),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x33888888)),
+        color: _kFxPanelFill,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _kFxPanelBorder),
       ),
       padding: const EdgeInsets.all(8),
       child: SizedBox.expand(
@@ -7178,7 +7290,7 @@ class _Eq3PreviewPainter extends CustomPainter {
       text: TextSpan(
         text: "${_fmtHz(hz)}",
         style: const TextStyle(
-          color: Color.fromARGB(134, 187, 187, 187),
+          color: _kFxPanelMutedText,
           fontSize: 11,
           fontWeight: FontWeight.w500,
         ),
@@ -7224,19 +7336,19 @@ class _Eq3PreviewPainter extends CustomPainter {
     if (w <= 1 || h <= 1) return;
 
     final axis = Paint()
-      ..color = const Color(0x55888888)
+      ..color = Colors.white.withValues(alpha: 0.12)
       ..strokeWidth = 1;
     canvas.drawLine(Offset(0, h - 1), Offset(w, h - 1), axis);
 
     // faint center line (0 dB)
     final midLine = Paint()
-      ..color = const Color(0x33888888)
+      ..color = Colors.white.withValues(alpha: 0.08)
       ..strokeWidth = 1;
     canvas.drawLine(Offset(0, h * 0.5), Offset(w, h * 0.5), midLine);
 
     // band markers (optional but helps “visual accuracy”)
     final marker = Paint()
-      ..color = const Color(0x33888888)
+      ..color = Colors.white.withValues(alpha: 0.10)
       ..strokeWidth = 1;
     // canvas.drawLine(Offset(_xForHz(lowFc, w), 0), Offset(_xForHz(lowFc, w), h), marker);
     // canvas.drawLine(Offset(_xForHz(midFc, w), 0), Offset(_xForHz(midFc, w), h), marker);
@@ -7277,7 +7389,7 @@ class _Eq3PreviewPainter extends CustomPainter {
     }
 
     final fillPaint = Paint()
-      ..color = const Color(0x33B03A2E)
+      ..color = _kFxWarmAccent.withValues(alpha: 0.20)
       ..style = PaintingStyle.fill;
     final fillPath = Path.from(path)
       ..lineTo(w, h)
@@ -7324,13 +7436,13 @@ class _Eq3PreviewPainter extends CustomPainter {
       canvas.drawPath(
         spectrumFill,
         Paint()
-          ..color = const Color(0x223DADEB)
+          ..color = _kFxCoolAccent.withValues(alpha: 0.18)
           ..style = PaintingStyle.fill,
       );
       canvas.drawPath(
         spectrumPath,
         Paint()
-          ..color = const Color(0xAA72C8F2)
+          ..color = _kFxCoolAccentSoft.withValues(alpha: 0.82)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.2
           ..isAntiAlias = true,
@@ -7338,7 +7450,7 @@ class _Eq3PreviewPainter extends CustomPainter {
     }
 
     final strokePaint = Paint()
-      ..color = const Color(0xFFB03A2E)
+      ..color = _kFxWarmAccentBorder
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2
       ..isAntiAlias = true;
@@ -7638,13 +7750,13 @@ class GainReductionSliderMeterHorizontal extends StatelessWidget {
     final t = (clamped / maxDb).clamp(0.0, 1.0); // 0..1 (0 = no GR)
 
     final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: Colors.white.withOpacity(0.55),
+          color: _kFxPanelMutedText,
           fontSize: 10,
           fontWeight: FontWeight.w600,
         );
 
     final readoutStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: Colors.white.withOpacity(0.80),
+          color: _kFxPanelText,
           fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.2,
@@ -7784,11 +7896,11 @@ class _GRSliderHorizontalPainter extends CustomPainter {
     final h = s.height;
 
     // Background "pill"
-    final bg = Paint()..color = const Color(0xFF111827).withOpacity(0.95);
+    final bg = Paint()..color = const Color(0xFF545B62);
     final border = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
-      ..color = Colors.white.withOpacity(0.12);
+      ..color = _kFxPanelBorder;
 
     final outer =
         RRect.fromRectAndRadius(Offset.zero & s, Radius.circular(h / 2));
@@ -7799,7 +7911,7 @@ class _GRSliderHorizontalPainter extends CustomPainter {
     const pad = 3.0;
     final track = Rect.fromLTWH(pad, pad, w - pad * 2, h - pad * 2);
 
-    final trackPaint = Paint()..color = Colors.white.withOpacity(0.08);
+    final trackPaint = Paint()..color = Colors.white.withValues(alpha: 0.10);
     c.drawRRect(
         RRect.fromRectAndRadius(track, Radius.circular(track.height / 2)),
         trackPaint);
@@ -7808,7 +7920,12 @@ class _GRSliderHorizontalPainter extends CustomPainter {
     final fillW = (track.width * t).clamp(0.0, track.width);
     final fillRect = Rect.fromLTWH(track.left, track.top, fillW, track.height);
 
-    final fillPaint = Paint()..color = Colors.white.withOpacity(0.70);
+    final fillPaint = Paint()
+      ..shader = const LinearGradient(
+        colors: <Color>[_kFxCoolAccent, _kFxWarmAccent],
+        begin: Alignment.centerLeft,
+        end: Alignment.centerRight,
+      ).createShader(fillRect);
     c.drawRRect(
         RRect.fromRectAndRadius(fillRect, Radius.circular(track.height / 2)),
         fillPaint);
@@ -7820,13 +7937,13 @@ class _GRSliderHorizontalPainter extends CustomPainter {
     final thumbRect = Rect.fromLTWH(
         thumbX - thumbW / 2, track.top - 1, thumbW, track.height + 2);
 
-    final thumbPaint = Paint()..color = Colors.white.withOpacity(0.95);
+    final thumbPaint = Paint()..color = _kFxPanelText;
     c.drawRRect(RRect.fromRectAndRadius(thumbRect, const Radius.circular(6)),
         thumbPaint);
 
     // Simple tick marks (optional, subtle)
     final tick = Paint()
-      ..color = Colors.black.withOpacity(0.20)
+      ..color = Colors.black.withValues(alpha: 0.16)
       ..strokeWidth = 1;
 
     for (int i = 1; i <= 4; i++) {
