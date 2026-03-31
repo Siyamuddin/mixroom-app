@@ -6,6 +6,7 @@ import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
 import 'package:mixroom/helpers/password_policy.dart';
 import 'package:mixroom/helpers/app_popup.dart';
+import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/models/app_user_models.dart';
@@ -225,6 +226,17 @@ class _AccountBodyState extends State<_AccountBody> {
             (widget.appUser?.musicProfile ?? '').trim().toLowerCase());
   }
 
+  void _handleEditToggle() {
+    if (_isSaving) return;
+    if (_isEditing) {
+      HapticFeedback.mediumImpact();
+      _save();
+      return;
+    }
+    HapticFeedback.selectionClick();
+    setState(() => _isEditing = true);
+  }
+
   Future<void> _save() async {
     final safeName = _nameController.text.trim();
     final safeUsername = _usernameController.text.trim().toLowerCase();
@@ -381,15 +393,7 @@ class _AccountBodyState extends State<_AccountBody> {
         if (widget.embeddedMode)
           _EmbeddedAccountChrome(
             isEditing: _isEditing,
-            onEditToggle: () {
-              HapticFeedback.selectionClick();
-              setState(() {
-                if (_isEditing) {
-                  _syncFromUser();
-                }
-                _isEditing = !_isEditing;
-              });
-            },
+            onEditToggle: _handleEditToggle,
           )
         else
           _ProfileHero(
@@ -397,15 +401,7 @@ class _AccountBodyState extends State<_AccountBody> {
             username: _usernameController.text,
             overrideName: _nameController.text,
             isEditing: _isEditing,
-            onEditToggle: () {
-              HapticFeedback.selectionClick();
-              setState(() {
-                if (_isEditing) {
-                  _syncFromUser();
-                }
-                _isEditing = !_isEditing;
-              });
-            },
+            onEditToggle: _handleEditToggle,
           ),
         if (needsEmailVerification) ...[
           const SizedBox(height: 10),
@@ -446,7 +442,7 @@ class _AccountBodyState extends State<_AccountBody> {
           padding: EdgeInsets.zero,
           color: widget.embeddedMode
               ? (_isEditing
-                  ? const Color.fromRGBO(244, 244, 244, 0.48)
+                  ? const Color.fromRGBO(244, 244, 244, 0.28)
                   : const Color.fromRGBO(244, 244, 244, 0.16))
               : const Color.fromRGBO(244, 244, 244, 0.08),
           child: Column(
@@ -582,14 +578,14 @@ class _AccountBodyState extends State<_AccountBody> {
           ),
         ),
         const SizedBox(height: 12),
+        const _SubscriptionEntitlementCard(),
+        const SizedBox(height: 12),
         _SignInMethodsCard(user: widget.user),
         const SizedBox(height: 12),
         _SecurityAccessCard(
           user: widget.user,
           auth: auth,
         ),
-        const SizedBox(height: 12),
-        const _SubscriptionEntitlementCard(),
         const SizedBox(height: 12),
         _FeedbackEntryCard(
           onOpen: _openFeedbackComposer,
@@ -662,7 +658,7 @@ class _EmbeddedAccountChrome extends StatelessWidget {
           height: 80,
           decoration: BoxDecoration(
             color: isEditing
-                ? const Color.fromRGBO(244, 244, 244, 0.42)
+                ? const Color.fromRGBO(244, 244, 244, 0.30)
                 : const Color.fromRGBO(244, 244, 244, 0.20),
             borderRadius: BorderRadius.circular(40),
             border: Border.all(
@@ -701,26 +697,53 @@ class _EmbeddedLogoutButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: isBusy ? null : onSignOut,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 212),
-          child: MixroomShellSurface(
-            radius: 24,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
-            color: const Color.fromRGBO(84, 112, 143, 0.82),
-            strong: true,
-            child: SizedBox(
-              width: double.infinity,
-              child: Text(
-                L10n.translate(context, 'Log Out'),
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontFamily: 'Pretendard',
-                  color: Color(0xFFF4F4F4),
-                  fontSize: 15,
-                  height: 22 / 15,
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 212),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: isBusy ? null : onSignOut,
+            borderRadius: BorderRadius.circular(24),
+            child: MixroomShellSurface(
+              radius: 24,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+              color: const Color.fromRGBO(84, 112, 143, 0.82),
+              strong: true,
+              child: SizedBox(
+                width: double.infinity,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  child: isBusy
+                      ? const SizedBox(
+                          key: ValueKey('logout_spinner_embedded'),
+                          height: 22,
+                          child: Center(
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Color(0xFFF4F4F4),
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                      : Text(
+                          key: const ValueKey('logout_text_embedded'),
+                          L10n.translate(context, 'Log Out'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 15,
+                            height: 22 / 15,
+                          ),
+                        ),
                 ),
               ),
             ),
@@ -1451,7 +1474,7 @@ class _EditableMusicProfileRow extends StatelessWidget {
               ],
               onChanged: enabled ? onChanged : null,
               style: const TextStyle(color: Colors.white, fontSize: 13),
-              dropdownColor: const Color(0xFF13233D),
+              dropdownColor: kMixroomGlassDropdownMenuColor,
               iconEnabledColor: Colors.white70,
               decoration: InputDecoration(
                 isDense: true,
@@ -2126,19 +2149,43 @@ class _AccountActions extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             height: 50,
-            child: ElevatedButton.icon(
+            child: ElevatedButton(
               onPressed: isBusy ? null : onSignOut,
-              icon: const Icon(Icons.logout_rounded),
-              label: Text(
-                L10n.translate(context, 'Log Out'),
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFBE3E3E),
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
+              ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: isBusy
+                    ? const SizedBox(
+                        key: ValueKey('logout_spinner_footer'),
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      )
+                    : Row(
+                        key: const ValueKey('logout_label_footer'),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.logout_rounded),
+                          const SizedBox(width: 8),
+                          Text(
+                            L10n.translate(context, 'Log Out'),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
               ),
             ),
           ),

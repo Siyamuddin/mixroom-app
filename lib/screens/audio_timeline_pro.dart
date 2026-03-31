@@ -12,9 +12,11 @@ import 'package:mixroom/widgets/effects_panel.dart';
 import 'package:mixroom/widgets/sample_browser_panel.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/automation_clip_clone_helper.dart';
+import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
+import 'package:mixroom/l10n/l10n.dart';
 import 'package:uuid/uuid.dart';
 
 class _QuantizePreset {
@@ -1229,7 +1231,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final selected = await showMenu<int>(
       context: context,
-      color: const Color(0xFF4F5861),
+      color: kMixroomGlassDropdownMenuColor,
       elevation: 10,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(22),
@@ -1293,7 +1295,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final selected = await showMenu<_TimelineTool>(
       context: context,
-      color: const Color(0xFF4F5861),
+      color: kMixroomGlassDropdownMenuColor,
       elevation: 10,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(22),
@@ -2447,8 +2449,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        const SnackBar(
-          content: Text('No copied clip to paint'),
+        SnackBar(
+          content: Text(L10n.translate(context, 'No copied clip to paint')),
           duration: Duration(milliseconds: 1200),
         ),
       );
@@ -4971,10 +4973,21 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final clip = widget.clips[clipIndex];
     final initialName = clip.label.trim().isNotEmpty
         ? clip.label.trim()
-        : (clip.isMidi ? 'MIDI Clip' : 'Audio Clip');
+        : (clip.isMidi
+            ? L10n.translate(context, 'MIDI Clip')
+            : L10n.translate(context, 'Audio Clip'));
     final controller = TextEditingController(text: initialName);
     final focusNode = FocusNode();
     bool focusScheduled = false;
+    bool dialogClosing = false;
+
+    void closeDialog(BuildContext dialogContext, String? result) {
+      if (dialogClosing) return;
+      dialogClosing = true;
+      focusNode.unfocus();
+      if (!dialogContext.mounted) return;
+      Navigator.of(dialogContext).pop(result);
+    }
 
     final nextName = await showDialog<String>(
       context: context,
@@ -4988,37 +5001,41 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         }
         return AlertDialog(
           backgroundColor: const Color(0xFF1A2233),
-          title:
-              const Text('Rename Clip', style: TextStyle(color: Colors.white)),
+          title: Text(
+            L10n.translate(ctx, 'Rename Clip'),
+            style: const TextStyle(color: Colors.white),
+          ),
           content: TextField(
             controller: controller,
             focusNode: focusNode,
             autofocus: false,
             maxLength: 48,
             textInputAction: TextInputAction.done,
-            onSubmitted: (_) => Navigator.pop(ctx, controller.text.trim()),
+            onSubmitted: (_) => closeDialog(ctx, controller.text.trim()),
             style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: 'Clip name',
-              hintStyle: TextStyle(color: Colors.white54),
+            decoration: InputDecoration(
+              hintText: L10n.translate(ctx, 'Clip name'),
+              hintStyle: const TextStyle(color: Colors.white54),
               counterText: '',
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              onPressed: () => closeDialog(ctx, null),
+              child: Text(L10n.translate(ctx, 'Cancel')),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-              child: const Text('Rename'),
+              onPressed: () => closeDialog(ctx, controller.text.trim()),
+              child: Text(L10n.translate(ctx, 'Rename')),
             ),
           ],
         );
       },
     );
-    controller.dispose();
-    focusNode.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      controller.dispose();
+      focusNode.dispose();
+    });
 
     if (!mounted || nextName == null || nextName.isEmpty) return;
     if (nextName == clip.label) return;
@@ -5039,8 +5056,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (clip.isMidi) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Tempo detection is only for audio clips.')),
+        SnackBar(
+          content: Text(
+            L10n.translate(context, 'Tempo detection is only for audio clips.'),
+          ),
+        ),
       );
       return;
     }
@@ -5521,7 +5541,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 IconButton(
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
-                  tooltip: 'Place clone',
+                  tooltip: L10n.translate(context, 'Place clone'),
                   icon: const Icon(Icons.content_paste,
                       size: 18, color: Colors.white),
                   onPressed: () {
@@ -5541,7 +5561,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
-                    tooltip: 'Clear clipboard',
+                    tooltip: L10n.translate(context, 'Clear clipboard'),
                     icon: const Icon(Icons.delete_outline,
                         size: 18, color: Color(0xFFFFA4A4)),
                     onPressed: () {
@@ -5549,8 +5569,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       ScaffoldMessenger.of(context)
                         ..hideCurrentSnackBar()
                         ..showSnackBar(
-                          const SnackBar(
-                            content: Text('Clipboard cleared'),
+                          SnackBar(
+                            content: Text(
+                                L10n.translate(context, 'Clipboard cleared')),
                             duration: Duration(milliseconds: 1200),
                           ),
                         );
@@ -6619,6 +6640,24 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 : (hasRangeEnd ? 'Range locked' : 'Tap end'))
             : 'Point lane';
 
+    bool hasAutomationDataForTarget(Map<String, dynamic> target) {
+      if (target['hasAutomationData'] == true) return true;
+      final id = (target['id'] ?? '').toString().trim();
+      if (id.isEmpty) return false;
+
+      final clips = widget.getAutomationClipsForTarget(row, id);
+      if (clips.isNotEmpty) return true;
+
+      if (id == 'volume') {
+        final points = widget.rowVolumeAutomation[row];
+        if (points.length > 1) return true;
+        if (points.isNotEmpty && (points.first.volume - 0.75).abs() > 1e-6) {
+          return true;
+        }
+      }
+      return false;
+    }
+
     double? laneHighlightStartMs;
     double? laneHighlightEndMs;
     final hasSharedHighlight = _highlightedSegmentRow == row &&
@@ -6701,8 +6740,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(
-            content: Text('Copied all automation points'),
+          SnackBar(
+            content:
+                Text(L10n.translate(context, 'Copied all automation points')),
             duration: Duration(milliseconds: 1200),
           ),
         );
@@ -7097,7 +7137,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           ),
                         ),
                       actionButton(
-                        label: 'Link',
+                        label: L10n.translate(context, 'Link'),
                         icon: Icons.link_rounded,
                         onTap: isOrphanTarget
                             ? null
@@ -7112,7 +7152,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       ),
                       if (onClose != null)
                         IconButton(
-                          tooltip: 'Close automation editor',
+                          tooltip: L10n.translate(
+                              context, 'Close automation editor'),
                           onPressed: onClose,
                           padding: EdgeInsets.zero,
                           visualDensity: const VisualDensity(
@@ -7154,7 +7195,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             child: DropdownButton<String>(
                               value: activeTargetId,
                               isExpanded: true,
-                              dropdownColor: const Color(0xFF5F666D),
+                              dropdownColor: kMixroomGlassDropdownMenuColor,
                               iconEnabledColor: _kTimelineShellMutedText,
                               style: const TextStyle(
                                 fontFamily: 'Pretendard',
@@ -7198,12 +7239,33 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                     .trim();
                                 final label =
                                     fullLabel.isEmpty ? id : fullLabel;
+                                final hasAutomationData =
+                                    hasAutomationDataForTarget(target);
                                 return DropdownMenuItem<String>(
                                   value: id,
-                                  child: Text(
-                                    label,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      if (hasAutomationData) ...[
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          width: 8,
+                                          height: 8,
+                                          decoration: BoxDecoration(
+                                            color: accentColor.withValues(
+                                              alpha: 0.92,
+                                            ),
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 );
                               }).toList(growable: false),
@@ -7830,56 +7892,56 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             ListTile(
               leading: const Icon(Icons.vertical_align_top,
                   color: _kTimelineShellText),
-              title: const Text('Insert Row Above',
-                  style: TextStyle(
+              title: Text(L10n.translate(ctx, 'Insert Row Above'),
+                  style: const TextStyle(
                       fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'insert_above'),
             ),
             ListTile(
               leading: const Icon(Icons.vertical_align_bottom,
                   color: _kTimelineShellText),
-              title: const Text('Insert Row Below',
-                  style: TextStyle(
+              title: Text(L10n.translate(ctx, 'Insert Row Below'),
+                  style: const TextStyle(
                       fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'insert_below'),
             ),
             ListTile(
               leading:
                   const Icon(Icons.arrow_upward, color: _kTimelineShellText),
-              title: const Text('Move Up',
-                  style: TextStyle(
+              title: Text(L10n.translate(ctx, 'Move Up'),
+                  style: const TextStyle(
                       fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'move_up'),
             ),
             ListTile(
               leading:
                   const Icon(Icons.arrow_downward, color: _kTimelineShellText),
-              title: const Text('Move Down',
-                  style: TextStyle(
+              title: Text(L10n.translate(ctx, 'Move Down'),
+                  style: const TextStyle(
                       fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'move_down'),
             ),
             ListTile(
               leading: const Icon(Icons.drive_file_rename_outline,
                   color: _kTimelineShellText),
-              title: const Text('Rename Row',
-                  style: TextStyle(
+              title: Text(L10n.translate(ctx, 'Rename Row'),
+                  style: const TextStyle(
                       fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'rename'),
             ),
             ListTile(
               leading:
                   const Icon(Icons.image_outlined, color: _kTimelineShellText),
-              title: const Text('Choose Icon',
-                  style: TextStyle(
+              title: Text(L10n.translate(ctx, 'Choose Icon'),
+                  style: const TextStyle(
                       fontFamily: 'Pretendard', color: _kTimelineShellText)),
               onTap: () => Navigator.pop(ctx, 'icon'),
             ),
             ListTile(
               leading:
                   const Icon(Icons.delete_outline, color: Color(0xFFFFA4A4)),
-              title: const Text('Delete Row',
-                  style: TextStyle(color: Color(0xFFFFA4A4))),
+              title: Text(L10n.translate(ctx, 'Delete Row'),
+                  style: const TextStyle(color: Color(0xFFFFA4A4))),
               onTap: () => Navigator.pop(ctx, 'delete'),
             ),
           ],
@@ -7899,6 +7961,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       final controller = TextEditingController(text: widget.rows[row].name);
       final focusNode = FocusNode();
       bool focusScheduled = false;
+      bool dialogClosing = false;
+
+      void closeDialog(BuildContext dialogContext, String? result) {
+        if (dialogClosing) return;
+        dialogClosing = true;
+        focusNode.unfocus();
+        if (!dialogContext.mounted) return;
+        Navigator.of(dialogContext).pop(result);
+      }
+
       final name = await showDialog<String>(
         context: context,
         builder: (ctx) {
@@ -7909,31 +7981,32 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               focusNode.requestFocus();
             });
           }
-          return MediaQuery.removeViewInsets(
-            context: ctx,
-            removeBottom: true,
-            child: Dialog(
-              alignment: Alignment.topCenter,
-              insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
-              backgroundColor: const Color(0xFF5F666D),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+          return Dialog(
+            alignment: Alignment.topCenter,
+            insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
+            backgroundColor: const Color(0xFF5F666D),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: math.min(MediaQuery.sizeOf(ctx).height * 0.84, 420),
               ),
-              child: Padding(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       children: [
-                        Icon(Icons.drive_file_rename_outline,
+                        const Icon(Icons.drive_file_rename_outline,
                             color: _kTimelineShellText),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Text(
-                          'Rename Row',
-                          style: TextStyle(
+                          L10n.translate(ctx, 'Rename Row'),
+                          style: const TextStyle(
                               fontFamily: 'Pretendard',
                               color: _kTimelineShellText,
                               fontSize: 18,
@@ -7956,14 +8029,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         maxLength: 32,
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) =>
-                            Navigator.pop(ctx, controller.text.trim()),
+                            closeDialog(ctx, controller.text.trim()),
                         style: const TextStyle(
                           fontFamily: 'Pretendard',
                           color: _kTimelineShellText,
                         ),
-                        decoration: const InputDecoration(
-                          hintText: 'Row name',
-                          hintStyle: TextStyle(
+                        decoration: InputDecoration(
+                          hintText: L10n.translate(ctx, 'Row name'),
+                          hintStyle: const TextStyle(
                             fontFamily: 'Pretendard',
                             color: _kTimelineShellMutedText,
                           ),
@@ -7979,21 +8052,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: const Text('Cancel',
-                              style: TextStyle(color: Colors.white70)),
+                          onPressed: () => closeDialog(ctx, null),
+                          child: Text(L10n.translate(ctx, 'Cancel'),
+                              style: const TextStyle(color: Colors.white70)),
                         ),
                         const SizedBox(width: 8),
                         ElevatedButton(
                           onPressed: () =>
-                              Navigator.pop(ctx, controller.text.trim()),
+                              closeDialog(ctx, controller.text.trim()),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFC89762),
+                            backgroundColor:
+                                const Color.fromRGBO(118, 147, 174, 0.92),
                             foregroundColor: _kTimelineShellText,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(999)),
                           ),
-                          child: const Text('Save'),
+                          child: Text(L10n.translate(ctx, 'Save')),
                         ),
                       ],
                     ),
@@ -8004,8 +8078,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           );
         },
       );
-      controller.dispose();
-      focusNode.dispose();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        controller.dispose();
+        focusNode.dispose();
+      });
       if (name != null && name.isNotEmpty) {
         await widget.onRenameRow(row, name);
       }
@@ -10179,8 +10255,12 @@ class _TimelinePainter extends CustomPainter {
       }
     }
 
-    // Draw vertical grid lines (unchanged)
-    _drawGrid(canvas, size); // Note: _drawGrid doesn't use vertical position
+    final bool isMsUnderlayPass = (leftVisibleExtensionPx ?? 0.0) > 0.0;
+
+    // Avoid drawing full-height vertical guides in the M/S passthrough strip.
+    if (!isMsUnderlayPass) {
+      _drawGrid(canvas, size); // Note: _drawGrid doesn't use vertical position
+    }
 
     // === RECORDING PREVIEW ==========================================
     if (isRecording && recordingRowIndex != null) {
@@ -10231,7 +10311,9 @@ class _TimelinePainter extends CustomPainter {
     _drawCutPreviewLine(canvas);
 
     // Draw playhead (centered)
-    _drawPlayhead(canvas, size);
+    if (!isMsUnderlayPass) {
+      _drawPlayhead(canvas, size);
+    }
 
     canvas.restore(); // Always restore!
   }
@@ -11509,7 +11591,8 @@ class _AutomationLaneState extends State<_AutomationLane> {
     );
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-          content: Text('Copied automation value ${_pointValueLabel(index)}')),
+          content: Text(
+              '${L10n.translate(context, 'Copied automation value')} ${_pointValueLabel(index)}')),
     );
   }
 
@@ -11530,20 +11613,30 @@ class _AutomationLaneState extends State<_AutomationLane> {
     );
     final focusNode = FocusNode();
     bool focusScheduled = false;
+    bool dialogClosing = false;
 
     final typedNormalized = await showDialog<double>(
       context: context,
-      builder: (dialogContext) {
+      builder: (dialogRootContext) {
         String? errorText;
+        void closeDialog(double? result) {
+          if (dialogClosing) return;
+          dialogClosing = true;
+          focusNode.unfocus();
+          if (!dialogRootContext.mounted) return;
+          Navigator.of(dialogRootContext).pop(result);
+        }
+
         void submit(StateSetter setDialogState) {
           final parsed = formatter.parseInputToNormalized(controller.text);
           if (parsed == null) {
             setDialogState(() {
-              errorText = 'Enter a valid ${formatter.inputLabel.toLowerCase()}';
+              errorText =
+                  '${L10n.translate(dialogRootContext, 'Enter a valid')} ${formatter.inputLabel.toLowerCase()}';
             });
             return;
           }
-          Navigator.pop(dialogContext, parsed);
+          closeDialog(parsed);
         }
 
         if (!focusScheduled) {
@@ -11562,9 +11655,9 @@ class _AutomationLaneState extends State<_AutomationLane> {
           builder: (dialogContext, setDialogState) {
             return AlertDialog(
               backgroundColor: const Color(0xFF1A2233),
-              title: const Text(
-                'Type Automation Value',
-                style: TextStyle(color: Colors.white),
+              title: Text(
+                L10n.translate(dialogContext, 'Type Automation Value'),
+                style: const TextStyle(color: Colors.white),
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -11596,12 +11689,12 @@ class _AutomationLaneState extends State<_AutomationLane> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('Cancel'),
+                  onPressed: () => closeDialog(null),
+                  child: Text(L10n.translate(dialogContext, 'Cancel')),
                 ),
                 FilledButton(
                   onPressed: () => submit(setDialogState),
-                  child: const Text('Set Value'),
+                  child: Text(L10n.translate(dialogContext, 'Set Value')),
                 ),
               ],
             );
@@ -11609,8 +11702,10 @@ class _AutomationLaneState extends State<_AutomationLane> {
         );
       },
     );
-    controller.dispose();
-    focusNode.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      controller.dispose();
+      focusNode.dispose();
+    });
     if (!mounted || typedNormalized == null) return;
     _setPointValue(index, typedNormalized);
   }
@@ -11620,8 +11715,9 @@ class _AutomationLaneState extends State<_AutomationLane> {
     final currentValue = _pointValueLabel(index);
     final canMatchPrevious = _canMatchPreviousPoint(index);
     final canPaste = _canPastePointValue();
-    final previousValue =
-        canMatchPrevious ? _pointValueLabel(index - 1) : 'No left point';
+    final previousValue = canMatchPrevious
+        ? _pointValueLabel(index - 1)
+        : L10n.translate(context, 'No left point');
     final canDelete =
         index > 0 && widget.points.length > 1 && index < widget.points.length;
     await AppHaptics.impact(AppHapticImpact.medium);
@@ -11645,38 +11741,40 @@ class _AutomationLaneState extends State<_AutomationLane> {
                 ),
               ),
               subtitle: Text(
-                'Automation point',
+                L10n.translate(sheetContext, 'Automation point'),
                 style: TextStyle(color: Colors.white.withOpacity(0.62)),
               ),
             ),
             ListTile(
               leading: const Icon(Icons.content_copy_outlined),
-              title: const Text('Copy value'),
+              title: Text(L10n.translate(sheetContext, 'Copy value')),
               subtitle: Text(currentValue),
               onTap: () => Navigator.pop(sheetContext, 'copy'),
             ),
             ListTile(
               enabled: canPaste,
               leading: const Icon(Icons.content_paste_outlined),
-              title: const Text('Paste value'),
+              title: Text(L10n.translate(sheetContext, 'Paste value')),
               subtitle: Text(_pasteSubtitle()),
               onTap:
                   canPaste ? () => Navigator.pop(sheetContext, 'paste') : null,
             ),
             ListTile(
               leading: const Icon(Icons.pin_outlined),
-              title: const Text('Type value'),
+              title: Text(L10n.translate(sheetContext, 'Type value')),
               subtitle: Text(currentValue),
               onTap: () => Navigator.pop(sheetContext, 'type'),
             ),
             ListTile(
               enabled: canMatchPrevious,
               leading: const Icon(Icons.keyboard_double_arrow_left_rounded),
-              title: const Text(
-                'Set to Value of Previous Point',
+              title: Text(
+                L10n.translate(sheetContext, 'Set to Value of Previous Point'),
               ),
               subtitle: Text(
-                canMatchPrevious ? 'Match $previousValue' : previousValue,
+                canMatchPrevious
+                    ? '${L10n.translate(sheetContext, 'Match')} $previousValue'
+                    : previousValue,
               ),
               onTap: canMatchPrevious
                   ? () => Navigator.pop(sheetContext, 'match_previous')
@@ -11685,7 +11783,7 @@ class _AutomationLaneState extends State<_AutomationLane> {
             ListTile(
               enabled: canDelete,
               leading: const Icon(Icons.delete_outline_rounded),
-              title: const Text('Delete point'),
+              title: Text(L10n.translate(sheetContext, 'Delete point')),
               onTap: canDelete
                   ? () => Navigator.pop(sheetContext, 'delete')
                   : null,
@@ -12703,7 +12801,8 @@ class _PrettyStereoSliderState extends State<PrettyStereoSlider> {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text("L", style: TextStyle(color: Colors.white, fontSize: 14)),
+        Text(L10n.translate(context, 'L'),
+            style: const TextStyle(color: Colors.white, fontSize: 14)),
 
         const SizedBox(width: 6),
 
@@ -12748,7 +12847,8 @@ class _PrettyStereoSliderState extends State<PrettyStereoSlider> {
 
         const SizedBox(width: 6),
 
-        Text("R", style: TextStyle(color: Colors.white, fontSize: 14)),
+        Text(L10n.translate(context, 'R'),
+            style: const TextStyle(color: Colors.white, fontSize: 14)),
       ],
     );
   }
@@ -12839,7 +12939,8 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
     return Row(
       children: [
         if (widget.showLabel)
-          Text("Gain:", style: TextStyle(color: Colors.white, fontSize: 14)),
+          Text(L10n.translate(context, 'Gain:'),
+              style: const TextStyle(color: Colors.white, fontSize: 14)),
         if (widget.showLabel) const SizedBox(width: 6),
 
         // ⭐ FIX: Make slider stretch horizontally

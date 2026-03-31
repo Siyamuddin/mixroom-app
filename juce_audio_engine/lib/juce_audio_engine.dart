@@ -567,6 +567,16 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<double> getExportProgress() async {
+    try {
+      final progress = await _ch.invokeMethod<double>('getExportProgress');
+      return (progress ?? 0.0).clamp(0.0, 1.0);
+    } on PlatformException catch (e) {
+      _logError('getExportProgress', e);
+      return 0.0;
+    }
+  }
+
   static Future<String> exportTrack(
     int track,
     String outPath, {
@@ -1557,6 +1567,27 @@ class JuceAudioEngine {
     );
   }
 
+  static Future<Float32List> decodeAudioMono16kForAnalysis(
+    String path, {
+    int maxOutputSamples = 480000,
+  }) async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return decodeAudioMono16k(path);
+    }
+
+    final List<dynamic> raw = await _ch.invokeMethod(
+      'decodeAudioMono16kForAnalysis',
+      {
+        'path': path,
+        'maxOutputSamples': maxOutputSamples,
+      },
+    );
+
+    return Float32List.fromList(
+      raw.map((e) => (e as num).toDouble()).toList(growable: false),
+    );
+  }
+
   static Future<Map<String, double>> analyzeAudioStereo16k(String path) async {
     try {
       final raw = await _ch.invokeMapMethod<String, dynamic>(
@@ -1575,6 +1606,25 @@ class JuceAudioEngine {
       return const {};
     } catch (_) {
       return const {};
+    }
+  }
+
+  static Future<Map<String, dynamic>> analyzeAudioForPrompt(String path) async {
+    try {
+      final raw = await _ch.invokeMapMethod<String, dynamic>(
+        'analyzeAudioForPrompt',
+        {'path': path},
+      );
+      return raw == null
+          ? const <String, dynamic>{}
+          : Map<String, dynamic>.from(raw);
+    } on MissingPluginException {
+      return const <String, dynamic>{};
+    } on PlatformException catch (e) {
+      _logError('analyzeAudioForPrompt', e);
+      return const <String, dynamic>{};
+    } catch (_) {
+      return const <String, dynamic>{};
     }
   }
 
@@ -1710,7 +1760,8 @@ class JuceAudioEngine {
 
   static Future<bool> preferNonBluetoothRecordingInput() async {
     try {
-      final res = await _ch.invokeMethod<bool>('preferNonBluetoothRecordingInput');
+      final res =
+          await _ch.invokeMethod<bool>('preferNonBluetoothRecordingInput');
       return res ?? false;
     } on MissingPluginException {
       return false;

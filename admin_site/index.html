@@ -202,7 +202,11 @@
             </div>
             <section id="summary-section" class="summary-grid"></section>
 
-          <section id="kpi-panel" class="panel hidden">
+          <section id="kpi-panel" class="panel hidden" data-home-section-panel="analytics">
+            <div class="section-loading-state hidden" data-home-section-loading="analytics">
+              <div class="loading-spinner" aria-hidden="true"></div>
+              <p class="loading-copy" data-home-section-loading-label="analytics">Loading product metrics…</p>
+            </div>
             <div class="panel-header">
               <div>
                 <p class="panel-label" data-i18n="panel.kpi.label">KPI Overview</p>
@@ -270,7 +274,11 @@
           </section>
 
           <section class="panel-grid">
-            <article class="panel">
+            <article class="panel" data-home-section-panel="usage">
+              <div class="section-loading-state hidden" data-home-section-loading="usage">
+                <div class="loading-spinner" aria-hidden="true"></div>
+                <p class="loading-copy" data-home-section-loading-label="usage">Loading AI activity…</p>
+              </div>
               <div class="panel-header">
                 <div>
                   <p class="panel-label" data-i18n="panel.aiUsage.label">AI Usage</p>
@@ -300,6 +308,195 @@
                 Sign in to load tier distribution.
               </div>
             </article>
+          </section>
+
+          <section class="panel" data-home-section-panel="observability">
+            <div class="section-loading-state hidden" data-home-section-loading="observability">
+              <div class="loading-spinner" aria-hidden="true"></div>
+              <p class="loading-copy" data-home-section-loading-label="observability">Loading recent AI calls…</p>
+            </div>
+            <div class="panel-header">
+              <div>
+                <p class="panel-label">AI Observability</p>
+                <h2>Prompt traces</h2>
+              </div>
+              <p id="ai-observability-meta" class="panel-meta">
+                Full prompt time is the total user wait. Backend proxy time is one slice inside it.
+              </p>
+            </div>
+            <div id="ai-observability-summary" class="mini-grid"></div>
+            <div id="ai-observability-counts" class="feature-list empty-state">
+              Sign in to load AI observability.
+            </div>
+            <div class="subsection compact-subsection">
+              <div class="subsection-header">
+                <div>
+                  <h3>Recent AI calls</h3>
+                  <p class="subsection-meta">
+                    A small recent sample only. Use show more if you need a few additional rows.
+                  </p>
+                </div>
+              </div>
+              <div class="table-wrap compact-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Call</th>
+                      <th>Outcome</th>
+                      <th>Model / setup</th>
+                      <th>Tool</th>
+                      <th>Backend timing</th>
+                      <th>Started</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ai-observability-traces-body">
+                    <tr>
+                      <td colspan="6" class="table-empty">
+                        Sign in to load AI observability.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <p id="ai-observability-traces-page-meta" class="panel-meta"></p>
+                <div class="search-actions">
+                  <button
+                    id="ai-observability-traces-show-less-button"
+                    class="button button-secondary button-small"
+                    type="button"
+                    data-i18n="action.showLess"
+                  >
+                    Show less
+                  </button>
+                  <button
+                    id="ai-observability-traces-show-more-button"
+                    class="button button-secondary button-small"
+                    type="button"
+                    data-i18n="action.showMore"
+                  >
+                    Show more
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel" data-home-section-panel="users">
+            <div class="section-loading-state hidden" data-home-section-loading="users">
+              <div class="loading-spinner" aria-hidden="true"></div>
+              <p class="loading-copy" data-home-section-loading-label="users">Loading account activity…</p>
+            </div>
+            <div class="panel-header">
+              <div>
+                <p class="panel-label" data-i18n="panel.accountActivity.label">Account Activity</p>
+                <h2 data-i18n="panel.accountActivity.title">Accounts with app data</h2>
+              </div>
+              <p class="panel-meta" data-i18n="panel.accountActivity.meta">
+                Users with subscription or AI usage records.
+              </p>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th data-i18n="table.user">User</th>
+                    <th data-i18n="table.tier">Tier</th>
+                    <th data-i18n="table.status">Status</th>
+                    <th data-i18n="table.aiRequests">AI Requests</th>
+                    <th data-i18n="table.creditsToday">Credits Today</th>
+                    <th data-i18n="table.tokensMonth">Tokens Month</th>
+                    <th data-i18n="table.lastSeen">Last Seen</th>
+                  </tr>
+                </thead>
+                <tbody id="users-table-body">
+                  <tr>
+                    <td colspan="7" class="table-empty" data-i18n="empty.signInUserData">
+                      Sign in to load user data.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="table-footer">
+              <p id="tracked-users-page-meta" class="panel-meta"></p>
+              <div class="search-actions">
+                <button
+                  id="tracked-users-show-less-button"
+                  class="button button-secondary button-small"
+                  type="button"
+                  data-i18n="action.showLess"
+                >
+                  Show less
+                </button>
+                <button
+                  id="tracked-users-show-more-button"
+                  class="button button-secondary button-small"
+                  type="button"
+                  data-i18n="action.showMore"
+                >
+                  Show more
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel" data-home-section-panel="projects">
+            <div class="section-loading-state hidden" data-home-section-loading="projects">
+              <div class="loading-spinner" aria-hidden="true"></div>
+              <p class="loading-copy" data-home-section-loading-label="projects">Loading project activity…</p>
+            </div>
+            <div class="panel-header">
+              <div>
+                <p class="panel-label" data-i18n="panel.projectActivity.label">Project Activity</p>
+                <h2 data-i18n="panel.projectActivity.title">Projects with AI usage</h2>
+              </div>
+              <p class="panel-meta" data-i18n="panel.projectActivity.meta">
+                Project IDs seen in AI usage events.
+              </p>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th data-i18n="table.project">Project</th>
+                    <th data-i18n="table.requests">Requests</th>
+                    <th data-i18n="table.users">Users</th>
+                    <th data-i18n="table.credits">Credits</th>
+                    <th data-i18n="table.tokens">Tokens</th>
+                    <th data-i18n="table.lastActivity">Last Activity</th>
+                  </tr>
+                </thead>
+                <tbody id="projects-table-body">
+                  <tr>
+                    <td colspan="6" class="table-empty" data-i18n="empty.signInProjectData">
+                      Sign in to load project data.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="table-footer">
+              <p id="projects-page-meta" class="panel-meta"></p>
+              <div class="search-actions">
+                <button
+                  id="projects-show-less-button"
+                  class="button button-secondary button-small"
+                  type="button"
+                  data-i18n="action.showLess"
+                >
+                  Show less
+                </button>
+                <button
+                  id="projects-show-more-button"
+                  class="button button-secondary button-small"
+                  type="button"
+                  data-i18n="action.showMore"
+                >
+                  Show more
+                </button>
+              </div>
+            </div>
           </section>
           </section>
 
@@ -434,115 +631,6 @@
                 Select a user to review details and actions.
               </div>
             </article>
-          </section>
-
-          <section class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-label" data-i18n="panel.accountActivity.label">Account Activity</p>
-                <h2 data-i18n="panel.accountActivity.title">Accounts with app data</h2>
-              </div>
-              <p class="panel-meta" data-i18n="panel.accountActivity.meta">
-                Users with subscription or AI usage records.
-              </p>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th data-i18n="table.user">User</th>
-                    <th data-i18n="table.tier">Tier</th>
-                    <th data-i18n="table.status">Status</th>
-                    <th data-i18n="table.aiRequests">AI Requests</th>
-                    <th data-i18n="table.creditsToday">Credits Today</th>
-                    <th data-i18n="table.tokensMonth">Tokens Month</th>
-                    <th data-i18n="table.lastSeen">Last Seen</th>
-                  </tr>
-                </thead>
-                <tbody id="users-table-body">
-                  <tr>
-                    <td colspan="7" class="table-empty" data-i18n="empty.signInUserData">
-                      Sign in to load user data.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="table-footer">
-              <p id="tracked-users-page-meta" class="panel-meta"></p>
-              <div class="search-actions">
-                <button
-                  id="tracked-users-show-less-button"
-                  class="button button-secondary button-small"
-                  type="button"
-                  data-i18n="action.showLess"
-                >
-                  Show less
-                </button>
-                <button
-                  id="tracked-users-show-more-button"
-                  class="button button-secondary button-small"
-                  type="button"
-                  data-i18n="action.showMore"
-                >
-                  Show more
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-label" data-i18n="panel.projectActivity.label">Project Activity</p>
-                <h2 data-i18n="panel.projectActivity.title">Projects with AI usage</h2>
-              </div>
-              <p class="panel-meta" data-i18n="panel.projectActivity.meta">
-                Project IDs seen in AI usage events.
-              </p>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th data-i18n="table.project">Project</th>
-                    <th data-i18n="table.requests">Requests</th>
-                    <th data-i18n="table.users">Users</th>
-                    <th data-i18n="table.credits">Credits</th>
-                    <th data-i18n="table.tokens">Tokens</th>
-                    <th data-i18n="table.lastActivity">Last Activity</th>
-                  </tr>
-                </thead>
-                <tbody id="projects-table-body">
-                  <tr>
-                    <td colspan="6" class="table-empty" data-i18n="empty.signInProjectData">
-                      Sign in to load project data.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="table-footer">
-              <p id="projects-page-meta" class="panel-meta"></p>
-              <div class="search-actions">
-                <button
-                  id="projects-show-less-button"
-                  class="button button-secondary button-small"
-                  type="button"
-                  data-i18n="action.showLess"
-                >
-                  Show less
-                </button>
-                <button
-                  id="projects-show-more-button"
-                  class="button button-secondary button-small"
-                  type="button"
-                  data-i18n="action.showMore"
-                >
-                  Show more
-                </button>
-              </div>
-            </div>
           </section>
           </section>
 
@@ -712,6 +800,85 @@
                 </div>
               </form>
               <p id="ai-prompt-limits-feedback" class="panel-meta"></p>
+            </article>
+
+            <article id="producer-capture-whitelist-panel" class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label" data-i18n="panel.producerCaptureWhitelist.label">
+                    Producer Capture Whitelist
+                  </p>
+                  <h2 data-i18n="panel.producerCaptureWhitelist.title">
+                    Producer capture usernames
+                  </h2>
+                </div>
+                <p
+                  id="producer-capture-whitelist-meta"
+                  class="panel-meta"
+                  data-i18n="panel.producerCaptureWhitelist.meta"
+                >
+                  Usernames allowlisted to see the Producer Capture UI toggle.
+                </p>
+              </div>
+              <div id="producer-capture-whitelist-summary" class="detail-card settings-summary-card">
+                <div class="detail-label" data-i18n="settings.currentProducerCaptureWhitelist">
+                  Current producer capture whitelist
+                </div>
+                <div class="detail-value" data-i18n="empty.signInProducerCaptureWhitelist">
+                  Sign in to load producer capture whitelist settings.
+                </div>
+              </div>
+              <form id="producer-capture-whitelist-form" class="form-stack">
+                <label class="search-input-wrap" for="producer-capture-whitelist-input">
+                  <span class="search-label" data-i18n="settings.producerCaptureWhitelistUsernames">
+                    Usernames (comma or line separated)
+                  </span>
+                  <textarea
+                    id="producer-capture-whitelist-input"
+                    class="text-area"
+                    rows="6"
+                    spellcheck="false"
+                  ></textarea>
+                </label>
+                <p
+                  id="producer-capture-whitelist-editor-note"
+                  class="panel-meta"
+                  data-i18n="settings.editableByAnyAdmin"
+                >
+                  Any admin can edit this list.
+                </p>
+                <label
+                  id="producer-capture-whitelist-confirm-wrap"
+                  class="search-input-wrap"
+                  for="producer-capture-whitelist-confirm-input"
+                >
+                  <span
+                    id="producer-capture-whitelist-confirm-label"
+                    class="search-label"
+                    data-i18n="settings.confirmProducerCaptureWhitelist"
+                  >
+                    Type APPLY PRODUCER WHITELIST to confirm
+                  </span>
+                  <input
+                    id="producer-capture-whitelist-confirm-input"
+                    class="text-input"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </label>
+                <div class="search-actions">
+                  <button
+                    id="producer-capture-whitelist-save-button"
+                    class="button button-secondary"
+                    type="submit"
+                    data-i18n="action.saveProducerCaptureWhitelist"
+                  >
+                    Save producer whitelist
+                  </button>
+                </div>
+              </form>
+              <p id="producer-capture-whitelist-feedback" class="panel-meta"></p>
             </article>
 
             <article id="ai-runtime-panel" class="panel hidden">

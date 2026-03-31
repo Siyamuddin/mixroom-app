@@ -30,6 +30,8 @@ class AnalyticsService with WidgetsBindingObserver {
   String _deviceId = '';
   String? _userId;
   String? _subscriptionTier;
+  String? _musicProfile;
+  String? _lastPersonPropertiesFingerprint;
   String _sessionId = '';
   DateTime? _sessionStartedAt;
   String? _lastScreenName;
@@ -110,6 +112,7 @@ class AnalyticsService with WidgetsBindingObserver {
     if (_postHogReady) {
       try {
         await _posthog.reset();
+        _lastPersonPropertiesFingerprint = null;
       } catch (_) {}
     }
   }
@@ -119,7 +122,11 @@ class AnalyticsService with WidgetsBindingObserver {
     String? email,
     String? name,
   }) async {
-    _userId = userId.trim().isEmpty ? null : userId.trim();
+    final nextUserId = userId.trim().isEmpty ? null : userId.trim();
+    if (_userId != nextUserId) {
+      _lastPersonPropertiesFingerprint = null;
+    }
+    _userId = nextUserId;
     if (!_collectionEnabled) return;
     await _ensurePostHogReady();
     if (!_postHogReady || _userId == null) return;
@@ -135,6 +142,10 @@ class AnalyticsService with WidgetsBindingObserver {
           'environment': environment,
           if ((_subscriptionTier ?? '').trim().isNotEmpty)
             'subscription_tier': _subscriptionTier!,
+          if ((_musicProfile ?? '').trim().isNotEmpty)
+            'music_profile': _musicProfile!,
+          if ((_musicProfile ?? '').trim().isNotEmpty)
+            'user_type': _musicProfile!,
         },
       );
     } catch (_) {}
@@ -143,6 +154,8 @@ class AnalyticsService with WidgetsBindingObserver {
   Future<void> resetUser() async {
     _userId = null;
     _subscriptionTier = null;
+    _musicProfile = null;
+    _lastPersonPropertiesFingerprint = null;
     if (!_postHogReady) return;
     try {
       await _posthog.reset();
@@ -151,7 +164,17 @@ class AnalyticsService with WidgetsBindingObserver {
 
   void setSubscriptionTier(String? tier) {
     final normalized = (tier ?? '').trim();
-    _subscriptionTier = normalized.isEmpty ? null : normalized;
+    final nextTier = normalized.isEmpty ? null : normalized;
+    if (_subscriptionTier == nextTier) return;
+    _subscriptionTier = nextTier;
+    unawaited(_syncPersonProperties());
+  }
+
+  void setMusicProfile(String? musicProfile) {
+    final nextMusicProfile = _normalizeMusicProfile(musicProfile);
+    if (_musicProfile == nextMusicProfile) return;
+    _musicProfile = nextMusicProfile;
+    unawaited(_syncPersonProperties());
   }
 
   Future<void> track(AnalyticsEvent event) async {
@@ -256,6 +279,8 @@ class AnalyticsService with WidgetsBindingObserver {
           WidgetsBinding.instance.platformDispatcher.locale.toLanguageTag(),
         ),
         MapEntry<String, Object?>('subscription_tier', _subscriptionTier),
+        MapEntry<String, Object?>('music_profile', _musicProfile),
+        MapEntry<String, Object?>('user_type', _musicProfile),
         ...eventProperties.entries,
       ].where((entry) {
         final value = entry.value;
@@ -292,5 +317,61 @@ class AnalyticsService with WidgetsBindingObserver {
       sessionId: _sessionId,
       durationMs: durationMs,
     )));
+  }
+
+  String? _normalizeMusicProfile(String? value) {
+    final normalized = (value ?? '').trim().toLowerCase();
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  Future<void> _syncPersonProperties() async {
+    if (!_collectionEnabled) return;
+    await _ensurePostHogReady();
+    if (!_postHogReady || _userId == null) return;
+
+    final properties = _buildPersonProperties();
+    final fingerprint = _fingerprintPersonProperties(
+      userId: _userId!,
+      properties: properties,
+    );
+    if (_lastPersonPropertiesFingerprint == fingerprint) {
+      return;
+    }
+
+    try {
+      await _posthog.setPersonProperties(
+        userPropertiesToSet: properties,
+      );
+      _lastPersonPropertiesFingerprint = fingerprint;
+    } catch (_) {}
+  }
+
+  Map<String, Object> _buildPersonProperties() {
+    return <String, Object>{
+      'platform': platform,
+      'app_version': appVersion,
+      'environment': environment,
+      if ((_subscriptionTier ?? '').trim().isNotEmpty)
+        'subscription_tier': _subscriptionTier!,
+      if ((_musicProfile ?? '').trim().isNotEmpty)
+        'music_profile': _musicProfile!,
+      if ((_musicProfile ?? '').trim().isNotEmpty) 'user_type': _musicProfile!,
+    };
+  }
+
+  String _fingerprintPersonProperties({
+    required String userId,
+    required Map<String, Object> properties,
+  }) {
+    final keys = properties.keys.toList()..sort();
+    final buffer = StringBuffer(userId);
+    for (final key in keys) {
+      buffer
+        ..write('|')
+        ..write(key)
+        ..write('=')
+        ..write(properties[key]);
+    }
+    return buffer.toString();
   }
 }

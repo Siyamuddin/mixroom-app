@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:mixroom/config/legal_config.dart';
+import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/privacy/privacy_preferences.dart';
 import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/helpers/auth_service.dart';
@@ -117,10 +118,14 @@ class AppUserService extends ChangeNotifier {
       }
 
       _current = nextProfile;
+      _syncAnalyticsProfile(_current);
       _lastSyncedAtUtc = DateTime.now().toUtc();
       _lastError = null;
       _isInitialized = true;
       await _writeCachedProfile(user.userId, _current!);
+      if (_current!.hasSeenWelcomeOnboarding) {
+        await _writeWelcomeSeenFlag(user.userId, true);
+      }
     } catch (e) {
       _lastError = e.toString().replaceFirst('Bad state: ', '');
       _isInitialized = true;
@@ -202,6 +207,7 @@ class AppUserService extends ChangeNotifier {
         response.body,
         fallbackUser: auth.signedInUser ?? user,
       );
+      _syncAnalyticsProfile(_current);
       _lastSyncedAtUtc = DateTime.now().toUtc();
       _lastError = null;
       _isInitialized = true;
@@ -296,6 +302,7 @@ class AppUserService extends ChangeNotifier {
       }
 
       _current = _parseProfileResponse(response.body, fallbackUser: user);
+      _syncAnalyticsProfile(_current);
       _lastSyncedAtUtc = DateTime.now().toUtc();
       _lastError = null;
       _isInitialized = true;
@@ -346,6 +353,7 @@ class AppUserService extends ChangeNotifier {
     );
 
     _current = nextProfile;
+    _syncAnalyticsProfile(_current);
     _lastSyncedAtUtc = DateTime.now().toUtc();
     _lastError = null;
     _isInitialized = true;
@@ -396,11 +404,15 @@ class AppUserService extends ChangeNotifier {
     }
 
     _current = _parseProfileResponse(response.body, fallbackUser: user);
+    _syncAnalyticsProfile(_current);
     _lastSyncedAtUtc = DateTime.now().toUtc();
     _lastError = null;
     _isInitialized = true;
     notifyListeners();
     await _writeCachedProfile(user.userId, _current!);
+    if (_current!.hasSeenWelcomeOnboarding) {
+      await _writeWelcomeSeenFlag(user.userId, true);
+    }
   }
 
   Future<void> stageSignupConsents({
@@ -544,6 +556,7 @@ class AppUserService extends ChangeNotifier {
         _boundUserId = null;
         _boundSignature = null;
         _current = null;
+        _syncAnalyticsProfile(null);
         _lastSyncedAtUtc = null;
         _lastError = null;
         _isInitialized = false;
@@ -562,13 +575,19 @@ class AppUserService extends ChangeNotifier {
       _setFallbackFromAuth(user, notify: false);
       _lastSyncedAtUtc = null;
       _lastError = null;
+      // Only a cached or server profile should satisfy the auth gate.
+      // Raw auth-backed fallback data is enough to hydrate fields, but not
+      // enough to decide whether required signup/profile completion is done.
       _isInitialized = false;
       // Reset in-flight signup/auth resolution markers when account context changes.
       _hasPendingSignupProfileSync = false;
       _isResolvingPostSignIn = false;
       notifyListeners();
       unawaited(
-        _loadPendingSignupProfileSyncFlag(user.email)
+        _primeCachedProfile(user)
+            .then(
+              (_) => _loadPendingSignupProfileSyncFlag(user.email),
+            )
             .then((_) => refresh(force: true)),
       );
       return;
@@ -605,6 +624,34 @@ class AppUserService extends ChangeNotifier {
     await prefs.remove(_cacheKey(userId));
   }
 
+  Future<bool> _primeCachedProfile(AuthUserProfile user) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cacheKey(user.userId));
+      if (raw == null || raw.trim().isEmpty) {
+        return false;
+      }
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        return false;
+      }
+      final data = decoded.map((key, value) => MapEntry(key.toString(), value));
+      _current = AppUserSnapshot.fromJson(
+        data,
+        fallbackAuthUser: user,
+      );
+      _syncAnalyticsProfile(_current);
+      _lastSyncedAtUtc = DateTime.now().toUtc();
+      _lastError = null;
+      _isInitialized = true;
+      notifyListeners();
+      return true;
+    } catch (_) {
+      // Ignore cache parse failures and fall back to auth-backed data.
+      return false;
+    }
+  }
+
   Future<void> _writeWelcomeSeenFlag(String userId, bool seen) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_welcomeSeenKey(userId), seen);
@@ -632,6 +679,7 @@ class AppUserService extends ChangeNotifier {
       mergedJson,
       fallbackAuthUser: user,
     );
+    _syncAnalyticsProfile(_current);
     _lastSyncedAtUtc = DateTime.now().toUtc();
     if (notify) {
       notifyListeners();
@@ -808,6 +856,10 @@ class AppUserService extends ChangeNotifier {
     } finally {
       _isSyncingPendingConsent = false;
     }
+  }
+
+  void _syncAnalyticsProfile(AppUserSnapshot? profile) {
+    AnalyticsService.instance.setMusicProfile(profile?.musicProfile);
   }
 
   void _detachAuthListener() {

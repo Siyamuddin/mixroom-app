@@ -24,6 +24,24 @@ def _limit_value(value: Any, *, default: int, maximum: int = 40) -> int:
     return max(1, min(numeric, maximum))
 
 
+def _tool_usage_range_value(value: Any, *, default: str = "30d") -> str:
+    normalized = str(value or default).strip().lower()
+    if normalized in {"7d", "30d", "all"}:
+        return normalized
+    return default
+
+
+def _include_section_value(value: Any, *, default: bool = True) -> bool:
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     started_at = time.perf_counter()
     admin_client_id = (
@@ -84,9 +102,45 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             query.get("project_limit") if isinstance(query, dict) else None,
             default=8,
         )
+        trace_limit = _limit_value(
+            query.get("trace_limit") if isinstance(query, dict) else None,
+            default=6,
+            maximum=24,
+        )
+        include_ai_usage = _include_section_value(
+            query.get("include_ai_usage") if isinstance(query, dict) else None,
+            default=True,
+        )
+        include_product_analytics = _include_section_value(
+            query.get("include_product_analytics") if isinstance(query, dict) else None,
+            default=True,
+        )
+        include_ai_observability = _include_section_value(
+            query.get("include_ai_observability") if isinstance(query, dict) else None,
+            default=True,
+        )
+        include_users = _include_section_value(
+            query.get("include_users") if isinstance(query, dict) else None,
+            default=True,
+        )
+        include_projects = _include_section_value(
+            query.get("include_projects") if isinstance(query, dict) else None,
+            default=True,
+        )
+        tool_usage_range = _tool_usage_range_value(
+            query.get("tool_usage_range") if isinstance(query, dict) else None,
+            default="30d",
+        )
         overview = repo.build_overview(
             user_limit=user_limit,
             project_limit=project_limit,
+            trace_limit=trace_limit,
+            include_ai_usage=include_ai_usage,
+            include_product_analytics=include_product_analytics,
+            include_ai_observability=include_ai_observability,
+            include_users=include_users,
+            include_projects=include_projects,
+            tool_usage_range=tool_usage_range,
         )
         overview["requested_by"] = user_id
         overview["requested_email"] = email

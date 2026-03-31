@@ -100,7 +100,6 @@ Environment variables (set by template and per-stage overrides):
 - `RECONCILIATION_JOBS_TABLE`
 - `PROJECTION_QUEUE_URL`
 - `AWS_REGION`
-- `ENFORCE_SUBSCRIPTIONS`
 - `ALLOW_STUDIO_TIER`
 
 Provider secrets should be stored in Secrets Manager and read by handlers:

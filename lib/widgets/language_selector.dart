@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:provider/provider.dart';
@@ -33,7 +34,15 @@ class LanguageSelector extends StatelessWidget {
           tooltip: L10n.translate(context, 'Language'),
           onSelected: (selectedLocale) =>
               L10n.setLocale(context, selectedLocale),
-          color: const Color(0xFF0F2038),
+          color: kMixroomGlassDropdownMenuColor,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: const Color.fromRGBO(0, 0, 0, 0.22),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(
+              color: borderColor ?? Colors.white.withValues(alpha: 0.16),
+            ),
+          ),
           itemBuilder: (context) {
             return L10n.supportedLocales.map((supportedLocale) {
               final itemCode = supportedLocale.languageCode.toUpperCase();
@@ -60,10 +69,10 @@ class LanguageSelector extends StatelessWidget {
           child: Container(
             padding: padding,
             decoration: BoxDecoration(
-              color: backgroundColor ?? Colors.white.withOpacity(0.10),
+              color: backgroundColor ?? Colors.white.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(borderRadius),
               border: Border.all(
-                color: borderColor ?? Colors.white.withOpacity(0.16),
+                color: borderColor ?? Colors.white.withValues(alpha: 0.16),
               ),
             ),
             child: Row(
@@ -74,7 +83,7 @@ class LanguageSelector extends StatelessWidget {
                 Text(
                   '|',
                   style: TextStyle(
-                    color: textColor.withOpacity(0.6),
+                    color: textColor.withValues(alpha: 0.6),
                     fontSize: fontSize,
                     fontWeight: FontWeight.w700,
                   ),

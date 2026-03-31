@@ -38,15 +38,44 @@ class AiPromptRateLimitWindow {
   }
 }
 
+class AiPromptBankStatus {
+  final int remaining;
+  final bool consumedFirst;
+
+  const AiPromptBankStatus({
+    required this.remaining,
+    required this.consumedFirst,
+  });
+
+  bool get available => remaining > 0;
+
+  factory AiPromptBankStatus.fromJson(Map<String, dynamic>? json) {
+    final data = json ?? const <String, dynamic>{};
+    return AiPromptBankStatus(
+      remaining: (data['remaining'] as num?)?.toInt() ?? 0,
+      consumedFirst: data['consumed_first'] != false,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'remaining': remaining,
+      'consumed_first': consumedFirst,
+    };
+  }
+}
+
 class AiPromptRateLimitStatus {
   final AiPromptRateLimitWindow daily;
   final AiPromptRateLimitWindow weekly;
+  final AiPromptBankStatus extraPromptBank;
   final bool canSubmit;
   final String blockedBy;
 
   const AiPromptRateLimitStatus({
     required this.daily,
     required this.weekly,
+    required this.extraPromptBank,
     required this.canSubmit,
     required this.blockedBy,
   });
@@ -73,6 +102,9 @@ class AiPromptRateLimitStatus {
       weekly: AiPromptRateLimitWindow.fromJson(
         (data['weekly'] as Map?)?.cast<String, dynamic>(),
       ),
+      extraPromptBank: AiPromptBankStatus.fromJson(
+        (data['extra_prompt_bank'] as Map?)?.cast<String, dynamic>(),
+      ),
       canSubmit: data['can_submit'] != false,
       blockedBy: data['blocked_by']?.toString().trim() ?? '',
     );
@@ -82,6 +114,7 @@ class AiPromptRateLimitStatus {
     return {
       'daily': daily.toJson(),
       'weekly': weekly.toJson(),
+      'extra_prompt_bank': extraPromptBank.toJson(),
       'can_submit': canSubmit,
       'blocked_by': blockedBy,
     };
@@ -1356,6 +1389,7 @@ Safety and style
     required String userText,
     required String projectSnapshot,
     required String selectionSnapshot,
+    String? promptTraceId,
     String? projectId,
     String? aiFeature,
     MixingResult? pendingMix,
@@ -1372,6 +1406,8 @@ Safety and style
       'project_snapshot': projectSnapshot,
       if (selectionSnapshot.trim().isNotEmpty)
         'selection_snapshot': selectionSnapshot,
+      if ((promptTraceId ?? '').trim().isNotEmpty)
+        'prompt_trace_id': promptTraceId!.trim(),
       if ((projectId ?? '').trim().isNotEmpty) 'project_id': projectId,
       if (normalizedAiFeature.isNotEmpty) 'ai_feature': normalizedAiFeature,
       if (pendingMix != null) 'pending_mix': pendingMix.toJson(),
@@ -1423,6 +1459,7 @@ Safety and style
     required String userText,
     required String projectSnapshot,
     required String selectionSnapshot,
+    required String? promptTraceId,
     required String? projectId,
     required String? aiFeature,
     required MixingResult? pendingMix,
@@ -1438,6 +1475,7 @@ Safety and style
         userText: userText,
         projectSnapshot: projectSnapshot,
         selectionSnapshot: selectionSnapshot,
+        promptTraceId: promptTraceId,
         projectId: projectId,
         aiFeature: aiFeature,
         pendingMix: pendingMix,
@@ -1529,7 +1567,42 @@ Safety and style
         meta['cached_prompt_tokens'] = cachedPromptTokens;
       }
     }
+    final observability = payload['observability'];
+    if (observability is Map<String, dynamic>) {
+      meta['observability'] = observability;
+    } else if (observability is Map) {
+      meta['observability'] = observability.cast<String, dynamic>();
+    }
+    final responseId = payload['id']?.toString().trim() ?? '';
+    final responseModel = payload['model']?.toString().trim() ?? '';
+    if (responseId.isNotEmpty || responseModel.isNotEmpty) {
+      meta['observability'] = <String, dynamic>{
+        if (meta['observability'] is Map<String, dynamic>)
+          ...(meta['observability'] as Map<String, dynamic>),
+        if (meta['observability'] is Map)
+          ...(meta['observability'] as Map).cast<String, dynamic>(),
+        if (responseId.isNotEmpty) 'provider_response_id': responseId,
+        if (responseModel.isNotEmpty) 'effective_model': responseModel,
+      };
+    }
     return meta;
+  }
+
+  Map<String, dynamic> _mergeMetaObservability(
+    Map<String, dynamic>? meta,
+    Map<String, dynamic> localObservability,
+  ) {
+    final merged = <String, dynamic>{
+      if (meta != null) ...meta,
+    };
+    final existingObservability = merged['observability'];
+    final observability = <String, dynamic>{
+      if (existingObservability is Map<String, dynamic>) ...existingObservability,
+      if (existingObservability is Map) ...existingObservability.cast<String, dynamic>(),
+      ...localObservability,
+    };
+    merged['observability'] = observability;
+    return merged;
   }
 
   int _cachedPromptTokensFromUsage(Map<String, dynamic> usage) {
@@ -1917,10 +1990,13 @@ Safety and style
     required String userText,
     required String projectSnapshot,
     String selectionSnapshot = '',
+    String? promptTraceId,
     String? projectId,
     String? aiFeature,
     MixingResult? pendingMix,
   }) async {
+    final requestStopwatch = Stopwatch();
+    final parseStopwatch = Stopwatch();
     late http.Response response;
     try {
       if (_isProxyEnabled) {
@@ -1932,16 +2008,19 @@ Safety and style
           );
         }
 
+        requestStopwatch.start();
         response = await _postProxyJson(
           token: token,
           conversation: conversation,
           userText: userText,
           projectSnapshot: projectSnapshot,
           selectionSnapshot: selectionSnapshot,
+          promptTraceId: promptTraceId,
           projectId: projectId,
           aiFeature: aiFeature,
           pendingMix: pendingMix,
         );
+        requestStopwatch.stop();
       } else if (_canUseDirectOpenAi) {
         final inputMessages = _buildInputMessages(
           conversation: conversation,
@@ -1951,6 +2030,7 @@ Safety and style
           pendingMix: pendingMix,
         );
 
+        requestStopwatch.start();
         response = await _postJson(
           uri: Uri.parse(_apiUrl),
           headers: {
@@ -1962,6 +2042,7 @@ Safety and style
             aiFeature: aiFeature,
           ),
         );
+        requestStopwatch.stop();
       } else {
         return LlmResult.text(
           'AI is not configured. Launch with --dart-define=LLM_PROXY_API_BASE_URL=... or --dart-define=OPENAI_API_KEY=... --dart-define=OPENAI_MODEL=...',
@@ -1975,10 +2056,28 @@ Safety and style
       );
     }
 
+    parseStopwatch.start();
     var payload = _decodeJsonObject(response.body);
     var responseMeta = _buildResponseMeta(payload);
+    responseMeta = _mergeMetaObservability(responseMeta, <String, dynamic>{
+      if ((promptTraceId ?? '').trim().isNotEmpty)
+        'prompt_trace_id': promptTraceId!.trim(),
+      'proxy_roundtrip_ms': requestStopwatch.elapsedMilliseconds,
+      'http_status_code': response.statusCode,
+      if (!_isProxyEnabled && _canUseDirectOpenAi) ...<String, dynamic>{
+        'provider': 'openai',
+        'effective_model': model.trim(),
+      },
+    });
     var promptRateLimit = _parsePromptRateLimitStatus(
       payload?['prompt_rate_limit'],
+    );
+    parseStopwatch.stop();
+    responseMeta = _mergeMetaObservability(
+      responseMeta,
+      <String, dynamic>{
+        'response_parse_ms': parseStopwatch.elapsedMilliseconds,
+      },
     );
 
     if (response.statusCode != 200) {
@@ -2004,20 +2103,44 @@ Safety and style
             final refreshedToken =
                 await _resolveProxyAuthToken(forceRefresh: true);
             if (refreshedToken != null && refreshedToken.isNotEmpty) {
+              requestStopwatch
+                ..reset()
+                ..start();
               response = await _postProxyJson(
                 token: refreshedToken,
                 conversation: conversation,
                 userText: userText,
                 projectSnapshot: projectSnapshot,
                 selectionSnapshot: selectionSnapshot,
+                promptTraceId: promptTraceId,
                 projectId: projectId,
                 aiFeature: aiFeature,
                 pendingMix: pendingMix,
               );
+              requestStopwatch.stop();
+              parseStopwatch
+                ..reset()
+                ..start();
               payload = _decodeJsonObject(response.body);
               responseMeta = _buildResponseMeta(payload);
+              responseMeta = _mergeMetaObservability(
+                responseMeta,
+                <String, dynamic>{
+                  if ((promptTraceId ?? '').trim().isNotEmpty)
+                    'prompt_trace_id': promptTraceId!.trim(),
+                  'proxy_roundtrip_ms': requestStopwatch.elapsedMilliseconds,
+                  'http_status_code': response.statusCode,
+                },
+              );
               promptRateLimit = _parsePromptRateLimitStatus(
                 payload?['prompt_rate_limit'],
+              );
+              parseStopwatch.stop();
+              responseMeta = _mergeMetaObservability(
+                responseMeta,
+                <String, dynamic>{
+                  'response_parse_ms': parseStopwatch.elapsedMilliseconds,
+                },
               );
               if (response.statusCode == 200) {
                 // Continue into the normal response parsing below.
@@ -2071,7 +2194,6 @@ Safety and style
         );
       }
     }
-
     final json = payload ?? const <String, dynamic>{};
     final outputs = (json['output'] as List<dynamic>? ?? const []);
 

@@ -4,18 +4,24 @@ import 'package:flutter/material.dart';
 import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/helpers/app_popup.dart';
+import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
+import 'package:mixroom/helpers/remote_announcement_manager.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
+import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/screens/account.dart';
 import 'package:mixroom/screens/audio_editor.dart';
 import 'package:mixroom/screens/projects.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
+import 'package:mixroom/widgets/remote_announcement_widgets.dart';
+import 'package:mixroom/widgets/remote_welcome_onboarding_screen.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SignedInShell extends StatefulWidget {
   const SignedInShell({super.key});
@@ -25,10 +31,34 @@ class SignedInShell extends StatefulWidget {
 }
 
 class _SignedInShellState extends State<SignedInShell> {
+  static const String _welcomeCampaignVersion = 'figma_onboarding_v1';
+  static const String _welcomeMediaType = 'local_4step';
+  static const String _welcomeMediaVersion = '2026-03-30';
+
   MixroomMainTab _selectedTab = MixroomMainTab.home;
   MixroomMainTab? _lastTrackedTab;
   bool _showAddMenu = false;
   bool _creatingProject = false;
+  final RemoteAnnouncementManager _remoteAnnouncementManager =
+      RemoteAnnouncementManager();
+  bool _welcomeCheckStarted = false;
+  bool _welcomeDialogOpen = false;
+  RemoteAnnouncement? _activeAnnouncement;
+  bool _announcementModalOpen = false;
+  String? _trackedAnnouncementBannerVersion;
+  AppUserService? _welcomeAppUserService;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final appUser = context.read<AppUserService>();
+    if (identical(_welcomeAppUserService, appUser)) {
+      return;
+    }
+    _welcomeAppUserService?.removeListener(_handleAppUserChanged);
+    _welcomeAppUserService = appUser;
+    appUser.addListener(_handleAppUserChanged);
+  }
 
   @override
   void initState() {
@@ -36,6 +66,261 @@ class _SignedInShellState extends State<SignedInShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _trackSelectedTab();
+      unawaited(_initializeRemoteEntryContent());
+    });
+  }
+
+  @override
+  void dispose() {
+    _welcomeAppUserService?.removeListener(_handleAppUserChanged);
+    super.dispose();
+  }
+
+  void _handleAppUserChanged() {
+    if (!mounted || _welcomeDialogOpen || _announcementModalOpen) {
+      return;
+    }
+    unawaited(_initializeRemoteEntryContent());
+  }
+
+  Future<void> _initializeRemoteEntryContent() async {
+    await _maybePresentRemoteWelcome();
+    if (!mounted) return;
+    await _refreshRemoteAnnouncementState(presentModal: true);
+  }
+
+  Future<void> _maybePresentRemoteWelcome() async {
+    if (_welcomeCheckStarted || _welcomeDialogOpen) return;
+
+    final appUser = context.read<AppUserService>();
+    final current = appUser.current;
+    if (current == null) {
+      return;
+    }
+
+    final userId = current.userId;
+    final hasSeenLocally =
+        await appUser.hasSeenWelcomeOnboardingLocally(userId);
+    if (!mounted) return;
+
+    final refreshed = appUser.current;
+    if (refreshed == null || refreshed.userId != userId) {
+      return;
+    }
+
+    if (refreshed.hasSeenWelcomeOnboarding || hasSeenLocally) {
+      if (hasSeenLocally && !refreshed.hasSeenWelcomeOnboarding) {
+        await appUser.stageWelcomeOnboardingSeen();
+        unawaited(
+          appUser.syncWelcomeOnboardingSeen().catchError((_) {}),
+        );
+      }
+      return;
+    }
+    _welcomeCheckStarted = true;
+
+    _welcomeDialogOpen = true;
+    unawaited(
+      AnalyticsService.instance.track(
+        AnalyticsEvents.welcomeOnboardingShown(
+          campaignVersion: _welcomeCampaignVersion,
+          mediaType: _welcomeMediaType,
+          mediaVersion: _welcomeMediaVersion,
+        ),
+      ),
+    );
+
+    final action =
+        await Navigator.of(context, rootNavigator: true).push<String>(
+      PageRouteBuilder<String>(
+        opaque: true,
+        barrierDismissible: false,
+        pageBuilder: (_, __, ___) => RemoteWelcomeOnboardingScreen(
+          onCompleted: () =>
+              Navigator.of(context, rootNavigator: true).pop('primary'),
+        ),
+        transitionsBuilder: (_, animation, __, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+      ),
+    );
+    _welcomeDialogOpen = false;
+    if (!mounted || action != 'primary') {
+      return;
+    }
+
+    unawaited(
+      AnalyticsService.instance.track(
+        AnalyticsEvents.welcomeOnboardingCompleted(
+          campaignVersion: _welcomeCampaignVersion,
+          mediaType: _welcomeMediaType,
+          mediaVersion: _welcomeMediaVersion,
+          action: 'primary',
+        ),
+      ),
+    );
+    await appUser.stageWelcomeOnboardingSeen();
+    unawaited(
+      appUser.syncWelcomeOnboardingSeen().catchError((_) {}),
+    );
+  }
+
+  Future<void> _refreshRemoteAnnouncementState({
+    bool presentModal = false,
+  }) async {
+    if (_welcomeDialogOpen) return;
+    final appUser = context.read<AppUserService>();
+    final current = appUser.current;
+    if (current == null) {
+      return;
+    }
+
+    await _remoteAnnouncementManager.refreshInBackground();
+    if (!mounted) return;
+    final announcement =
+        await _remoteAnnouncementManager.installedAnnouncement();
+    if (!mounted) return;
+
+    if (announcement == null ||
+        !_remoteAnnouncementManager.isEligibleForUser(
+          announcement: announcement,
+          accountCreatedAtUtc: current.createdAt.toUtc(),
+        )) {
+      if (_activeAnnouncement != null) {
+        setState(() {
+          _activeAnnouncement = null;
+          _trackedAnnouncementBannerVersion = null;
+        });
+      }
+      return;
+    }
+
+    final showBanner =
+        await _remoteAnnouncementManager.shouldShowBanner(announcement);
+    final showModal = presentModal
+        ? await _remoteAnnouncementManager.shouldShowModal(announcement)
+        : false;
+    if (!mounted) return;
+
+    if (!showBanner && !showModal) {
+      if (_activeAnnouncement != null) {
+        setState(() {
+          _activeAnnouncement = null;
+          _trackedAnnouncementBannerVersion = null;
+        });
+      }
+      return;
+    }
+
+    setState(() {
+      _activeAnnouncement = announcement;
+      if (!showBanner) {
+        _trackedAnnouncementBannerVersion = null;
+      }
+    });
+
+    if (showBanner &&
+        _trackedAnnouncementBannerVersion != announcement.announcementVersion) {
+      _trackedAnnouncementBannerVersion = announcement.announcementVersion;
+      _remoteAnnouncementManager.trackShown(
+        announcement: announcement,
+        presentationMode: 'banner',
+      );
+    }
+
+    if (showModal) {
+      await _presentRemoteAnnouncementModal(announcement);
+    }
+  }
+
+  Future<void> _presentRemoteAnnouncementModal(
+    RemoteAnnouncement announcement,
+  ) async {
+    if (_announcementModalOpen || _welcomeDialogOpen || !mounted) {
+      return;
+    }
+    _announcementModalOpen = true;
+    await _remoteAnnouncementManager.markModalSeen(announcement);
+    if (!mounted) {
+      _announcementModalOpen = false;
+      return;
+    }
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    _remoteAnnouncementManager.trackShown(
+      announcement: announcement,
+      presentationMode: 'modal',
+    );
+    final action = await showDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => RemoteAnnouncementDialog(
+        announcement: announcement,
+        onPrimaryPressed: () => rootNavigator.pop('primary'),
+        onSecondaryPressed: () => rootNavigator.pop('secondary'),
+      ),
+    );
+    _announcementModalOpen = false;
+    if (!mounted) return;
+    await _handleAnnouncementAction(
+      announcement: announcement,
+      action: action ?? 'dismissed',
+    );
+  }
+
+  Future<void> _handleAnnouncementAction({
+    required RemoteAnnouncement announcement,
+    required String action,
+  }) async {
+    if (action == 'primary') {
+      final url = announcement.primaryActionUrl.trim();
+      if (url.isNotEmpty) {
+        final uri = Uri.tryParse(url);
+        if (uri != null) {
+          final launched = await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication,
+          );
+          if (!launched) {
+            if (mounted) {
+              showAppSnackBar(
+                context,
+                L10n.translate(context, 'Unable to open link right now.'),
+              );
+            }
+            await _remoteAnnouncementManager.markDismissed(
+              announcement: announcement,
+              action: 'primary_launch_failed',
+              errorCode: 'launch_failed',
+            );
+          } else {
+            await _remoteAnnouncementManager.markDismissed(
+              announcement: announcement,
+              action: 'primary',
+            );
+          }
+        } else {
+          await _remoteAnnouncementManager.markDismissed(
+            announcement: announcement,
+            action: 'primary_invalid_url',
+            errorCode: 'invalid_url',
+          );
+        }
+      } else {
+        await _remoteAnnouncementManager.markDismissed(
+          announcement: announcement,
+          action: 'primary',
+        );
+      }
+    } else {
+      await _remoteAnnouncementManager.markDismissed(
+        announcement: announcement,
+        action: action,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _activeAnnouncement = null;
+      _trackedAnnouncementBannerVersion = null;
     });
   }
 
@@ -143,6 +428,7 @@ class _SignedInShellState extends State<SignedInShell> {
           ),
         ),
       );
+      ProjectManager.notifyProjectLibraryChanged();
     } finally {
       _creatingProject = false;
       if (mounted) {
@@ -177,12 +463,41 @@ class _SignedInShellState extends State<SignedInShell> {
 
   @override
   Widget build(BuildContext context) {
+    context.watch<LocaleProvider>();
     return Scaffold(
       resizeToAvoidBottomInset: false,
       backgroundColor: const Color(0xFF090909),
       body: Stack(
         children: [
           Positioned.fill(child: _buildPage(_selectedTab)),
+          if (_activeAnnouncement != null && _activeAnnouncement!.showsBanner)
+            Positioned(
+              left: 18,
+              right: 18,
+              top: MediaQuery.of(context).padding.top + 10,
+              child: SafeArea(
+                bottom: false,
+                child: RemoteAnnouncementBanner(
+                  announcement: _activeAnnouncement!,
+                  onPrimaryTap: () {
+                    unawaited(
+                      _handleAnnouncementAction(
+                        announcement: _activeAnnouncement!,
+                        action: 'primary',
+                      ),
+                    );
+                  },
+                  onDismissTap: () {
+                    unawaited(
+                      _handleAnnouncementAction(
+                        announcement: _activeAnnouncement!,
+                        action: 'dismissed',
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
           Positioned(
             left: 0,
             right: 0,
@@ -254,6 +569,9 @@ class _HomeTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final bottomPadding = mixroomShellBottomPadding(context) +
+        (keyboardInset > 0 ? keyboardInset + 16 : 0);
     return Stack(
       children: [
         const Positioned.fill(child: MixroomShellBackground()),
@@ -262,16 +580,18 @@ class _HomeTab extends StatelessWidget {
           child: Align(
             alignment: Alignment.topCenter,
             child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: EdgeInsets.fromLTRB(
                 27,
                 0,
                 27,
-                mixroomShellBottomPadding(context),
+                bottomPadding,
               ),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 348),
                 child: MixroomInlineFeedbackComposer(
                   onSubmit: onSubmitFeedback,
+                  showBetaNotice: true,
                 ),
               ),
             ),

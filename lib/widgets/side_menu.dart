@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/screens/home.dart';
 import 'package:mixroom/helpers/app_popup.dart';
+import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:mixroom/l10n/l10n.dart';
@@ -134,6 +135,7 @@ Widget _buildLanguageSelector(BuildContext context) {
       value: Provider.of<LocaleProvider>(context).locale ??
           L10n.getDeviceLocale(context),
       isExpanded: true,
+      dropdownColor: kMixroomGlassDropdownMenuColor,
       items: L10n.supportedLocales.map((locale) {
         return DropdownMenuItem(
           value: locale,

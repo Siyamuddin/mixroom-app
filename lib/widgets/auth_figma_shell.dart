@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:provider/provider.dart';
@@ -104,10 +105,10 @@ class MixroomLocaleSelector extends StatelessWidget {
               L10n.setLocale(context, selectedLocale),
           position: PopupMenuPosition.under,
           offset: const Offset(0, 14),
-          color: const Color(0xFF162A46),
+          color: kMixroomGlassDropdownMenuColor,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
-          shadowColor: const Color.fromRGBO(0, 0, 0, 0.28),
+          shadowColor: const Color.fromRGBO(0, 0, 0, 0.22),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
             side: const BorderSide(
@@ -131,6 +132,7 @@ class MixroomLocaleSelector extends StatelessWidget {
                   children: [
                     _MixroomCircularGlassButton(
                       size: 40,
+                      showShadow: false,
                       icon: SvgPicture.asset(
                         _localeFlagAsset(supportedLocale),
                         width: 21,
@@ -173,6 +175,7 @@ class MixroomLocaleSelector extends StatelessWidget {
               const SizedBox(width: 10),
               _MixroomCircularGlassButton(
                 size: 48,
+                showShadow: false,
                 icon: SvgPicture.asset(
                   _localeFlagAsset(locale),
                   width: 25,
@@ -988,10 +991,12 @@ class _MixroomCircularGlassButton extends StatelessWidget {
   const _MixroomCircularGlassButton({
     required this.size,
     required this.icon,
+    this.showShadow = true,
   });
 
   final double size;
   final Widget icon;
+  final bool showShadow;
 
   @override
   Widget build(BuildContext context) {
@@ -1010,13 +1015,15 @@ class _MixroomCircularGlassButton extends StatelessWidget {
             ],
             stops: [0.56, 1.0],
           ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color.fromRGBO(0, 0, 0, 0.25),
-              blurRadius: 15,
-              spreadRadius: 8,
-            ),
-          ],
+          boxShadow: showShadow
+              ? const [
+                  BoxShadow(
+                    color: Color.fromRGBO(0, 0, 0, 0.25),
+                    blurRadius: 15,
+                    spreadRadius: 8,
+                  ),
+                ]
+              : null,
         ),
         child: Center(child: icon),
       ),

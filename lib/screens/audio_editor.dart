@@ -12,6 +12,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
@@ -21,6 +22,7 @@ import 'package:mixroom/helpers/automation_clip_overlap.dart';
 import 'package:mixroom/helpers/automation_target_labels.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/helpers/halo.dart';
+import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
@@ -61,9 +63,11 @@ import 'package:mixroom/helpers/export_save_dialog.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/config/llm_config.dart';
+import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
+import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -79,7 +83,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
-import 'package:mixroom/screens/home.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -119,6 +122,12 @@ const String kMixroomDawTopShareIconAsset = 'assets/daw/top_share_icon.png';
 const String kMixroomDawTransportWaveIconAsset =
     'assets/daw/transport_wave_icon.png';
 const String kMixroomDawChatBarIconAsset = 'assets/daw/chat_bar_icon.svg';
+const String kMixroomExportProgressBgAsset =
+    'assets/daw/export_progress_bg.png';
+const Set<String> kDefaultProducerCaptureUsernameAllowlist = <String>{
+  'lavitababy1004',
+  'andrewtest',
+};
 
 const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
   {
@@ -281,20 +290,30 @@ const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
 ];
 
 const Set<String> kReleaseEssentialInstrumentIds = <String>{
-  'mixroom.drum_acoustic_easy',
+  // Beta-safe subset: only sampled presets with deterministic SFZ-backed init.
   'mixroom.drum_808_starter',
-  'mixroom.velvet_ep',
-  'mixroom.fm_keys',
-  'mixroom.vintage_strings',
-  'mixroom.horn_stack',
-  'mixroom.neon_lead',
-  'mixroom.reese_bass',
-  'mixroom.mellow_sub',
+  // Re-enabled plucks that were reported usable in beta testing.
+  'mixroom.gentle_pluck',
+  'mixroom.air_pluck',
+  'mixroom.glass_pluck',
   'sfz.vsco.mixroom_acoustic_drum_kit',
   'sfz.vsco.mixroom_dry_drum_kit',
+  'sfz.vsco.piccolo_sus',
+  'sfz.vsco.organ_quiet',
   'sfz.vsco.organ_loud',
   'sfz.vsco.violin_ens_pizz',
   'sfz.vsco.trumpet_stac',
+  'sfz.vsco.tuba_stac',
+  'sfz.vsco.flute_stac',
+  'sfz.vsco.clarinet_stac',
+  'sfz.vsco.marimba',
+  'sfz.vsco.glockenspiel',
+};
+
+const Set<String> kEmergencyBetaInstrumentIds = <String>{
+  'mixroom.gentle_pluck',
+  'mixroom.air_pluck',
+  'mixroom.glass_pluck',
 };
 
 const Map<String, String> kLegacySfzInstrumentAliases = {
@@ -3334,22 +3353,24 @@ class _TopPopupLayout {
 
 class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     with WidgetsBindingObserver {
+  static const bool _kForceRenderedMidiPlaybackForBeta = true;
+  static const bool _kAllowSampledNativeRenderFallbackForBeta = false;
   static const Key _editorScaffoldKey = Key('audio_editor_screen');
   static const Key _editorBackButtonKey = Key('audio_editor_back_button');
-  static final GlobalKey _projectSettingsButtonKey =
+  final GlobalKey _projectSettingsButtonKey =
       GlobalKey(debugLabel: 'audio_editor_project_settings_button');
-  static final GlobalKey _tempoButtonKey =
+  final GlobalKey _tempoButtonKey =
       GlobalKey(debugLabel: 'audio_editor_tempo_button');
-  static final GlobalKey _masterPluginsButtonKey =
+  final GlobalKey _masterPluginsButtonKey =
       GlobalKey(debugLabel: 'audio_editor_master_plugins_button');
-  static final GlobalKey _toolbarPillKey =
+  final GlobalKey _toolbarPillKey =
       GlobalKey(debugLabel: 'audio_editor_toolbar_pill');
   static const Key _exportButtonKey = Key('audio_editor_export_button');
-  static final GlobalKey _masterRackKey =
+  final GlobalKey _masterRackKey =
       GlobalKey(debugLabel: 'audio_editor_master_rack');
-  static final GlobalKey _projectSettingsDialogKey =
+  final GlobalKey _projectSettingsDialogKey =
       GlobalKey(debugLabel: 'project_settings_dialog');
-  static final GlobalKey _tempoRollDownPanelKey =
+  final GlobalKey _tempoRollDownPanelKey =
       GlobalKey(debugLabel: 'audio_editor_tempo_roll_down_panel');
   static const Key _projectSettingsNameFieldKey =
       Key('project_settings_name_field');
@@ -3360,17 +3381,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const Key _projectSettingsCloseButtonKey =
       Key('project_settings_close_button');
   static const double _kTransportBarHeight = 88.0;
+  static const double _kIosSnackBarExtraLift = 16.0;
   static const double _kChatBarStackHeight = 68.0;
   static const double _kChatHistoryHeight = 380.0;
   static const double _kChatHistoryBottomGap = 20.0;
-  static const double _kChatChromeOpacity = 0.30;
+  static const double _kChatChromeOpacity = 0.32;
   static const double _kChatBarFixedHeight = 48.0;
+  static const LinearGradient _kChatBarGradient = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    stops: <double>[0.5625, 1.0],
+    colors: <Color>[
+      Color.fromRGBO(232, 232, 232, 0.46),
+      Color.fromRGBO(190, 196, 202, 0.44),
+    ],
+  );
   double get _chatHistoryBottomGap =>
       Platform.isIOS ? 12.0 : _kChatHistoryBottomGap;
   static const double _kSamplePanelCollapsedTopFactor = 0.34;
   static const double _kSamplePanelExpandedTop = 68.0;
   static const double _kSamplePanelBottomGap = 12.0;
-  static const double _kAddActionsPanelWidth = 312.0;
+  static const double _kAndroidOverlayPanelLift = 4.0;
+  static const double _kAddActionsPanelWidth = 288.0;
+  static const double _kOverlayPanelHorizontalInset = 8.0;
   static const double _kProducerBannerHeightEstimate = 62.0;
   static const double _kTopPopupHorizontalMargin = 11.0;
   static const Set<String> _kSampleAudioExtensions = <String>{
@@ -3487,7 +3520,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const Duration _kTransportPollInterval = Duration(milliseconds: 50);
   static const Duration _kTransportPlayStartSyncGrace =
       Duration(milliseconds: 180);
-  static const Duration _kTransportUiNotifyInterval = Duration.zero;
+  static const Duration _kTransportUiNotifyInterval =
+      Duration(milliseconds: 10);
   static const Duration _kTransportMaxExtrapolation =
       Duration(milliseconds: 120);
   static const Duration _kFxPlaybackRefreshInterval =
@@ -3532,7 +3566,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     resampleQuality: _ExportResampleQuality.best,
   );
   _AudioExportSettings? _activeAudioExportSettings;
+  static const List<String> _kOneButtonMixProfiles = <String>[
+    'Mixroom Producer',
+  ];
+  static const Color _kOneButtonMixAccentColor =
+      Color.fromRGBO(0, 149, 255, 0.60);
   String _selectedOneButtonMixProfile = 'Mixroom Producer';
+
+  String _localizedOneButtonMixProfile(BuildContext context, String profile) {
+    switch (profile) {
+      case 'Mixroom Producer':
+        return L10n.translate(context, 'Mixroom Producer');
+      default:
+        return profile;
+    }
+  }
 
   List<int> _exportSampleRatesForFormat(_ExportAudioFormat format) {
     return AudioExportPlan.uiSampleRatesForFormat(format.name);
@@ -3873,6 +3921,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String _projectSettingsDraftName = '';
   bool _tempoSyncInFlight = false;
   bool _tempoSyncQueued = false;
+  late final FixedExtentScrollController _tempoPickerController;
 
   List<MediaDeviceInfo> _inputs = [];
   List<MediaDeviceInfo> _outputs = [];
@@ -3925,8 +3974,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   late final MixingMagnitudePredictor _magnitudePredictor;
   Future<void>? _aiModelsWarmupFuture;
   late final ProducerDataCollector _producerCollector;
+  final http.Client _producerCaptureAccessHttpClient = http.Client();
   bool _producerDataMode = false;
   bool _showProducerCaptureUi = false;
+  bool _producerCaptureUiAllowlisted = false;
+  String _producerCaptureAllowlistUsername = '';
   bool _producerUiBusy = false;
   _ProducerPromptLanguage _producerPromptLanguage =
       _ProducerPromptLanguage.korean;
@@ -3938,7 +3990,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _producerCapturePanelMinimized = true;
   bool _producerGuidedPromptMinimized = false;
   late final ChatController _chatController;
+  final ScrollController _chatListScrollController = ScrollController();
   Timer? _chatHistoryPersistTimer;
+  bool _chatHistoryPruneScheduled = false;
+  bool _chatHistoryPruneInFlight = false;
   Timer? _copiedChatMessageTimer;
   String? _copiedChatMessageId;
   AiPromptRateLimitStatus? _promptRateLimitStatus;
@@ -3947,6 +4002,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   void Function(int row) _refreshRowFx = _noopRefreshRowFx;
   void Function(int row) _refreshRowFxPlayback = _noopRefreshRowFx;
   bool _isThinking = false;
+  bool _chatScrollHintEnabled = false;
   late final MixChangeHighlighter _mixHighlighter = MixChangeHighlighter();
   bool _chatWarm = false;
   bool _showDawOnboarding = false;
@@ -3962,6 +4018,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   StateSetter? _projectSettingsStateSetter;
   final GlobalKey _feedbackScreenshotBoundaryKey =
       GlobalKey(debugLabel: 'audio_editor_feedback_screenshot_boundary');
+  static const double _kChatScrollHintThreshold = 64.0;
 
   bool _sampleBrowserVisible = false;
   bool _sampleBrowserExpanded = false;
@@ -3991,6 +4048,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<Map<String, dynamic>> _instrumentCatalog =
       _cloneInstrumentCatalog(kInstrumentCatalog);
   bool _instrumentCatalogReady = false;
+  Set<String>? _instrumentQualityApprovedIds;
+  Future<void>? _instrumentQualityVettingFuture;
   final Map<String, _SfzDefinition> _sfzDefinitionCache =
       <String, _SfzDefinition>{};
   final LinkedHashMap<String, _DecodedStereoPcm> _sfzSampleCache =
@@ -4044,6 +4103,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
   }
 
+  void _handleChatFocusChanged() {
+    if (!mounted) return;
+    final hasFocus = _chatFocusNode.hasFocus;
+    if (_chatInputActive == hasFocus) return;
+    setState(() {
+      _chatInputActive = hasFocus;
+    });
+  }
+
   Map<String, dynamic> _buildFeedbackProjectSettings() {
     final selectedClip = (_timelinePrimarySelectedClipIndex >= 0 &&
             _timelinePrimarySelectedClipIndex < _audioTracks.length)
@@ -4067,7 +4135,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'track_count': _audioTracks.length,
       'selected_row_index': _selectedRow,
       if (selectedClip != null) 'selected_clip_label': selectedClip.label,
-      'producer_capture_enabled': _showProducerCaptureUi || _producerDataMode,
+      if (_producerCaptureAllowlistUsername.isNotEmpty)
+        'producer_capture_allowlist_username':
+            _producerCaptureAllowlistUsername,
+      'producer_capture_enabled':
+          _isProducerCaptureUiVisible || _producerDataMode,
       'sample_browser_open': _sampleBrowserVisible,
       'master_rack_open': _showMasterRack,
       if (visibleRowNames.isNotEmpty) 'row_names': visibleRowNames,
@@ -4196,7 +4268,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Thank you for your submission!')),
+        SnackBar(
+            content: Text(
+                L10n.translate(context, 'Thank you for your submission!'))),
       );
     } catch (e) {
       if (!mounted) return;
@@ -4239,12 +4313,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool get _isProjectSettingsOpen =>
       _activeTopPopup == _TopPopupType.projectSettings;
   bool get _isMasterPopupOpen => _activeTopPopup == _TopPopupType.master;
+  bool get _canShowProducerCaptureUiSetting => _producerCaptureUiAllowlisted;
+  bool get _isProducerCaptureUiVisible =>
+      _canShowProducerCaptureUiSetting && _showProducerCaptureUi;
 
   bool _toggleTopPopup(_TopPopupType popupType) {
     final bool willOpen = _activeTopPopup != popupType;
     setState(() {
       _activeTopPopup = willOpen ? popupType : _TopPopupType.none;
     });
+    if (willOpen && popupType == _TopPopupType.tempo) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _syncTempoPickerSelection();
+      });
+    }
     return willOpen;
   }
 
@@ -4721,6 +4804,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             magnitudeModelAsset: kMixMagnitudeRegressorAsset,
           )
         : const NoopMixingMagnitudePredictor();
+    unawaited(_magnitudePredictor.startBackgroundRefresh());
     final authService = context.read<AuthService>();
 
     _chatPipeline = ChatPipeline(
@@ -4744,8 +4828,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       },
     );
 
+    _tempoPickerController = FixedExtentScrollController(
+      initialItem: _tempoPickerItemFor(_tempo),
+    );
     _chatController = InMemoryChatController();
     _chatTextController.addListener(_handleChatTextChanged);
+    _chatFocusNode.addListener(_handleChatFocusChanged);
     unawaited(_refreshPromptRateLimitStatus());
 
     _samplePreviewPlayer = ja.AudioPlayer(handleAudioSessionActivation: false);
@@ -4777,12 +4865,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _loadInputDevicesFromJuce();
       await _refreshAudioRouteInfo();
       await _loadBundledInstrumentCatalog();
-      _liveMidiEventPlaybackSupported =
+      unawaited(_ensureInstrumentQualityVetting());
+      final engineSupportsLiveMidi =
           await JuceAudioEngine.supportsLiveMidiClipPlayback();
+      _liveMidiEventPlaybackSupported =
+          !_kForceRenderedMidiPlaybackForBeta && engineSupportsLiveMidi;
+      if (_kForceRenderedMidiPlaybackForBeta && engineSupportsLiveMidi) {
+        debugPrint(
+          '🎹 Live MIDI clip playback disabled for beta quality; using rendered MIDI WAV playback.',
+        );
+      }
       if (_liveMidiEventPlaybackSupported) {
         _startMidiDeviceConnectionPolling();
       }
       await _reloadRowsFromEngine();
+      await _refreshProducerCaptureUiAllowlistAccess();
       await _loadProjectIfAny();
       setState(() => _isLoadingNextScreen = false);
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
@@ -5623,6 +5720,51 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _chatFocusNode.unfocus();
   }
 
+  void _collapseChatWindow({bool dismissKeyboard = true}) {
+    if (!mounted) return;
+    if (dismissKeyboard) {
+      _chatFocusNode.unfocus();
+    }
+    if (!_chatExpanded && !_chatInputActive) return;
+    setState(() {
+      _chatExpanded = false;
+      _chatInputActive = false;
+      _chatScrollHintEnabled = false;
+    });
+  }
+
+  void _setChatScrollHintEnabled(bool enabled) {
+    if (!mounted || _chatScrollHintEnabled == enabled) return;
+    setState(() {
+      _chatScrollHintEnabled = enabled;
+    });
+  }
+
+  bool _handleChatListScrollNotification(ScrollNotification notification) {
+    final metrics = notification.metrics;
+    final scrolledAwayFromBottom =
+        metrics.extentAfter > _kChatScrollHintThreshold;
+    final userDriven = notification is UserScrollNotification ||
+        (notification is ScrollStartNotification &&
+            notification.dragDetails != null) ||
+        (notification is ScrollUpdateNotification &&
+            notification.dragDetails != null) ||
+        (notification is OverscrollNotification &&
+            notification.dragDetails != null);
+
+    if (!scrolledAwayFromBottom) {
+      if (_chatScrollHintEnabled) {
+        _setChatScrollHintEnabled(false);
+      }
+      return false;
+    }
+
+    if (userDriven && !_chatScrollHintEnabled) {
+      _setChatScrollHintEnabled(true);
+    }
+    return false;
+  }
+
   void _cleanupBeforeLeavingDawOnboardingStep(_DawTutorialStepId stepId) {
     switch (stepId) {
       case _DawTutorialStepId.addInstrument:
@@ -5688,6 +5830,146 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<bool> _showDawOnboardingStartDialog() async {
+    if (!mounted) return false;
+    final shouldStart = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          barrierColor: Colors.black.withValues(alpha: 0.58),
+          builder: (dialogContext) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              surfaceTintColor: Colors.transparent,
+              shadowColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              clipBehavior: Clip.antiAlias,
+              insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: MixroomShellSurface(
+                  radius: 24,
+                  strong: true,
+                  color: const Color.fromRGBO(244, 244, 244, 0.14),
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: const Color.fromRGBO(0, 149, 255, 0.16),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            alignment: Alignment.center,
+                            child: const Icon(
+                              Icons.school_rounded,
+                              color: Color(0xFF80C9FF),
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              L10n.translate(
+                                dialogContext,
+                                'Start DAW tutorial?',
+                              ),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                height: 1.15,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        L10n.translate(
+                          dialogContext,
+                          'Take a guided 23-step walkthrough of the timeline, tracks, effects, automation, AI, and export flow. You can replay it anytime from project settings.',
+                        ),
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.84),
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w500,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () =>
+                                  Navigator.of(dialogContext).pop(false),
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(0, 44),
+                                foregroundColor: const Color(0xFFF4F4F4),
+                                backgroundColor:
+                                    Colors.white.withValues(alpha: 0.10),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  side: BorderSide(
+                                    color: Colors.white.withValues(alpha: 0.12),
+                                  ),
+                                ),
+                              ),
+                              child: Text(
+                                L10n.translate(dialogContext, 'Skip'),
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () =>
+                                  Navigator.of(dialogContext).pop(true),
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(0, 44),
+                                foregroundColor: const Color(0xFFF4F4F4),
+                                backgroundColor: _kOneButtonMixAccentColor,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                              child: Text(
+                                L10n.translate(dialogContext, 'Start tutorial'),
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ) ??
+        false;
+    return shouldStart;
+  }
+
   Future<void> _maybeShowDawOnboarding() async {
     if (!mounted ||
         widget.initialAction != null ||
@@ -5700,7 +5982,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final hasSeen = await DawOnboardingPrefs.hasSeen(userId);
     if (!mounted) return;
     if (!pendingQuickTour && hasSeen) return;
-    _startDawOnboarding();
+    if (pendingQuickTour) {
+      _startDawOnboarding();
+      return;
+    }
+    final shouldStart = await _showDawOnboardingStartDialog();
+    if (!mounted) return;
+    if (shouldStart) {
+      _startDawOnboarding();
+      return;
+    }
+    await DawOnboardingPrefs.markSeen(userId);
   }
 
   void _advanceDawOnboardingStep() {
@@ -6024,11 +6316,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       track.audioStartTimer?.cancel();
     }
     _transportTicker?.dispose();
+    _tempoPickerController.dispose();
     _chatTextController.removeListener(_handleChatTextChanged);
+    _chatFocusNode.removeListener(_handleChatFocusChanged);
     _chatTextController.dispose();
     _chatFocusNode.dispose();
+    _chatListScrollController.dispose();
     _chatHistoryPersistTimer?.cancel();
     _chatHistoryPersistTimer = null;
+    _producerCaptureAccessHttpClient.close();
     _copiedChatMessageTimer?.cancel();
     _copiedChatMessageTimer = null;
     _promptRateLimitRefreshTimer?.cancel();
@@ -6172,6 +6468,115 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _refreshAudioRouteInfo(refreshNativeRoute: false);
   }
 
+  Uri _producerCaptureUiAccessUri() {
+    final base = AppApiConfig.apiBaseUrl.trim().replaceFirst(RegExp(r'/$'), '');
+    return Uri.parse('$base/v1/users/me/producer-capture-ui-access');
+  }
+
+  String _normalizedProducerCaptureUsername(String raw) {
+    return raw.trim().toLowerCase();
+  }
+
+  String _fallbackProducerCaptureUsername() {
+    try {
+      final snapshot = context.read<AppUserService>().current;
+      final fromProfile = _normalizedProducerCaptureUsername(
+        snapshot?.username ?? '',
+      );
+      if (fromProfile.isNotEmpty) return fromProfile;
+      final fromCognito = _normalizedProducerCaptureUsername(
+        snapshot?.cognitoUsername ?? '',
+      );
+      if (fromCognito.contains('@')) return '';
+      return fromCognito;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  void _applyProducerCaptureUiAllowlistAccess({
+    required bool allowlisted,
+    required String username,
+  }) {
+    final normalizedUsername = _normalizedProducerCaptureUsername(username);
+    final shouldDisableUi = !allowlisted && _showProducerCaptureUi;
+    final shouldDisableMode = !allowlisted && _producerDataMode;
+    final changed = _producerCaptureUiAllowlisted != allowlisted ||
+        _producerCaptureAllowlistUsername != normalizedUsername ||
+        shouldDisableUi ||
+        shouldDisableMode;
+    if (!changed) return;
+
+    _setStateAndRefreshProjectSettings(() {
+      _producerCaptureUiAllowlisted = allowlisted;
+      _producerCaptureAllowlistUsername = normalizedUsername;
+      if (!allowlisted) {
+        _showProducerCaptureUi = false;
+        _producerDataMode = false;
+        _producerUiBusy = false;
+        _producerGuidedPromptAwaitingFinal = false;
+        _producerCapturePanelMinimized = true;
+        _producerPromptSubmitting = false;
+        _producerPromptQueueIds = <String>[];
+        _producerPromptQueueIndex = 0;
+      }
+    });
+    if (!allowlisted) {
+      unawaited(_producerCollector.setEnabled(false));
+    }
+  }
+
+  Future<void> _refreshProducerCaptureUiAllowlistAccess() async {
+    final fallbackUsername = _fallbackProducerCaptureUsername();
+    var resolvedUsername = fallbackUsername;
+    var allowlisted =
+        kDefaultProducerCaptureUsernameAllowlist.contains(fallbackUsername);
+
+    if (AppApiConfig.hasApiBaseUrl) {
+      try {
+        final auth = context.read<AuthService>();
+        final response = await auth.authorizedRequest(
+          (token) => _producerCaptureAccessHttpClient.get(
+            _producerCaptureUiAccessUri(),
+            headers: <String, String>{
+              'Authorization': 'Bearer $token',
+              'Accept': 'application/json',
+            },
+          ).timeout(
+            Duration(
+              seconds: math.max(
+                1,
+                math.min(AppApiConfig.requestTimeoutSeconds, 6),
+              ),
+            ),
+          ),
+        );
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map) {
+            final usernameFromApi = _normalizedProducerCaptureUsername(
+              (decoded['username'] ?? '').toString(),
+            );
+            if (usernameFromApi.isNotEmpty) {
+              resolvedUsername = usernameFromApi;
+            }
+            allowlisted = decoded['enabled'] == true;
+          }
+        }
+      } catch (error) {
+        debugPrint(
+          'Producer capture allowlist access fallback applied: $error',
+        );
+      }
+    }
+
+    if (!mounted) return;
+    _applyProducerCaptureUiAllowlistAccess(
+      allowlisted: allowlisted,
+      username: resolvedUsername,
+    );
+  }
+
   Future<void> _loadProjectIfAny() async {
     if (_loadedOnce) return;
     _loadedOnce = true;
@@ -6195,12 +6600,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _tempo = (((json["tempoBpm"] as num?) ?? (json["bpm"] as num?) ?? _tempo)
               .toDouble())
           .clamp(20.0, 999.0);
+      _syncTempoPickerSelection();
       _tempoStretchEnabled = (json["tempoStretchEnabled"] as bool?) ?? false;
       _tempoStretchPreservePitchDefault =
           (json["tempoStretchPreservePitchDefault"] as bool?) ?? false;
       final uiSettings = (json["ui"] as Map?)?.cast<String, dynamic>();
-      _showProducerCaptureUi =
+      final savedProducerCaptureUi =
           (uiSettings?["showProducerCaptureUi"] as bool?) ?? false;
+      _showProducerCaptureUi =
+          _canShowProducerCaptureUiSetting && savedProducerCaptureUi;
       await JuceAudioEngine.setMetronomeBpm(_tempo);
 
       // mark opened time
@@ -6427,9 +6835,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (final rs in rowStatesList) {
         final snap =
             RowStateSnapshot.fromJson((rs as Map).cast<String, dynamic>());
-        var r = snap.rowId >= 0 ? _rowIndexForId(snap.rowId) : -1;
-        if (r < 0) {
-          r = snap.row;
+        // Row IDs are session-scoped and can be reassigned after reopen.
+        // Prefer persisted row order index, and only fall back to rowId lookup.
+        var r = snap.row;
+        if (r < 0 || r >= _rowCount) {
+          r = snap.rowId >= 0 ? _rowIndexForId(snap.rowId) : -1;
         }
 
         // Safety check
@@ -6463,8 +6873,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (final rf in rowFxList) {
         final snap = RowEffectsSnapshotJson.fromJson(
             (rf as Map).cast<String, dynamic>());
-        final resolvedRow =
-            snap.rowId >= 0 ? _rowIndexForId(snap.rowId) : snap.row;
+        // Same reasoning as rowStates above: saved index is the stable restore
+        // anchor across sessions; rowId is a best-effort fallback.
+        var resolvedRow = snap.row;
+        if (resolvedRow < 0 || resolvedRow >= _rowCount) {
+          resolvedRow = snap.rowId >= 0 ? _rowIndexForId(snap.rowId) : -1;
+        }
         if (resolvedRow < 0 || resolvedRow >= _rowCount) {
           continue;
         }
@@ -6737,14 +7151,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await ProjectManager.writeProjectJson(_projectDir, json);
 
       if (mounted && showSnackBar) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text("✅ Project saved")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(L10n.translate(context, 'Project saved'))),
+        );
       }
     } catch (e) {
       debugPrint("Project save failed: $e");
       if (mounted && showSnackBar) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("⚠️ Save failed: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${L10n.translate(context, 'Save failed')}: $e'),
+          ),
+        );
       }
     }
   }
@@ -6752,190 +7170,212 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<String?> _showProjectNameDialog({
     required String title,
     required String initialName,
-    String hint = 'Project name',
+    String? hint,
   }) async {
+    final resolvedHint = hint ?? L10n.translate(context, 'Project name');
     final controller = TextEditingController(text: initialName);
     final focusNode = FocusNode();
     bool focusScheduled = false;
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        if (!focusScheduled) {
-          focusScheduled = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!focusNode.canRequestFocus) return;
-            focusNode.requestFocus();
-          });
-        }
-        return MediaQuery.removeViewInsets(
-          context: ctx,
-          removeBottom: true,
-          child: Dialog(
-            alignment: Alignment.topCenter,
-            insetPadding: const EdgeInsets.fromLTRB(20, 56, 20, 16),
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            child: Material(
-              color: Colors.transparent,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: MixroomShellSurface(
-                  radius: 24,
-                  strong: true,
-                  color: const Color.fromRGBO(26, 38, 56, 0.92),
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.white.withValues(alpha: 0.08),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.10),
+    bool dialogClosing = false;
+    void closeDialog(BuildContext dialogContext, String? value) {
+      if (dialogClosing) return;
+      dialogClosing = true;
+      focusNode.unfocus();
+      if (!dialogContext.mounted) return;
+      Navigator.of(dialogContext).pop(value);
+    }
+
+    try {
+      final result = await showDialog<String>(
+        context: context,
+        builder: (ctx) {
+          if (!focusScheduled) {
+            focusScheduled = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!focusNode.canRequestFocus) return;
+              focusNode.requestFocus();
+            });
+          }
+          return MediaQuery.removeViewInsets(
+            context: ctx,
+            removeBottom: true,
+            child: Dialog(
+              alignment: Alignment.topCenter,
+              insetPadding: const EdgeInsets.fromLTRB(20, 56, 20, 16),
+              backgroundColor: Colors.transparent,
+              surfaceTintColor: Colors.transparent,
+              shadowColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              clipBehavior: Clip.antiAlias,
+              elevation: 0,
+              child: Material(
+                color: Colors.transparent,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: MixroomShellSurface(
+                    radius: 24,
+                    strong: true,
+                    color: const Color.fromRGBO(26, 38, 56, 0.92),
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white.withValues(alpha: 0.08),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.10),
+                                ),
                               ),
-                            ),
-                            child: const Icon(
-                              Icons.drive_file_rename_outline,
-                              color: Color(0xFFF4F4F4),
-                              size: 16,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              title,
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
+                              child: const Icon(
+                                Icons.drive_file_rename_outline,
                                 color: Color(0xFFF4F4F4),
-                                fontSize: 17,
-                                height: 22 / 17,
-                                fontWeight: FontWeight.w600,
+                                size: 16,
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      MixroomShellSurface(
-                        radius: 16,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 3,
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                title,
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 17,
+                                  height: 22 / 17,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        color: const Color.fromRGBO(244, 244, 244, 0.10),
-                        child: TextField(
-                          controller: controller,
-                          focusNode: focusNode,
-                          autofocus: false,
-                          maxLength: 50,
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) =>
-                              Navigator.pop(ctx, controller.text.trim()),
-                          style: const TextStyle(
-                            fontFamily: 'Pretendard',
-                            color: Color(0xFFF4F4F4),
-                            fontSize: 15,
-                            height: 22 / 15,
+                        const SizedBox(height: 12),
+                        MixroomShellSurface(
+                          radius: 16,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 3,
                           ),
-                          decoration: InputDecoration(
-                            hintText: hint,
-                            hintStyle: TextStyle(
+                          color: const Color.fromRGBO(244, 244, 244, 0.10),
+                          child: TextField(
+                            controller: controller,
+                            focusNode: focusNode,
+                            autofocus: false,
+                            maxLength: 50,
+                            textInputAction: TextInputAction.done,
+                            onSubmitted: (_) =>
+                                closeDialog(ctx, controller.text.trim()),
+                            style: const TextStyle(
                               fontFamily: 'Pretendard',
-                              color: Colors.white.withValues(alpha: 0.48),
+                              color: Color(0xFFF4F4F4),
                               fontSize: 15,
                               height: 22 / 15,
                             ),
-                            border: InputBorder.none,
-                            counterText: '',
+                            decoration: InputDecoration(
+                              hintText: resolvedHint,
+                              hintStyle: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.48),
+                                fontSize: 15,
+                                height: 22 / 15,
+                              ),
+                              border: InputBorder.none,
+                              counterText: '',
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          SizedBox(
-                            width: 112,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => Navigator.pop(ctx),
-                              child: MixroomShellSurface(
-                                radius: 20,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 11,
-                                ),
-                                color:
-                                    const Color.fromRGBO(244, 244, 244, 0.14),
-                                child: SizedBox(
-                                  width: double.infinity,
-                                  child: Text(
-                                    L10n.translate(ctx, 'Cancel'),
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      fontFamily: 'Pretendard',
-                                      color: Color(0xFFF4F4F4),
-                                      fontSize: 15,
-                                      height: 22 / 15,
-                                      fontWeight: FontWeight.w500,
+                        const SizedBox(height: 14),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            SizedBox(
+                              width: 112,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => closeDialog(ctx, null),
+                                child: MixroomShellSurface(
+                                  radius: 20,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 11,
+                                  ),
+                                  color:
+                                      const Color.fromRGBO(244, 244, 244, 0.14),
+                                  child: SizedBox(
+                                    width: double.infinity,
+                                    child: Text(
+                                      L10n.translate(ctx, 'Cancel'),
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        color: Color(0xFFF4F4F4),
+                                        fontSize: 15,
+                                        height: 22 / 15,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          SizedBox(
-                            width: 112,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () =>
-                                  Navigator.pop(ctx, controller.text.trim()),
-                              child: MixroomShellSurface(
-                                radius: 20,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 11,
-                                ),
-                                color: const Color.fromRGBO(0, 149, 255, 0.52),
-                                strong: true,
-                                child: SizedBox(
-                                  width: double.infinity,
-                                  child: Text(
-                                    L10n.translate(ctx, 'Save'),
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      fontFamily: 'Pretendard',
-                                      color: Color(0xFFF4F4F4),
-                                      fontSize: 15,
-                                      height: 22 / 15,
-                                      fontWeight: FontWeight.w600,
+                            const SizedBox(width: 10),
+                            SizedBox(
+                              width: 112,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () =>
+                                    closeDialog(ctx, controller.text.trim()),
+                                child: MixroomShellSurface(
+                                  radius: 20,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 11,
+                                  ),
+                                  color:
+                                      const Color.fromRGBO(0, 149, 255, 0.52),
+                                  strong: true,
+                                  child: SizedBox(
+                                    width: double.infinity,
+                                    child: Text(
+                                      L10n.translate(ctx, 'Save'),
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        color: Color(0xFFF4F4F4),
+                                        fontSize: 15,
+                                        height: 22 / 15,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ],
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        );
-      },
-    );
-    controller.dispose();
-    focusNode.dispose();
-    return result;
+          );
+        },
+      );
+      return result;
+    } finally {
+      Future<void>.delayed(const Duration(milliseconds: 300), () {
+        controller.dispose();
+        focusNode.dispose();
+      });
+    }
   }
 
   bool _looksLikeGeneratedUntitledProjectName(String name) {
@@ -7007,7 +7447,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('⚠️ Rename failed: $e')),
+          SnackBar(
+            content: Text('${L10n.translate(context, 'Rename failed')}: $e'),
+          ),
         );
       }
       return false;
@@ -7015,7 +7457,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (mounted && showSuccessSnackBar) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Project renamed')),
+        SnackBar(content: Text(L10n.translate(context, 'Project renamed'))),
       );
     }
     return true;
@@ -7024,9 +7466,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _ensureProjectNamedOnFirstExit() async {
     if (!_requiresProjectNaming) return true;
     final renamed = await _showProjectNameDialog(
-      title: 'Name Your Project',
+      title: L10n.translate(context, 'Name Your Project'),
       initialName: _projectName,
-      hint: 'Project name',
+      hint: L10n.translate(context, 'Project name'),
     );
     if (renamed == null) return false;
     final newName = renamed.trim();
@@ -7106,13 +7548,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _meterPolling = true;
 
     // Defensive: re-enable native metering whenever polling starts.
-    unawaited(JuceAudioEngine.setMasterMeterEnabled(true));
-    unawaited(JuceAudioEngine.setRowMetersEnabled(true));
+    unawaited(_setNativeMeteringEnabled(true));
 
     _meterTimer?.cancel();
     _meterDecayTimer?.cancel();
 
-    _meterTimer = Timer.periodic(const Duration(milliseconds: 33), (_) async {
+    _meterTimer = Timer.periodic(const Duration(milliseconds: 40), (_) async {
       // prevent overlapping async ticks (super important)
       if (!_meterPolling) return; // stopped mid-flight
       if (_meterPollingBusy) return; // prevent overlap
@@ -7176,6 +7617,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     // in case we stopped while an await was in-flight
     _meterPollingBusy = false;
+    unawaited(_setNativeMeteringEnabled(false));
 
     if (!decayToZero) {
       _meterDecayTimer?.cancel();
@@ -7190,7 +7632,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _meterDecayTimer?.cancel();
 
     // ~30fps-ish but cheap
-    _meterDecayTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
+    _meterDecayTimer = Timer.periodic(const Duration(milliseconds: 40), (_) {
       // if we started polling again, stop decaying
       if (_meterPolling) {
         _meterDecayTimer?.cancel();
@@ -7205,6 +7647,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _meterDecayTimer = null;
       }
     });
+  }
+
+  Future<void> _setNativeMeteringEnabled(bool enabled) async {
+    try {
+      await JuceAudioEngine.setMasterMeterEnabled(enabled);
+      await JuceAudioEngine.setRowMetersEnabled(enabled);
+    } catch (_) {
+      // Native bridge can race shutdown/teardown; ignore best-effort toggles.
+    }
   }
 
   /// Calculate effective audio position for a given track based on video position.
@@ -7351,6 +7802,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await JuceAudioEngine.pause();
     await _pollTransportFromJuceIfNeeded(force: true);
     _syncTransportClock(_globalAudioClock, playing: false);
+    _stopMeterPolling();
   }
 
   Future<_AudioExportSettings?> _showAudioExportSettingsSheet() async {
@@ -7415,9 +7867,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         barrierColor: Colors.black.withValues(alpha: 0.58),
         builder: (dialogContext) {
           final theme = Theme.of(dialogContext);
-          const accent = Color(0xFFF4F4F4);
           const exportBlue = Color(0xFF258AE6);
           final mutedText = Colors.white.withValues(alpha: 0.78);
+          const sheetBorderRadius = BorderRadius.only(
+            topLeft: Radius.circular(30),
+            topRight: Radius.circular(30),
+            bottomLeft: Radius.circular(24),
+            bottomRight: Radius.circular(24),
+          );
 
           Widget buildDropdownField<T>({
             required String label,
@@ -7428,7 +7885,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }) {
             return DropdownButtonFormField<T>(
               value: value,
-              dropdownColor: const Color(0xFF5F6871),
+              dropdownColor: kMixroomGlassDropdownMenuColor,
               iconEnabledColor: Colors.white.withValues(alpha: 0.76),
               style: const TextStyle(
                 fontFamily: 'Pretendard',
@@ -7567,19 +8024,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   child: Align(
                     alignment: Alignment.bottomCenter,
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 348),
+                      constraints: BoxConstraints(
+                        maxWidth: 348,
+                        maxHeight:
+                            (MediaQuery.sizeOf(dialogContext).height * 0.82)
+                                .clamp(360.0, 700.0)
+                                .toDouble(),
+                      ),
                       child: ClipRRect(
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(30),
-                          topRight: Radius.circular(30),
-                          bottomLeft: Radius.circular(24),
-                          bottomRight: Radius.circular(24),
-                        ),
+                        borderRadius: sheetBorderRadius,
+                        clipBehavior: Clip.antiAlias,
                         child: BackdropFilter(
                           filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
                           child: Container(
                             padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
                             decoration: BoxDecoration(
+                              borderRadius: sheetBorderRadius,
                               gradient: const LinearGradient(
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
@@ -7597,400 +8057,598 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Text(
-                                  'Export',
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    color: const Color(0xFFF4F4F4),
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 24,
+                                ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxHeight: (MediaQuery.sizeOf(dialogContext)
+                                                .height *
+                                            0.58)
+                                        .clamp(250.0, 520.0)
+                                        .toDouble(),
                                   ),
-                                ),
-                                const SizedBox(height: 12),
-                                Container(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(24),
-                                    border: Border.all(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.12),
-                                    ),
-                                    color: const Color.fromRGBO(
-                                        244, 244, 244, 0.10),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      buildFormatOption(
-                                        format: _ExportAudioFormat.wav,
-                                        label: 'WAV',
-                                        isLeft: true,
-                                        enabled: true,
-                                      ),
-                                      Container(
-                                        width: 1,
-                                        height: 48,
-                                        color: Colors.white
-                                            .withValues(alpha: 0.12),
-                                      ),
-                                      buildFormatOption(
-                                        format: _ExportAudioFormat.mp3,
-                                        label: 'MP3',
-                                        isLeft: false,
-                                        enabled: !nativeWavOnly,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (nativeWavOnly) ...[
-                                  const SizedBox(height: 10),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 8),
-                                    decoration: BoxDecoration(
-                                      color: const Color.fromRGBO(
-                                          244, 244, 244, 0.10),
-                                      borderRadius: BorderRadius.circular(18),
-                                      border: Border.all(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.09),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.',
-                                      style: TextStyle(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.86),
-                                        fontSize: 12.2,
-                                        height: 1.3,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 10),
-                                GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    setSheetState(
-                                        () => showAdvanced = !showAdvanced);
-                                  },
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                      vertical: 6,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Text(
-                                          'Advanced options',
-                                          style: theme.textTheme.bodyMedium
-                                              ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.white
-                                                .withValues(alpha: 0.82),
-                                          ),
-                                        ),
-                                        const Spacer(),
-                                        Icon(
-                                          showAdvanced
-                                              ? Icons.keyboard_arrow_up
-                                              : Icons.keyboard_arrow_down,
-                                          color: mutedText,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                if (showAdvanced) ...[
-                                  const SizedBox(height: 10),
-                                  Theme(
-                                    data: theme.copyWith(
-                                      unselectedWidgetColor:
-                                          Colors.white.withValues(alpha: 0.45),
-                                      colorScheme: theme.colorScheme.copyWith(
-                                        primary: exportBlue,
-                                      ),
-                                    ),
+                                  child: SingleChildScrollView(
                                     child: Column(
+                                      mainAxisSize: MainAxisSize.min,
                                       crossAxisAlignment:
                                           CrossAxisAlignment.stretch,
                                       children: [
-                                        buildDropdownField(
-                                          label: 'Sample rate',
-                                          value: selectedSampleRate,
-                                          options: sampleRateOptions,
-                                          textBuilder: (value) => '$value Hz',
-                                          onChanged: (value) {
-                                            if (value == null) return;
-                                            setSheetState(() {
-                                              selectedSampleRate = value;
-                                            });
-                                          },
+                                        Text(
+                                          L10n.translate(
+                                            dialogContext,
+                                            'Export',
+                                          ),
+                                          textAlign: TextAlign.center,
+                                          style: theme.textTheme.titleMedium
+                                              ?.copyWith(
+                                            color: const Color(0xFFF4F4F4),
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 24,
+                                          ),
                                         ),
-                                        if (!nativeWavOnly) ...[
-                                          const SizedBox(height: 10),
-                                          buildDropdownField(
-                                            label: 'Channels',
-                                            value: selectedChannelMode,
-                                            options: _ExportChannelMode.values,
-                                            textBuilder: (value) => value ==
-                                                    _ExportChannelMode.stereo
-                                                ? 'Stereo'
-                                                : 'Mono',
-                                            onChanged: (value) {
-                                              if (value == null) return;
-                                              setSheetState(() {
-                                                selectedChannelMode = value;
-                                              });
-                                            },
-                                          ),
-                                          const SizedBox(height: 10),
-                                          buildDropdownField(
-                                            label: L10n.translate(
-                                                context, 'Resample quality'),
-                                            value: selectedResampleQuality,
-                                            options:
-                                                _ExportResampleQuality.values,
-                                            textBuilder: (value) {
-                                              switch (value) {
-                                                case _ExportResampleQuality
-                                                      .draft:
-                                                  return L10n.translate(
-                                                      context, 'Draft (fast)');
-                                                case _ExportResampleQuality
-                                                      .good:
-                                                  return L10n.translate(
-                                                      context, 'Good');
-                                                case _ExportResampleQuality
-                                                      .best:
-                                                  return L10n.translate(
-                                                      context, 'Best');
-                                              }
-                                            },
-                                            onChanged: (value) {
-                                              if (value == null) return;
-                                              setSheetState(() {
-                                                selectedResampleQuality = value;
-                                              });
-                                            },
-                                          ),
-                                          const SizedBox(height: 6),
-                                          SwitchListTile(
-                                            contentPadding: EdgeInsets.zero,
-                                            title: Text(
-                                              L10n.translate(context,
-                                                  'Normalize loudness'),
-                                              style:
-                                                  TextStyle(color: mutedText),
+                                        const SizedBox(height: 12),
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius:
+                                                BorderRadius.circular(24),
+                                            border: Border.all(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.12),
                                             ),
-                                            value: selectedNormalize,
-                                            activeColor: exportBlue,
-                                            onChanged: (value) {
-                                              setSheetState(() {
-                                                selectedNormalize = value;
-                                              });
-                                            },
+                                            color: const Color.fromRGBO(
+                                                244, 244, 244, 0.10),
                                           ),
-                                        ],
-                                        if (!nativeWavOnly &&
-                                            selectedNormalize) ...[
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            L10n.translate(context,
-                                                'Limiter ceiling (dBTP)'),
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(color: mutedText),
-                                          ),
-                                          const SizedBox(height: 6),
-                                          SliderTheme(
-                                            data: SliderTheme.of(context)
-                                                .copyWith(
-                                              activeTrackColor: exportBlue,
-                                              inactiveTrackColor: Colors.white
-                                                  .withValues(alpha: 0.14),
-                                              thumbColor: Colors.white,
-                                              overlayColor:
-                                                  exportBlue.withValues(
-                                                alpha: 0.16,
+                                          child: Row(
+                                            children: [
+                                              buildFormatOption(
+                                                format: _ExportAudioFormat.wav,
+                                                label: 'WAV',
+                                                isLeft: true,
+                                                enabled: true,
                                               ),
-                                              trackHeight: 4,
-                                            ),
-                                            child: Slider(
-                                              value: selectedNormalizeTargetDb
-                                                  .clamp(
-                                                    _kExportNormalizeTargetDbMin,
-                                                    _kExportNormalizeTargetDbMax,
-                                                  )
-                                                  .toDouble(),
-                                              min: _kExportNormalizeTargetDbMin,
-                                              max: _kExportNormalizeTargetDbMax,
-                                              divisions: 17,
-                                              label:
-                                                  '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
-                                              onChanged: (value) {
-                                                final stepped = double.parse(
-                                                    value.toStringAsFixed(1));
-                                                setSheetState(() {
-                                                  selectedNormalizeTargetDb =
-                                                      stepped
-                                                          .clamp(
-                                                            _kExportNormalizeTargetDbMin,
-                                                            _kExportNormalizeTargetDbMax,
-                                                          )
-                                                          .toDouble();
-                                                });
-                                              },
-                                            ),
-                                          ),
-                                          Align(
-                                            alignment: Alignment.centerRight,
-                                            child: Text(
-                                              '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
-                                              style: theme.textTheme.bodySmall
-                                                  ?.copyWith(
+                                              Container(
+                                                width: 1,
+                                                height: 48,
                                                 color: Colors.white
-                                                    .withValues(alpha: 0.82),
-                                                fontWeight: FontWeight.w700,
+                                                    .withValues(alpha: 0.12),
+                                              ),
+                                              buildFormatOption(
+                                                format: _ExportAudioFormat.mp3,
+                                                label: 'MP3',
+                                                isLeft: false,
+                                                enabled: !nativeWavOnly,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        if (nativeWavOnly) ...[
+                                          const SizedBox(height: 10),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 8),
+                                            decoration: BoxDecoration(
+                                              color: const Color.fromRGBO(
+                                                  244, 244, 244, 0.10),
+                                              borderRadius:
+                                                  BorderRadius.circular(18),
+                                              border: Border.all(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.09),
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(height: 6),
-                                          Wrap(
-                                            spacing: 8,
-                                            runSpacing: 6,
-                                            children: _kExportNormalizeTargetsDb
-                                                .map(
-                                                  (preset) => ChoiceChip(
-                                                    label: Text(
-                                                      '${preset.toStringAsFixed(1)} dB',
-                                                    ),
-                                                    selected:
-                                                        (selectedNormalizeTargetDb -
-                                                                    preset)
-                                                                .abs() <
-                                                            0.05,
-                                                    labelStyle: theme
-                                                        .textTheme.bodySmall
-                                                        ?.copyWith(
-                                                      color: Colors.white
-                                                          .withValues(
-                                                              alpha: 0.9),
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
-                                                    backgroundColor:
-                                                        Colors.white.withValues(
-                                                            alpha: 0.05),
-                                                    selectedColor:
-                                                        exportBlue.withValues(
-                                                            alpha: 0.26),
-                                                    side: BorderSide(
-                                                      color: Colors.white
-                                                          .withValues(
-                                                              alpha: 0.16),
-                                                    ),
-                                                    onSelected: (_) {
-                                                      setSheetState(() {
-                                                        selectedNormalizeTargetDb =
-                                                            preset;
-                                                      });
-                                                    },
-                                                  ),
-                                                )
-                                                .toList(growable: false),
+                                            child: Text(
+                                              'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.',
+                                              style: TextStyle(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.86),
+                                                fontSize: 12.2,
+                                                height: 1.3,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
                                           ),
                                         ],
                                         const SizedBox(height: 10),
-                                        if (selectedFormat ==
-                                                _ExportAudioFormat.wav ||
-                                            nativeWavOnly) ...[
-                                          buildDropdownField(
-                                            label: L10n.translate(
-                                                context, 'Bit depth'),
-                                            value: selectedWavBitDepth,
-                                            options: _kExportWavBitDepths,
-                                            textBuilder: (value) =>
-                                                '$value-bit',
-                                            onChanged: (value) {
-                                              if (value == null) return;
-                                              setSheetState(() {
-                                                selectedWavBitDepth = value;
-                                              });
-                                            },
-                                          ),
-                                          const SizedBox(height: 6),
-                                          SwitchListTile(
-                                            contentPadding: EdgeInsets.zero,
-                                            title: Text(
-                                              L10n.translate(
-                                                  context, 'Enable dithering'),
-                                              style:
-                                                  TextStyle(color: mutedText),
+                                        GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: () {
+                                            setSheetState(() =>
+                                                showAdvanced = !showAdvanced);
+                                          },
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                              vertical: 6,
                                             ),
-                                            value: selectedWavDithering,
-                                            activeColor: exportBlue,
-                                            onChanged: (value) {
-                                              setSheetState(() {
-                                                selectedWavDithering = value;
-                                              });
-                                            },
-                                          ),
-                                        ] else ...[
-                                          buildDropdownField(
-                                            label: L10n.translate(
-                                                context, 'Encoding mode'),
-                                            value: selectedMp3Mode,
-                                            options: _ExportMp3Mode.values,
-                                            textBuilder: (value) =>
-                                                value == _ExportMp3Mode.cbr
-                                                    ? 'CBR'
-                                                    : 'VBR',
-                                            onChanged: (value) {
-                                              if (value == null) return;
-                                              setSheetState(() {
-                                                selectedMp3Mode = value;
-                                              });
-                                            },
-                                          ),
-                                          const SizedBox(height: 10),
-                                          if (selectedMp3Mode ==
-                                              _ExportMp3Mode.cbr)
-                                            buildDropdownField(
-                                              label: L10n.translate(
-                                                  context, 'Bit rate'),
-                                              value: selectedMp3Bitrate,
-                                              options: _kExportMp3Bitrates,
-                                              textBuilder: (value) =>
-                                                  '${value} kbps',
-                                              onChanged: (value) {
-                                                if (value == null) return;
-                                                setSheetState(() {
-                                                  selectedMp3Bitrate = value;
-                                                });
-                                              },
-                                            )
-                                          else
-                                            buildDropdownField(
-                                              label: L10n.translate(
-                                                  context, 'VBR quality'),
-                                              value: selectedMp3VbrQuality,
-                                              options: _kExportMp3VbrQualities,
-                                              textBuilder: (value) =>
-                                                  'V$value (${L10n.translate(context, value == 0 ? "highest" : "smaller file")})',
-                                              onChanged: (value) {
-                                                if (value == null) return;
-                                                setSheetState(() {
-                                                  selectedMp3VbrQuality = value;
-                                                });
-                                              },
+                                            child: Row(
+                                              children: [
+                                                Text(
+                                                  'Advanced options',
+                                                  style: theme
+                                                      .textTheme.bodyMedium
+                                                      ?.copyWith(
+                                                    fontWeight: FontWeight.w700,
+                                                    color: Colors.white
+                                                        .withValues(
+                                                            alpha: 0.82),
+                                                  ),
+                                                ),
+                                                const Spacer(),
+                                                AnimatedRotation(
+                                                  turns:
+                                                      showAdvanced ? 0.5 : 0.0,
+                                                  duration: const Duration(
+                                                      milliseconds: 220),
+                                                  curve: Curves.easeOutCubic,
+                                                  child: Icon(
+                                                    Icons.keyboard_arrow_down,
+                                                    color: mutedText,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                        ],
+                                          ),
+                                        ),
+                                        AnimatedSize(
+                                          duration:
+                                              const Duration(milliseconds: 260),
+                                          curve: Curves.easeOutCubic,
+                                          alignment: Alignment.topCenter,
+                                          child: ClipRect(
+                                            child: Align(
+                                              alignment: Alignment.topCenter,
+                                              heightFactor:
+                                                  showAdvanced ? 1.0 : 0.0,
+                                              child: IgnorePointer(
+                                                ignoring: !showAdvanced,
+                                                child: AnimatedOpacity(
+                                                  duration: const Duration(
+                                                      milliseconds: 180),
+                                                  curve: Curves.easeOutCubic,
+                                                  opacity:
+                                                      showAdvanced ? 1.0 : 0.0,
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                            top: 10),
+                                                    child: Theme(
+                                                      data: theme.copyWith(
+                                                        unselectedWidgetColor:
+                                                            Colors.white
+                                                                .withValues(
+                                                                    alpha:
+                                                                        0.45),
+                                                        colorScheme: theme
+                                                            .colorScheme
+                                                            .copyWith(
+                                                          primary: exportBlue,
+                                                        ),
+                                                      ),
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .stretch,
+                                                        children: [
+                                                          buildDropdownField(
+                                                            label:
+                                                                'Sample rate',
+                                                            value:
+                                                                selectedSampleRate,
+                                                            options:
+                                                                sampleRateOptions,
+                                                            textBuilder:
+                                                                (value) =>
+                                                                    '$value Hz',
+                                                            onChanged: (value) {
+                                                              if (value == null)
+                                                                return;
+                                                              setSheetState(() {
+                                                                selectedSampleRate =
+                                                                    value;
+                                                              });
+                                                            },
+                                                          ),
+                                                          if (!nativeWavOnly) ...[
+                                                            const SizedBox(
+                                                                height: 10),
+                                                            buildDropdownField(
+                                                              label: 'Channels',
+                                                              value:
+                                                                  selectedChannelMode,
+                                                              options:
+                                                                  _ExportChannelMode
+                                                                      .values,
+                                                              textBuilder: (value) =>
+                                                                  value ==
+                                                                          _ExportChannelMode
+                                                                              .stereo
+                                                                      ? 'Stereo'
+                                                                      : 'Mono',
+                                                              onChanged:
+                                                                  (value) {
+                                                                if (value ==
+                                                                    null) {
+                                                                  return;
+                                                                }
+                                                                setSheetState(
+                                                                    () {
+                                                                  selectedChannelMode =
+                                                                      value;
+                                                                });
+                                                              },
+                                                            ),
+                                                            const SizedBox(
+                                                                height: 10),
+                                                            buildDropdownField(
+                                                              label: L10n.translate(
+                                                                  context,
+                                                                  'Resample quality'),
+                                                              value:
+                                                                  selectedResampleQuality,
+                                                              options:
+                                                                  _ExportResampleQuality
+                                                                      .values,
+                                                              textBuilder:
+                                                                  (value) {
+                                                                switch (value) {
+                                                                  case _ExportResampleQuality
+                                                                        .draft:
+                                                                    return L10n.translate(
+                                                                        context,
+                                                                        'Draft (fast)');
+                                                                  case _ExportResampleQuality
+                                                                        .good:
+                                                                    return L10n.translate(
+                                                                        context,
+                                                                        'Good');
+                                                                  case _ExportResampleQuality
+                                                                        .best:
+                                                                    return L10n.translate(
+                                                                        context,
+                                                                        'Best');
+                                                                }
+                                                              },
+                                                              onChanged:
+                                                                  (value) {
+                                                                if (value ==
+                                                                    null) {
+                                                                  return;
+                                                                }
+                                                                setSheetState(
+                                                                    () {
+                                                                  selectedResampleQuality =
+                                                                      value;
+                                                                });
+                                                              },
+                                                            ),
+                                                            const SizedBox(
+                                                                height: 6),
+                                                            SwitchListTile(
+                                                              contentPadding:
+                                                                  EdgeInsets
+                                                                      .zero,
+                                                              title: Text(
+                                                                L10n.translate(
+                                                                    context,
+                                                                    'Normalize loudness'),
+                                                                style:
+                                                                    TextStyle(
+                                                                  color:
+                                                                      mutedText,
+                                                                ),
+                                                              ),
+                                                              value:
+                                                                  selectedNormalize,
+                                                              activeColor:
+                                                                  exportBlue,
+                                                              onChanged:
+                                                                  (value) {
+                                                                setSheetState(
+                                                                    () {
+                                                                  selectedNormalize =
+                                                                      value;
+                                                                });
+                                                              },
+                                                            ),
+                                                          ],
+                                                          if (!nativeWavOnly &&
+                                                              selectedNormalize) ...[
+                                                            const SizedBox(
+                                                                height: 4),
+                                                            Text(
+                                                              L10n.translate(
+                                                                  context,
+                                                                  'Limiter ceiling (dBTP)'),
+                                                              style: theme
+                                                                  .textTheme
+                                                                  .bodySmall
+                                                                  ?.copyWith(
+                                                                      color:
+                                                                          mutedText),
+                                                            ),
+                                                            const SizedBox(
+                                                                height: 6),
+                                                            SliderTheme(
+                                                              data: SliderTheme
+                                                                      .of(context)
+                                                                  .copyWith(
+                                                                activeTrackColor:
+                                                                    exportBlue,
+                                                                inactiveTrackColor: Colors
+                                                                    .white
+                                                                    .withValues(
+                                                                        alpha:
+                                                                            0.14),
+                                                                thumbColor:
+                                                                    Colors
+                                                                        .white,
+                                                                overlayColor:
+                                                                    exportBlue
+                                                                        .withValues(
+                                                                  alpha: 0.16,
+                                                                ),
+                                                                trackHeight: 4,
+                                                              ),
+                                                              child: Slider(
+                                                                value: selectedNormalizeTargetDb
+                                                                    .clamp(
+                                                                      _kExportNormalizeTargetDbMin,
+                                                                      _kExportNormalizeTargetDbMax,
+                                                                    )
+                                                                    .toDouble(),
+                                                                min:
+                                                                    _kExportNormalizeTargetDbMin,
+                                                                max:
+                                                                    _kExportNormalizeTargetDbMax,
+                                                                divisions: 17,
+                                                                label:
+                                                                    '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
+                                                                onChanged:
+                                                                    (value) {
+                                                                  final stepped =
+                                                                      double.parse(
+                                                                          value.toStringAsFixed(
+                                                                              1));
+                                                                  setSheetState(
+                                                                      () {
+                                                                    selectedNormalizeTargetDb =
+                                                                        stepped
+                                                                            .clamp(
+                                                                              _kExportNormalizeTargetDbMin,
+                                                                              _kExportNormalizeTargetDbMax,
+                                                                            )
+                                                                            .toDouble();
+                                                                  });
+                                                                },
+                                                              ),
+                                                            ),
+                                                            Align(
+                                                              alignment: Alignment
+                                                                  .centerRight,
+                                                              child: Text(
+                                                                '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
+                                                                style: theme
+                                                                    .textTheme
+                                                                    .bodySmall
+                                                                    ?.copyWith(
+                                                                  color: Colors
+                                                                      .white
+                                                                      .withValues(
+                                                                          alpha:
+                                                                              0.82),
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w700,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            const SizedBox(
+                                                                height: 6),
+                                                            Wrap(
+                                                              spacing: 8,
+                                                              runSpacing: 6,
+                                                              children:
+                                                                  _kExportNormalizeTargetsDb
+                                                                      .map(
+                                                                        (preset) =>
+                                                                            ChoiceChip(
+                                                                          label:
+                                                                              Text(
+                                                                            '${preset.toStringAsFixed(1)} dB',
+                                                                          ),
+                                                                          selected:
+                                                                              (selectedNormalizeTargetDb - preset).abs() < 0.05,
+                                                                          labelStyle: theme
+                                                                              .textTheme
+                                                                              .bodySmall
+                                                                              ?.copyWith(
+                                                                            color:
+                                                                                Colors.white.withValues(alpha: 0.9),
+                                                                            fontWeight:
+                                                                                FontWeight.w600,
+                                                                          ),
+                                                                          backgroundColor: Colors
+                                                                              .white
+                                                                              .withValues(alpha: 0.05),
+                                                                          selectedColor:
+                                                                              exportBlue.withValues(alpha: 0.26),
+                                                                          side:
+                                                                              BorderSide(
+                                                                            color:
+                                                                                Colors.white.withValues(alpha: 0.16),
+                                                                          ),
+                                                                          onSelected:
+                                                                              (_) {
+                                                                            setSheetState(() {
+                                                                              selectedNormalizeTargetDb = preset;
+                                                                            });
+                                                                          },
+                                                                        ),
+                                                                      )
+                                                                      .toList(
+                                                                          growable:
+                                                                              false),
+                                                            ),
+                                                          ],
+                                                          const SizedBox(
+                                                              height: 10),
+                                                          if (selectedFormat ==
+                                                                  _ExportAudioFormat
+                                                                      .wav ||
+                                                              nativeWavOnly) ...[
+                                                            buildDropdownField(
+                                                              label: L10n
+                                                                  .translate(
+                                                                      context,
+                                                                      'Bit depth'),
+                                                              value:
+                                                                  selectedWavBitDepth,
+                                                              options:
+                                                                  _kExportWavBitDepths,
+                                                              textBuilder:
+                                                                  (value) =>
+                                                                      '$value-bit',
+                                                              onChanged:
+                                                                  (value) {
+                                                                if (value ==
+                                                                    null) {
+                                                                  return;
+                                                                }
+                                                                setSheetState(
+                                                                    () {
+                                                                  selectedWavBitDepth =
+                                                                      value;
+                                                                });
+                                                              },
+                                                            ),
+                                                            const SizedBox(
+                                                                height: 6),
+                                                            SwitchListTile(
+                                                              contentPadding:
+                                                                  EdgeInsets
+                                                                      .zero,
+                                                              title: Text(
+                                                                L10n.translate(
+                                                                    context,
+                                                                    'Enable dithering'),
+                                                                style: TextStyle(
+                                                                    color:
+                                                                        mutedText),
+                                                              ),
+                                                              value:
+                                                                  selectedWavDithering,
+                                                              activeColor:
+                                                                  exportBlue,
+                                                              onChanged:
+                                                                  (value) {
+                                                                setSheetState(
+                                                                    () {
+                                                                  selectedWavDithering =
+                                                                      value;
+                                                                });
+                                                              },
+                                                            ),
+                                                          ] else ...[
+                                                            buildDropdownField(
+                                                              label: L10n.translate(
+                                                                  context,
+                                                                  'Encoding mode'),
+                                                              value:
+                                                                  selectedMp3Mode,
+                                                              options:
+                                                                  _ExportMp3Mode
+                                                                      .values,
+                                                              textBuilder: (value) =>
+                                                                  value ==
+                                                                          _ExportMp3Mode
+                                                                              .cbr
+                                                                      ? 'CBR'
+                                                                      : 'VBR',
+                                                              onChanged:
+                                                                  (value) {
+                                                                if (value ==
+                                                                    null) {
+                                                                  return;
+                                                                }
+                                                                setSheetState(
+                                                                    () {
+                                                                  selectedMp3Mode =
+                                                                      value;
+                                                                });
+                                                              },
+                                                            ),
+                                                            const SizedBox(
+                                                                height: 10),
+                                                            if (selectedMp3Mode ==
+                                                                _ExportMp3Mode
+                                                                    .cbr)
+                                                              buildDropdownField(
+                                                                label: L10n
+                                                                    .translate(
+                                                                        context,
+                                                                        'Bit rate'),
+                                                                value:
+                                                                    selectedMp3Bitrate,
+                                                                options:
+                                                                    _kExportMp3Bitrates,
+                                                                textBuilder:
+                                                                    (value) =>
+                                                                        '${value} kbps',
+                                                                onChanged:
+                                                                    (value) {
+                                                                  if (value ==
+                                                                      null) {
+                                                                    return;
+                                                                  }
+                                                                  setSheetState(
+                                                                      () {
+                                                                    selectedMp3Bitrate =
+                                                                        value;
+                                                                  });
+                                                                },
+                                                              )
+                                                            else
+                                                              buildDropdownField(
+                                                                label: L10n
+                                                                    .translate(
+                                                                        context,
+                                                                        'VBR quality'),
+                                                                value:
+                                                                    selectedMp3VbrQuality,
+                                                                options:
+                                                                    _kExportMp3VbrQualities,
+                                                                textBuilder:
+                                                                    (value) =>
+                                                                        'V$value (${L10n.translate(context, value == 0 ? "highest" : "smaller file")})',
+                                                                onChanged:
+                                                                    (value) {
+                                                                  if (value ==
+                                                                      null) {
+                                                                    return;
+                                                                  }
+                                                                  setSheetState(
+                                                                      () {
+                                                                    selectedMp3VbrQuality =
+                                                                        value;
+                                                                  });
+                                                                },
+                                                              ),
+                                                          ],
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
-                                ],
+                                ),
                                 const SizedBox(height: 12),
                                 Container(
                                   height: 50,
+                                  clipBehavior: Clip.antiAlias,
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(25),
                                     color: const Color.fromRGBO(
@@ -8003,98 +8661,102 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   child: Row(
                                     children: [
                                       Expanded(
-                                        child: TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(dialogContext),
-                                          style: TextButton.styleFrom(
-                                            foregroundColor: Colors.white,
-                                            padding: EdgeInsets.zero,
-                                            shape: const RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.only(
-                                                topLeft: Radius.circular(25),
-                                                bottomLeft: Radius.circular(25),
+                                        child: Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            onTap: () =>
+                                                Navigator.pop(dialogContext),
+                                            child: Center(
+                                              child: Text(
+                                                L10n.translate(
+                                                  context,
+                                                  'Cancel',
+                                                ),
+                                                style: const TextStyle(
+                                                  fontFamily: 'Pretendard',
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 14,
+                                                  color: Color.fromRGBO(
+                                                      255, 255, 255, 0.94),
+                                                ),
                                               ),
-                                            ),
-                                            backgroundColor: Colors.transparent,
-                                          ),
-                                          child: Text(
-                                            L10n.translate(context, 'Cancel'),
-                                            style: const TextStyle(
-                                              fontFamily: 'Pretendard',
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 14,
                                             ),
                                           ),
                                         ),
                                       ),
                                       Container(
                                         width: 1,
-                                        height: 28,
+                                        height: double.infinity,
                                         color: Colors.white
                                             .withValues(alpha: 0.10),
                                       ),
                                       Expanded(
-                                        child: FilledButton(
-                                          style: FilledButton.styleFrom(
-                                            backgroundColor: exportBlue,
-                                            foregroundColor: Colors.white,
-                                            elevation: 0,
-                                            padding: EdgeInsets.zero,
-                                            shape: const RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.only(
-                                                topRight: Radius.circular(25),
-                                                bottomRight:
-                                                    Radius.circular(25),
-                                              ),
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: exportBlue,
+                                            borderRadius:
+                                                const BorderRadius.horizontal(
+                                              right: Radius.circular(25),
                                             ),
                                           ),
-                                          onPressed: () {
-                                            Navigator.pop(
-                                              dialogContext,
-                                              _AudioExportSettings(
-                                                format: nativeWavOnly
-                                                    ? _ExportAudioFormat.wav
-                                                    : selectedFormat,
-                                                sampleRate:
-                                                    _normalizeExportSampleRateForFormat(
-                                                  nativeWavOnly
-                                                      ? _ExportAudioFormat.wav
-                                                      : selectedFormat,
-                                                  selectedSampleRate,
+                                          child: Material(
+                                            color: Colors.transparent,
+                                            child: InkWell(
+                                              onTap: () {
+                                                Navigator.pop(
+                                                  dialogContext,
+                                                  _AudioExportSettings(
+                                                    format: nativeWavOnly
+                                                        ? _ExportAudioFormat.wav
+                                                        : selectedFormat,
+                                                    sampleRate:
+                                                        _normalizeExportSampleRateForFormat(
+                                                      nativeWavOnly
+                                                          ? _ExportAudioFormat
+                                                              .wav
+                                                          : selectedFormat,
+                                                      selectedSampleRate,
+                                                    ),
+                                                    wavBitDepth:
+                                                        selectedWavBitDepth,
+                                                    wavDithering:
+                                                        selectedWavDithering,
+                                                    mp3BitrateKbps:
+                                                        selectedMp3Bitrate,
+                                                    mp3Mode: selectedMp3Mode,
+                                                    mp3VbrQuality:
+                                                        selectedMp3VbrQuality,
+                                                    channelMode: nativeWavOnly
+                                                        ? _ExportChannelMode
+                                                            .stereo
+                                                        : selectedChannelMode,
+                                                    normalize: nativeWavOnly
+                                                        ? false
+                                                        : selectedNormalize,
+                                                    normalizeTargetDb:
+                                                        selectedNormalizeTargetDb,
+                                                    resampleQuality: nativeWavOnly
+                                                        ? _ExportResampleQuality
+                                                            .best
+                                                        : selectedResampleQuality,
+                                                  ),
+                                                );
+                                              },
+                                              child: Center(
+                                                child: Text(
+                                                  L10n.translate(
+                                                    context,
+                                                    'Start export',
+                                                  ),
+                                                  style: const TextStyle(
+                                                    fontFamily: 'Pretendard',
+                                                    fontWeight: FontWeight.w700,
+                                                    fontSize: 14,
+                                                    color: Color.fromRGBO(
+                                                        255, 255, 255, 0.98),
+                                                  ),
                                                 ),
-                                                wavBitDepth:
-                                                    selectedWavBitDepth,
-                                                wavDithering:
-                                                    selectedWavDithering,
-                                                mp3BitrateKbps:
-                                                    selectedMp3Bitrate,
-                                                mp3Mode: selectedMp3Mode,
-                                                mp3VbrQuality:
-                                                    selectedMp3VbrQuality,
-                                                channelMode: nativeWavOnly
-                                                    ? _ExportChannelMode.stereo
-                                                    : selectedChannelMode,
-                                                normalize: nativeWavOnly
-                                                    ? false
-                                                    : selectedNormalize,
-                                                normalizeTargetDb:
-                                                    selectedNormalizeTargetDb,
-                                                resampleQuality: nativeWavOnly
-                                                    ? _ExportResampleQuality
-                                                        .best
-                                                    : selectedResampleQuality,
                                               ),
-                                            );
-                                          },
-                                          child: Text(
-                                            L10n.translate(
-                                              context,
-                                              'Start export',
-                                            ),
-                                            style: const TextStyle(
-                                              fontFamily: 'Pretendard',
-                                              fontWeight: FontWeight.w700,
-                                              fontSize: 14,
                                             ),
                                           ),
                                         ),
@@ -8216,6 +8878,82 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<T> _runProgressPulse<T>({
+    required ValueChanged<double> onProgress,
+    required double from,
+    required double to,
+    required Future<T> Function() task,
+    Duration tick = const Duration(milliseconds: 320),
+    double step = 0.02,
+  }) async {
+    if (to <= from) {
+      onProgress(from);
+      return task();
+    }
+
+    var progress = from;
+    onProgress(progress);
+    final timer = Timer.periodic(tick, (_) {
+      progress = math.min(progress + step, to);
+      onProgress(progress);
+    });
+
+    try {
+      return await task();
+    } finally {
+      timer.cancel();
+    }
+  }
+
+  Future<String> _runNativeExportMixWithProgress({
+    required String outPath,
+    required int sampleRate,
+    required int wavBitDepth,
+    required bool wavDithering,
+    required int mp3BitrateKbps,
+    required ValueChanged<double> onProgress,
+    required double from,
+    required double to,
+  }) async {
+    final span = math.max(0.0, to - from);
+    onProgress(from);
+    var pollingDone = false;
+
+    Future<void> pollNativeProgress() async {
+      while (!pollingDone) {
+        try {
+          final nativeProgress = await JuceAudioEngine.getExportProgress();
+          final mapped =
+              from + span * nativeProgress.clamp(0.0, 1.0).toDouble();
+          onProgress(mapped);
+        } catch (_) {
+          // Keep export running even if progress polling is unavailable.
+        }
+        await Future.delayed(const Duration(milliseconds: 120));
+      }
+    }
+
+    final poller = pollNativeProgress();
+    try {
+      return await JuceAudioEngine.exportMix(
+        outPath,
+        format: 'wav',
+        sampleRate: sampleRate,
+        wavBitDepth: wavBitDepth,
+        wavDithering: wavDithering,
+        mp3BitrateKbps: mp3BitrateKbps,
+      );
+    } finally {
+      pollingDone = true;
+      await poller;
+      try {
+        final nativeProgress = await JuceAudioEngine.getExportProgress();
+        final mapped = from + span * nativeProgress.clamp(0.0, 1.0).toDouble();
+        onProgress(mapped);
+      } catch (_) {}
+    }
+  }
+
   Future<String> _exportAudioOnly(ValueChanged<double> onProgress) async {
     if (_audioTracks.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -8226,26 +8964,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return "";
     }
 
-    onProgress(0.0);
+    var reportedProgress = 0.0;
+    void reportProgress(double value) {
+      final clamped = value.clamp(0.0, 1.0).toDouble();
+      if (clamped <= reportedProgress) return;
+      reportedProgress = clamped;
+      onProgress(clamped);
+    }
+
+    reportProgress(0.02);
     final settings = _normalizeAudioExportSettings(
       _activeAudioExportSettings ?? _audioExportSettings,
     );
+    reportProgress(0.06);
+
     if (_desktopNativeWavOnlyExport) {
+      reportProgress(0.12);
       final tempDir = await getTemporaryDirectory();
+      reportProgress(0.18);
       await _syncNativePluginAutomationForAllRows();
+      reportProgress(0.24);
       final nativeOutPath =
           '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.wav';
 
       try {
-        final exportedPath = await JuceAudioEngine.exportMix(
-          nativeOutPath,
-          format: 'wav',
+        final exportedPath = await _runNativeExportMixWithProgress(
+          outPath: nativeOutPath,
           sampleRate: settings.sampleRate,
           wavBitDepth: settings.wavBitDepth,
           wavDithering: settings.wavDithering,
           mp3BitrateKbps: settings.mp3BitrateKbps,
+          onProgress: reportProgress,
+          from: 0.24,
+          to: 0.88,
         );
-        onProgress(1.0);
+        reportProgress(0.96);
         if (exportedPath.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(L10n.translate(context, "Export failed"))),
@@ -8264,6 +9017,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
           return "";
         }
+        reportProgress(1.0);
         return exportedPath;
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -8277,9 +9031,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
 
+    reportProgress(0.10);
     final rawRenderSampleRate = await _resolveRawRenderSampleRate(settings);
+    reportProgress(0.16);
     final tempDir = await getTemporaryDirectory();
+    reportProgress(0.20);
     await _syncNativePluginAutomationForAllRows();
+    reportProgress(0.24);
 
     final useNativeWavDirect = _canUseNativeWavExport(settings) &&
         settings.sampleRate == rawRenderSampleRate;
@@ -8287,15 +9045,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final nativeOutPath =
           '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.wav';
       try {
-        final exportedPath = await JuceAudioEngine.exportMix(
-          nativeOutPath,
-          format: 'wav',
+        final exportedPath = await _runNativeExportMixWithProgress(
+          outPath: nativeOutPath,
           sampleRate: settings.sampleRate,
           wavBitDepth: settings.wavBitDepth,
           wavDithering: settings.wavDithering,
           mp3BitrateKbps: settings.mp3BitrateKbps,
+          onProgress: reportProgress,
+          from: 0.24,
+          to: 0.88,
         );
-        onProgress(1.0);
+        reportProgress(0.96);
 
         if (exportedPath.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -8316,6 +9076,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
           return "";
         }
+        reportProgress(1.0);
         return exportedPath;
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -8333,15 +9094,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         '${tempDir.path}/audio_export_raw_${DateTime.now().millisecondsSinceEpoch}.wav';
 
     try {
-      final exportedPath = await JuceAudioEngine.exportMix(
-        rawOutPath,
-        format: 'wav',
+      final exportedPath = await _runNativeExportMixWithProgress(
+        outPath: rawOutPath,
         sampleRate: rawRenderSampleRate,
         wavBitDepth: 32,
         wavDithering: false,
         mp3BitrateKbps: settings.mp3BitrateKbps,
+        onProgress: reportProgress,
+        from: 0.24,
+        to: 0.72,
       );
-      onProgress(0.8);
+      reportProgress(0.80);
 
       if (exportedPath.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -8360,12 +9123,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return "";
       }
 
-      onProgress(0.9);
-      final convertedPath = await _convertMixWithExportSettings(
-        inputPath: exportedPath,
-        settings: settings,
+      final convertedPath = await _runProgressPulse<String>(
+        onProgress: reportProgress,
+        from: 0.84,
+        to: 0.97,
+        task: () => _convertMixWithExportSettings(
+          inputPath: exportedPath,
+          settings: settings,
+        ),
       );
-      onProgress(1.0);
+      reportProgress(1.0);
       return convertedPath;
     } catch (e) {
       print("Full export error: $e");
@@ -8826,7 +9593,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (!targetOk) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to arm selected MIDI clip.')),
+        SnackBar(
+          content: Text(
+            L10n.translate(context, 'Unable to arm selected MIDI clip.'),
+          ),
+        ),
       );
       return;
     }
@@ -8839,7 +9610,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _recordingPeakTimer = null;
 
     _midiInputPollTimer?.cancel();
-    _midiInputPollTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
+    _midiInputPollTimer = Timer.periodic(const Duration(milliseconds: 40), (_) {
       unawaited(_drainMidiInputEventsForRecording());
     });
 
@@ -8934,8 +9705,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       // 1) Require a selected row
       if (_rowCount <= 0 || _selectedRow < 0 || _selectedRow >= _rowCount) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Select a track to record on first.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              L10n.translate(context, 'Select a track to record on first.'),
+            ),
+          ),
+        );
         return;
       }
 
@@ -8986,7 +9762,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!ok) {
         _liveInputMonitoringEffective = null;
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to start recording')));
+          SnackBar(
+            content: Text(L10n.translate(context, 'Failed to start recording')),
+          ),
+        );
         return;
       }
 
@@ -9048,8 +9827,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       SnackBar(
         content: Text(
           status.isPermanentlyDenied || status.isRestricted
-              ? 'Microphone access is blocked. Open app settings to record audio.'
-              : 'Microphone access is required to record audio.',
+              ? L10n.translate(
+                  context,
+                  'Microphone access is blocked. Open app settings to record audio.',
+                )
+              : L10n.translate(
+                  context,
+                  'Microphone access is required to record audio.',
+                ),
         ),
       ),
     );
@@ -9160,8 +9945,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(
-            content: Text('Recording failed or no data captured.')));
+        ).showSnackBar(
+          SnackBar(
+            content: Text(
+              L10n.translate(context, 'Recording failed or no data captured.'),
+            ),
+          ),
+        );
         return;
       }
 
@@ -9195,7 +9985,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       } catch (e) {
         debugPrint("Error adding recorded track: $e");
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to add recorded track.')));
+          SnackBar(
+            content:
+                Text(L10n.translate(context, 'Failed to add recorded track.')),
+          ),
+        );
       }
 
       // 3) Restore the intended playback state after the clip is inserted.
@@ -9652,6 +10446,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   List<MidiNote> _defaultMidiNotesForInstrument(String instrumentId) {
     final now = DateTime.now().microsecondsSinceEpoch;
+    int noteIndex = 0;
+    MidiNote seededNote(
+      int pitch,
+      double startBeat,
+      double lengthBeats,
+      double velocity,
+    ) {
+      return MidiNote(
+        id: '${now}_${noteIndex++}',
+        pitch: pitch,
+        startBeat: startBeat,
+        lengthBeats: lengthBeats,
+        velocity: velocity,
+      );
+    }
+
+    List<MidiNote> seededPattern(List<List<num>> data) {
+      return data
+          .map(
+            (entry) => seededNote(
+              entry[0].toInt(),
+              entry[1].toDouble(),
+              entry[2].toDouble(),
+              entry[3].toDouble(),
+            ),
+          )
+          .toList(growable: false);
+    }
+
     if (instrumentId == 'mixroom.drum_808_starter') {
       return <MidiNote>[
         MidiNote(
@@ -9730,158 +10553,136 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (_isSampledInstrumentId(instrumentId)) {
       final name = _instrumentNameFromId(instrumentId).toLowerCase();
+      if (instrumentId == 'sfz.vsco.organ_quiet' ||
+          instrumentId == 'sfz.vsco.organ_loud' ||
+          name.contains('organ')) {
+        return seededPattern(<List<num>>[
+          <num>[48, 0.0, 2.0, 0.72],
+          <num>[55, 0.0, 2.0, 0.66],
+          <num>[60, 0.0, 2.0, 0.64],
+          <num>[50, 2.0, 2.0, 0.7],
+          <num>[57, 2.0, 2.0, 0.64],
+          <num>[62, 2.0, 2.0, 0.64],
+        ]);
+      }
+      if (instrumentId == 'sfz.vsco.violin_ens_pizz' ||
+          name.contains('pizz') ||
+          name.contains('violin')) {
+        return seededPattern(<List<num>>[
+          <num>[67, 0.0, 0.5, 0.78],
+          <num>[71, 0.5, 0.5, 0.74],
+          <num>[74, 1.0, 0.5, 0.76],
+          <num>[79, 1.5, 0.5, 0.8],
+          <num>[74, 2.0, 0.5, 0.76],
+          <num>[71, 2.5, 0.5, 0.74],
+          <num>[69, 3.0, 0.5, 0.74],
+          <num>[67, 3.5, 0.5, 0.78],
+        ]);
+      }
+      if (instrumentId == 'sfz.vsco.trumpet_stac' || name.contains('trumpet')) {
+        return seededPattern(<List<num>>[
+          <num>[60, 0.0, 0.5, 0.82],
+          <num>[64, 0.5, 0.5, 0.78],
+          <num>[67, 1.0, 0.5, 0.8],
+          <num>[64, 1.5, 0.5, 0.76],
+          <num>[62, 2.0, 0.5, 0.78],
+          <num>[67, 2.5, 0.5, 0.82],
+          <num>[69, 3.0, 0.5, 0.82],
+          <num>[67, 3.5, 0.5, 0.8],
+        ]);
+      }
+      if (instrumentId == 'sfz.vsco.tuba_stac' || name.contains('tuba')) {
+        return seededPattern(<List<num>>[
+          <num>[36, 0.0, 0.75, 0.9],
+          <num>[43, 1.0, 0.5, 0.84],
+          <num>[38, 2.0, 0.75, 0.88],
+          <num>[41, 3.0, 0.5, 0.84],
+          <num>[34, 3.5, 0.5, 0.88],
+        ]);
+      }
+      if (instrumentId == 'sfz.vsco.flute_stac' || name.contains('flute')) {
+        return seededPattern(<List<num>>[
+          <num>[76, 0.0, 0.5, 0.8],
+          <num>[79, 0.5, 0.5, 0.76],
+          <num>[81, 1.0, 0.5, 0.78],
+          <num>[79, 1.5, 0.5, 0.74],
+          <num>[83, 2.0, 0.5, 0.8],
+          <num>[81, 2.5, 0.5, 0.76],
+          <num>[79, 3.0, 0.5, 0.74],
+          <num>[76, 3.5, 0.5, 0.78],
+        ]);
+      }
+      if (instrumentId == 'sfz.vsco.clarinet_stac' ||
+          name.contains('clarinet')) {
+        return seededPattern(<List<num>>[
+          <num>[62, 0.0, 0.5, 0.78],
+          <num>[65, 0.5, 0.5, 0.74],
+          <num>[67, 1.0, 0.5, 0.76],
+          <num>[69, 1.5, 0.5, 0.78],
+          <num>[67, 2.0, 0.5, 0.74],
+          <num>[65, 2.5, 0.5, 0.72],
+          <num>[64, 3.0, 0.5, 0.74],
+          <num>[62, 3.5, 0.5, 0.76],
+        ]);
+      }
+      if (instrumentId == 'sfz.vsco.piccolo_sus' || name.contains('piccolo')) {
+        return seededPattern(<List<num>>[
+          <num>[84, 0.0, 1.5, 0.72],
+          <num>[88, 1.5, 1.0, 0.68],
+          <num>[91, 2.5, 1.5, 0.72],
+        ]);
+      }
       if (name.contains('timpani')) {
-        return <MidiNote>[
-          MidiNote(
-              id: '${now}_0',
-              pitch: 43,
-              startBeat: 0.0,
-              lengthBeats: 0.75,
-              velocity: 0.86),
-          MidiNote(
-              id: '${now}_1',
-              pitch: 46,
-              startBeat: 1.0,
-              lengthBeats: 0.75,
-              velocity: 0.80),
-          MidiNote(
-              id: '${now}_2',
-              pitch: 50,
-              startBeat: 2.0,
-              lengthBeats: 0.75,
-              velocity: 0.84),
-          MidiNote(
-              id: '${now}_3',
-              pitch: 53,
-              startBeat: 3.0,
-              lengthBeats: 1.0,
-              velocity: 0.90),
-        ];
+        return seededPattern(<List<num>>[
+          <num>[43, 0.0, 0.75, 0.86],
+          <num>[46, 1.0, 0.75, 0.8],
+          <num>[50, 2.0, 0.75, 0.84],
+          <num>[53, 3.0, 1.0, 0.9],
+        ]);
       }
       if (name.contains('drum') ||
           name.contains('kit') ||
           name.contains('gm style perc')) {
-        return <MidiNote>[
-          MidiNote(
-              id: '${now}_0',
-              pitch: 36,
-              startBeat: 0.0,
-              lengthBeats: 0.25,
-              velocity: 0.92),
-          MidiNote(
-              id: '${now}_1',
-              pitch: 42,
-              startBeat: 0.5,
-              lengthBeats: 0.25,
-              velocity: 0.72),
-          MidiNote(
-              id: '${now}_2',
-              pitch: 38,
-              startBeat: 1.0,
-              lengthBeats: 0.25,
-              velocity: 0.85),
-          MidiNote(
-              id: '${now}_3',
-              pitch: 42,
-              startBeat: 1.5,
-              lengthBeats: 0.25,
-              velocity: 0.72),
-          MidiNote(
-              id: '${now}_4',
-              pitch: 36,
-              startBeat: 2.0,
-              lengthBeats: 0.25,
-              velocity: 0.9),
-          MidiNote(
-              id: '${now}_5',
-              pitch: 46,
-              startBeat: 2.5,
-              lengthBeats: 0.25,
-              velocity: 0.74),
-          MidiNote(
-              id: '${now}_6',
-              pitch: 38,
-              startBeat: 3.0,
-              lengthBeats: 0.25,
-              velocity: 0.88),
-          MidiNote(
-              id: '${now}_7',
-              pitch: 42,
-              startBeat: 3.5,
-              lengthBeats: 0.25,
-              velocity: 0.76),
-        ];
+        return seededPattern(<List<num>>[
+          <num>[36, 0.0, 0.25, 0.94],
+          <num>[42, 0.5, 0.125, 0.64],
+          <num>[38, 1.0, 0.25, 0.84],
+          <num>[42, 1.5, 0.125, 0.6],
+          <num>[36, 2.0, 0.25, 0.92],
+          <num>[42, 2.5, 0.125, 0.62],
+          <num>[45, 2.75, 0.25, 0.72],
+          <num>[38, 3.0, 0.25, 0.86],
+          <num>[46, 3.5, 0.125, 0.68],
+          <num>[42, 3.75, 0.125, 0.6],
+        ]);
       }
       if (name.contains('marimba') ||
           name.contains('glock') ||
           name.contains('xylo') ||
           name.contains('bell') ||
           name.contains('perc')) {
-        return <MidiNote>[
-          MidiNote(
-              id: '${now}_0',
-              pitch: 60,
-              startBeat: 0.0,
-              lengthBeats: 0.5,
-              velocity: 0.90),
-          MidiNote(
-              id: '${now}_1',
-              pitch: 64,
-              startBeat: 0.5,
-              lengthBeats: 0.5,
-              velocity: 0.82),
-          MidiNote(
-              id: '${now}_2',
-              pitch: 67,
-              startBeat: 1.0,
-              lengthBeats: 0.5,
-              velocity: 0.86),
-          MidiNote(
-              id: '${now}_3',
-              pitch: 72,
-              startBeat: 1.5,
-              lengthBeats: 0.5,
-              velocity: 0.90),
-          MidiNote(
-              id: '${now}_4',
-              pitch: 67,
-              startBeat: 2.0,
-              lengthBeats: 0.5,
-              velocity: 0.84),
-          MidiNote(
-              id: '${now}_5',
-              pitch: 64,
-              startBeat: 2.5,
-              lengthBeats: 0.5,
-              velocity: 0.80),
-          MidiNote(
-              id: '${now}_6',
-              pitch: 60,
-              startBeat: 3.0,
-              lengthBeats: 1.0,
-              velocity: 0.88),
-        ];
+        return seededPattern(<List<num>>[
+          <num>[60, 0.0, 0.5, 0.88],
+          <num>[67, 0.5, 0.5, 0.8],
+          <num>[72, 1.0, 0.5, 0.84],
+          <num>[76, 1.5, 0.5, 0.82],
+          <num>[74, 2.0, 0.5, 0.78],
+          <num>[72, 2.5, 0.5, 0.78],
+          <num>[67, 3.0, 0.5, 0.8],
+          <num>[64, 3.5, 0.5, 0.82],
+        ]);
       }
-      return <MidiNote>[
-        MidiNote(
-            id: '${now}_0',
-            pitch: 60,
-            startBeat: 0.0,
-            lengthBeats: 4.0,
-            velocity: 0.78),
-        MidiNote(
-            id: '${now}_1',
-            pitch: 64,
-            startBeat: 0.0,
-            lengthBeats: 4.0,
-            velocity: 0.72),
-        MidiNote(
-            id: '${now}_2',
-            pitch: 67,
-            startBeat: 0.0,
-            lengthBeats: 4.0,
-            velocity: 0.72),
-      ];
+      return seededPattern(<List<num>>[
+        <num>[60, 0.0, 1.0, 0.78],
+        <num>[64, 0.0, 1.0, 0.72],
+        <num>[67, 0.0, 1.0, 0.74],
+        <num>[62, 1.0, 1.0, 0.76],
+        <num>[65, 1.0, 1.0, 0.7],
+        <num>[69, 1.0, 1.0, 0.72],
+        <num>[59, 2.0, 2.0, 0.74],
+        <num>[62, 2.0, 2.0, 0.7],
+        <num>[67, 2.0, 2.0, 0.72],
+      ]);
     }
     if (instrumentId == 'mixroom.bass_mono') {
       return <MidiNote>[
@@ -10130,32 +10931,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ];
     }
     if (instrumentId == 'mixroom.gentle_pluck') {
-      return <MidiNote>[
-        MidiNote(
-            id: '${now}_0',
-            pitch: 67,
-            startBeat: 0.0,
-            lengthBeats: 0.5,
-            velocity: 0.8),
-        MidiNote(
-            id: '${now}_1',
-            pitch: 72,
-            startBeat: 1.0,
-            lengthBeats: 0.5,
-            velocity: 0.78),
-        MidiNote(
-            id: '${now}_2',
-            pitch: 74,
-            startBeat: 2.0,
-            lengthBeats: 0.5,
-            velocity: 0.8),
-        MidiNote(
-            id: '${now}_3',
-            pitch: 79,
-            startBeat: 3.0,
-            lengthBeats: 0.5,
-            velocity: 0.82),
-      ];
+      return seededPattern(<List<num>>[
+        <num>[67, 0.0, 0.375, 0.8],
+        <num>[71, 0.5, 0.375, 0.74],
+        <num>[74, 1.0, 0.375, 0.78],
+        <num>[79, 1.5, 0.5, 0.82],
+        <num>[74, 2.0, 0.375, 0.76],
+        <num>[71, 2.5, 0.375, 0.74],
+        <num>[67, 3.0, 0.375, 0.78],
+        <num>[74, 3.5, 0.5, 0.8],
+      ]);
+    }
+    if (instrumentId == 'mixroom.air_pluck') {
+      return seededPattern(<List<num>>[
+        <num>[72, 0.0, 0.5, 0.7],
+        <num>[76, 0.75, 0.5, 0.66],
+        <num>[79, 1.5, 0.5, 0.68],
+        <num>[83, 2.0, 0.75, 0.72],
+        <num>[79, 3.0, 0.5, 0.66],
+        <num>[76, 3.5, 0.5, 0.64],
+      ]);
+    }
+    if (instrumentId == 'mixroom.glass_pluck') {
+      return seededPattern(<List<num>>[
+        <num>[79, 0.0, 0.25, 0.74],
+        <num>[83, 0.5, 0.25, 0.7],
+        <num>[86, 1.0, 0.25, 0.72],
+        <num>[83, 1.5, 0.25, 0.68],
+        <num>[79, 2.0, 0.25, 0.72],
+        <num>[86, 2.5, 0.25, 0.74],
+        <num>[88, 3.0, 0.25, 0.7],
+        <num>[83, 3.5, 0.5, 0.72],
+      ]);
     }
     if (instrumentId == 'mixroom.sub_bass') {
       return <MidiNote>[
@@ -10617,26 +11424,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             velocity: 0.66),
       ];
     }
-    return <MidiNote>[
-      MidiNote(
-          id: '${now}_0',
-          pitch: 60,
-          startBeat: 0.0,
-          lengthBeats: 1.0,
-          velocity: 0.84),
-      MidiNote(
-          id: '${now}_1',
-          pitch: 64,
-          startBeat: 1.0,
-          lengthBeats: 1.0,
-          velocity: 0.8),
-      MidiNote(
-          id: '${now}_2',
-          pitch: 67,
-          startBeat: 2.0,
-          lengthBeats: 1.0,
-          velocity: 0.8),
-    ];
+    return seededPattern(<List<num>>[
+      <num>[60, 0.0, 0.5, 0.82],
+      <num>[64, 0.5, 0.5, 0.76],
+      <num>[67, 1.0, 0.5, 0.78],
+      <num>[69, 1.5, 0.5, 0.74],
+      <num>[67, 2.0, 0.5, 0.78],
+      <num>[64, 2.5, 0.5, 0.76],
+      <num>[62, 3.0, 0.5, 0.74],
+      <num>[60, 3.5, 0.5, 0.8],
+    ]);
   }
 
   Future<File> _nextInstrumentRenderFile(String instrumentId) async {
@@ -11231,7 +12028,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (renderedWithSfz && outFile.existsSync()) {
         return true;
       }
-      if (Platform.isAndroid) {
+      if (_kAllowSampledNativeRenderFallbackForBeta && Platform.isAndroid) {
         final engineInstrumentId = _liveMidiEngineInstrumentId(instrumentId);
         final renderedPath = await JuceAudioEngine.renderInstrumentClip(
           outPath: outFile.path,
@@ -11629,9 +12426,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final outFile =
         renderedFile ?? await _nextInstrumentRenderFile(instrumentId);
+    final hasExistingRenderedFile =
+        outFile.existsSync() && outFile.lengthSync() > 0;
     final shouldRefreshSampledRender =
         renderedFile != null && _isSampledInstrumentId(instrumentId);
-    if (!outFile.existsSync() || shouldRefreshSampledRender) {
+    if (!hasExistingRenderedFile || shouldRefreshSampledRender) {
       final rendered = await _renderInstrumentClipToFile(
         outFile: outFile,
         instrumentId: instrumentId,
@@ -11639,15 +12438,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         notes: midiNotes,
         params: instrumentParams,
       );
-      if (!rendered || !outFile.existsSync()) {
-        if (mounted) {
-          final msg = _isSampledInstrumentId(instrumentId)
-              ? 'Could not render sampled instrument. Check SFZ assets.'
-              : 'Could not render instrument clip.';
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(msg)));
+      final hasRenderedOutput =
+          outFile.existsSync() && outFile.lengthSync() > 0;
+      if (!rendered || !hasRenderedOutput) {
+        if (hasExistingRenderedFile) {
+          // Project already has a valid rendered WAV; do not block load on
+          // best-effort sampled re-render refresh failures.
+          debugPrint(
+            'Using existing rendered MIDI clip after sampled re-render failed: ${outFile.path}',
+          );
+        } else {
+          if (mounted) {
+            final msg = _isSampledInstrumentId(instrumentId)
+                ? 'Could not render sampled instrument. Check SFZ assets.'
+                : 'Could not render instrument clip.';
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text(msg)));
+          }
+          return;
         }
-        return;
       }
     }
 
@@ -11913,6 +12722,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   double _clampTempo(double bpm) => bpm.clamp(20.0, 999.0).toDouble();
 
+  int _tempoPickerItemFor(double bpm) => _clampTempo(bpm).round() - 20;
+
+  void _syncTempoPickerSelection({bool animate = false}) {
+    final targetItem = _tempoPickerItemFor(_tempo);
+    if (!_tempoPickerController.hasClients) return;
+    final currentItem = _tempoPickerController.selectedItem;
+    if (currentItem == targetItem) return;
+    if (animate) {
+      unawaited(
+        _tempoPickerController.animateToItem(
+          targetItem,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+    } else {
+      _tempoPickerController.jumpToItem(targetItem);
+    }
+  }
+
   String _formatTempoBpm(double bpm) {
     final t = _clampTempo(bpm);
     if ((t - t.roundToDouble()).abs() < 0.0001) {
@@ -11923,33 +12752,167 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _promptTempoInput() async {
     final controller = TextEditingController(text: _formatTempoBpm(_tempo));
-    final raw = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1F2E),
-        title: const Text('Set Tempo', style: TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: '20.0 - 999.0',
-            hintStyle: TextStyle(color: Colors.white54),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Apply'),
-          ),
-        ],
-      ),
-    );
+    final focusNode = FocusNode();
+    bool focusScheduled = false;
+    bool dialogClosing = false;
+
+    void closeDialog(BuildContext dialogContext, String? result) {
+      if (dialogClosing) return;
+      dialogClosing = true;
+      focusNode.unfocus();
+      if (!dialogContext.mounted) return;
+      Navigator.of(dialogContext).pop(result);
+    }
+
+    String? raw;
+    try {
+      raw = await showDialog<String>(
+        context: context,
+        builder: (ctx) {
+          if (!focusScheduled) {
+            focusScheduled = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!focusNode.canRequestFocus) return;
+              focusNode.requestFocus();
+            });
+          }
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+            clipBehavior: Clip.antiAlias,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: MixroomShellSurface(
+                radius: 24,
+                strong: true,
+                color: const Color.fromRGBO(244, 244, 244, 0.14),
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      L10n.translate(ctx, 'Set Tempo'),
+                      style: const TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Color(0xFFF4F4F4),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      autofocus: false,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) =>
+                          closeDialog(ctx, controller.text.trim()),
+                      style: const TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Color(0xFFF4F4F4),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: '20.0 - 999.0',
+                        hintStyle: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.54),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        filled: true,
+                        fillColor: Colors.white.withValues(alpha: 0.09),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 11,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.14),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.14),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.28),
+                            width: 1.1,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => closeDialog(ctx, null),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFF4F4F4),
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                          ),
+                          child: Text(L10n.translate(ctx, 'Cancel')),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          onPressed: () =>
+                              closeDialog(ctx, controller.text.trim()),
+                          style: FilledButton.styleFrom(
+                            backgroundColor:
+                                const Color.fromRGBO(118, 147, 174, 0.92),
+                            foregroundColor: const Color(0xFFF4F4F4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text(L10n.translate(ctx, 'Apply')),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    } finally {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        controller.dispose();
+        focusNode.dispose();
+      });
+    }
     if (raw == null || raw.isEmpty) return;
     final parsed = double.tryParse(raw.replaceAll(',', '.'));
     if (parsed == null || parsed < 20.0 || parsed > 999.0) {
@@ -11968,6 +12931,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       context: context,
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+        ),
+        clipBehavior: Clip.antiAlias,
         insetPadding: const EdgeInsets.symmetric(horizontal: 28),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(22),
@@ -12035,6 +13004,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final next = _clampTempo(bpm);
     if (next == _tempo) return;
     _setStateAndRefreshProjectSettings(() => _tempo = next);
+    _syncTempoPickerSelection();
     unawaited(_queueTempoEngineSync());
   }
 
@@ -12325,12 +13295,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     final effectiveSettings = _normalizeAudioExportSettings(selectedSettings);
+    final exportFormat = effectiveSettings.fileExtension;
     final exportStopwatch = Stopwatch()..start();
     unawaited(
       AnalyticsService.instance.track(
         AnalyticsEvents.exportStarted(
           projectId: _projectId,
-          exportType: 'mixdown',
+          exportType: exportFormat,
           trackCount: _audioTracks.length,
         ),
       ),
@@ -12384,7 +13355,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       AnalyticsService.instance.track(
         AnalyticsEvents.exportCompleted(
           projectId: _projectId,
-          exportType: 'mixdown',
+          exportType: exportFormat,
           durationMs: exportStopwatch.elapsedMilliseconds,
           fileSize: exportFileSize,
         ),
@@ -12403,11 +13374,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
 
     if (savedPath != null) {
+      if (Platform.isAndroid) {
+        final savedDisplayName =
+            await ExportSaveDialog.resolveSavedDisplayNameFromPlatform(
+          savedPath,
+        );
+        if (savedDisplayName != null &&
+            savedDisplayName.isNotEmpty &&
+            savedDisplayName.toLowerCase() !=
+                suggestedFileName.trim().toLowerCase()) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Name already existed. Saved as "$savedDisplayName".',
+              ),
+            ),
+          );
+        }
+      }
       // final success_str = L10n.translate(context, 'Exported file saved!');
       // ScaffoldMessenger.of(context).showSnackBar(
       //   SnackBar(content: Text(success_str)),// at: $savedPath')),
       // );
-      final bool? done = await Navigator.push(
+      final ExportSuccessAction? action =
+          await Navigator.push<ExportSuccessAction>(
         context,
         MaterialPageRoute(
           builder: (context) => ExportSuccessScreen(
@@ -12426,37 +13416,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       } catch (_) {}
 
-      if (done == true) {
-        //****TEMPORARY: REMOVE return LINE FOR Mixroom FULL RELEASE****
+      if (action == ExportSuccessAction.exitToProjects) {
+        await _handleBackPressed();
         return;
-
-        _pausePlayback();
-        JuceAudioEngine.shutdown();
-
-        if (!mounted) return;
-        Navigator.pushAndRemoveUntil(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) => HomeScreen(),
-            transitionsBuilder:
-                (context, animation, secondaryAnimation, child) {
-              const beginScale = 0.96;
-              const endScale = 1.0;
-              const curve = Curves.easeOutCubic;
-              final tween = Tween<double>(begin: beginScale, end: endScale)
-                  .chain(CurveTween(curve: curve));
-              final fadeTween = Tween<double>(begin: 0.0, end: 1.0)
-                  .chain(CurveTween(curve: curve));
-              return FadeTransition(
-                opacity: animation.drive(fadeTween),
-                child: ScaleTransition(
-                    scale: animation.drive(tween), child: child),
-              );
-            },
-            transitionDuration: const Duration(milliseconds: 300),
-          ),
-          (route) => false,
-        );
       }
     } else {
       final fail_str = L10n.translate(context, 'Export canceled or failed.');
@@ -12492,7 +13454,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("OK"),
+            child: Text(L10n.translate(context, 'OK')),
           ),
         ],
       ),
@@ -12517,7 +13479,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!File(filePath).existsSync()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('File is unavailable.')),
+        SnackBar(
+            content: Text(L10n.translate(context, 'File is unavailable.'))),
       );
       return;
     }
@@ -12803,8 +13766,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_sampleBrowserRoots.contains(normalized)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Folder already loaded for this project.')),
+        SnackBar(
+          content: Text(L10n.translate(
+              context, 'Folder already loaded for this project.')),
+        ),
       );
       return;
     }
@@ -12826,95 +13791,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       '/storage/self/primary',
     };
     return rootCandidates.contains(normalized);
-  }
-
-  Future<List<String>> _androidSampleBrowserDefaultRoots() async {
-    final candidates = <String>{
-      '/storage/emulated/0/Music',
-      '/storage/emulated/0/Download',
-      '/sdcard/Music',
-      '/sdcard/Download',
-    };
-    for (final base in _androidStorageRootCandidates) {
-      final dirs = _listTopLevelAndroidSubfolders(base);
-      candidates.addAll(dirs);
-    }
-    try {
-      final musicDirs =
-          await getExternalStorageDirectories(type: StorageDirectory.music);
-      if (musicDirs != null) {
-        for (final dir in musicDirs) {
-          candidates.add(dir.path);
-        }
-      }
-    } catch (_) {}
-    try {
-      final downloadDirs =
-          await getExternalStorageDirectories(type: StorageDirectory.downloads);
-      if (downloadDirs != null) {
-        for (final dir in downloadDirs) {
-          candidates.add(dir.path);
-        }
-      }
-    } catch (_) {}
-
-    final resolved = <String>[];
-    for (final raw in candidates) {
-      final normalized = _normalizePickedDirectoryPath(raw);
-      if (normalized.isEmpty || _isAndroidRootFolderPath(normalized)) continue;
-      if (!_canUseAsSampleBrowserRoot(normalized)) continue;
-      if (!resolved.contains(normalized)) {
-        resolved.add(normalized);
-      }
-    }
-    return resolved;
-  }
-
-  static const List<String> _androidStorageRootCandidates = <String>[
-    '/storage/emulated/0',
-    '/sdcard',
-    '/storage/self/primary',
-  ];
-
-  List<String> _listTopLevelAndroidSubfolders(String rootPath) {
-    final dirs = <String>[];
-    try {
-      final root = Directory(rootPath);
-      if (!root.existsSync()) return dirs;
-      for (final entity in root.listSync(followLinks: false)) {
-        if (entity is! Directory) continue;
-        final name = p.basename(entity.path).trim();
-        if (name.isEmpty || name.startsWith('.')) continue;
-        dirs.add(entity.path);
-      }
-    } catch (_) {}
-    return dirs;
-  }
-
-  bool _canUseAsSampleBrowserRoot(String path) {
-    try {
-      final dir = Directory(path);
-      if (!dir.existsSync()) return false;
-      // Guard against inaccessible roots that appear to exist but cannot be listed.
-      dir.listSync(followLinks: false);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<bool> _seedAndroidSampleBrowserDefaultRootsIfNeeded() async {
-    if (!Platform.isAndroid || _sampleBrowserRoots.isNotEmpty) return false;
-    final defaults = await _androidSampleBrowserDefaultRoots();
-    if (defaults.isEmpty || !mounted) return false;
-    setState(() {
-      for (final root in defaults) {
-        if (!_sampleBrowserRoots.contains(root)) {
-          _sampleBrowserRoots.add(root);
-        }
-      }
-    });
-    return _sampleBrowserRoots.isNotEmpty;
   }
 
   Future<T?> _runFilePickerRequest<T>(Future<T?> Function() request) async {
@@ -13100,14 +13976,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _openSampleBrowser({bool promptFolderIfEmpty = false}) async {
     if (promptFolderIfEmpty && _sampleBrowserRoots.isEmpty) {
-      if (!await _ensureAndroidMediaLibraryAccess()) return;
-      var seededDefaults = false;
-      if (Platform.isAndroid) {
-        seededDefaults = await _seedAndroidSampleBrowserDefaultRootsIfNeeded();
-      }
-      if (!seededDefaults && _sampleBrowserRoots.isEmpty) {
-        await _addSampleBrowserRootFolder();
-      }
+      await _addSampleBrowserRootFolder();
       if (_sampleBrowserRoots.isEmpty) {
         return;
       }
@@ -13274,7 +14143,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _samplePreviewPlaying = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to preview sample: $e')),
+        SnackBar(
+          content: Text(
+              '${L10n.translate(context, 'Failed to preview sample')}: $e'),
+        ),
       );
     }
   }
@@ -13369,6 +14241,148 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return 'Other';
   }
 
+  bool _passesInstrumentRuntimeQualityGate(Map<String, dynamic> spec) {
+    final approved = _instrumentQualityApprovedIds;
+    if (approved == null) return true;
+    final id = (spec['id'] as String? ?? '').trim().toLowerCase();
+    if (id.isEmpty) return false;
+    return approved.contains(id);
+  }
+
+  Future<void> _ensureInstrumentQualityVetting() async {
+    if (_instrumentQualityApprovedIds != null) return;
+    if (_instrumentQualityVettingFuture != null) {
+      await _instrumentQualityVettingFuture;
+      return;
+    }
+    final future = _runInstrumentQualityVetting();
+    _instrumentQualityVettingFuture = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_instrumentQualityVettingFuture, future)) {
+        _instrumentQualityVettingFuture = null;
+      }
+    }
+  }
+
+  Future<void> _runInstrumentQualityVetting() async {
+    final available = _instrumentCatalog.isNotEmpty
+        ? _instrumentCatalog
+        : _mergeInstrumentCatalogs([
+            kInstrumentCatalog,
+            kBundledSfzFallbackCatalog,
+          ]);
+    final candidates = available
+        .where(_isReleaseAllowedInstrumentSpec)
+        .map((spec) => Map<String, dynamic>.from(spec))
+        .toList(growable: false);
+    final approved = <String>{};
+
+    for (final spec in candidates) {
+      final id = (spec['id'] as String? ?? '').trim().toLowerCase();
+      if (id.isEmpty) continue;
+      final ok = await _passesInstrumentRenderSanity(spec);
+      if (ok) {
+        approved.add(id);
+      } else {
+        debugPrint('⚠️ Instrument quality gate rejected: $id');
+      }
+    }
+
+    if (approved.isEmpty) {
+      // Emergency beta fallback: keep only the known-stable pluck presets.
+      approved.addAll(kEmergencyBetaInstrumentIds);
+    }
+    debugPrint(
+      '🎛️ Instrument quality gate approved ${approved.length}/${candidates.length} instruments.',
+    );
+
+    if (!mounted) {
+      _instrumentQualityApprovedIds = approved;
+      return;
+    }
+    setState(() {
+      _instrumentQualityApprovedIds = approved;
+    });
+  }
+
+  Future<bool> _passesInstrumentRenderSanity(Map<String, dynamic> spec) async {
+    final id = (spec['id'] as String? ?? '').trim();
+    if (id.isEmpty) return false;
+    final name = (spec['name'] as String? ?? id).trim();
+    final params = _instrumentParamsFromSpec(spec);
+    final notes = _defaultMidiNotesForInstrument(id);
+    if (notes.isEmpty) return false;
+
+    Directory tempDir;
+    try {
+      tempDir = await getTemporaryDirectory();
+    } catch (_) {
+      tempDir = Directory.systemTemp;
+    }
+    final safeId =
+        id.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_').trim();
+    final outFile = File(
+      p.join(
+        tempDir.path,
+        'instrument_quality_${safeId.isEmpty ? 'unknown' : safeId}.wav',
+      ),
+    );
+
+    try {
+      final rendered = await _renderInstrumentClipToFile(
+        outFile: outFile,
+        instrumentId: id,
+        instrumentName: name.isEmpty ? id : name,
+        notes: notes,
+        params: params,
+      );
+      if (!rendered || !outFile.existsSync()) return false;
+      final rawBytes = await outFile.readAsBytes();
+      final decoded = _decodePcmWav(ByteData.sublistView(rawBytes));
+      if (decoded == null || decoded.frameCount < 2048) return false;
+
+      double peak = 0.0;
+      double sumSq = 0.0;
+      double sum = 0.0;
+      int clipped = 0;
+      final frames = decoded.frameCount;
+      for (int i = 0; i < frames; i++) {
+        final l = decoded.left[i].toDouble();
+        final r = decoded.right[i].toDouble();
+        final al = l.abs();
+        final ar = r.abs();
+        if (al > peak) peak = al;
+        if (ar > peak) peak = ar;
+        if (al >= 0.995) clipped++;
+        if (ar >= 0.995) clipped++;
+        sumSq += (l * l) + (r * r);
+        sum += l + r;
+      }
+      final sampleCount = (frames * 2).toDouble();
+      final rms = math.sqrt(sumSq / sampleCount);
+      final clipRatio = clipped / sampleCount;
+      final dcOffset = (sum / sampleCount).abs();
+
+      if (peak < 0.018) return false;
+      if (rms < 0.0012) return false;
+      if (clipRatio > 0.08) return false;
+      if (dcOffset > 0.10) return false;
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      try {
+        if (outFile.existsSync()) {
+          await outFile.delete();
+        }
+      } catch (_) {
+        // best effort cleanup
+      }
+    }
+  }
+
   List<Map<String, dynamic>> _activeInstrumentCatalog() {
     final available = _instrumentCatalog.isNotEmpty
         ? _instrumentCatalog
@@ -13379,9 +14393,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final filtered = <Map<String, dynamic>>[];
     for (final spec in available) {
       if (!_isReleaseAllowedInstrumentSpec(spec)) continue;
+      if (!_passesInstrumentRuntimeQualityGate(spec)) continue;
       filtered.add(Map<String, dynamic>.from(spec));
     }
     if (filtered.isNotEmpty) return filtered;
+    final curatedFallback = _mergeInstrumentCatalogs([
+      kInstrumentCatalog,
+      kBundledSfzFallbackCatalog,
+    ]).where((spec) {
+      return _isReleaseAllowedInstrumentSpec(spec) &&
+          _passesInstrumentRuntimeQualityGate(spec);
+    }).map((spec) {
+      return Map<String, dynamic>.from(spec);
+    }).toList(growable: false);
+    if (curatedFallback.isNotEmpty) return curatedFallback;
     return available
         .map((spec) => Map<String, dynamic>.from(spec))
         .toList(growable: false);
@@ -13389,6 +14414,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   bool _isReleaseAllowedInstrumentSpec(Map<String, dynamic> spec) {
     final id = (spec['id'] as String? ?? '').trim().toLowerCase();
+    if (id.isEmpty) return false;
+    if (!kReleaseEssentialInstrumentIds.contains(id)) {
+      return false;
+    }
     final sfzAssetPath =
         (spec['sfzAssetPath'] as String? ?? '').trim().toLowerCase();
     for (final token in kReleaseBlockedInstrumentTokens) {
@@ -13512,13 +14541,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.04),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           child: Row(
             children: [
               Container(
@@ -13545,9 +14569,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
+                        color: Color(0xFFF4F4F4),
+                        fontSize: 13.6,
                         fontWeight: FontWeight.w700,
+                        fontFamily: 'Pretendard',
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -13556,9 +14581,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.62),
+                        color: const Color(0xFFF4F4F4).withValues(alpha: 0.62),
                         fontSize: 11,
                         fontWeight: FontWeight.w500,
+                        fontFamily: 'Pretendard',
                       ),
                     ),
                   ],
@@ -13568,7 +14594,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               Icon(
                 Icons.chevron_right_rounded,
                 size: 18,
-                color: Colors.white.withValues(alpha: 0.34),
+                color: const Color(0xFFF4F4F4).withValues(alpha: 0.36),
               ),
             ],
           ),
@@ -13584,6 +14610,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
+    if (!mounted) return;
+    await _ensureInstrumentQualityVetting();
     if (!mounted) return;
     final catalog = _activeInstrumentCatalog();
     if (catalog.isEmpty) return;
@@ -13603,138 +14631,184 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               return _instrumentPickerCategory(spec) == selectedCategory;
             }).toList(growable: true)
               ..sort(_compareInstrumentSpecsForPicker);
-            return AlertDialog(
-              backgroundColor: const Color(0xFF1A2230),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-              ),
-              title: const Text(
-                'Choose Instrument',
-                style: TextStyle(color: Colors.white),
-              ),
-              content: SizedBox(
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 22, vertical: 26),
+              child: SizedBox(
                 width: dialogWidth,
-                height: dialogHeight,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      height: 38,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: categories.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 7),
-                        itemBuilder: (context, index) {
-                          final category = categories[index];
-                          final selected = category == selectedCategory;
-                          final accent = _instrumentPickerAccent(category);
-                          return InkWell(
-                            onTap: () => setModalState(
-                                () => selectedCategory = category),
-                            borderRadius: BorderRadius.circular(999),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 120),
-                              constraints: const BoxConstraints(
-                                minHeight: 30,
-                                minWidth: 74,
-                              ),
-                              alignment: Alignment.center,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                gradient: selected
-                                    ? LinearGradient(
-                                        begin: Alignment.topCenter,
-                                        end: Alignment.bottomCenter,
-                                        colors: [
-                                          accent.withValues(alpha: 0.24),
-                                          accent.withValues(alpha: 0.14),
-                                        ],
-                                      )
-                                    : null,
-                                color: selected
-                                    ? null
-                                    : Colors.white.withValues(alpha: 0.05),
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(
-                                  color: selected
-                                      ? accent.withValues(alpha: 0.70)
-                                      : Colors.white.withValues(alpha: 0.12),
-                                ),
-                                boxShadow: selected
-                                    ? [
-                                        BoxShadow(
-                                          color: accent.withValues(alpha: 0.20),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 2),
-                                        ),
-                                      ]
-                                    : null,
-                              ),
-                              child: Center(
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      _instrumentPickerIcon(category),
-                                      size: 12.4,
-                                      color: selected ? accent : Colors.white70,
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      category,
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color:
-                                            selected ? accent : Colors.white70,
-                                        fontSize: 11.1,
-                                        fontWeight: FontWeight.w700,
-                                        height: 1.0,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: filtered.isEmpty
-                          ? Center(
+                child: _buildDawConnectedSurface(
+                  borderRadius: BorderRadius.circular(28),
+                  active: true,
+                  showOverlay: false,
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                  child: SizedBox(
+                    height: dialogHeight,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
                               child: Text(
-                                'No instruments in this category.',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.65),
-                                  fontSize: 13,
+                                L10n.translate(ctx, 'Choose Instrument'),
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.2,
                                 ),
                               ),
-                            )
-                          : ListView.separated(
-                              itemCount: filtered.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 8),
-                              itemBuilder: (_, index) {
-                                final spec = filtered[index];
-                                return _buildInstrumentPickerRow(
-                                  spec: spec,
-                                  onTap: () => Navigator.pop(ctx, spec),
-                                );
-                              },
                             ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              constraints: const BoxConstraints.tightFor(
+                                width: 30,
+                                height: 30,
+                              ),
+                              padding: EdgeInsets.zero,
+                              splashRadius: 14,
+                              onPressed: () => Navigator.pop(ctx),
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                size: 16,
+                                color: Color(0xB8F4F4F4),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          height: 36,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: categories.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(width: 7),
+                            itemBuilder: (context, index) {
+                              final category = categories[index];
+                              final selected = category == selectedCategory;
+                              final accent = _instrumentPickerAccent(category);
+                              return InkWell(
+                                onTap: () => setModalState(
+                                    () => selectedCategory = category),
+                                borderRadius: BorderRadius.circular(999),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 120),
+                                  constraints: const BoxConstraints(
+                                    minHeight: 30,
+                                    minWidth: 74,
+                                  ),
+                                  alignment: Alignment.center,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? const Color.fromRGBO(
+                                            244, 244, 244, 0.20)
+                                        : const Color.fromRGBO(
+                                            80, 91, 107, 0.24),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: selected
+                                          ? Colors.white.withValues(alpha: 0.20)
+                                          : Colors.white
+                                              .withValues(alpha: 0.10),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _instrumentPickerIcon(category),
+                                        size: 12.4,
+                                        color: selected
+                                            ? accent
+                                            : const Color(0xB8F4F4F4),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        category,
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: selected
+                                              ? const Color(0xFFF4F4F4)
+                                              : const Color(0xB8F4F4F4),
+                                          fontSize: 11.1,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.0,
+                                          fontFamily: 'Pretendard',
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Expanded(
+                          child: filtered.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    L10n.translate(
+                                      ctx,
+                                      'No instruments in this category.',
+                                    ),
+                                    style: TextStyle(
+                                      color: const Color(0xFFF4F4F4)
+                                          .withValues(alpha: 0.66),
+                                      fontSize: 13,
+                                      fontFamily: 'Pretendard',
+                                    ),
+                                  ),
+                                )
+                              : ListView.separated(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 6),
+                                  itemCount: filtered.length,
+                                  separatorBuilder: (_, __) => Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8),
+                                    child: Divider(
+                                      height: 1,
+                                      thickness: 1,
+                                      color:
+                                          Colors.white.withValues(alpha: 0.07),
+                                    ),
+                                  ),
+                                  itemBuilder: (_, index) {
+                                    final spec = filtered[index];
+                                    return _buildInstrumentPickerRow(
+                                      spec: spec,
+                                      onTap: () => Navigator.pop(ctx, spec),
+                                    );
+                                  },
+                                ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFFF4F4F4),
+                              textStyle: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            child: Text(L10n.translate(ctx, 'Cancel')),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel'),
-                ),
-              ],
             );
           },
         );
@@ -14043,9 +15117,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text(
-                                  "Master Bus",
-                                  style: TextStyle(
+                                Text(
+                                  L10n.translate(context, 'Master Bus'),
+                                  style: const TextStyle(
                                     fontFamily: 'Pretendard',
                                     color: Color(0xFFF4F4F4),
                                     fontWeight: FontWeight.w600,
@@ -14056,9 +15130,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 const Spacer(),
                                 Row(
                                   children: [
-                                    const Text(
-                                      "FX Bypass",
-                                      style: TextStyle(
+                                    Text(
+                                      L10n.translate(context, 'FX Bypass'),
+                                      style: const TextStyle(
                                         fontFamily: 'Pretendard',
                                         color: Color(0xB8F4F4F4),
                                         fontSize: 12,
@@ -14510,9 +15584,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   String _technicalLevelLabel(double peakDb) {
-    if (peakDb >= -0.1) return "0.0 dB";
-    if (!peakDb.isFinite || peakDb <= -120.0) return "-inf dB";
-    return "${peakDb.toStringAsFixed(1)} dB";
+    if (peakDb >= -0.1) return "0.0 dBFS";
+    if (!peakDb.isFinite || peakDb <= -120.0) return "-inf dBFS";
+    return "${peakDb.toStringAsFixed(1)} dBFS";
   }
 
   Color _technicalLevelColor(double peakDb) {
@@ -14802,10 +15876,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool active = false,
     double size = 52,
     bool drawShell = true,
+    bool showPressFeedback = false,
   }) {
+    final BorderRadius buttonRadius = BorderRadius.circular(size / 2);
     final Widget body = drawShell
         ? _buildDawConnectedSurface(
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: buttonRadius,
             active: active,
             child: SizedBox(
               width: size,
@@ -14821,12 +15897,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Semantics(
       button: true,
       enabled: onTap != null,
-      child: GestureDetector(
-        key: key,
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: body,
-      ),
+      child: showPressFeedback
+          ? Material(
+              type: MaterialType.transparency,
+              child: InkResponse(
+                key: key,
+                onTap: onTap,
+                containedInkWell: true,
+                highlightShape: BoxShape.circle,
+                customBorder: const CircleBorder(),
+                radius: size * 0.62,
+                splashColor: Colors.white.withValues(alpha: 0.18),
+                highlightColor: Colors.white.withValues(alpha: 0.10),
+                child: ClipOval(child: body),
+              ),
+            )
+          : GestureDetector(
+              key: key,
+              behavior: HitTestBehavior.opaque,
+              onTap: onTap,
+              child: body,
+            ),
     );
   }
 
@@ -14874,6 +15965,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               onTap: _handleBackPressed,
               active: connectedTopPanelVisible,
               size: layoutSpec.topBarActionButtonSize,
+              showPressFeedback: true,
               child: Center(
                 child: SvgPicture.asset(
                   kMixroomDawTopBackIconAsset,
@@ -15270,7 +16362,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   fontWeight: FontWeight.w600,
                                 ),
                                 decoration: _projectSettingsFieldDecoration(
-                                  labelText: 'Project Name',
+                                  labelText:
+                                      L10n.translate(context, 'Project Name'),
                                 ),
                               ),
                               const SizedBox(height: 10),
@@ -15294,8 +16387,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               _buildMetronomeToggle(),
                               const SizedBox(height: 9),
                               _buildMetronomeVolumeSlider(),
-                              const SizedBox(height: 9),
-                              _buildProducerCaptureUiToggle(),
+                              if (_canShowProducerCaptureUiSetting) ...[
+                                const SizedBox(height: 9),
+                                _buildProducerCaptureUiToggle(),
+                              ],
                               const SizedBox(height: 12),
                               const SizedBox(height: 2),
                               Text(
@@ -15308,7 +16403,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.',
+                                L10n.translate(
+                                  context,
+                                  'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.',
+                                ),
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.76),
                                   fontSize: 12.5,
@@ -15444,6 +16542,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildProducerCaptureUiToggle() {
+    if (!_canShowProducerCaptureUiSetting) {
+      return const SizedBox.shrink();
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
       child: Row(
@@ -15802,29 +16903,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (dialogContext) {
         return AlertDialog(
           backgroundColor: const Color(0xFF181B24),
-          title: const Text(
-            'Bluetooth headset mic',
-            style: TextStyle(color: Colors.white),
+          title: Text(
+            L10n.translate(dialogContext, 'Bluetooth headset mic'),
+            style: const TextStyle(color: Colors.white),
           ),
           content: Text(
             fallbackDevice == null
-                ? 'Bluetooth headset mic can reduce audio quality and increase latency. Continue with this mic?'
-                : 'Bluetooth headset mic can reduce audio quality and increase latency. Use your built-in/default mic instead, or continue with this mic?',
+                ? L10n.translate(
+                    dialogContext,
+                    'Bluetooth headset mic can reduce audio quality and increase latency. Continue with this mic?',
+                  )
+                : L10n.translate(
+                    dialogContext,
+                    'Bluetooth headset mic can reduce audio quality and increase latency. Use your built-in/default mic instead, or continue with this mic?',
+                  ),
             style: const TextStyle(color: Colors.white70),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop('cancel'),
-              child: const Text('Cancel'),
+              child: Text(L10n.translate(dialogContext, 'Cancel')),
             ),
             if (fallbackDevice != null)
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop('fallback'),
-                child: const Text('Use default mic'),
+                child: Text(L10n.translate(dialogContext, 'Use default mic')),
               ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop('continue'),
-              child: const Text('Continue'),
+              child: Text(L10n.translate(dialogContext, 'Continue')),
             ),
           ],
         );
@@ -16068,12 +17175,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Widget _buildMicrophonePermissionNotice() {
     final actionLabel = _microphonePermissionStatus.isPermanentlyDenied ||
             _microphonePermissionStatus.isRestricted
-        ? 'Open settings'
-        : 'Allow access';
+        ? L10n.translate(context, 'Open settings')
+        : L10n.translate(context, 'Allow access');
     final helperText = _microphonePermissionStatus.isPermanentlyDenied ||
             _microphonePermissionStatus.isRestricted
-        ? 'Built-in microphone recording needs access in Settings. External audio interfaces can still be used below when available.'
-        : 'Built-in microphone recording needs access. External audio interfaces can still be used below when available.';
+        ? L10n.translate(
+            context,
+            'Built-in microphone recording needs access in Settings. External audio interfaces can still be used below when available.',
+          )
+        : L10n.translate(
+            context,
+            'Built-in microphone recording needs access. External audio interfaces can still be used below when available.',
+          );
 
     return Container(
       width: double.infinity,
@@ -16086,9 +17199,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Microphone access is turned off',
-            style: TextStyle(
+          Text(
+            L10n.translate(context, 'Microphone access is turned off'),
+            style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w600,
             ),
@@ -16173,9 +17286,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (_inputDevices.isEmpty) {
       if (!_microphoneAccessBlocked) {
-        return const Text(
-          "No input devices available",
-          style: TextStyle(color: Colors.white54),
+        return Text(
+          L10n.translate(context, 'No input devices available'),
+          style: const TextStyle(color: Colors.white54),
         );
       }
       return Column(
@@ -16183,9 +17296,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         children: [
           _buildMicrophonePermissionNotice(),
           const SizedBox(height: 12),
-          const Text(
-            "No input devices available",
-            style: TextStyle(color: Colors.white54),
+          Text(
+            L10n.translate(context, 'No input devices available'),
+            style: const TextStyle(color: Colors.white54),
           ),
         ],
       );
@@ -16194,7 +17307,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final selector = DropdownButtonFormField<String>(
       value: _selectedDevice,
       isExpanded: true,
-      dropdownColor: const Color(0xFF6B7379),
+      dropdownColor: kMixroomGlassDropdownMenuColor,
       style: const TextStyle(color: Colors.white),
       selectedItemBuilder: (context) {
         return _inputDevices
@@ -16211,9 +17324,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             .toList(growable: false);
       },
       decoration: _projectSettingsFieldDecoration(
-        labelText: "Input Device",
+        labelText: L10n.translate(context, 'Input Device'),
         suffixIcon: IconButton(
-          tooltip: "Refresh audio devices",
+          tooltip: L10n.translate(context, 'Refresh audio devices'),
           icon: const Icon(Icons.refresh, color: Colors.white70),
           onPressed: () async {
             _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
@@ -16276,9 +17389,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       key: ValueKey(_numInputChannels),
       value: selected,
       isExpanded: true,
-      dropdownColor: const Color(0xFF6B7379),
+      dropdownColor: kMixroomGlassDropdownMenuColor,
       style: const TextStyle(color: Colors.white),
-      decoration: _projectSettingsFieldDecoration(labelText: 'Input Channel'),
+      decoration: _projectSettingsFieldDecoration(
+        labelText: L10n.translate(context, 'Input Channel'),
+      ),
       items: options
           .map(
             (option) => DropdownMenuItem<_InputChannelRouteOption>(
@@ -16314,13 +17429,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (Platform.isAndroid) {
       final routeLabel = _androidOutputRouteName?.trim();
       final effectiveLabel = (routeLabel == null || routeLabel.isEmpty)
-          ? 'System default (speaker / Bluetooth / audio interface)'
+          ? L10n.translate(
+              context,
+              'System default (speaker / Bluetooth / audio interface)',
+            )
           : routeLabel;
       return InputDecorator(
         decoration: _projectSettingsFieldDecoration(
-          labelText: "Output Route",
+          labelText: L10n.translate(context, 'Output Route'),
           suffixIcon: IconButton(
-            tooltip: "Refresh output route",
+            tooltip: L10n.translate(context, 'Refresh output route'),
             icon: const Icon(Icons.refresh, color: Colors.white70),
             onPressed: () {
               unawaited(_refreshAndroidOutputRouteLabel());
@@ -16337,13 +17455,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (Platform.isIOS) {
       final routeLabel = _audioRouteInfo.outputRouteName.trim();
       final effectiveLabel = routeLabel.isEmpty
-          ? 'System default (speaker / Bluetooth / audio interface)'
+          ? L10n.translate(
+              context,
+              'System default (speaker / Bluetooth / audio interface)',
+            )
           : routeLabel;
       return InputDecorator(
         decoration: _projectSettingsFieldDecoration(
-          labelText: "Output Route",
+          labelText: L10n.translate(context, 'Output Route'),
           suffixIcon: IconButton(
-            tooltip: "Refresh output route",
+            tooltip: L10n.translate(context, 'Refresh output route'),
             icon: const Icon(Icons.refresh, color: Colors.white70),
             onPressed: () {
               unawaited(_refreshAudioRouteInfo());
@@ -16360,13 +17481,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (Platform.isMacOS) {
       final routeLabel = _macOutputDeviceName?.trim();
       final effectiveLabel = (routeLabel == null || routeLabel.isEmpty)
-          ? 'System default (managed by macOS audio settings)'
+          ? L10n.translate(
+              context,
+              'System default (managed by macOS audio settings)',
+            )
           : routeLabel;
       return InputDecorator(
         decoration: _projectSettingsFieldDecoration(
-          labelText: "Output Device",
+          labelText: L10n.translate(context, 'Output Device'),
           suffixIcon: IconButton(
-            tooltip: "Refresh output device",
+            tooltip: L10n.translate(context, 'Refresh output device'),
             icon: const Icon(Icons.refresh, color: Colors.white70),
             onPressed: () {
               unawaited(_loadInputDevicesFromJuce());
@@ -16382,16 +17506,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     // Non-Android fallback path uses WebRTC device enumeration.
     if (_outputs.isEmpty) {
-      return const Text("No selectable output devices",
-          style: TextStyle(color: Colors.white54));
+      return Text(L10n.translate(context, 'No selectable output devices'),
+          style: const TextStyle(color: Colors.white54));
     }
 
     return DropdownButtonFormField<MediaDeviceInfo>(
-      dropdownColor: const Color(0xFF6B7379),
+      dropdownColor: kMixroomGlassDropdownMenuColor,
       initialValue: _selectedOutput,
       isExpanded: true,
       style: const TextStyle(color: Colors.white),
-      decoration: _projectSettingsFieldDecoration(labelText: "Output Device"),
+      decoration: _projectSettingsFieldDecoration(
+        labelText: L10n.translate(context, 'Output Device'),
+      ),
       items: _outputs.map((d) {
         return DropdownMenuItem(
           value: d,
@@ -16439,8 +17565,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Bluetooth recording policy',
+          Text(
+            L10n.translate(context, 'Bluetooth recording policy'),
             style: TextStyle(
               color: Colors.white,
               fontSize: 14,
@@ -16451,8 +17577,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             const SizedBox(height: 8),
             Text(
               routeName.isEmpty
-                  ? 'Bluetooth playback and recording are supported. Real-time monitoring is off by default.'
-                  : '$routeName is using Bluetooth output. Real-time monitoring is off by default.',
+                  ? L10n.translate(
+                      context,
+                      'Bluetooth playback and recording are supported. Real-time monitoring is off by default.',
+                    )
+                  : '$routeName ${L10n.translate(context, 'is using Bluetooth output. Real-time monitoring is off by default.')}',
               style: const TextStyle(color: Colors.white70, height: 1.35),
             ),
             const SizedBox(height: 10),
@@ -16460,13 +17589,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               contentPadding: EdgeInsets.zero,
               value: _advancedBluetoothMonitorOverride,
               activeColor: const Color(0xFF4C8DFF),
-              title: const Text(
-                'Advanced: monitor anyway',
-                style: TextStyle(color: Colors.white),
+              title: Text(
+                L10n.translate(context, 'Advanced: monitor anyway'),
+                style: const TextStyle(color: Colors.white),
               ),
-              subtitle: const Text(
-                'May sound choppy or unstable on Bluetooth earphones.',
-                style: TextStyle(color: Colors.white60),
+              subtitle: Text(
+                L10n.translate(
+                  context,
+                  'May sound choppy or unstable on Bluetooth earphones.',
+                ),
+                style: const TextStyle(color: Colors.white60),
               ),
               onChanged: (value) {
                 unawaited(_setAdvancedBluetoothMonitorOverride(value));
@@ -16477,8 +17609,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             const SizedBox(height: 8),
             Text(
               _isBluetoothMicOptedIn()
-                  ? 'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.'
-                  : 'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.',
+                  ? L10n.translate(
+                      context,
+                      'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.',
+                    )
+                  : L10n.translate(
+                      context,
+                      'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.',
+                    ),
               style: const TextStyle(color: Colors.white70, height: 1.35),
             ),
           ],
@@ -16490,7 +17628,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 onPressed: () {
                   unawaited(_resetBluetoothMicOptIns());
                 },
-                child: const Text('Reset Bluetooth mic approvals'),
+                child: Text(
+                    L10n.translate(context, 'Reset Bluetooth mic approvals')),
               ),
             ),
           ],
@@ -16503,7 +17642,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("Tempo (BPM)", style: TextStyle(color: Colors.white70)),
+        Text(L10n.translate(context, 'Tempo (BPM)'),
+            style: const TextStyle(color: Colors.white70)),
         const SizedBox(height: 8),
         Container(
           height: 120,
@@ -16513,8 +17653,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             border: Border.all(color: Colors.white24, width: 1),
           ),
           child: CupertinoPicker(
-            scrollController:
-                FixedExtentScrollController(initialItem: _tempo.round() - 20),
+            scrollController: _tempoPickerController,
             itemExtent: 36,
             magnification: 1.15,
             squeeze: 1.2,
@@ -16604,7 +17743,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       Text('$tempo',
                           style: bigNum, textAlign: TextAlign.center),
                       const SizedBox(height: 4),
-                      Text('TEMPO',
+                      Text(L10n.translate(context, 'TEMPO'),
                           style: smallLabel, textAlign: TextAlign.center),
                     ],
                   ),
@@ -16821,9 +17960,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               ),
                             ),
                             child: CupertinoPicker.builder(
-                              scrollController: FixedExtentScrollController(
-                                initialItem: _clampTempo(_tempo).round() - 20,
-                              ),
+                              scrollController: _tempoPickerController,
                               itemExtent: 28,
                               diameterRatio: 1.35,
                               squeeze: 1.16,
@@ -18241,6 +19378,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _tempo = roundedTempo;
       _tempoStretchEnabled = true;
     });
+    _syncTempoPickerSelection();
     await _queueTempoEngineSync();
   }
 
@@ -18266,6 +19404,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final clampedTempo = _clampTempo(explicitProjectTempo);
       if (clampedTempo != _tempo) {
         _setStateAndRefreshProjectSettings(() => _tempo = clampedTempo);
+        _syncTempoPickerSelection();
         await _queueTempoEngineSync();
       }
     } else if (setProjectTempo) {
@@ -20832,21 +21971,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (normalizedParamId.isEmpty) return null;
 
       if (parsed.effectKey.isNotEmpty) {
-        return discoveredByEffectKeyAndParam[
+        final byEffectKey = discoveredByEffectKeyAndParam[
             '${parsed.scope}\u0000${parsed.effectKey}\u0000$normalizedParamId'];
+        if (byEffectKey != null) return byEffectKey;
       }
 
       if (parsed.legacyEffectIndex >= 0) {
         final byLegacy = discoveredByLegacyIndexAndParam[
             '${parsed.scope}\u0000${parsed.legacyEffectIndex}\u0000$normalizedParamId'];
-        if (byLegacy != null) {
-          final previousLabelLower = previousMeta.label.trim().toLowerCase();
-          if (previousLabelLower.isNotEmpty &&
-              byLegacy.label.trim().toLowerCase() != previousLabelLower) {
-            return null;
-          }
-          return byLegacy;
-        }
+        if (byLegacy != null) return byLegacy;
+      }
+
+      // For fxid targets, instance ids can change after restoring a project.
+      // Fall back to lane metadata (effectIndex + paramId) captured at save.
+      if (previousMeta.effectIndex >= 0) {
+        final bySavedLaneEffectIndex = discoveredByLegacyIndexAndParam[
+            '${parsed.scope}\u0000${previousMeta.effectIndex}\u0000$normalizedParamId'];
+        if (bySavedLaneEffectIndex != null) return bySavedLaneEffectIndex;
       }
 
       final candidates =
@@ -21015,7 +22156,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             if (!a.isOrphan && b.isOrphan) return -1;
             return a.label.toLowerCase().compareTo(b.label.toLowerCase());
           });
-    return values.map((e) => e.toUiMap()).toList(growable: false);
+    return values.map((target) {
+      final map = target.toUiMap();
+      map['hasAutomationData'] =
+          _hasUserAutomationDataForTarget(row, target.targetId);
+      return map;
+    }).toList(growable: false);
   }
 
   String _selectedAutomationTargetIdForRow(int row) {
@@ -21244,6 +22390,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     final clips = _rowAutomationClips[row]?[targetId];
     return clips != null && clips.isNotEmpty;
+  }
+
+  bool _hasUserAutomationDataForTarget(int row, String targetId) {
+    if (row < 0 || row >= _rowCount) return false;
+
+    if (targetId == 'volume') {
+      final points = _rowVolumeAutomation[row];
+      if (points.length > 1) return true;
+      if (points.isNotEmpty && (points.first.volume - 0.75).abs() > 1e-6) {
+        return true;
+      }
+      final clips = _rowAutomationClips[row]?['volume'];
+      return clips != null && clips.isNotEmpty;
+    }
+
+    return _hasExplicitAutomationForTarget(row, targetId);
   }
 
   bool _isMasterAutomationTarget(String targetId) {
@@ -21570,6 +22732,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<AutomationLaneSnapshot> _automationLanesForRowSave(int row) {
     if (row < 0 || row >= _rowCount) return const <AutomationLaneSnapshot>[];
     final lanes = <AutomationLaneSnapshot>[];
+    final addedTargetIds = <String>{};
 
     final volumePoints = _sanitizeAutomationPointsForTarget(
       row,
@@ -21577,6 +22740,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _rowVolumeAutomation[row],
     );
     lanes.add(_volumeAutomationTargetMeta().toLaneSnapshot(volumePoints));
+    addedTargetIds.add('volume');
 
     final rowPlugin =
         _rowPluginAutomation[row] ?? const <String, List<AutomationPoint>>{};
@@ -21590,7 +22754,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final target =
           targets[targetId] ?? _fallbackAutomationTargetMeta(targetId);
       lanes.add(target.toLaneSnapshot(safePoints));
+      addedTargetIds.add(targetId);
     });
+
+    // Persist metadata for clip-only targets so target remapping can recover
+    // plugin automation when effect instance ids change between sessions.
+    final clipTargets = _rowAutomationClips[row] ??
+        const <String, List<AutomationClipSnapshot>>{};
+    for (final entry in clipTargets.entries) {
+      final targetId = entry.key;
+      if (targetId == 'volume' || addedTargetIds.contains(targetId)) continue;
+      if (entry.value.isEmpty) continue;
+      final target =
+          targets[targetId] ?? _fallbackAutomationTargetMeta(targetId);
+      final seedPoints = _defaultAutomationPointsForTarget(row, targetId);
+      final safePoints =
+          _sanitizeAutomationPointsForTarget(row, targetId, seedPoints);
+      lanes.add(target.toLaneSnapshot(safePoints));
+      addedTargetIds.add(targetId);
+    }
 
     return lanes;
   }
@@ -24898,6 +26080,657 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Map<String, dynamic> _aiObservabilityFromMeta(Map<String, dynamic>? meta) {
+    if (meta == null) return const <String, dynamic>{};
+    final raw = meta['observability'];
+    if (raw is Map<String, dynamic>) {
+      return raw;
+    }
+    if (raw is Map) {
+      return raw.cast<String, dynamic>();
+    }
+    return const <String, dynamic>{};
+  }
+
+  int? _aiObservabilityInt(Map<String, dynamic> observability, String key) {
+    final value = observability[key];
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return null;
+  }
+
+  String? _aiObservabilityString(
+      Map<String, dynamic> observability, String key) {
+    final value = observability[key]?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  bool? _aiObservabilityBool(Map<String, dynamic> observability, String key) {
+    final value = observability[key];
+    if (value is bool) return value;
+    return null;
+  }
+
+  Map<String, dynamic> _aiMap(dynamic raw) {
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return raw.cast<String, dynamic>();
+    return const <String, dynamic>{};
+  }
+
+  Map<String, dynamic> _aiUsageFromMeta(Map<String, dynamic>? meta) {
+    if (meta == null) return const <String, dynamic>{};
+    return _aiMap(meta['usage']);
+  }
+
+  Map<String, dynamic> _aiSoftErrorFromMeta(Map<String, dynamic>? meta) {
+    if (meta == null) return const <String, dynamic>{};
+    return _aiMap(meta['soft_error']);
+  }
+
+  int? _aiAsInt(Object? raw) {
+    if (raw is int) return raw;
+    if (raw is num) return raw.toInt();
+    if (raw is String) return int.tryParse(raw.trim());
+    return null;
+  }
+
+  double? _aiAsDouble(Object? raw) {
+    if (raw is double) return raw;
+    if (raw is num) return raw.toDouble();
+    if (raw is String) return double.tryParse(raw.trim());
+    return null;
+  }
+
+  int? _aiFirstInt(List<Object?> candidates) {
+    for (final candidate in candidates) {
+      final value = _aiAsInt(candidate);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  double? _aiFirstDouble(List<Object?> candidates) {
+    for (final candidate in candidates) {
+      final value = _aiAsDouble(candidate);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  int _aiCachedPromptTokensFromUsage(Map<String, dynamic> usage) {
+    for (final key in const <String>[
+      'input_tokens_details',
+      'prompt_tokens_details',
+    ]) {
+      final details = _aiMap(usage[key]);
+      final cached = _aiAsInt(details['cached_tokens']);
+      if (cached != null) return cached;
+    }
+    return 0;
+  }
+
+  int? _aiUsagePromptTokens(Map<String, dynamic>? meta) {
+    final usage = _aiUsageFromMeta(meta);
+    final observability = _aiObservabilityFromMeta(meta);
+    return _aiFirstInt(<Object?>[
+      usage['input_tokens'],
+      usage['prompt_tokens'],
+      usage['tokens_prompt'],
+      usage['prompt_token_count'],
+      observability['input_tokens'],
+      observability['prompt_tokens'],
+      observability['tokens_prompt'],
+      observability['prompt_token_count'],
+    ]);
+  }
+
+  int? _aiUsageCompletionTokens(Map<String, dynamic>? meta) {
+    final usage = _aiUsageFromMeta(meta);
+    final observability = _aiObservabilityFromMeta(meta);
+    return _aiFirstInt(<Object?>[
+      usage['output_tokens'],
+      usage['completion_tokens'],
+      usage['tokens_completion'],
+      usage['completion_token_count'],
+      observability['output_tokens'],
+      observability['completion_tokens'],
+      observability['tokens_completion'],
+      observability['completion_token_count'],
+    ]);
+  }
+
+  int? _aiUsageTotalTokens(Map<String, dynamic>? meta) {
+    final usage = _aiUsageFromMeta(meta);
+    final observability = _aiObservabilityFromMeta(meta);
+    final direct = _aiFirstInt(<Object?>[
+      usage['total_tokens'],
+      usage['tokens_total'],
+      usage['token_count'],
+      observability['total_tokens'],
+      observability['tokens_total'],
+      observability['token_count'],
+    ]);
+    if (direct != null) return direct;
+    final prompt = _aiUsagePromptTokens(meta);
+    final completion = _aiUsageCompletionTokens(meta);
+    if (prompt != null || completion != null) {
+      return (prompt ?? 0) + (completion ?? 0);
+    }
+    return null;
+  }
+
+  int? _aiUsageCachedPromptTokens(Map<String, dynamic>? meta) {
+    final usage = _aiUsageFromMeta(meta);
+    final observability = _aiObservabilityFromMeta(meta);
+    final direct = _aiFirstInt(<Object?>[
+      meta?['cached_prompt_tokens'],
+      usage['cached_prompt_tokens'],
+      usage['prompt_cached_tokens'],
+      observability['cached_prompt_tokens'],
+      observability['prompt_cached_tokens'],
+    ]);
+    if (direct != null) return direct;
+    final fromUsageDetails = _aiCachedPromptTokensFromUsage(usage);
+    return fromUsageDetails > 0 ? fromUsageDetails : null;
+  }
+
+  double? _aiUsageEstimatedCostUsd(Map<String, dynamic>? meta) {
+    final usage = _aiUsageFromMeta(meta);
+    final observability = _aiObservabilityFromMeta(meta);
+    final direct = _aiFirstDouble(<Object?>[
+      usage['estimated_cost_usd'],
+      usage['cost_usd'],
+      usage['total_cost_usd'],
+      usage['usd_cost'],
+      usage['total_usd'],
+      observability['estimated_cost_usd'],
+      observability['cost_usd'],
+      observability['total_cost_usd'],
+      observability['usd_cost'],
+      observability['total_usd'],
+    ]);
+    if (direct != null) return direct;
+
+    final promptCost = _aiFirstDouble(<Object?>[
+      usage['input_cost_usd'],
+      usage['prompt_cost_usd'],
+      observability['input_cost_usd'],
+      observability['prompt_cost_usd'],
+    ]);
+    final completionCost = _aiFirstDouble(<Object?>[
+      usage['output_cost_usd'],
+      usage['completion_cost_usd'],
+      observability['output_cost_usd'],
+      observability['completion_cost_usd'],
+    ]);
+    if (promptCost != null || completionCost != null) {
+      return (promptCost ?? 0) + (completionCost ?? 0);
+    }
+    return null;
+  }
+
+  String? _aiSoftErrorCodeFromMeta(Map<String, dynamic>? meta) {
+    final softError = _aiSoftErrorFromMeta(meta);
+    final code = (softError['code'] ?? '').toString().trim();
+    return code.isEmpty ? null : code;
+  }
+
+  Future<void> _trackAiResponseOutcome({
+    required String promptTraceId,
+    required String aiFeature,
+    required String projectId,
+    Map<String, dynamic>? meta,
+    String? fallbackErrorCode,
+  }) async {
+    final observability = _aiObservabilityFromMeta(meta);
+    final runtimeConfigFingerprint =
+        _aiObservabilityString(observability, 'runtime_config_fingerprint');
+    final hasSystemPromptOverride =
+        _aiObservabilityBool(observability, 'has_system_prompt_override');
+    final modelName = _aiObservabilityString(observability, 'effective_model');
+    final latencyMs = _aiFirstInt(<Object?>[
+      observability['provider_roundtrip_ms'],
+      observability['openai_api_ms'],
+      observability['proxy_roundtrip_ms'],
+    ]);
+    final softErrorCode = _aiSoftErrorCodeFromMeta(meta);
+    final errorCode = softErrorCode ?? fallbackErrorCode;
+    if ((errorCode ?? '').trim().isNotEmpty) {
+      await AnalyticsService.instance.track(
+        AnalyticsEvents.aiResponseFailed(
+          projectId: projectId,
+          aiFeature: aiFeature,
+          errorCode: errorCode!,
+          promptTraceId: promptTraceId,
+          runtimeConfigFingerprint: runtimeConfigFingerprint,
+          hasSystemPromptOverride: hasSystemPromptOverride,
+        ),
+      );
+      return;
+    }
+
+    await AnalyticsService.instance.track(
+      AnalyticsEvents.aiResponseCompleted(
+        projectId: projectId,
+        aiFeature: aiFeature,
+        modelName: modelName,
+        promptTraceId: promptTraceId,
+        runtimeConfigFingerprint: runtimeConfigFingerprint,
+        hasSystemPromptOverride: hasSystemPromptOverride,
+        latencyMs: latencyMs,
+        tokensPrompt: _aiUsagePromptTokens(meta),
+        tokensCompletion: _aiUsageCompletionTokens(meta),
+        tokensTotal: _aiUsageTotalTokens(meta),
+        cachedPromptTokens: _aiUsageCachedPromptTokens(meta),
+        estimatedCostUsd: _aiUsageEstimatedCostUsd(meta),
+      ),
+    );
+  }
+
+  Future<void> _trackAiPromptCycleCompleted({
+    required String promptTraceId,
+    required String aiFeature,
+    required String projectId,
+    required Map<String, dynamic>? meta,
+    required String toolName,
+    required int promptCycleTotalMs,
+    int? applyMixMs,
+  }) async {
+    final observability = _aiObservabilityFromMeta(meta);
+    final modelName = _aiObservabilityString(observability, 'effective_model');
+    final runtimeConfigFingerprint =
+        _aiObservabilityString(observability, 'runtime_config_fingerprint');
+    final hasSystemPromptOverride =
+        _aiObservabilityBool(observability, 'has_system_prompt_override');
+    final event = AnalyticsEvents.aiPromptCycleCompleted(
+      projectId: projectId,
+      aiFeature: aiFeature,
+      promptTraceId: promptTraceId,
+      toolName: toolName.isEmpty ? null : toolName,
+      modelName: modelName,
+      runtimeConfigFingerprint: runtimeConfigFingerprint,
+      hasSystemPromptOverride: hasSystemPromptOverride,
+      projectStatsMs: _aiObservabilityInt(observability, 'project_stats_ms'),
+      proxyRoundtripMs:
+          _aiObservabilityInt(observability, 'proxy_roundtrip_ms'),
+      responseParseMs: _aiObservabilityInt(observability, 'response_parse_ms'),
+      mixPlanMs: _aiObservabilityInt(observability, 'mix_plan_ms'),
+      mixModelHeuristicMs:
+          _aiObservabilityInt(observability, 'mix_model_heuristic_ms'),
+      mixModelOnnxMs: _aiObservabilityInt(observability, 'mix_model_onnx_ms'),
+      applyMixMs: applyMixMs,
+      promptCycleTotalMs: promptCycleTotalMs,
+      openAiApiMs: _aiObservabilityInt(observability, 'openai_api_ms'),
+      providerRoundtripMs:
+          _aiObservabilityInt(observability, 'provider_roundtrip_ms'),
+      responseNormalizeMs:
+          _aiObservabilityInt(observability, 'response_normalize_ms'),
+      proxyHandlerMsTotal:
+          _aiObservabilityInt(observability, 'proxy_handler_ms_total'),
+      tokensPrompt: _aiUsagePromptTokens(meta),
+      tokensCompletion: _aiUsageCompletionTokens(meta),
+      tokensTotal: _aiUsageTotalTokens(meta),
+      cachedPromptTokens: _aiUsageCachedPromptTokens(meta),
+      estimatedCostUsd: _aiUsageEstimatedCostUsd(meta),
+      mixMagnitudeModelSource:
+          _aiObservabilityString(observability, 'mix_magnitude_model_source'),
+      mixMagnitudeModelBundleVersion: _aiObservabilityString(
+        observability,
+        'mix_magnitude_model_bundle_version',
+      ),
+      mixApplyModelVersion:
+          _aiObservabilityString(observability, 'mix_apply_model_version'),
+      mixMagnitudeRegressorVersion: _aiObservabilityString(
+        observability,
+        'mix_magnitude_regressor_version',
+      ),
+    );
+    await AnalyticsService.instance.track(event);
+  }
+
+  Future<void> _trackAiPromptCycleFailed({
+    required String promptTraceId,
+    required String aiFeature,
+    required String projectId,
+    required String errorCode,
+    Map<String, dynamic>? meta,
+    String toolName = '',
+    required int promptCycleTotalMs,
+    int? applyMixMs,
+  }) async {
+    final observability = _aiObservabilityFromMeta(meta);
+    final modelName = _aiObservabilityString(observability, 'effective_model');
+    final runtimeConfigFingerprint =
+        _aiObservabilityString(observability, 'runtime_config_fingerprint');
+    final hasSystemPromptOverride =
+        _aiObservabilityBool(observability, 'has_system_prompt_override');
+    await AnalyticsService.instance.track(
+      AnalyticsEvents.aiPromptCycleFailed(
+        projectId: projectId,
+        aiFeature: aiFeature,
+        promptTraceId: promptTraceId,
+        errorCode: errorCode,
+        toolName: toolName.isEmpty ? null : toolName,
+        modelName: modelName,
+        runtimeConfigFingerprint: runtimeConfigFingerprint,
+        hasSystemPromptOverride: hasSystemPromptOverride,
+        projectStatsMs: _aiObservabilityInt(observability, 'project_stats_ms'),
+        proxyRoundtripMs:
+            _aiObservabilityInt(observability, 'proxy_roundtrip_ms'),
+        responseParseMs:
+            _aiObservabilityInt(observability, 'response_parse_ms'),
+        mixPlanMs: _aiObservabilityInt(observability, 'mix_plan_ms'),
+        mixModelHeuristicMs:
+            _aiObservabilityInt(observability, 'mix_model_heuristic_ms'),
+        mixModelOnnxMs: _aiObservabilityInt(observability, 'mix_model_onnx_ms'),
+        applyMixMs: applyMixMs,
+        promptCycleTotalMs: promptCycleTotalMs,
+        openAiApiMs: _aiObservabilityInt(observability, 'openai_api_ms'),
+        providerRoundtripMs:
+            _aiObservabilityInt(observability, 'provider_roundtrip_ms'),
+        responseNormalizeMs:
+            _aiObservabilityInt(observability, 'response_normalize_ms'),
+        proxyHandlerMsTotal:
+            _aiObservabilityInt(observability, 'proxy_handler_ms_total'),
+        tokensPrompt: _aiUsagePromptTokens(meta),
+        tokensCompletion: _aiUsageCompletionTokens(meta),
+        tokensTotal: _aiUsageTotalTokens(meta),
+        cachedPromptTokens: _aiUsageCachedPromptTokens(meta),
+        estimatedCostUsd: _aiUsageEstimatedCostUsd(meta),
+        mixMagnitudeModelSource:
+            _aiObservabilityString(observability, 'mix_magnitude_model_source'),
+        mixMagnitudeModelBundleVersion: _aiObservabilityString(
+          observability,
+          'mix_magnitude_model_bundle_version',
+        ),
+        mixApplyModelVersion:
+            _aiObservabilityString(observability, 'mix_apply_model_version'),
+        mixMagnitudeRegressorVersion: _aiObservabilityString(
+          observability,
+          'mix_magnitude_regressor_version',
+        ),
+      ),
+    );
+    _logAiPromptCycleSummary(
+      promptTraceId: promptTraceId,
+      toolName: toolName,
+      modelName: modelName,
+      status: errorCode,
+      observability: observability,
+      promptCycleTotalMs: promptCycleTotalMs,
+      applyMixMs: applyMixMs,
+    );
+  }
+
+  void _logAiPromptCycleSummary({
+    required String promptTraceId,
+    required String toolName,
+    required String? modelName,
+    required String status,
+    required Map<String, dynamic> observability,
+    required int promptCycleTotalMs,
+    int? applyMixMs,
+  }) {
+    if (!kAiDebugLogs) return;
+    final parts = <String>[
+      'trace=$promptTraceId',
+      'status=$status',
+      if (toolName.trim().isNotEmpty) 'tool=$toolName',
+      if ((modelName ?? '').trim().isNotEmpty) 'model=$modelName',
+      'total=${promptCycleTotalMs}ms',
+      if (_aiObservabilityInt(observability, 'project_stats_ms') != null)
+        'project=${_aiObservabilityInt(observability, 'project_stats_ms')}ms',
+      if (_aiObservabilityInt(observability, 'proxy_roundtrip_ms') != null)
+        'proxy=${_aiObservabilityInt(observability, 'proxy_roundtrip_ms')}ms',
+      if (_aiObservabilityInt(observability, 'openai_api_ms') != null)
+        'openai=${_aiObservabilityInt(observability, 'openai_api_ms')}ms',
+      if (_aiObservabilityInt(observability, 'mix_plan_ms') != null)
+        'mixPlan=${_aiObservabilityInt(observability, 'mix_plan_ms')}ms',
+      if (_aiObservabilityInt(observability, 'mix_model_heuristic_ms') != null)
+        'heuristic=${_aiObservabilityInt(observability, 'mix_model_heuristic_ms')}ms',
+      if (_aiObservabilityInt(observability, 'mix_model_onnx_ms') != null)
+        'onnx=${_aiObservabilityInt(observability, 'mix_model_onnx_ms')}ms',
+      if (applyMixMs != null) 'apply=${applyMixMs}ms',
+    ];
+    aiDebugLog('prompt-cycle', parts.join(' '));
+  }
+
+  void _logAiPromptDebugPretty({
+    required String promptTraceId,
+    required String toolName,
+    required Map<String, dynamic>? meta,
+    required int promptCycleTotalMs,
+    int? applyMixMs,
+  }) {
+    if (!kAiDebugLogs) return;
+
+    final observability = _aiObservabilityFromMeta(meta);
+    final steps = (meta?['mix_debug_steps'] as List?)
+            ?.whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList(growable: false) ??
+        const <Map<String, dynamic>>[];
+
+    String fmtMs(String key) {
+      final value = _aiObservabilityInt(observability, key);
+      return value == null ? '-' : '${value}ms';
+    }
+
+    String fmtStr(String key) {
+      return _aiObservabilityString(observability, key) ?? '-';
+    }
+
+    String fmtNum(dynamic value, {int digits = 3}) {
+      if (value is num) {
+        return value.toStringAsFixed(digits);
+      }
+      return '-';
+    }
+
+    Map<String, dynamic> mapOrEmpty(dynamic raw) {
+      if (raw is Map<String, dynamic>) return raw;
+      if (raw is Map) return raw.cast<String, dynamic>();
+      return const <String, dynamic>{};
+    }
+
+    List<Map<String, dynamic>> listOfMaps(dynamic raw) {
+      if (raw is! List) return const <Map<String, dynamic>>[];
+      return raw
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList(growable: false);
+    }
+
+    String formatDataDelta(
+      Map<String, dynamic> beforeData,
+      Map<String, dynamic> afterData,
+    ) {
+      final keys = <String>{...beforeData.keys, ...afterData.keys}.toList()
+        ..sort();
+      final diffs = <String>[];
+      for (final key in keys) {
+        final beforeValue = beforeData[key];
+        final afterValue = afterData[key];
+        if (beforeValue == afterValue) continue;
+
+        final beforeText = beforeValue?.toString() ?? 'null';
+        final afterText = afterValue?.toString() ?? 'null';
+        if (beforeText == afterText) continue;
+
+        diffs.add('$key:$beforeText->$afterText');
+      }
+      if (diffs.isEmpty) return 'no_data_delta';
+      if (!kAiDebugVerbose && diffs.length > 5) {
+        return '${diffs.take(5).join(', ')}, ...';
+      }
+      return diffs.join(', ');
+    }
+
+    String formatMagnitudeEntry(Map<String, dynamic> entry) {
+      final actionIndex = entry['action_index'];
+      final actionType =
+          (entry['action_type']?.toString().trim().isNotEmpty ?? false)
+              ? entry['action_type'].toString().trim()
+              : 'unknown_action';
+      final decision = entry['decision']?.toString().trim() ?? '-';
+      final dropped = entry['dropped'] == true;
+
+      final beforeAction = mapOrEmpty(entry['before']);
+      final afterAction = mapOrEmpty(entry['after']);
+      final beforeType =
+          beforeAction['type']?.toString().trim().isNotEmpty == true
+              ? beforeAction['type'].toString().trim()
+              : actionType;
+      final afterType =
+          afterAction['type']?.toString().trim().isNotEmpty == true
+              ? afterAction['type'].toString().trim()
+              : actionType;
+      final typeText =
+          beforeType == afterType ? beforeType : '$beforeType->$afterType';
+
+      final beforeData = mapOrEmpty(beforeAction['data']);
+      final afterData = mapOrEmpty(afterAction['data']);
+      final dataDelta = formatDataDelta(beforeData, afterData);
+
+      final prefix = '[a$actionIndex]';
+      final applyScore = fmtNum(entry['apply_score']);
+      final rawMagnitude = fmtNum(entry['raw_magnitude']);
+      final finalScale = dropped ? '-' : fmtNum(entry['final_scale']);
+      if (dropped) {
+        return '$prefix DROP $typeText apply=$applyScore raw=$rawMagnitude '
+            'decision=$decision before=${aiDebugShortMap(beforeData, maxEntries: 6, maxValueLen: 44)}';
+      }
+      return '$prefix $typeText apply=$applyScore raw=$rawMagnitude '
+          'final=$finalScale decision=$decision delta={$dataDelta}';
+    }
+
+    bool isMagnitudeEntryChanged(Map<String, dynamic> entry) {
+      if (entry['dropped'] == true) return true;
+      final beforeAction = mapOrEmpty(entry['before']);
+      final afterAction = mapOrEmpty(entry['after']);
+      final beforeType = beforeAction['type']?.toString() ?? '';
+      final afterType = afterAction['type']?.toString() ?? '';
+      if (beforeType != afterType) return true;
+      final beforeData = mapOrEmpty(beforeAction['data']);
+      final afterData = mapOrEmpty(afterAction['data']);
+      return formatDataDelta(beforeData, afterData) != 'no_data_delta';
+    }
+
+    String formatGoalCompact(Map<String, dynamic> goal) {
+      final parts = <String>[
+        'scope=${goal['scope'] ?? 'auto'}',
+        if (goal['row_index'] != null) 'row=${goal['row_index']}',
+        if ((goal['role']?.toString().trim() ?? '').isNotEmpty)
+          'role=${goal['role']}',
+        if (goal['intensity'] is num)
+          'intensity=${(goal['intensity'] as num).toStringAsFixed(2)}',
+      ];
+      final intents =
+          (goal['intents'] as List?)?.whereType<Map>().map((rawIntent) {
+                final intent = Map<String, dynamic>.from(rawIntent);
+                final bits = <String>[intent['kind']?.toString() ?? 'unknown'];
+                final direction = intent['direction']?.toString();
+                final descriptor = intent['descriptor']?.toString();
+                if ((direction ?? '').trim().isNotEmpty)
+                  bits.add(direction!.trim());
+                if ((descriptor ?? '').trim().isNotEmpty) {
+                  bits.add(descriptor!.trim());
+                }
+                if (intent['confidence'] is num) {
+                  bits.add((intent['confidence'] as num).toStringAsFixed(2));
+                }
+                return bits.join('/');
+              }).join(', ') ??
+              '';
+      if (intents.isNotEmpty) {
+        parts.add('intents=$intents');
+      }
+      return parts.join(' ');
+    }
+
+    String formatStepLine(int index, Map<String, dynamic> step) {
+      final goal = step['goal'] is Map
+          ? Map<String, dynamic>.from(step['goal'] as Map)
+          : const <String, dynamic>{};
+      final heuristicCount =
+          ((step['heuristic_actions'] as List?) ?? const []).length;
+      final refinedCount =
+          ((step['refined_actions'] as List?) ?? const []).length;
+      final fallback = step['fallback_reason']?.toString().trim() ?? '';
+      final fallbackPart = fallback.isEmpty ? '' : ' fallback=$fallback';
+      return '  ${index + 1}. ${formatGoalCompact(goal)} '
+          '[heuristic=$heuristicCount refined=$refinedCount$fallbackPart]';
+    }
+
+    final b = StringBuffer()
+      ..writeln('AI Prompt Cycle')
+      ..writeln('trace: $promptTraceId')
+      ..writeln('tool: ${toolName.isEmpty ? '-' : toolName}')
+      ..writeln(
+        'timings: total=${promptCycleTotalMs}ms project=${fmtMs('project_stats_ms')} '
+        'proxy=${fmtMs('proxy_roundtrip_ms')} openai=${fmtMs('openai_api_ms')} '
+        'mixPlan=${fmtMs('mix_plan_ms')} heuristic=${fmtMs('mix_model_heuristic_ms')} '
+        'onnx=${fmtMs('mix_model_onnx_ms')} apply=${applyMixMs == null ? '-' : '${applyMixMs}ms'}',
+      )
+      ..writeln(
+        'models: llm=${fmtStr('effective_model')} '
+        'source=${fmtStr('mix_magnitude_model_source')} '
+        'bundle=${fmtStr('mix_magnitude_model_bundle_version')} '
+        'apply=${fmtStr('mix_apply_model_version')} '
+        'regressor=${fmtStr('mix_magnitude_regressor_version')}',
+      );
+
+    final fallbackReasons =
+        meta?['learned_magnitude_fallback_reasons'] as List? ?? const [];
+    b.writeln(
+      'magnitude: enabled=${meta?['learned_magnitude_enabled']} '
+      'ready=${meta?['learned_magnitude_ready']} '
+      'bypassed=${meta?['learned_magnitude_bypassed']} '
+      'fallback=${meta?['learned_magnitude_fallback_used']} '
+      'reasons=${fallbackReasons.isEmpty ? '-' : fallbackReasons.join(",")}',
+    );
+
+    if (steps.isEmpty) {
+      b.writeln('steps: none');
+    } else {
+      const maxVisibleSteps = 4;
+      final visibleCount = math.min(steps.length, maxVisibleSteps);
+      b.writeln('steps: ${steps.length}');
+      for (int i = 0; i < visibleCount; i++) {
+        final step = steps[i];
+        b.writeln(formatStepLine(i, step));
+        final magnitudeEntries = listOfMaps(step['magnitude_debug']);
+        if (magnitudeEntries.isNotEmpty) {
+          final droppedCount = magnitudeEntries
+              .where((entry) => entry['dropped'] == true)
+              .length;
+          final changedCount =
+              magnitudeEntries.where(isMagnitudeEntryChanged).length;
+          b.writeln(
+            '     onnx_deltas=${magnitudeEntries.length} '
+            'changed=$changedCount dropped=$droppedCount',
+          );
+          final visibleDeltas = kAiDebugVerbose
+              ? magnitudeEntries.length
+              : math.min(magnitudeEntries.length, 6);
+          for (int j = 0; j < visibleDeltas; j++) {
+            b.writeln('       ${formatMagnitudeEntry(magnitudeEntries[j])}');
+          }
+          if (magnitudeEntries.length > visibleDeltas) {
+            b.writeln(
+              '       ... +${magnitudeEntries.length - visibleDeltas} more action delta(s)',
+            );
+          }
+        }
+      }
+      if (steps.length > visibleCount) {
+        b.writeln('  ... +${steps.length - visibleCount} more step(s)');
+      }
+    }
+
+    aiDebugLog('prompt-debug', b.toString().trimRight());
+  }
+
   Map<String, dynamic>? _pickParam(List<Map<String, dynamic>> params,
       {String? exactName, List<String>? containsAny}) {
     final lowerExact = exactName?.toLowerCase();
@@ -25021,13 +26854,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
+    final cappedText = _truncateChatMessageText(trimmed);
+    if (cappedText.isEmpty) return;
 
     final existingMessages = _chatController.messages;
     if (existingMessages.isNotEmpty) {
       final lastMessage = existingMessages.last;
       if (lastMessage is TextMessage &&
           lastMessage.authorId == authorId &&
-          lastMessage.text.trim() == trimmed) {
+          lastMessage.text.trim() == cappedText) {
         return;
       }
     }
@@ -25037,17 +26872,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         id: const Uuid().v4(),
         authorId: authorId,
         createdAt: (createdAt ?? DateTime.now()).toUtc(),
-        text: trimmed,
+        text: cappedText,
         metadata: metadata,
       ),
     );
 
+    _scheduleChatHistoryPrune();
     if (!persist) return;
-    unawaited(_enforcePersistedChatHistoryLimit());
     _scheduleChatHistoryPersist();
     if (authorId == 'user' || authorId == 'assistant') {
       _scrollChatToLatest();
     }
+  }
+
+  String _truncateChatMessageText(String text) {
+    final maxCharacters =
+        kDefaultProjectChatHistoryLimits.maxStoredMessageCharacters;
+    if (maxCharacters <= 0) return '';
+    if (text.length <= maxCharacters) return text;
+    if (maxCharacters == 1) return text.substring(0, 1);
+    return '${text.substring(0, maxCharacters - 1)}…';
   }
 
   int _chatTextMessageCount({String? authorId}) {
@@ -25083,6 +26927,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _scrollChatToLatest({bool jump = false}) {
+    if (_chatScrollHintEnabled) {
+      _setChatScrollHintEnabled(false);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       final controller = _chatController;
@@ -25121,33 +26968,73 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
   }
 
-  Future<void> _enforcePersistedChatHistoryLimit() async {
-    final normalized =
-        ProjectChatHistory.fromChatMessages(_chatController.messages)
-            .toChatMessages();
-    if (_chatMessagesMatchCurrentState(normalized)) return;
-    await _chatController.setMessages(normalized.cast<Message>());
-    if (mounted) setState(() {});
+  void _scheduleChatHistoryPrune() {
+    if (_chatHistoryPruneScheduled || _chatHistoryPruneInFlight) return;
+    _chatHistoryPruneScheduled = true;
+    Future<void>.microtask(() async {
+      _chatHistoryPruneScheduled = false;
+      if (_chatHistoryPruneInFlight) return;
+      _chatHistoryPruneInFlight = true;
+      try {
+        await _pruneChatHistoryInMemory();
+      } finally {
+        _chatHistoryPruneInFlight = false;
+      }
+      if (_chatHistoryNeedsPruning()) {
+        _scheduleChatHistoryPrune();
+      }
+    });
   }
 
-  bool _chatMessagesMatchCurrentState(List<TextMessage> nextMessages) {
-    final currentMessages = _chatController.messages;
-    if (currentMessages.length != nextMessages.length) return false;
+  Future<void> _setChatMessages(
+    List<Message> messages, {
+    bool animated = true,
+  }) {
+    final controller = _chatController;
+    if (controller is InMemoryChatController) {
+      return controller.setMessages(messages, animated: animated);
+    }
+    return controller.setMessages(messages);
+  }
 
-    for (int i = 0; i < currentMessages.length; i++) {
-      final current = currentMessages[i];
-      final next = nextMessages[i];
-      if (current is! TextMessage) return false;
-      if (current.id != next.id ||
-          current.authorId != next.authorId ||
-          current.text != next.text ||
-          current.createdAt?.millisecondsSinceEpoch !=
-              next.createdAt?.millisecondsSinceEpoch) {
-        return false;
+  Future<void> _removeChatMessage(
+    Message message, {
+    bool animated = true,
+  }) {
+    final controller = _chatController;
+    if (controller is InMemoryChatController) {
+      return controller.removeMessage(message, animated: animated);
+    }
+    return controller.removeMessage(message);
+  }
+
+  bool _chatHistoryNeedsPruning() {
+    final limits = kDefaultProjectChatHistoryLimits;
+    final messages = _chatController.messages;
+    if (messages.length > limits.maxStoredMessages) return true;
+    int totalChars = 0;
+    for (final message in messages) {
+      if (message is TextMessage) {
+        totalChars += message.text.length;
+        if (totalChars > limits.maxStoredCharacters) {
+          return true;
+        }
       }
     }
+    return false;
+  }
 
-    return true;
+  Future<void> _pruneChatHistoryInMemory() async {
+    bool changed = false;
+    while (_chatHistoryNeedsPruning()) {
+      final messages = _chatController.messages;
+      if (messages.isEmpty) break;
+      await _removeChatMessage(messages.first, animated: false);
+      changed = true;
+    }
+    if (changed && mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _restoreChatHistoryFromProjectJson(
@@ -25155,7 +27042,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   ) async {
     final history = ProjectChatHistory.fromJson(
         json['assistantChat'] ?? json['chatHistory']);
-    await _chatController.setMessages(history.toChatMessages().cast<Message>());
+    await _setChatMessages(
+      history.toChatMessages().cast<Message>(),
+      animated: false,
+    );
     _chatPipeline.replaceConversation(history.toConversation());
   }
 
@@ -25201,7 +27091,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _clearChatHistory() async {
     _chatHistoryPersistTimer?.cancel();
     _chatHistoryPersistTimer = null;
-    await _chatController.setMessages(const <Message>[]);
+    await _setChatMessages(const <Message>[], animated: false);
     _chatPipeline.clearConversation();
     await _persistChatHistoryOnly();
     if (mounted) setState(() {});
@@ -25286,6 +27176,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return '${local.year}-$month-$day $hour:$minute';
   }
 
+  String _formatPromptResetShort(
+    DateTime? resetsAt, {
+    bool preferDateWhenFar = false,
+  }) {
+    if (resetsAt == null) return '--';
+    final local = resetsAt.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final targetDay = DateTime(local.year, local.month, local.day);
+    final dayDelta = targetDay.difference(today).inDays;
+    if (preferDateWhenFar && dayDelta >= 1) {
+      final month = local.month.toString().padLeft(2, '0');
+      final day = local.day.toString().padLeft(2, '0');
+      return '$month/$day';
+    }
+    final isPm = local.hour >= 12;
+    final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$hour12:$minute ${isPm ? 'PM' : 'AM'}';
+  }
+
   Future<void> _showPromptRateLimitDialog() async {
     final status = _promptRateLimitStatus;
     if (status == null) {
@@ -25293,115 +27204,398 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    await showDialog<void>(
+    await showModalBottomSheet<void>(
       context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      isDismissible: true,
+      enableDrag: true,
       builder: (dialogContext) {
         final blockedWait = _formatPromptWaitDuration(status.blockedResetAt);
+        final daily = status.daily;
+        final weekly = status.weekly;
+        final extraPromptBank = status.extraPromptBank;
+        final leftLabel = L10n.translate(dialogContext, 'left');
+        Widget buildLimitRow({
+          required String label,
+          required int remaining,
+          required int limit,
+          required DateTime? resetsAt,
+          required bool preferDateWhenFar,
+        }) {
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color.fromRGBO(244, 244, 244, 0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.07),
+              ),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 56,
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    '$remaining/$limit $leftLabel',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 88,
+                  child: Text(
+                    _formatPromptResetShort(
+                      resetsAt,
+                      preferDateWhenFar: preferDateWhenFar,
+                    ),
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.78),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return SafeArea(
+          top: false,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.of(dialogContext).pop(),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 430),
+                    child: MixroomShellSurface(
+                      radius: 24,
+                      strong: true,
+                      color: const Color.fromRGBO(244, 244, 244, 0.14),
+                      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            L10n.translate(dialogContext, 'Prompt usage'),
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            L10n.translate(
+                              dialogContext,
+                              extraPromptBank.available
+                                  ? 'Extra prompt credits are used first, before daily and weekly limits.'
+                                  : 'Daily and weekly prompt usage limits.',
+                            ),
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Colors.white.withValues(alpha: 0.82),
+                              fontSize: 14,
+                              height: 1.35,
+                            ),
+                          ),
+                          if (extraPromptBank.available) ...[
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    L10n.translate(
+                                      dialogContext,
+                                      'Extra prompt bank',
+                                    ),
+                                    style: TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color: Color(0xFFF4F4F4),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  '${extraPromptBank.remaining} $leftLabel',
+                                  style: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Color(0xFFF4F4F4),
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          const SizedBox(height: 14),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 56,
+                                  child: Text(
+                                    L10n.translate(dialogContext, 'Window'),
+                                    style: TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color:
+                                          Colors.white.withValues(alpha: 0.62),
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    L10n.translate(dialogContext, 'Left'),
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color: Colors.white70,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 88,
+                                  child: Text(
+                                    L10n.translate(dialogContext, 'Reset'),
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color:
+                                          Colors.white.withValues(alpha: 0.62),
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          buildLimitRow(
+                            label: L10n.translate(dialogContext, 'Daily'),
+                            remaining: daily.remaining,
+                            limit: daily.limit,
+                            resetsAt: daily.resetsAt,
+                            preferDateWhenFar: false,
+                          ),
+                          const SizedBox(height: 6),
+                          buildLimitRow(
+                            label: L10n.translate(dialogContext, 'Weekly'),
+                            remaining: weekly.remaining,
+                            limit: weekly.limit,
+                            resetsAt: weekly.resetsAt,
+                            preferDateWhenFar: true,
+                          ),
+                          if (!status.canSubmit) ...[
+                            const SizedBox(height: 10),
+                            Text(
+                              '${L10n.translate(dialogContext, 'Try again in')} $blockedWait.',
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${L10n.translate(dialogContext, 'Blocked until')} ${_formatPromptResetAt(status.blockedResetAt)}',
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.66),
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              const Spacer(),
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.of(dialogContext).pop(),
+                                child: Text(
+                                  L10n.translate(dialogContext, 'Close'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmClearChatHistory() async {
+    if (_isThinking || _chatController.messages.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
         return Dialog(
           backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(26),
+          ),
+          clipBehavior: Clip.antiAlias,
           insetPadding: const EdgeInsets.symmetric(horizontal: 18),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360),
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: <Color>[
-                    Color(0xFFA0A7AB),
-                    Color(0xFF7D858C),
-                    Color(0xFF626B73),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.34),
-                    blurRadius: 24,
-                    offset: const Offset(0, 14),
-                  ),
-                ],
-              ),
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: MixroomShellSurface(
+              radius: 26,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Center(
-                    child: Text(
-                      'Prompt usage limit',
-                      style: TextStyle(
-                        fontFamily: 'Pretendard',
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    status.canSubmit
-                        ? 'All AI prompts count toward the same shared allowance.'
-                        : 'Prompt sending is paused until the blocked allowance refreshes.',
-                    style: TextStyle(
-                      fontFamily: 'Pretendard',
-                      color: Colors.white.withValues(alpha: 0.80),
-                      height: 1.3,
-                      fontSize: 13.5,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _buildPromptLimitSummaryCard(
-                    label: 'Daily',
-                    remaining: status.daily.remaining,
-                    limit: status.daily.limit,
-                    resetsAt: status.daily.resetsAt,
-                  ),
-                  const SizedBox(height: 8),
-                  _buildPromptLimitSummaryCard(
-                    label: 'Weekly',
-                    remaining: status.weekly.remaining,
-                    limit: status.weekly.limit,
-                    resetsAt: status.weekly.resetsAt,
-                  ),
-                  if (!status.canSubmit) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 11, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0x49B95B4E),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.14)),
-                      ),
-                      child: Text(
-                        'Prompts unlock again in $blockedWait.\nRefresh: ${_formatPromptResetAt(status.blockedResetAt)}',
-                        style: const TextStyle(
-                          fontFamily: 'Pretendard',
-                          color: Colors.white,
-                          height: 1.3,
-                          fontSize: 12.5,
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: const Color.fromRGBO(255, 119, 119, 0.16),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.delete_outline_rounded,
+                          color: Color(0xFFFF8D8D),
+                          size: 20,
                         ),
                       ),
-                    ),
-                  ],
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () {
-                          Navigator.of(dialogContext).pop();
-                          unawaited(_refreshPromptRateLimitStatus());
-                        },
-                        child: const Text('Refresh'),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          L10n.translate(dialogContext, 'Clear chat history?'),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            height: 1.15,
+                          ),
+                        ),
                       ),
-                      TextButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        child: const Text('Close'),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    L10n.translate(
+                      dialogContext,
+                      'This removes the saved project chat context and cannot be undone.',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.82),
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(false),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 44),
+                            foregroundColor: const Color(0xFFF4F4F4),
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                          ),
+                          child: Text(
+                            L10n.translate(dialogContext, 'Cancel'),
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(true),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 44),
+                            foregroundColor: const Color(0xFFFFD0D0),
+                            backgroundColor:
+                                const Color.fromRGBO(255, 108, 108, 0.22),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: const BorderSide(
+                                color: Color.fromRGBO(255, 140, 140, 0.56),
+                              ),
+                            ),
+                          ),
+                          child: Text(
+                            L10n.translate(dialogContext, 'Clear'),
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -25412,94 +27606,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
       },
     );
-  }
-
-  Widget _buildPromptLimitSummaryCard({
-    required String label,
-    required int remaining,
-    required int limit,
-    required DateTime? resetsAt,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-      decoration: BoxDecoration(
-        color: const Color.fromRGBO(74, 96, 118, 0.52),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$label  $remaining',
-            style: const TextStyle(
-              fontFamily: 'Pretendard',
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            'Remaining of $limit',
-            style: TextStyle(
-              fontFamily: 'Pretendard',
-              color: Colors.white.withValues(alpha: 0.76),
-              fontSize: 12.5,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            'Refreshes in ${_formatPromptWaitDuration(resetsAt)}',
-            style: TextStyle(
-              fontFamily: 'Pretendard',
-              color: Colors.white.withValues(alpha: 0.66),
-              fontSize: 11.8,
-            ),
-          ),
-          Text(
-            _formatPromptResetAt(resetsAt),
-            style: TextStyle(
-              fontFamily: 'Pretendard',
-              color: Colors.white.withValues(alpha: 0.56),
-              fontSize: 11.8,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _confirmClearChatHistory() async {
-    if (_isThinking || _chatController.messages.isEmpty) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF17191F),
-          title: const Text(
-            'Clear chat history?',
-            style: TextStyle(color: Colors.white),
-          ),
-          content: const Text(
-            'This removes the saved project chat context and cannot be undone.',
-            style: TextStyle(color: Colors.white70),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Clear'),
-            ),
-          ],
-        );
-      },
-    );
 
     if (confirmed != true) return;
 
@@ -25507,7 +27613,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Chat history cleared')),
+        SnackBar(
+          content: Text(L10n.translate(context, 'Chat history cleared')),
+        ),
       );
     }
   }
@@ -25640,10 +27748,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             'Producer Session',
         extension: 'json',
       );
+      if (!mounted) return;
+      final desktopDialogTitle =
+          L10n.translate(context, 'Save producer session');
       macSavedPath = await ExportSaveDialog.saveExportedFile(
         sourceFilePath: file.path,
         suggestedFileName: suggestedFileName,
-        desktopDialogTitle: 'Save producer session',
+        desktopDialogTitle: desktopDialogTitle,
       );
       if (macSavedPath == null || macSavedPath.isEmpty) {
         _showSmallNotice('Producer session export canceled.');
@@ -26272,6 +28383,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _showPromptRateLimitDialog();
       return false;
     }
+    const aiFeature = 'ai_chat';
+    final promptTraceId = const Uuid().v4();
+    final promptCycleStopwatch = Stopwatch()..start();
+    final magnitudeObservability = _magnitudePredictor.observabilityContext;
+    unawaited(
+      AnalyticsService.instance.track(
+        AnalyticsEvents.aiPromptSubmitted(
+          projectId: _projectId,
+          aiFeature: aiFeature,
+          promptTraceId: promptTraceId,
+          mixMagnitudeModelSource:
+              magnitudeObservability['mix_magnitude_model_source']?.toString(),
+          mixMagnitudeModelBundleVersion:
+              magnitudeObservability['mix_magnitude_model_bundle_version']
+                  ?.toString(),
+          mixApplyModelVersion:
+              magnitudeObservability['mix_apply_model_version']?.toString(),
+          mixMagnitudeRegressorVersion:
+              magnitudeObservability['mix_magnitude_regressor_version']
+                  ?.toString(),
+        ),
+      ),
+    );
 
     _handleDawOnboardingChatPromptSubmitted();
     _insertUserChatText(trimmed);
@@ -26290,6 +28424,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     late final ChatPipelineResult reply;
+    String toolName = '';
+    int? applyMixMs;
     try {
       await _ensureAiModelsLoaded();
       reply = await _chatPipeline.handleUserText(
@@ -26305,12 +28441,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
         selectedRowIndex: _selectedRow,
         automationClipSnapshot: _aiAutomationClipSnapshot(),
+        promptTraceId: promptTraceId,
         projectId: _projectId,
-        aiFeature: 'ai_chat',
+        aiFeature: aiFeature,
         bypassLearnedMagnitudes: _producerDataMode,
       );
     } catch (error, stackTrace) {
       _reportAiChatFailure(error, stackTrace, stage: 'chat_pipeline');
+      promptCycleStopwatch.stop();
+      unawaited(
+        _trackAiResponseOutcome(
+          promptTraceId: promptTraceId,
+          aiFeature: aiFeature,
+          projectId: _projectId,
+          fallbackErrorCode: 'chat_pipeline',
+        ),
+      );
+      unawaited(
+        _trackAiPromptCycleFailed(
+          promptTraceId: promptTraceId,
+          aiFeature: aiFeature,
+          projectId: _projectId,
+          errorCode: 'chat_pipeline',
+          promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+        ),
+      );
       _insertAssistantChatText(_kAiRequestFailureMessage);
       if (mounted) {
         setState(() {});
@@ -26319,37 +28474,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return false;
     }
 
-    final toolName = reply.meta?['tool']?.toString().trim() ?? '';
+    toolName = reply.meta?['tool']?.toString().trim() ?? '';
     if (toolName.isNotEmpty) {
       unawaited(
         AnalyticsService.instance.track(
           AnalyticsEvents.aiToolCalled(
             toolName: toolName,
             projectId: _projectId,
+            promptTraceId: promptTraceId,
           ),
         ),
       );
     }
 
-    if (kAiDebugLogs) {
-      aiDebugLog('audio-editor', reply.toString());
-      if (reply.meta != null) {
-        aiDebugLog(
-          'audio-editor',
-          'reply.meta=${aiDebugShortMap(reply.meta!)}',
-        );
-      }
-    }
-
     _updatePromptRateLimitStatusFromMeta(reply.meta);
+    unawaited(
+      _trackAiResponseOutcome(
+        promptTraceId: promptTraceId,
+        aiFeature: aiFeature,
+        projectId: _projectId,
+        meta: reply.meta,
+      ),
+    );
 
     try {
       if (reply.hasMix) {
+        final applyStopwatch = Stopwatch()..start();
         final appliedCount = await applyMixingResult(
           reply.mixing!,
           emitActionSummaries: true,
         );
+        applyStopwatch.stop();
+        applyMixMs = applyStopwatch.elapsedMilliseconds;
         if (appliedCount <= 0) {
+          promptCycleStopwatch.stop();
+          unawaited(
+            _trackAiPromptCycleFailed(
+              promptTraceId: promptTraceId,
+              aiFeature: aiFeature,
+              projectId: _projectId,
+              errorCode: 'chat_apply_no_changes',
+              meta: reply.meta,
+              toolName: toolName,
+              applyMixMs: applyMixMs,
+              promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+            ),
+          );
           _insertAssistantChatText(_kAiApplyFailureMessage);
           if (mounted) {
             setState(() {});
@@ -26382,6 +28552,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _presentPipelineReply(reply);
     } catch (error, stackTrace) {
       _reportAiChatFailure(error, stackTrace, stage: 'chat_apply');
+      promptCycleStopwatch.stop();
+      unawaited(
+        _trackAiPromptCycleFailed(
+          promptTraceId: promptTraceId,
+          aiFeature: aiFeature,
+          projectId: _projectId,
+          errorCode: 'chat_apply',
+          meta: reply.meta,
+          toolName: toolName,
+          applyMixMs: applyMixMs,
+          promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+        ),
+      );
       _insertAssistantChatText(
         reply.hasMix ? _kAiApplyFailureMessage : _kAiRequestFailureMessage,
       );
@@ -26404,6 +28587,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (mounted) {
       setState(() {});
     }
+    promptCycleStopwatch.stop();
+    _logAiPromptDebugPretty(
+      promptTraceId: promptTraceId,
+      toolName: toolName,
+      meta: reply.meta,
+      applyMixMs: applyMixMs,
+      promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+    );
+    unawaited(
+      _trackAiPromptCycleCompleted(
+        promptTraceId: promptTraceId,
+        aiFeature: aiFeature,
+        projectId: _projectId,
+        meta: reply.meta,
+        toolName: toolName,
+        applyMixMs: applyMixMs,
+        promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+      ),
+    );
     unawaited(_handleDawOnboardingChatReplyReady());
     return true;
   }
@@ -26412,220 +28614,199 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     var selectedProfile = _selectedOneButtonMixProfile;
     final shouldRun = await showDialog<bool>(
       context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
       builder: (context) {
         return StatefulBuilder(
-          builder: (context, setDialogState) => Dialog(
-            backgroundColor: Colors.transparent,
-            surfaceTintColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(horizontal: 16),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 360),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.fromLTRB(24, 18, 24, 16),
-                        decoration: BoxDecoration(
-                          color: const Color.fromRGBO(244, 244, 244, 0.20),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.18),
-                          ),
-                          boxShadow: const <BoxShadow>[
-                            BoxShadow(
-                              color: Color.fromRGBO(0, 0, 0, 0.25),
-                              blurRadius: 15,
-                              spreadRadius: 8,
-                              offset: Offset.zero,
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              L10n.translate(context, 'One-Button Mix'),
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                                height: 22 / 18,
-                                color: Color(0xFFF4F4F4),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            Container(
-                              height: 48,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 18),
-                              decoration: BoxDecoration(
-                                color:
-                                    const Color.fromRGBO(244, 244, 244, 0.20),
-                                borderRadius: BorderRadius.circular(24),
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.16),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Expanded(
-                                    child: Text(
-                                      'Select Profile',
-                                      style: TextStyle(
-                                        fontFamily: 'Pretendard',
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w400,
-                                        color:
-                                            Color.fromRGBO(244, 244, 244, 0.50),
-                                      ),
-                                    ),
-                                  ),
-                                  DropdownButtonHideUnderline(
-                                    child: DropdownButton<String>(
-                                      value: selectedProfile,
-                                      dropdownColor: const Color(0xFF5F6871),
-                                      style: const TextStyle(
-                                        fontFamily: 'Pretendard',
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                        color: Color(0xFFF4F4F4),
-                                      ),
-                                      icon: const Icon(
-                                        Icons.arrow_drop_down_rounded,
-                                        color:
-                                            Color.fromRGBO(244, 244, 244, 0.75),
-                                        size: 20,
-                                      ),
-                                      items: const [
-                                        DropdownMenuItem<String>(
-                                          value: 'Mixroom Producer',
-                                          child: Text('Mixroom Producer'),
-                                        ),
-                                      ],
-                                      onChanged: (nextProfile) {
-                                        if (nextProfile == null) return;
-                                        setDialogState(() {
-                                          selectedProfile = nextProfile;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            const Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                'This will :\n'
-                                '  \u2022  Balance levels\n'
-                                '  \u2022  Reduce masking\n'
-                                '  \u2022  Improve clarity\n'
-                                '\n'
-                                'You can undo everything.',
-                                style: TextStyle(
-                                  fontFamily: 'Pretendard',
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w400,
-                                  height: 18 / 15,
-                                  color: Color(0xFFF4F4F4),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
+          builder: (context, setDialogState) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              surfaceTintColor: Colors.transparent,
+              shadowColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              clipBehavior: Clip.antiAlias,
+              elevation: 0,
+              insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
+                child: MixroomShellSurface(
+                  radius: 24,
+                  strong: true,
+                  color: const Color.fromRGBO(244, 244, 244, 0.14),
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(24),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                            child: Container(
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color:
-                                    const Color.fromRGBO(244, 244, 244, 0.20),
-                                borderRadius: BorderRadius.circular(24),
-                                boxShadow: const <BoxShadow>[
-                                  BoxShadow(
-                                    color: Color.fromRGBO(0, 0, 0, 0.25),
-                                    blurRadius: 15,
-                                    spreadRadius: 8,
-                                    offset: Offset.zero,
-                                  ),
-                                ],
-                              ),
-                              child: TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: const Color(0xFFF4F4F4),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(24),
-                                  ),
-                                  textStyle: const TextStyle(
-                                    fontFamily: 'Pretendard',
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w400,
-                                  ),
-                                ),
-                                child: Text(L10n.translate(context, 'Cancel')),
-                              ),
-                            ),
+                      Center(
+                        child: Text(
+                          L10n.translate(context, 'One-Button Mix'),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            height: 22 / 18,
+                            color: Color(0xFFF4F4F4),
                           ),
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Container(
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: const Color.fromRGBO(0, 149, 255, 0.60),
-                            borderRadius: BorderRadius.circular(24),
-                            boxShadow: const <BoxShadow>[
-                              BoxShadow(
-                                color: Color.fromRGBO(0, 0, 0, 0.25),
-                                blurRadius: 15,
-                                spreadRadius: 8,
-                                offset: Offset.zero,
-                              ),
-                            ],
-                          ),
-                          child: TextButton(
-                            onPressed: () {
-                              _selectedOneButtonMixProfile = selectedProfile;
-                              Navigator.pop(context, true);
-                            },
-                            style: TextButton.styleFrom(
-                              foregroundColor: const Color(0xFFF4F4F4),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                              textStyle: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            child: Text(L10n.translate(context, 'Run')),
+                      const SizedBox(height: 14),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.12),
                           ),
                         ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: selectedProfile,
+                            isExpanded: true,
+                            dropdownColor: kMixroomGlassDropdownMenuColor,
+                            borderRadius: BorderRadius.circular(18),
+                            iconEnabledColor:
+                                Colors.white.withValues(alpha: 0.82),
+                            style: const TextStyle(
+                              fontFamily: 'Pretendard',
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFF4F4F4),
+                            ),
+                            selectedItemBuilder: (context) {
+                              return _kOneButtonMixProfiles
+                                  .map(
+                                    (profile) => Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: RichText(
+                                        text: TextSpan(
+                                          children: <InlineSpan>[
+                                            TextSpan(
+                                              text:
+                                                  '${L10n.translate(context, 'Profile')}  ',
+                                              style: TextStyle(
+                                                fontFamily: 'Pretendard',
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w500,
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.68,
+                                                ),
+                                              ),
+                                            ),
+                                            TextSpan(
+                                              text:
+                                                  _localizedOneButtonMixProfile(
+                                                context,
+                                                profile,
+                                              ),
+                                              style: const TextStyle(
+                                                fontFamily: 'Pretendard',
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600,
+                                                color: Color(0xFFF4F4F4),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(growable: false);
+                            },
+                            items: _kOneButtonMixProfiles
+                                .map(
+                                  (profile) => DropdownMenuItem<String>(
+                                    value: profile,
+                                    child: Text(
+                                      _localizedOneButtonMixProfile(
+                                        context,
+                                        profile,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                                .toList(growable: false),
+                            onChanged: (value) {
+                              if (value == null) return;
+                              setDialogState(() {
+                                selectedProfile = value;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        L10n.translate(
+                          context,
+                          'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.',
+                        ),
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          fontSize: 14,
+                          fontWeight: FontWeight.w400,
+                          height: 1.4,
+                          color: Colors.white.withValues(alpha: 0.86),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () {
+                                Navigator.pop(context, false);
+                              },
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(0, 46),
+                                foregroundColor: const Color(0xFFF4F4F4),
+                                backgroundColor:
+                                    Colors.white.withValues(alpha: 0.12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                  side: BorderSide(
+                                    color: Colors.white.withValues(alpha: 0.12),
+                                  ),
+                                ),
+                              ),
+                              child: Text(L10n.translate(context, 'Cancel')),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () {
+                                _selectedOneButtonMixProfile = selectedProfile;
+                                Navigator.pop(context, true);
+                              },
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(0, 46),
+                                foregroundColor: const Color(0xFFF4F4F4),
+                                backgroundColor: _kOneButtonMixAccentColor,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                              ),
+                              child: Text(
+                                L10n.translate(context, 'Run'),
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -26633,7 +28814,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _loadAiModels() async {
-    await _classifier.load();
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      await _classifier.load();
+    }
     await _magnitudePredictor.load();
   }
 
@@ -26788,6 +28972,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         "Balance levels, reduce masking, tame harshness, and set tasteful space. "
         "Keep it natural and avoid extreme changes, and don't make it that quiet, prefer loud over soft. "
         "This is not a proposal but an execution. You may proceed without my approval";
+    const aiFeature = 'one_button_mix';
+    final promptTraceId = const Uuid().v4();
+    final promptCycleStopwatch = Stopwatch()..start();
+    int? applyMixMs;
+    final magnitudeObservability = _magnitudePredictor.observabilityContext;
+    unawaited(
+      AnalyticsService.instance.track(
+        AnalyticsEvents.aiPromptSubmitted(
+          projectId: _projectId,
+          aiFeature: aiFeature,
+          promptTraceId: promptTraceId,
+          mixMagnitudeModelSource:
+              magnitudeObservability['mix_magnitude_model_source']?.toString(),
+          mixMagnitudeModelBundleVersion:
+              magnitudeObservability['mix_magnitude_model_bundle_version']
+                  ?.toString(),
+          mixApplyModelVersion:
+              magnitudeObservability['mix_apply_model_version']?.toString(),
+          mixMagnitudeRegressorVersion:
+              magnitudeObservability['mix_magnitude_regressor_version']
+                  ?.toString(),
+        ),
+      ),
+    );
 
     Map<String, dynamic>? producerPreSnapshot;
     if (_producerDataMode) {
@@ -26818,13 +29026,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
         selectedRowIndex: _selectedRow,
         automationClipSnapshot: _aiAutomationClipSnapshot(),
+        promptTraceId: promptTraceId,
         projectId: _projectId,
-        aiFeature: 'ai_chat',
+        aiFeature: aiFeature,
         autoApplyProposals: true, // <-- key
         bypassLearnedMagnitudes: _producerDataMode,
       );
     } catch (error, stackTrace) {
       _reportAiChatFailure(error, stackTrace, stage: 'one_button_pipeline');
+      promptCycleStopwatch.stop();
+      unawaited(
+        _trackAiResponseOutcome(
+          promptTraceId: promptTraceId,
+          aiFeature: aiFeature,
+          projectId: _projectId,
+          fallbackErrorCode: 'one_button_pipeline',
+        ),
+      );
+      unawaited(
+        _trackAiPromptCycleFailed(
+          promptTraceId: promptTraceId,
+          aiFeature: aiFeature,
+          projectId: _projectId,
+          errorCode: 'one_button_pipeline',
+          promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+        ),
+      );
       _insertAssistantChatText(_kAiRequestFailureMessage);
       return;
     }
@@ -26838,30 +29065,45 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           AnalyticsEvents.aiToolCalled(
             toolName: toolName,
             projectId: _projectId,
+            promptTraceId: promptTraceId,
           ),
         ),
       );
     }
 
-    if (kAiDebugLogs) {
-      aiDebugLog('audio-editor', 'one-button-mix reply:\n${reply.toString()}');
-      if (reply.meta != null) {
-        aiDebugLog(
-          'audio-editor',
-          'one-button-mix meta=${aiDebugShortMap(reply.meta!)}',
-        );
-      }
-    }
-
     _updatePromptRateLimitStatusFromMeta(reply.meta);
+    unawaited(
+      _trackAiResponseOutcome(
+        promptTraceId: promptTraceId,
+        aiFeature: aiFeature,
+        projectId: _projectId,
+        meta: reply.meta,
+      ),
+    );
 
     try {
       if (reply.hasMix) {
+        final applyMixStopwatch = Stopwatch()..start();
         final appliedCount = await applyMixingResult(
           reply.mixing!,
           emitActionSummaries: true,
         );
+        applyMixStopwatch.stop();
+        applyMixMs = applyMixStopwatch.elapsedMilliseconds;
         if (appliedCount <= 0) {
+          promptCycleStopwatch.stop();
+          unawaited(
+            _trackAiPromptCycleFailed(
+              promptTraceId: promptTraceId,
+              aiFeature: aiFeature,
+              projectId: _projectId,
+              errorCode: 'one_button_apply_no_changes',
+              meta: reply.meta,
+              toolName: toolName,
+              applyMixMs: applyMixMs,
+              promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+            ),
+          );
           _insertAssistantChatText(_kAiApplyFailureMessage);
           return;
         }
@@ -26889,11 +29131,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _presentPipelineReply(reply);
     } catch (error, stackTrace) {
       _reportAiChatFailure(error, stackTrace, stage: 'one_button_apply');
+      promptCycleStopwatch.stop();
+      unawaited(
+        _trackAiPromptCycleFailed(
+          promptTraceId: promptTraceId,
+          aiFeature: aiFeature,
+          projectId: _projectId,
+          errorCode: 'one_button_apply',
+          meta: reply.meta,
+          toolName: toolName,
+          applyMixMs: applyMixMs,
+          promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+        ),
+      );
       _insertAssistantChatText(
         reply.hasMix ? _kAiApplyFailureMessage : _kAiRequestFailureMessage,
       );
       return;
     }
+
+    promptCycleStopwatch.stop();
+    _logAiPromptDebugPretty(
+      promptTraceId: promptTraceId,
+      toolName: toolName,
+      meta: reply.meta,
+      applyMixMs: applyMixMs,
+      promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+    );
+    unawaited(
+      _trackAiPromptCycleCompleted(
+        promptTraceId: promptTraceId,
+        aiFeature: aiFeature,
+        projectId: _projectId,
+        meta: reply.meta,
+        toolName: toolName,
+        applyMixMs: applyMixMs,
+        promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+      ),
+    );
 
     // show a snackbar/modal if you want:
     // ScaffoldMessenger.of(context).showSnackBar(...)
@@ -26934,14 +29209,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
     final viewPadding = MediaQuery.viewPaddingOf(context).bottom;
     final navInset = math.max(bottomPadding, viewPadding);
-    if (navInset <= 0.0) return 15.0;
-    return (navInset + 11.0).clamp(15.0, 25.0).toDouble();
+    final baseInset =
+        navInset <= 0.0 ? 15.0 : (navInset + 11.0).clamp(15.0, 25.0).toDouble();
+    return baseInset + 2.0;
   }
 
   Widget _buildBottomChatAndTransport({
     bool includeChatBar = true,
     bool includeProducerCapture = true,
     bool includeTransport = true,
+    double chatBarKeyboardOffset = 0.0,
   }) {
     final safeAreaBottomInset =
         includeTransport ? MediaQuery.paddingOf(context).bottom : 0.0;
@@ -27032,7 +29309,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             constraints: const BoxConstraints(
                                 minWidth: 32, minHeight: 32),
                             padding: EdgeInsets.zero,
-                            tooltip: 'Export producer session',
+                            tooltip: L10n.translate(
+                                context, 'Export producer session'),
                             onPressed: _producerDataMode
                                 ? () async {
                                     await _exportProducerSession();
@@ -27123,125 +29401,134 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         //   ),
         // ),
         if (includeChatBar)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // === GLASS CHAT BAR (fills available space) ===
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                  child: Builder(
-                    builder: (context) {
-                      Widget chatBar = _ChatBar(
-                        expanded: _chatInputActive,
-                        hasText: _chatHasText,
-                        controller: _chatTextController,
-                        focusNode: _chatFocusNode,
-                        readOnly: _dawTutorialChatPromptLocked,
-                        tutorialHighlighter: _mixHighlighter,
-                        promptRateLimitStatus: _promptRateLimitStatus,
-                        promptRateLimitLoading: _promptRateLimitLoading,
-                        onShowPromptRateLimits: () {
-                          unawaited(_showPromptRateLimitDialog());
-                        },
-                        onTapBar: () {
-                          unawaited(
-                              _refreshPromptRateLimitStatus(silent: true));
-                          if (_sampleBrowserVisible) {
-                            unawaited(_stopSampleAudition());
-                          }
-                          if (!_chatExpanded) {
-                            setState(() {
-                              _showAddActionsPanel = false;
-                              _sampleBrowserVisible = false;
-                              _sampleBrowserExpanded = false;
-                              _sampleDragActive = false;
-                              _reopenSampleBrowserAfterDrag = false;
-                              _reopenSampleBrowserExpanded = false;
-                              _chatExpanded = true;
-                              // Desktop chat should accept hardware keyboard
-                              // immediately on first click.
-                              _chatInputActive = Platform.isMacOS;
-                            });
-                            _handleDawOnboardingChatOpened();
-                            if (Platform.isMacOS) {
+          Padding(
+            padding: EdgeInsets.only(bottom: chatBarKeyboardOffset),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // === GLASS CHAT BAR (fills available space) ===
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      _chatInputActive ? 12 : 16,
+                      10,
+                      _chatInputActive ? 12 : 10,
+                      10,
+                    ),
+                    child: Builder(
+                      builder: (context) {
+                        Widget chatBar = _ChatBar(
+                          expanded: _chatInputActive,
+                          hasText: _chatHasText,
+                          controller: _chatTextController,
+                          focusNode: _chatFocusNode,
+                          readOnly: _dawTutorialChatPromptLocked,
+                          tutorialHighlighter: _mixHighlighter,
+                          promptRateLimitStatus: _promptRateLimitStatus,
+                          promptRateLimitLoading: _promptRateLimitLoading,
+                          onShowPromptRateLimits: () {
+                            unawaited(_showPromptRateLimitDialog());
+                          },
+                          onTapBar: () {
+                            unawaited(
+                                _refreshPromptRateLimitStatus(silent: true));
+                            if (_sampleBrowserVisible) {
+                              unawaited(_stopSampleAudition());
+                            }
+                            if (!_chatExpanded) {
+                              setState(() {
+                                _showAddActionsPanel = false;
+                                _sampleBrowserVisible = false;
+                                _sampleBrowserExpanded = false;
+                                _sampleDragActive = false;
+                                _reopenSampleBrowserAfterDrag = false;
+                                _reopenSampleBrowserExpanded = false;
+                                _chatExpanded = true;
+                                // Desktop chat should accept hardware keyboard
+                                // immediately on first click.
+                                _chatInputActive = Platform.isMacOS;
+                              });
+                              _handleDawOnboardingChatOpened();
+                              if (Platform.isMacOS) {
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  if (!mounted) return;
+                                  _chatFocusNode.requestFocus();
+                                });
+                              }
+                              if (!_hasTrackedAiAssistantScreen) {
+                                _hasTrackedAiAssistantScreen = true;
+                                unawaited(
+                                  AnalyticsService.instance.trackScreen(
+                                    AnalyticsScreenNames.aiAssistant,
+                                    properties: <String, Object?>{
+                                      'project_id': _projectId,
+                                    },
+                                  ),
+                                );
+                                unawaited(
+                                  AnalyticsService.instance.track(
+                                    AnalyticsEvents.aiFeatureViewed(
+                                      featureName: 'assistant_chat',
+                                    ),
+                                  ),
+                                );
+                              }
+                              return;
+                            }
+                            if (!_chatInputActive) {
+                              setState(() {
+                                _showAddActionsPanel = false;
+                                _sampleBrowserVisible = false;
+                                _sampleBrowserExpanded = false;
+                                _sampleDragActive = false;
+                                _reopenSampleBrowserAfterDrag = false;
+                                _reopenSampleBrowserExpanded = false;
+                                _chatInputActive = true;
+                              });
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (!mounted) return;
+                                _chatFocusNode.requestFocus();
+                              });
+                              return;
+                            }
+                            if (!_chatFocusNode.hasFocus) {
                               WidgetsBinding.instance.addPostFrameCallback((_) {
                                 if (!mounted) return;
                                 _chatFocusNode.requestFocus();
                               });
                             }
-                            if (!_hasTrackedAiAssistantScreen) {
-                              _hasTrackedAiAssistantScreen = true;
-                              unawaited(
-                                AnalyticsService.instance.trackScreen(
-                                  AnalyticsScreenNames.aiAssistant,
-                                  properties: <String, Object?>{
-                                    'project_id': _projectId,
-                                  },
-                                ),
-                              );
-                              unawaited(
-                                AnalyticsService.instance.track(
-                                  AnalyticsEvents.aiFeatureViewed(
-                                    featureName: 'assistant_chat',
-                                  ),
-                                ),
-                              );
+                          },
+                          onSubmit: () async {
+                            final text = _chatTextController.text.trim();
+                            if (text.isEmpty) return;
+                            _chatTextController.clear();
+                            if (mounted) {
+                              setState(() {
+                                _chatInputActive = false;
+                              });
                             }
-                            return;
-                          }
-                          if (!_chatInputActive) {
-                            setState(() {
-                              _showAddActionsPanel = false;
-                              _sampleBrowserVisible = false;
-                              _sampleBrowserExpanded = false;
-                              _sampleDragActive = false;
-                              _reopenSampleBrowserAfterDrag = false;
-                              _reopenSampleBrowserExpanded = false;
-                              _chatInputActive = true;
-                            });
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (!mounted) return;
-                              _chatFocusNode.requestFocus();
-                            });
-                            return;
-                          }
-                          if (!_chatFocusNode.hasFocus) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (!mounted) return;
-                              _chatFocusNode.requestFocus();
-                            });
-                          }
-                        },
-                        onSubmit: () async {
-                          final text = _chatTextController.text.trim();
-                          if (text.isEmpty) return;
-                          _chatTextController.clear();
-                          _chatFocusNode.unfocus();
-                          await _submitChatPrompt(text);
-                        },
-                      );
-                      if (_showDawOnboarding) {
-                        chatBar = Halo(
-                          highlighter: _mixHighlighter,
-                          haloKey: const HaloKey('tutorial:chatbar'),
-                          borderRadius: BorderRadius.circular(18),
-                          child: chatBar,
+                            _chatFocusNode.unfocus();
+                            await _submitChatPrompt(text);
+                          },
                         );
-                      }
-                      return chatBar;
-                    },
+                        if (_showDawOnboarding) {
+                          chatBar = Halo(
+                            highlighter: _mixHighlighter,
+                            haloKey: const HaloKey('tutorial:chatbar'),
+                            borderRadius: BorderRadius.circular(18),
+                            child: chatBar,
+                          );
+                        }
+                        return chatBar;
+                      },
+                    ),
                   ),
                 ),
-              ),
-              Padding(
-                key: _addButtonAnchorKey,
-                padding: const EdgeInsets.fromLTRB(0, 10, 16, 10),
-                child: IgnorePointer(
-                  ignoring: _chatInputActive,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 120),
-                    opacity: _chatInputActive ? 0.34 : 1.0,
+                if (!_chatInputActive)
+                  Padding(
+                    key: _addButtonAnchorKey,
+                    padding: const EdgeInsets.fromLTRB(0, 10, 16, 10),
                     child: Halo(
                       highlighter: _mixHighlighter,
                       haloKey: const HaloKey('tutorial:add_button'),
@@ -27256,15 +29543,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             width: 48,
                             height: 48,
                             decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                stops: <double>[0.5625, 1.0],
-                                colors: <Color>[
-                                  Color.fromRGBO(25, 94, 160, 0.50),
-                                  Color.fromRGBO(244, 244, 244, 0.50),
-                                ],
-                              ),
+                              gradient: _kChatBarGradient,
                               shape: BoxShape.circle,
                               boxShadow: const <BoxShadow>[
                                 BoxShadow(
@@ -27284,6 +29563,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 });
                               },
                               onTap: () {
+                                if (_chatExpanded) {
+                                  _collapseChatWindow();
+                                  return;
+                                }
                                 if (_sampleBrowserVisible) {
                                   _closeAddActionsPanel();
                                   unawaited(_closeSampleBrowser());
@@ -27295,29 +29578,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   _openAddActionsPanel(userInitiated: true);
                                 }
                               },
-                              child: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 140),
-                                switchInCurve: Curves.easeOutCubic,
-                                switchOutCurve: Curves.easeInCubic,
-                                transitionBuilder: (child, animation) {
-                                  return RotationTransition(
-                                    turns: Tween<double>(
-                                      begin: 0.85,
-                                      end: 1.0,
-                                    ).animate(animation),
-                                    child: FadeTransition(
-                                      opacity: animation,
-                                      child: child,
-                                    ),
-                                  );
-                                },
-                                child: Icon(
-                                  _showAddActionsPanel
-                                      ? Icons.close_rounded
-                                      : Icons.add,
-                                  key: ValueKey<bool>(_showAddActionsPanel),
-                                  color: Colors.white,
-                                  size: _showAddActionsPanel ? 20 : 16,
+                              child: AnimatedRotation(
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
+                                turns: (_chatExpanded || _showAddActionsPanel)
+                                    ? 0.125
+                                    : 0.0,
+                                child: AnimatedScale(
+                                  duration: const Duration(milliseconds: 180),
+                                  curve: Curves.easeOutCubic,
+                                  scale: (_chatExpanded || _showAddActionsPanel)
+                                      ? 1.0
+                                      : 0.96,
+                                  child: const Icon(
+                                    Icons.add_rounded,
+                                    color: Color(0xFFF4F4F4),
+                                    size: 22,
+                                  ),
                                 ),
                               ),
                             ),
@@ -27326,9 +29603,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       ),
                     ),
                   ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
 
         // ==== Transport Drawer =============================================
@@ -27379,7 +29655,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 end: Alignment.bottomCenter,
                                 stops: <double>[0.5625, 1.0],
                                 colors: <Color>[
-                                  Color.fromRGBO(25, 94, 160, 0.40),
+                                  Color.fromRGBO(112, 159, 194, 0.22),
                                   Color.fromRGBO(244, 244, 244, 0.40),
                                 ],
                               ),
@@ -27388,10 +29664,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               ),
                               boxShadow: const <BoxShadow>[
                                 BoxShadow(
-                                  color: Color.fromRGBO(0, 0, 0, 0.25),
-                                  blurRadius: 15,
-                                  spreadRadius: 8,
-                                  offset: Offset.zero,
+                                  color: Color.fromRGBO(0, 0, 0, 0.17),
+                                  blurRadius: 13,
+                                  spreadRadius: 3,
+                                  offset: Offset(0, 2),
                                 ),
                               ],
                             ),
@@ -27433,10 +29709,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           boxShadow: const <BoxShadow>[
                                             BoxShadow(
                                               color:
-                                                  Color.fromRGBO(0, 0, 0, 0.25),
-                                              blurRadius: 15,
-                                              spreadRadius: 8,
-                                              offset: Offset.zero,
+                                                  Color.fromRGBO(0, 0, 0, 0.17),
+                                              blurRadius: 12,
+                                              spreadRadius: 2,
+                                              offset: Offset(0, 1),
                                             ),
                                           ],
                                         ),
@@ -27471,7 +29747,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       );
                                                       setState(() {});
                                                     }
-                                                  : () {},
+                                                  : null,
                                               radius: const BorderRadius.only(
                                                 topLeft: Radius.circular(24),
                                                 bottomLeft: Radius.circular(24),
@@ -27513,7 +29789,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       );
                                                       setState(() {});
                                                     }
-                                                  : () {},
+                                                  : null,
                                               radius: const BorderRadius.only(
                                                 topRight: Radius.circular(24),
                                                 bottomRight:
@@ -27543,10 +29819,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           boxShadow: const <BoxShadow>[
                                             BoxShadow(
                                               color:
-                                                  Color.fromRGBO(0, 0, 0, 0.25),
-                                              blurRadius: 15,
-                                              spreadRadius: 8,
-                                              offset: Offset.zero,
+                                                  Color.fromRGBO(0, 0, 0, 0.17),
+                                              blurRadius: 12,
+                                              spreadRadius: 2,
+                                              offset: Offset(0, 1),
                                             ),
                                           ],
                                         ),
@@ -27623,16 +29899,51 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         borderRadius: BorderRadius.circular(24),
                                         child: Material(
                                           color: Colors.transparent,
+                                          borderRadius:
+                                              BorderRadius.circular(24),
+                                          clipBehavior: Clip.antiAlias,
                                           child: InkWell(
                                             borderRadius:
                                                 BorderRadius.circular(24),
                                             splashFactory:
-                                                NoSplash.splashFactory,
-                                            highlightColor: Colors.transparent,
-                                            overlayColor:
-                                                const WidgetStatePropertyAll<
-                                                    Color>(
-                                              Colors.transparent,
+                                                InkRipple.splashFactory,
+                                            splashColor:
+                                                Colors.white.withValues(
+                                              alpha: 0.14,
+                                            ),
+                                            highlightColor:
+                                                Colors.white.withValues(
+                                              alpha: 0.06,
+                                            ),
+                                            overlayColor: WidgetStateProperty
+                                                .resolveWith<Color?>(
+                                              (states) {
+                                                if (states.contains(
+                                                  WidgetState.pressed,
+                                                )) {
+                                                  return Colors.white
+                                                      .withValues(
+                                                    alpha: 0.18,
+                                                  );
+                                                }
+                                                if (states.contains(
+                                                  WidgetState.hovered,
+                                                )) {
+                                                  return Colors.white
+                                                      .withValues(
+                                                    alpha: 0.08,
+                                                  );
+                                                }
+                                                if (states.contains(
+                                                  WidgetState.focused,
+                                                )) {
+                                                  return Colors.white
+                                                      .withValues(
+                                                    alpha: 0.10,
+                                                  );
+                                                }
+                                                return Colors.transparent;
+                                              },
                                             ),
                                             onTap: () async {
                                               final run =
@@ -27670,12 +29981,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             },
                                             child: Ink(
                                               decoration: BoxDecoration(
-                                                color: const Color.fromRGBO(
-                                                  0,
-                                                  149,
-                                                  255,
-                                                  0.56,
-                                                ),
+                                                color:
+                                                    _kOneButtonMixAccentColor,
                                                 borderRadius:
                                                     BorderRadius.circular(24),
                                               ),
@@ -27715,7 +30022,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Widget _transportSegment({
     required IconData icon,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
     BorderRadius? radius,
     double iconSize = 20,
     Color? iconColor,
@@ -27725,22 +30032,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String? haloKey,
   }) {
     final resolvedRadius = radius ?? BorderRadius.zero;
-    Widget segmentChild = InkWell(
+    Widget segmentChild = Material(
+      color: Colors.transparent,
       borderRadius: resolvedRadius,
-      splashFactory: NoSplash.splashFactory,
-      highlightColor: Colors.transparent,
-      overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        decoration: BoxDecoration(
-          color: backgroundColor ?? Colors.transparent,
-          borderRadius: resolvedRadius,
-          border: borderColor != null ? Border.all(color: borderColor) : null,
-          boxShadow: boxShadow,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        borderRadius: resolvedRadius,
+        splashFactory: InkRipple.splashFactory,
+        splashColor: Colors.white.withValues(alpha: 0.14),
+        highlightColor: Colors.white.withValues(alpha: 0.06),
+        overlayColor: WidgetStateProperty.resolveWith<Color?>(
+          (states) {
+            if (states.contains(WidgetState.pressed)) {
+              return Colors.white.withValues(alpha: 0.18);
+            }
+            if (states.contains(WidgetState.hovered)) {
+              return Colors.white.withValues(alpha: 0.08);
+            }
+            if (states.contains(WidgetState.focused)) {
+              return Colors.white.withValues(alpha: 0.10);
+            }
+            return Colors.transparent;
+          },
         ),
-        child: Center(
-          child: Icon(icon, size: iconSize, color: iconColor ?? Colors.white),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          decoration: BoxDecoration(
+            color: backgroundColor ?? Colors.transparent,
+            borderRadius: resolvedRadius,
+            border: borderColor != null ? Border.all(color: borderColor) : null,
+            boxShadow: boxShadow,
+          ),
+          child: Center(
+            child: Icon(icon, size: iconSize, color: iconColor ?? Colors.white),
+          ),
         ),
       ),
     );
@@ -28071,7 +30397,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Clip tempo mode turned off.')),
+      SnackBar(
+          content:
+              Text(L10n.translate(context, 'Clip tempo mode turned off.'))),
     );
   }
 
@@ -28175,7 +30503,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Detecting clip tempo...')),
+        SnackBar(
+            content: Text(L10n.translate(context, 'Detecting clip tempo...'))),
       );
     }
 
@@ -28183,7 +30512,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (detected == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not detect clip tempo.')),
+        SnackBar(
+            content:
+                Text(L10n.translate(context, 'Could not detect clip tempo.'))),
       );
       return;
     }
@@ -28196,23 +30527,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: const Color(0xFF1A2233),
-          title: const Text(
-            'Change Project BPM?',
-            style: TextStyle(color: Colors.white),
+          title: Text(
+            L10n.translate(ctx, 'Change Project BPM?'),
+            style: const TextStyle(color: Colors.white),
           ),
           content: Text(
-            'Detected ${detected.toStringAsFixed(1)} BPM from this clip.\n'
-            'Change project BPM from ${_formatTempoBpm(_tempo)} to $rounded?',
+            '${L10n.translate(ctx, 'Detected')} ${detected.toStringAsFixed(1)} BPM ${L10n.translate(ctx, 'from this clip.')}\n'
+            '${L10n.translate(ctx, 'Change project BPM from')} ${_formatTempoBpm(_tempo)} ${L10n.translate(ctx, 'to')} $rounded?',
             style: const TextStyle(color: Colors.white70),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
+              child: Text(L10n.translate(ctx, 'Cancel')),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Change BPM'),
+              child: Text(L10n.translate(ctx, 'Change BPM')),
             ),
           ],
         ),
@@ -28229,6 +30560,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _tempo = rounded.toDouble();
       }
     });
+    if (applyProjectTempo) {
+      _syncTempoPickerSelection();
+    }
 
     if (applyProjectTempo) {
       await _queueTempoEngineSync();
@@ -28917,7 +31251,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final messenger = ScaffoldMessenger.of(context);
         messenger.hideCurrentSnackBar();
         messenger.showSnackBar(
-          const SnackBar(content: Text('Maximum of ${kMaxRows} rows reached.')),
+          SnackBar(
+            content: Text(
+              '${L10n.translate(context, 'Maximum of')} $kMaxRows ${L10n.translate(context, 'rows reached.')}',
+            ),
+          ),
         );
       }
       return;
@@ -28957,7 +31295,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final messenger = ScaffoldMessenger.of(context);
         messenger.hideCurrentSnackBar();
         messenger.showSnackBar(
-          const SnackBar(content: Text('Maximum of ${kMaxRows} rows reached.')),
+          SnackBar(
+            content: Text(
+              '${L10n.translate(context, 'Maximum of')} $kMaxRows ${L10n.translate(context, 'rows reached.')}',
+            ),
+          ),
         );
       }
       return;
@@ -28997,7 +31339,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final messenger = ScaffoldMessenger.of(context);
         messenger.hideCurrentSnackBar();
         messenger.showSnackBar(
-          const SnackBar(content: Text('Maximum of ${kMaxRows} rows reached.')),
+          SnackBar(
+            content: Text(
+              '${L10n.translate(context, 'Maximum of')} $kMaxRows ${L10n.translate(context, 'rows reached.')}',
+            ),
+          ),
         );
       }
       return;
@@ -29014,9 +31360,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(
-        content: Text(message),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        padding: EdgeInsets.zero,
+        showCloseIcon: false,
+        content: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color.fromRGBO(70, 80, 95, 0.97),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.14),
+                ),
+              ),
+              child: Text(
+                message,
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                  height: 1.2,
+                  color: Color(0xFFF4F4F4),
+                  letterSpacing: -0.05,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -29199,9 +31575,36 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final editorLayoutSpec =
             _EditorLayoutSpec.fromSize(MediaQuery.of(context).size);
         final snackBottomInset = _kTransportBarHeight +
-            (_showProducerCaptureUi ? _kProducerBannerHeightEstimate : 0.0) +
+            (_isProducerCaptureUiVisible
+                ? _kProducerBannerHeightEstimate
+                : 0.0) +
             _androidTransportBottomInset(context) +
-            8.0;
+            (Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0) +
+            (Platform.isIOS ? _kIosSnackBarExtraLift : 0.0) +
+            18.0;
+        final fixedTransportFootprint =
+            _kTransportBarHeight + _androidTransportBottomInset(context);
+        final keyboardBottomInset = MediaQuery.viewInsetsOf(context).bottom;
+        final chatKeyboardActive = keyboardBottomInset > 0.0 &&
+            (_chatFocusNode.hasFocus || _chatInputActive);
+        final rawKeyboardLift = chatKeyboardActive
+            ? math.max(
+                0.0,
+                keyboardBottomInset -
+                    MediaQuery.paddingOf(context).bottom +
+                    8.0,
+              )
+            : 0.0;
+        final keyboardLift = math.max(
+          0.0,
+          rawKeyboardLift - fixedTransportFootprint,
+        );
+        final chatTapAwayBottomInset = _kChatHistoryHeight +
+            _kChatBarStackHeight +
+            _kTransportBarHeight +
+            _chatHistoryBottomGap +
+            (Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0) +
+            keyboardLift;
         return WillPopScope(
           onWillPop: () async {
             await _handleBackPressed();
@@ -29218,7 +31621,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       kMixroomDawBackgroundAsset,
                       fit: BoxFit.cover,
                       alignment: Alignment.topCenter,
-                      filterQuality: FilterQuality.high,
+                      filterQuality: FilterQuality.medium,
                     ),
                   ),
                 ),
@@ -29227,7 +31630,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   data: Theme.of(context).copyWith(
                     snackBarTheme: SnackBarThemeData(
                       behavior: SnackBarBehavior.floating,
-                      backgroundColor: const Color.fromRGBO(70, 80, 95, 0.86),
+                      backgroundColor: const Color.fromRGBO(70, 80, 95, 0.97),
                       elevation: 0,
                       showCloseIcon: true,
                       closeIconColor: const Color(0xFFF4F4F4),
@@ -30186,7 +32589,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           tutorialHighlighter: _mixHighlighter,
                                           bottomDockInset: _kChatBarStackHeight +
                                               _kTransportBarHeight +
-                                              (_showProducerCaptureUi
+                                              (_isProducerCaptureUiVisible
                                                   ? _kProducerBannerHeightEstimate
                                                   : 0.0),
 
@@ -30202,30 +32605,54 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   final keyboardInset =
                                       MediaQuery.viewInsetsOf(overlayContext)
                                           .bottom;
-                                  final transportBottomInset =
-                                      _androidTransportBottomInset(
-                                          overlayContext);
+                                  final keyboardVisible = keyboardInset > 0.0;
                                   final chatTypingActive =
                                       _chatFocusNode.hasFocus ||
-                                          keyboardInset > 0.0;
+                                          _chatInputActive;
+                                  final chatKeyboardActive =
+                                      keyboardVisible && chatTypingActive;
+                                  final androidOverlayPanelLift =
+                                      Platform.isAndroid
+                                          ? _kAndroidOverlayPanelLift
+                                          : 0.0;
+                                  final fixedTransportFootprint =
+                                      _kTransportBarHeight +
+                                          _androidTransportBottomInset(
+                                            overlayContext,
+                                          );
                                   const transportVisualBottomInset = 0.0;
-                                  final chatLift = math.max(
+                                  final rawKeyboardLift = chatKeyboardActive
+                                      ? math.max(
+                                          0.0,
+                                          keyboardInset -
+                                              MediaQuery.paddingOf(
+                                                overlayContext,
+                                              ).bottom +
+                                              8.0,
+                                        )
+                                      : 0.0;
+                                  final keyboardLift = math.max(
                                     0.0,
-                                    chatTypingActive
-                                        ? keyboardInset -
-                                            (_kTransportBarHeight +
-                                                transportBottomInset)
-                                        : 0.0,
+                                    rawKeyboardLift - fixedTransportFootprint,
                                   );
+                                  final chatHistoryBaseBottom =
+                                      _kChatBarStackHeight +
+                                          _kTransportBarHeight +
+                                          transportVisualBottomInset +
+                                          _chatHistoryBottomGap +
+                                          androidOverlayPanelLift;
+                                  final chatLift = keyboardLift;
                                   final mediaSize =
                                       MediaQuery.sizeOf(overlayContext);
                                   final samplePanelBottom = chatLift +
                                       _kChatBarStackHeight +
                                       _kTransportBarHeight +
-                                      (_showProducerCaptureUi
+                                      (_isProducerCaptureUiVisible &&
+                                              !chatTypingActive
                                           ? _kProducerBannerHeightEstimate
                                           : 0.0) +
                                       (Platform.isAndroid ? 10.0 : 0.0) +
+                                      androidOverlayPanelLift +
                                       _kSamplePanelBottomGap;
                                   final collapsedTop = math.max(
                                     _kSamplePanelExpandedTop + 24.0,
@@ -30290,13 +32717,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       Positioned(
                                         left: 0,
                                         right: 0,
-                                        bottom: chatLift +
-                                            transportVisualBottomInset,
-                                        child: _buildBottomChatAndTransport(
-                                          includeChatBar: true,
-                                          includeProducerCapture:
-                                              _showProducerCaptureUi,
-                                          includeTransport: true,
+                                        bottom: 0,
+                                        child: RepaintBoundary(
+                                          child: _buildBottomChatAndTransport(
+                                            includeChatBar: true,
+                                            includeProducerCapture:
+                                                _isProducerCaptureUiVisible &&
+                                                    !chatTypingActive,
+                                            includeTransport: true,
+                                            chatBarKeyboardOffset: chatLift,
+                                          ),
                                         ),
                                       ),
                                       Positioned(
@@ -30457,11 +32887,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                             icon: Icons
                                                                 .folder_open,
                                                             title:
-                                                                'Open File Browser',
+                                                                L10n.translate(
+                                                              context,
+                                                              'Open File Browser',
+                                                            ),
                                                             topPadding: 0,
                                                             bottomPadding: 8,
                                                             subtitle:
-                                                                'Audition folders and drag and drop',
+                                                                L10n.translate(
+                                                              context,
+                                                              'Audition folders and drag and drop',
+                                                            ),
                                                             onTap: () {
                                                               unawaited(
                                                                 _handleAddActionSelection(
@@ -30484,8 +32920,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           duration:
                                               const Duration(milliseconds: 190),
                                           curve: Curves.easeOutCubic,
-                                          left: 0,
-                                          right: 0,
+                                          left: _kOverlayPanelHorizontalInset,
+                                          right: _kOverlayPanelHorizontalInset,
                                           top: samplePanelTop,
                                           bottom: samplePanelBottom,
                                           child: SampleBrowserPanel(
@@ -30531,420 +32967,505 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       Positioned(
                                         left: 0,
                                         right: 0,
-                                        bottom: _kChatBarStackHeight +
-                                            _kTransportBarHeight +
-                                            chatLift +
-                                            transportVisualBottomInset +
-                                            _chatHistoryBottomGap,
-                                        child: AnimatedSlide(
-                                          offset: _chatExpanded
-                                              ? Offset.zero
-                                              : const Offset(0, 0.3),
-                                          duration:
-                                              const Duration(milliseconds: 160),
-                                          curve: Curves.easeOutCubic,
-                                          child: SizedBox(
-                                            height: _kChatHistoryHeight,
-                                            child: _chatWarm
-                                                ? Container(
-                                                    margin: const EdgeInsets
-                                                        .symmetric(
-                                                        horizontal: 12),
-                                                    child: IgnorePointer(
-                                                      ignoring: !_chatExpanded,
-                                                      child: AnimatedOpacity(
-                                                        duration:
-                                                            const Duration(
-                                                                milliseconds:
-                                                                    140),
-                                                        curve:
-                                                            Curves.easeOutCubic,
-                                                        opacity: _chatExpanded
-                                                            ? 1
-                                                            : 0,
-                                                        child: ClipRRect(
-                                                          borderRadius:
-                                                              BorderRadius
-                                                                  .circular(29),
-                                                          child: BackdropFilter(
-                                                            filter: ImageFilter
-                                                                .blur(
-                                                                    sigmaX: 18,
-                                                                    sigmaY: 18),
-                                                            child: Container(
-                                                              decoration:
-                                                                  BoxDecoration(
-                                                                color: const Color
-                                                                    .fromRGBO(
-                                                                  244,
-                                                                  244,
-                                                                  244,
-                                                                  _kChatChromeOpacity,
-                                                                ),
-                                                                borderRadius:
-                                                                    BorderRadius
-                                                                        .circular(
-                                                                            29),
-                                                                boxShadow: [
-                                                                  BoxShadow(
+                                        bottom:
+                                            chatHistoryBaseBottom + chatLift,
+                                        child: RepaintBoundary(
+                                          child: AnimatedSlide(
+                                            offset: _chatExpanded
+                                                ? Offset.zero
+                                                : const Offset(0, 0.3),
+                                            duration: _chatExpanded
+                                                ? const Duration(
+                                                    milliseconds: 160)
+                                                : const Duration(
+                                                    milliseconds: 85),
+                                            curve: Curves.easeOutCubic,
+                                            child: SizedBox(
+                                              height: _kChatHistoryHeight,
+                                              child: _chatWarm
+                                                  ? Container(
+                                                      margin: const EdgeInsets
+                                                          .symmetric(
+                                                          horizontal: 12),
+                                                      child: IgnorePointer(
+                                                        ignoring:
+                                                            !_chatExpanded,
+                                                        child: AnimatedOpacity(
+                                                          duration: _chatExpanded
+                                                              ? const Duration(
+                                                                  milliseconds:
+                                                                      110)
+                                                              : const Duration(
+                                                                  milliseconds:
+                                                                      70),
+                                                          curve: Curves
+                                                              .easeOutCubic,
+                                                          opacity: _chatExpanded
+                                                              ? 1
+                                                              : 0,
+                                                          child: ClipRRect(
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        29),
+                                                            child:
+                                                                BackdropFilter(
+                                                              filter: ImageFilter
+                                                                  .blur(
+                                                                      sigmaX:
+                                                                          14,
+                                                                      sigmaY:
+                                                                          14),
+                                                              child: Container(
+                                                                decoration:
+                                                                    BoxDecoration(
+                                                                  color: const Color
+                                                                      .fromRGBO(
+                                                                    232,
+                                                                    232,
+                                                                    232,
+                                                                    _kChatChromeOpacity,
+                                                                  ),
+                                                                  borderRadius:
+                                                                      BorderRadius
+                                                                          .circular(
+                                                                              29),
+                                                                  border: Border
+                                                                      .all(
                                                                     color: Colors
-                                                                        .black
+                                                                        .white
                                                                         .withValues(
                                                                       alpha:
-                                                                          0.25,
+                                                                          0.12,
                                                                     ),
-                                                                    blurRadius:
-                                                                        15,
-                                                                    spreadRadius:
-                                                                        8,
-                                                                    offset: Offset
-                                                                        .zero,
                                                                   ),
-                                                                ],
-                                                              ),
-                                                              child: Builder(
-                                                                builder:
-                                                                    (context) {
-                                                                  final canClearChatHistory = !_isThinking &&
-                                                                      _chatController
-                                                                          .messages
-                                                                          .isNotEmpty;
-                                                                  return Column(
-                                                                    children: [
-                                                                      Padding(
-                                                                        padding: const EdgeInsets
-                                                                            .fromLTRB(
-                                                                            16,
-                                                                            12,
-                                                                            12,
-                                                                            6),
-                                                                        child:
-                                                                            Row(
-                                                                          children: [
-                                                                            Expanded(
-                                                                              child: Text(
-                                                                                L10n.translate(
-                                                                                  context,
-                                                                                  'Project Chat',
-                                                                                ),
-                                                                                style: const TextStyle(
-                                                                                  fontFamily: 'Pretendard',
-                                                                                  fontSize: 13,
-                                                                                  fontWeight: FontWeight.w700,
-                                                                                  letterSpacing: 0.3,
-                                                                                  color: Colors.white70,
-                                                                                ),
-                                                                              ),
-                                                                            ),
-                                                                            _buildChatHeaderActionButton(
-                                                                              label: 'Feedback',
-                                                                              icon: Icons.feedback_outlined,
-                                                                              onPressed: _feedbackSubmissionInFlight ? null : _openDawFeedbackComposer,
-                                                                            ),
-                                                                            const SizedBox(width: 8),
-                                                                            _buildChatHeaderActionButton(
-                                                                              label: 'Clear',
-                                                                              icon: Icons.delete_outline_rounded,
-                                                                              onPressed: canClearChatHistory ? _confirmClearChatHistory : null,
-                                                                            ),
-                                                                          ],
-                                                                        ),
+                                                                  boxShadow: [
+                                                                    BoxShadow(
+                                                                      color: Colors
+                                                                          .black
+                                                                          .withValues(
+                                                                        alpha:
+                                                                            0.22,
                                                                       ),
-                                                                      Expanded(
-                                                                        child: MediaQuery
-                                                                            .removePadding(
-                                                                          context:
-                                                                              overlayContext,
-                                                                          removeBottom:
-                                                                              true,
+                                                                      blurRadius:
+                                                                          18,
+                                                                      offset:
+                                                                          const Offset(
+                                                                        0,
+                                                                        10,
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                ),
+                                                                child: Builder(
+                                                                  builder:
+                                                                      (context) {
+                                                                    final canClearChatHistory = !_isThinking &&
+                                                                        _chatController
+                                                                            .messages
+                                                                            .isNotEmpty;
+                                                                    return Column(
+                                                                      children: [
+                                                                        Padding(
+                                                                          padding: const EdgeInsets
+                                                                              .fromLTRB(
+                                                                              16,
+                                                                              12,
+                                                                              12,
+                                                                              6),
                                                                           child:
-                                                                              MediaQuery.removeViewInsets(
-                                                                            context:
-                                                                                overlayContext,
-                                                                            removeBottom:
-                                                                                true,
-                                                                            child:
-                                                                                Chat(
-                                                                              chatController: _chatController,
-                                                                              currentUserId: 'user',
-                                                                              onMessageSend: null,
-                                                                              timeFormat: null,
-                                                                              onMessageLongPress: (
-                                                                                BuildContext context,
-                                                                                Message message, {
-                                                                                required LongPressStartDetails details,
-                                                                                required int index,
-                                                                              }) async {
-                                                                                if (message is TextMessage) {
-                                                                                  await Clipboard.setData(
-                                                                                    ClipboardData(text: message.text),
-                                                                                  );
-
-                                                                                  await AppHaptics.impact(
-                                                                                    AppHapticImpact.light,
-                                                                                  );
-
-                                                                                  _showCopiedChatMessageFeedback(
-                                                                                    message.id,
-                                                                                  );
-                                                                                }
-                                                                              },
-                                                                              builders: Builders(
-                                                                                composerBuilder: (_) => const SizedBox.shrink(),
-                                                                                emptyChatListBuilder: (_) => Center(
-                                                                                  child: Padding(
-                                                                                    padding: const EdgeInsets.symmetric(horizontal: 28),
-                                                                                    child: Text(
-                                                                                      'Chat context now stays with this project.\nStart a conversation and it will still be here when you reopen it.',
-                                                                                      textAlign: TextAlign.center,
-                                                                                      style: const TextStyle(
-                                                                                        fontFamily: 'Pretendard',
-                                                                                        fontSize: 14,
-                                                                                        height: 1.45,
-                                                                                        color: Colors.white60,
-                                                                                      ),
-                                                                                    ),
+                                                                              Row(
+                                                                            children: [
+                                                                              Expanded(
+                                                                                child: Text(
+                                                                                  L10n.translate(
+                                                                                    context,
+                                                                                    'Project Chat',
                                                                                   ),
-                                                                                ),
-                                                                                scrollToBottomBuilder: (
-                                                                                  BuildContext context,
-                                                                                  Animation<double> animation,
-                                                                                  VoidCallback onPressed,
-                                                                                ) {
-                                                                                  return Positioned(
-                                                                                    left: 0,
-                                                                                    right: 0,
-                                                                                    bottom: 16,
-                                                                                    child: IgnorePointer(
-                                                                                      ignoring: animation.value <= 0.01,
-                                                                                      child: Center(
-                                                                                        child: ScaleTransition(
-                                                                                          scale: animation,
-                                                                                          child: FloatingActionButton(
-                                                                                            heroTag: null,
-                                                                                            mini: true,
-                                                                                            backgroundColor: const Color.fromARGB(210, 34, 38, 48),
-                                                                                            foregroundColor: Colors.white,
-                                                                                            onPressed: onPressed,
-                                                                                            child: const Icon(Icons.keyboard_arrow_down_rounded),
-                                                                                          ),
-                                                                                        ),
-                                                                                      ),
-                                                                                    ),
-                                                                                  );
-                                                                                },
-                                                                                textMessageBuilder: (
-                                                                                  BuildContext context,
-                                                                                  TextMessage message,
-                                                                                  int index, {
-                                                                                  required bool isSentByMe,
-                                                                                  MessageGroupStatus? groupStatus,
-                                                                                }) {
-                                                                                  if (message.authorId == 'system') {
-                                                                                    return Padding(
-                                                                                      padding: const EdgeInsets.symmetric(vertical: 10),
-                                                                                      child: Center(
-                                                                                        child: Text(
-                                                                                          message.text,
-                                                                                          textAlign: TextAlign.center,
-                                                                                          style: const TextStyle(
-                                                                                            fontFamily: 'Pretendard',
-                                                                                            fontSize: 13,
-                                                                                            fontWeight: FontWeight.w600,
-                                                                                            letterSpacing: 0.4,
-                                                                                            color: Colors.white70,
-                                                                                          ),
-                                                                                        ),
-                                                                                      ),
-                                                                                    );
-                                                                                  }
-                                                                                  final isCopied = _copiedChatMessageId == message.id;
-                                                                                  final bubbleColor = isSentByMe
-                                                                                      ? const Color.fromRGBO(
-                                                                                          25,
-                                                                                          94,
-                                                                                          160,
-                                                                                          0.42,
-                                                                                        )
-                                                                                      : const Color.fromRGBO(
-                                                                                          244,
-                                                                                          244,
-                                                                                          244,
-                                                                                          0.18,
-                                                                                        );
-                                                                                  return Align(
-                                                                                    alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
-                                                                                    child: Column(
-                                                                                      crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                                                                      children: [
-                                                                                        AnimatedSwitcher(
-                                                                                          duration: const Duration(milliseconds: 120),
-                                                                                          child: isCopied
-                                                                                              ? Padding(
-                                                                                                  key: const ValueKey('copied_badge'),
-                                                                                                  padding: const EdgeInsets.symmetric(
-                                                                                                    horizontal: 14,
-                                                                                                    vertical: 2,
-                                                                                                  ),
-                                                                                                  child: Container(
-                                                                                                    padding: const EdgeInsets.symmetric(
-                                                                                                      horizontal: 8,
-                                                                                                      vertical: 4,
-                                                                                                    ),
-                                                                                                    decoration: BoxDecoration(
-                                                                                                      color: const Color(0xFF7A8E73),
-                                                                                                      borderRadius: BorderRadius.circular(999),
-                                                                                                    ),
-                                                                                                    child: const Row(
-                                                                                                      mainAxisSize: MainAxisSize.min,
-                                                                                                      children: [
-                                                                                                        Icon(
-                                                                                                          Icons.check_rounded,
-                                                                                                          size: 13,
-                                                                                                          color: Colors.white,
-                                                                                                        ),
-                                                                                                        SizedBox(width: 4),
-                                                                                                        Text(
-                                                                                                          'Copied',
-                                                                                                          style: TextStyle(
-                                                                                                            fontFamily: 'Pretendard',
-                                                                                                            fontSize: 11,
-                                                                                                            fontWeight: FontWeight.w700,
-                                                                                                            color: Colors.white,
-                                                                                                          ),
-                                                                                                        ),
-                                                                                                      ],
-                                                                                                    ),
-                                                                                                  ),
-                                                                                                )
-                                                                                              : const SizedBox.shrink(),
-                                                                                        ),
-                                                                                        AnimatedContainer(
-                                                                                          duration: const Duration(milliseconds: 140),
-                                                                                          margin: const EdgeInsets.symmetric(
-                                                                                            horizontal: 12,
-                                                                                            vertical: 4,
-                                                                                          ),
-                                                                                          padding: const EdgeInsets.symmetric(
-                                                                                            horizontal: 14,
-                                                                                            vertical: 10,
-                                                                                          ),
-                                                                                          decoration: BoxDecoration(
-                                                                                            color: bubbleColor,
-                                                                                            borderRadius: BorderRadius.circular(18),
-                                                                                            border: Border.all(
-                                                                                              color: isCopied ? const Color(0xFFD6E8C9) : Colors.transparent,
-                                                                                              width: 1.2,
-                                                                                            ),
-                                                                                            boxShadow: isCopied
-                                                                                                ? const [
-                                                                                                    BoxShadow(
-                                                                                                      color: Color(0x33D6E8C9),
-                                                                                                      blurRadius: 12,
-                                                                                                      offset: Offset(0, 2),
-                                                                                                    ),
-                                                                                                  ]
-                                                                                                : null,
-                                                                                          ),
-                                                                                          child: Text(
-                                                                                            message.text,
-                                                                                            style: const TextStyle(
-                                                                                              fontFamily: 'Pretendard',
-                                                                                              fontSize: 15,
-                                                                                              height: 1.2,
-                                                                                              color: Colors.white,
-                                                                                            ),
-                                                                                          ),
-                                                                                        ),
-                                                                                      ],
-                                                                                    ),
-                                                                                  );
-                                                                                },
-                                                                              ),
-                                                                              theme: const ChatTheme(
-                                                                                colors: ChatColors(
-                                                                                  // User message bubble (you)
-                                                                                  primary: Color.fromRGBO(25, 94, 160, 0.42),
-                                                                                  onPrimary: Colors.white,
-                                                                                  // Message list surface layers (kill them)
-                                                                                  surface: Colors.transparent,
-                                                                                  onSurface: Colors.white,
-                                                                                  surfaceContainer: Colors.transparent, //Color.fromARGB(100, 170, 170, 170),
-                                                                                  surfaceContainerLow: Colors.transparent,
-                                                                                  surfaceContainerHigh: Colors.transparent,
-                                                                                ),
-                                                                                typography: ChatTypography(
-                                                                                  bodyLarge: TextStyle(
-                                                                                    fontFamily: 'Pretendard',
-                                                                                    fontSize: 15,
-                                                                                    height: 1.35,
-                                                                                    color: Colors.white,
-                                                                                  ),
-                                                                                  bodyMedium: TextStyle(
-                                                                                    fontFamily: 'Pretendard',
-                                                                                    fontSize: 14,
-                                                                                    height: 1.35,
-                                                                                    color: Colors.white70,
-                                                                                  ),
-                                                                                  bodySmall: TextStyle(
+                                                                                  style: const TextStyle(
                                                                                     fontFamily: 'Pretendard',
                                                                                     fontSize: 13,
-                                                                                    height: 1.3,
-                                                                                    color: Colors.white60,
-                                                                                  ),
-                                                                                  labelLarge: TextStyle(
-                                                                                    fontFamily: 'Pretendard',
-                                                                                    fontSize: 13,
-                                                                                    fontWeight: FontWeight.w500,
+                                                                                    fontWeight: FontWeight.w700,
+                                                                                    letterSpacing: 0.3,
                                                                                     color: Colors.white70,
                                                                                   ),
-                                                                                  labelMedium: TextStyle(
-                                                                                    fontFamily: 'Pretendard',
-                                                                                    fontSize: 12,
-                                                                                    color: Colors.white60,
-                                                                                  ),
-                                                                                  labelSmall: TextStyle(
-                                                                                    fontFamily: 'Pretendard',
-                                                                                    fontSize: 11,
-                                                                                    color: Colors.white54,
-                                                                                  ),
                                                                                 ),
-
-                                                                                // Message bubble shape — keep subtle, not “chat app rounded”
-                                                                                shape: BorderRadius.all(Radius.circular(14)),
                                                                               ),
-                                                                              resolveUser: (UserID id) async {
-                                                                                if (id == 'user') {
-                                                                                  return const User(id: 'user', name: 'You');
-                                                                                }
-                                                                                return const User(id: 'assistant', name: 'MixAssistant');
-                                                                              },
-                                                                            ),
+                                                                              _buildChatHeaderActionButton(
+                                                                                label: L10n.translate(
+                                                                                  context,
+                                                                                  'Feedback',
+                                                                                ),
+                                                                                icon: Icons.feedback_outlined,
+                                                                                onPressed: _feedbackSubmissionInFlight ? null : _openDawFeedbackComposer,
+                                                                              ),
+                                                                              const SizedBox(width: 8),
+                                                                              _buildChatHeaderActionButton(
+                                                                                label: L10n.translate(
+                                                                                  context,
+                                                                                  'Clear',
+                                                                                ),
+                                                                                icon: Icons.delete_outline_rounded,
+                                                                                onPressed: canClearChatHistory ? _confirmClearChatHistory : null,
+                                                                              ),
+                                                                            ],
                                                                           ),
                                                                         ),
-                                                                      ),
-                                                                      AnimatedSwitcher(
-                                                                        duration:
-                                                                            const Duration(milliseconds: 140),
-                                                                        switchInCurve:
-                                                                            Curves.easeOutCubic,
-                                                                        switchOutCurve:
-                                                                            Curves.easeInCubic,
-                                                                        child: _isThinking
-                                                                            ? _buildThinkingPlaceholderBubble()
-                                                                            : const SizedBox.shrink(),
-                                                                      ),
-                                                                    ],
-                                                                  );
-                                                                },
+                                                                        Expanded(
+                                                                          child:
+                                                                              Stack(
+                                                                            children: [
+                                                                              Positioned.fill(
+                                                                                child: ClipRect(
+                                                                                  child: ShaderMask(
+                                                                                    blendMode: BlendMode.dstIn,
+                                                                                    shaderCallback: (
+                                                                                      Rect bounds,
+                                                                                    ) {
+                                                                                      final fadeStartStop = bounds.height > 0
+                                                                                          ? math.min(
+                                                                                              0.022,
+                                                                                              4 / bounds.height,
+                                                                                            )
+                                                                                          : 0.022;
+                                                                                      final fadeEndStop = bounds.height > 0
+                                                                                          ? math.min(
+                                                                                              0.08,
+                                                                                              18 / bounds.height,
+                                                                                            )
+                                                                                          : 0.08;
+                                                                                      return LinearGradient(
+                                                                                        begin: Alignment.topCenter,
+                                                                                        end: Alignment.bottomCenter,
+                                                                                        stops: <double>[
+                                                                                          0.0,
+                                                                                          fadeStartStop,
+                                                                                          fadeEndStop,
+                                                                                          1.0,
+                                                                                        ],
+                                                                                        colors: const <Color>[
+                                                                                          Colors.transparent,
+                                                                                          Color.fromRGBO(255, 255, 255, 0.45),
+                                                                                          Colors.white,
+                                                                                          Colors.white,
+                                                                                        ],
+                                                                                      ).createShader(
+                                                                                        bounds,
+                                                                                      );
+                                                                                    },
+                                                                                    child: MediaQuery.removePadding(
+                                                                                      context: overlayContext,
+                                                                                      removeBottom: true,
+                                                                                      child: MediaQuery.removeViewInsets(
+                                                                                        context: overlayContext,
+                                                                                        removeBottom: true,
+                                                                                        child: Chat(
+                                                                                          chatController: _chatController,
+                                                                                          currentUserId: 'user',
+                                                                                          onMessageSend: null,
+                                                                                          timeFormat: null,
+                                                                                          onMessageLongPress: (
+                                                                                            BuildContext context,
+                                                                                            Message message, {
+                                                                                            required LongPressStartDetails details,
+                                                                                            required int index,
+                                                                                          }) async {
+                                                                                            if (message is TextMessage) {
+                                                                                              await Clipboard.setData(
+                                                                                                ClipboardData(text: message.text),
+                                                                                              );
+
+                                                                                              await AppHaptics.impact(
+                                                                                                AppHapticImpact.light,
+                                                                                              );
+
+                                                                                              _showCopiedChatMessageFeedback(
+                                                                                                message.id,
+                                                                                              );
+                                                                                            }
+                                                                                          },
+                                                                                          builders: Builders(
+                                                                                            chatAnimatedListBuilder: (
+                                                                                              BuildContext context,
+                                                                                              ChatItem itemBuilder,
+                                                                                            ) {
+                                                                                              return NotificationListener<ScrollNotification>(
+                                                                                                onNotification: _handleChatListScrollNotification,
+                                                                                                child: ChatAnimatedList(
+                                                                                                  itemBuilder: itemBuilder,
+                                                                                                  scrollController: _chatListScrollController,
+                                                                                                  handleSafeArea: false,
+                                                                                                  bottomPadding: 8,
+                                                                                                  bottomSliver: _isThinking
+                                                                                                      ? SliverToBoxAdapter(
+                                                                                                          child: _buildThinkingPlaceholderBubble(),
+                                                                                                        )
+                                                                                                      : null,
+                                                                                                  scrollToBottomAppearanceDelay: const Duration(milliseconds: 180),
+                                                                                                  scrollToBottomAppearanceThreshold: _kChatScrollHintThreshold,
+                                                                                                ),
+                                                                                              );
+                                                                                            },
+                                                                                            composerBuilder: (_) => const SizedBox.shrink(),
+                                                                                            emptyChatListBuilder: (_) => Center(
+                                                                                              child: Padding(
+                                                                                                padding: const EdgeInsets.symmetric(horizontal: 28),
+                                                                                                child: Text(
+                                                                                                  L10n.translate(
+                                                                                                    context,
+                                                                                                    'This is an experimental feature in development. Output may be unexpected.',
+                                                                                                  ),
+                                                                                                  textAlign: TextAlign.center,
+                                                                                                  style: const TextStyle(
+                                                                                                    fontFamily: 'Pretendard',
+                                                                                                    fontSize: 14,
+                                                                                                    height: 1.45,
+                                                                                                    color: Colors.white60,
+                                                                                                  ),
+                                                                                                ),
+                                                                                              ),
+                                                                                            ),
+                                                                                            scrollToBottomBuilder: (
+                                                                                              BuildContext context,
+                                                                                              Animation<double> animation,
+                                                                                              VoidCallback onPressed,
+                                                                                            ) {
+                                                                                              if (!_chatScrollHintEnabled || animation.value <= 0.01) {
+                                                                                                return const SizedBox.shrink();
+                                                                                              }
+                                                                                              return Positioned(
+                                                                                                left: 0,
+                                                                                                right: 0,
+                                                                                                bottom: 16,
+                                                                                                child: Center(
+                                                                                                  child: ScaleTransition(
+                                                                                                    scale: animation,
+                                                                                                    child: FloatingActionButton(
+                                                                                                      heroTag: null,
+                                                                                                      mini: true,
+                                                                                                      backgroundColor: const Color.fromRGBO(154, 169, 191, 0.56),
+                                                                                                      foregroundColor: const Color(0xFFF7FAFF),
+                                                                                                      onPressed: () {
+                                                                                                        _setChatScrollHintEnabled(false);
+                                                                                                        onPressed();
+                                                                                                      },
+                                                                                                      child: const Icon(Icons.keyboard_arrow_down_rounded),
+                                                                                                    ),
+                                                                                                  ),
+                                                                                                ),
+                                                                                              );
+                                                                                            },
+                                                                                            textMessageBuilder: (
+                                                                                              BuildContext context,
+                                                                                              TextMessage message,
+                                                                                              int index, {
+                                                                                              required bool isSentByMe,
+                                                                                              MessageGroupStatus? groupStatus,
+                                                                                            }) {
+                                                                                              if (message.authorId == 'system') {
+                                                                                                return Padding(
+                                                                                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                                                                                  child: Center(
+                                                                                                    child: Text(
+                                                                                                      message.text,
+                                                                                                      textAlign: TextAlign.center,
+                                                                                                      style: const TextStyle(
+                                                                                                        fontFamily: 'Pretendard',
+                                                                                                        fontSize: 13,
+                                                                                                        fontWeight: FontWeight.w600,
+                                                                                                        letterSpacing: 0.4,
+                                                                                                        color: Colors.white70,
+                                                                                                      ),
+                                                                                                    ),
+                                                                                                  ),
+                                                                                                );
+                                                                                              }
+                                                                                              final isCopied = _copiedChatMessageId == message.id;
+                                                                                              final bubbleColor = isSentByMe
+                                                                                                  ? const Color.fromRGBO(
+                                                                                                      25,
+                                                                                                      94,
+                                                                                                      160,
+                                                                                                      0.42,
+                                                                                                    )
+                                                                                                  : const Color.fromRGBO(
+                                                                                                      244,
+                                                                                                      244,
+                                                                                                      244,
+                                                                                                      0.18,
+                                                                                                    );
+                                                                                              return Align(
+                                                                                                alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
+                                                                                                child: Column(
+                                                                                                  crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                                                                                  children: [
+                                                                                                    AnimatedSwitcher(
+                                                                                                      duration: const Duration(milliseconds: 120),
+                                                                                                      child: isCopied
+                                                                                                          ? Padding(
+                                                                                                              key: const ValueKey('copied_badge'),
+                                                                                                              padding: const EdgeInsets.symmetric(
+                                                                                                                horizontal: 14,
+                                                                                                                vertical: 2,
+                                                                                                              ),
+                                                                                                              child: Container(
+                                                                                                                padding: const EdgeInsets.symmetric(
+                                                                                                                  horizontal: 8,
+                                                                                                                  vertical: 4,
+                                                                                                                ),
+                                                                                                                decoration: BoxDecoration(
+                                                                                                                  color: const Color(0xFF7A8E73),
+                                                                                                                  borderRadius: BorderRadius.circular(999),
+                                                                                                                ),
+                                                                                                                child: Row(
+                                                                                                                  mainAxisSize: MainAxisSize.min,
+                                                                                                                  children: [
+                                                                                                                    const Icon(
+                                                                                                                      Icons.check_rounded,
+                                                                                                                      size: 13,
+                                                                                                                      color: Colors.white,
+                                                                                                                    ),
+                                                                                                                    const SizedBox(width: 4),
+                                                                                                                    Text(
+                                                                                                                      L10n.translate(
+                                                                                                                        context,
+                                                                                                                        'Copied',
+                                                                                                                      ),
+                                                                                                                      style: TextStyle(
+                                                                                                                        fontFamily: 'Pretendard',
+                                                                                                                        fontSize: 11,
+                                                                                                                        fontWeight: FontWeight.w700,
+                                                                                                                        color: Colors.white,
+                                                                                                                      ),
+                                                                                                                    ),
+                                                                                                                  ],
+                                                                                                                ),
+                                                                                                              ),
+                                                                                                            )
+                                                                                                          : const SizedBox.shrink(),
+                                                                                                    ),
+                                                                                                    AnimatedContainer(
+                                                                                                      duration: const Duration(milliseconds: 140),
+                                                                                                      margin: const EdgeInsets.symmetric(
+                                                                                                        horizontal: 12,
+                                                                                                        vertical: 2,
+                                                                                                      ),
+                                                                                                      padding: const EdgeInsets.symmetric(
+                                                                                                        horizontal: 14,
+                                                                                                        vertical: 10,
+                                                                                                      ),
+                                                                                                      decoration: BoxDecoration(
+                                                                                                        color: bubbleColor,
+                                                                                                        borderRadius: BorderRadius.circular(18),
+                                                                                                        border: Border.all(
+                                                                                                          color: isCopied ? const Color(0xFFD6E8C9) : Colors.transparent,
+                                                                                                          width: 1.2,
+                                                                                                        ),
+                                                                                                        boxShadow: isCopied
+                                                                                                            ? const [
+                                                                                                                BoxShadow(
+                                                                                                                  color: Color(0x33D6E8C9),
+                                                                                                                  blurRadius: 12,
+                                                                                                                  offset: Offset(0, 2),
+                                                                                                                ),
+                                                                                                              ]
+                                                                                                            : null,
+                                                                                                      ),
+                                                                                                      child: Text(
+                                                                                                        message.text,
+                                                                                                        style: const TextStyle(
+                                                                                                          fontFamily: 'Pretendard',
+                                                                                                          fontSize: 15,
+                                                                                                          fontWeight: FontWeight.w500,
+                                                                                                          height: 1.2,
+                                                                                                          color: Colors.white,
+                                                                                                        ),
+                                                                                                      ),
+                                                                                                    ),
+                                                                                                  ],
+                                                                                                ),
+                                                                                              );
+                                                                                            },
+                                                                                          ),
+                                                                                          theme: const ChatTheme(
+                                                                                            colors: ChatColors(
+                                                                                              // User message bubble (you)
+                                                                                              primary: Color.fromRGBO(25, 94, 160, 0.42),
+                                                                                              onPrimary: Colors.white,
+                                                                                              // Message list surface layers (kill them)
+                                                                                              surface: Colors.transparent,
+                                                                                              onSurface: Colors.white,
+                                                                                              surfaceContainer: Colors.transparent, //Color.fromARGB(100, 170, 170, 170),
+                                                                                              surfaceContainerLow: Colors.transparent,
+                                                                                              surfaceContainerHigh: Colors.transparent,
+                                                                                            ),
+                                                                                            typography: ChatTypography(
+                                                                                              bodyLarge: TextStyle(
+                                                                                                fontFamily: 'Pretendard',
+                                                                                                fontSize: 15,
+                                                                                                height: 1.35,
+                                                                                                color: Colors.white,
+                                                                                              ),
+                                                                                              bodyMedium: TextStyle(
+                                                                                                fontFamily: 'Pretendard',
+                                                                                                fontSize: 14,
+                                                                                                height: 1.35,
+                                                                                                color: Colors.white70,
+                                                                                              ),
+                                                                                              bodySmall: TextStyle(
+                                                                                                fontFamily: 'Pretendard',
+                                                                                                fontSize: 13,
+                                                                                                height: 1.3,
+                                                                                                color: Colors.white60,
+                                                                                              ),
+                                                                                              labelLarge: TextStyle(
+                                                                                                fontFamily: 'Pretendard',
+                                                                                                fontSize: 13,
+                                                                                                fontWeight: FontWeight.w500,
+                                                                                                color: Colors.white70,
+                                                                                              ),
+                                                                                              labelMedium: TextStyle(
+                                                                                                fontFamily: 'Pretendard',
+                                                                                                fontSize: 12,
+                                                                                                color: Colors.white60,
+                                                                                              ),
+                                                                                              labelSmall: TextStyle(
+                                                                                                fontFamily: 'Pretendard',
+                                                                                                fontSize: 11,
+                                                                                                color: Colors.white54,
+                                                                                              ),
+                                                                                            ),
+
+                                                                                            // Message bubble shape — keep subtle, not “chat app rounded”
+                                                                                            shape: BorderRadius.all(Radius.circular(14)),
+                                                                                          ),
+                                                                                          resolveUser: (UserID id) async {
+                                                                                            if (id == 'user') {
+                                                                                              return const User(id: 'user', name: 'You');
+                                                                                            }
+                                                                                            return const User(id: 'assistant', name: 'MixAssistant');
+                                                                                          },
+                                                                                        ),
+                                                                                      ),
+                                                                                    ),
+                                                                                  ),
+                                                                                ),
+                                                                              ),
+                                                                            ],
+                                                                          ),
+                                                                        ),
+                                                                      ],
+                                                                    );
+                                                                  },
+                                                                ),
                                                               ),
                                                             ),
                                                           ),
                                                         ),
                                                       ),
-                                                    ),
-                                                  )
-                                                : const SizedBox(),
+                                                    )
+                                                  : const SizedBox(),
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -30971,22 +33492,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
                                       final media = MediaQuery.of(panelContext);
                                       final screenH = media.size.height;
-                                      final safeTopInset = media.padding.top;
-                                      final fullscreenTopGap = math.max(
-                                        152.0,
-                                        safeTopInset +
-                                            _kTransportBarHeight +
-                                            44.0,
-                                      );
+                                      final midiPanelBottom =
+                                          _kChatBarStackHeight +
+                                              _kTransportBarHeight +
+                                              (_isProducerCaptureUiVisible
+                                                  ? _kProducerBannerHeightEstimate
+                                                  : 0.0) +
+                                              (Platform.isAndroid
+                                                  ? _kAndroidOverlayPanelLift
+                                                  : 0.0) +
+                                              14.0;
                                       final maxFullscreenHeight = math.max(
                                         280.0,
                                         screenH -
-                                            _kChatBarStackHeight -
-                                            _kTransportBarHeight -
-                                            (_showProducerCaptureUi
-                                                ? _kProducerBannerHeightEstimate
-                                                : 0.0) -
-                                            fullscreenTopGap,
+                                            midiPanelBottom -
+                                            _kSamplePanelExpandedTop,
                                       );
                                       final targetHeight = _pianoRollFullscreen
                                           ? maxFullscreenHeight
@@ -30998,14 +33518,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         duration:
                                             const Duration(milliseconds: 190),
                                         curve: Curves.easeOutCubic,
-                                        left: 0,
-                                        right: 0,
-                                        bottom: _kChatBarStackHeight +
-                                            _kTransportBarHeight +
-                                            (_showProducerCaptureUi
-                                                ? _kProducerBannerHeightEstimate
-                                                : 0.0) +
-                                            14.0,
+                                        left: _kOverlayPanelHorizontalInset,
+                                        right: _kOverlayPanelHorizontalInset,
+                                        bottom: midiPanelBottom,
                                         height: panelHeight,
                                         child: Halo(
                                           highlighter: _mixHighlighter,
@@ -31046,7 +33561,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 Positioned.fill(
                                   bottom: _kChatBarStackHeight +
                                       _kTransportBarHeight +
-                                      (_showProducerCaptureUi
+                                      (_isProducerCaptureUiVisible
                                           ? _kProducerBannerHeightEstimate
                                           : 0.0),
                                   child: Listener(
@@ -31077,7 +33592,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 Positioned.fill(
                                   bottom: _kChatBarStackHeight +
                                       _kTransportBarHeight +
-                                      (_showProducerCaptureUi
+                                      (_isProducerCaptureUiVisible
                                           ? _kProducerBannerHeightEstimate
                                           : 0.0),
                                   child: Listener(
@@ -31111,7 +33626,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 Positioned.fill(
                                   bottom: _kChatBarStackHeight +
                                       _kTransportBarHeight +
-                                      (_showProducerCaptureUi
+                                      (_isProducerCaptureUiVisible
                                           ? _kProducerBannerHeightEstimate
                                           : 0.0),
                                   child: Listener(
@@ -31212,19 +33727,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     left: 0,
                     right: 0,
                     top: 0,
-                    bottom: _kChatHistoryHeight +
-                        _kChatBarStackHeight +
-                        _kTransportBarHeight +
-                        _chatHistoryBottomGap,
+                    bottom: chatTapAwayBottomInset,
                     child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
-                      onTap: () {
-                        setState(() {
-                          _chatExpanded = false;
-                          _chatInputActive = false;
-                          _chatFocusNode.unfocus();
-                        });
-                      },
+                      onTapDown: (_) => _collapseChatWindow(),
                     ),
                   ),
                 if (_showDawOnboarding) _buildDawOnboardingOverlay(),
@@ -31783,55 +34289,45 @@ class _ChatThinkingBubbleState extends State<_ChatThinkingBubble>
       animation: _controller,
       builder: (context, _) {
         final t = _controller.value;
-        final glow = 0.08 + ((math.sin((t * math.pi * 2)) + 1) * 0.05);
         double dotOpacity(double offset) =>
-            0.30 + (((math.sin(((t + offset) * math.pi * 2)) + 1) * 0.5) * 0.7);
+            0.26 +
+            (((math.sin(((t + offset) * math.pi * 2)) + 1) * 0.5) * 0.62);
+        double dotScale(double offset) =>
+            0.82 +
+            (((math.sin(((t + offset) * math.pi * 2)) + 1) * 0.5) * 0.28);
 
         return Align(
           alignment: Alignment.centerLeft,
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: <Color>[
-                  Color.fromRGBO(244, 244, 244, 0.20),
-                  Color.fromRGBO(244, 244, 244, 0.12),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-              boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: const Color.fromRGBO(167, 204, 255, 1)
-                      .withValues(alpha: glow),
-                  blurRadius: 14,
-                  spreadRadius: 1,
-                  offset: Offset.zero,
-                ),
-              ],
-            ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(26, 6, 12, 8),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
+                Text(
                   'Thinking',
                   style: TextStyle(
                     fontFamily: 'Pretendard',
-                    fontSize: 14,
+                    fontSize: 15,
                     height: 1.2,
-                    color: Colors.white,
-                    fontWeight: FontWeight.w500,
+                    color: Colors.white.withValues(alpha: 0.90),
+                    fontWeight: FontWeight.w400,
                   ),
                 ),
-                const SizedBox(width: 8),
-                _ThinkingDot(opacity: dotOpacity(0.0)),
+                const SizedBox(width: 7),
+                _ThinkingDot(
+                  opacity: dotOpacity(0.0),
+                  scale: dotScale(0.0),
+                ),
                 const SizedBox(width: 4),
-                _ThinkingDot(opacity: dotOpacity(0.18)),
+                _ThinkingDot(
+                  opacity: dotOpacity(0.18),
+                  scale: dotScale(0.18),
+                ),
                 const SizedBox(width: 4),
-                _ThinkingDot(opacity: dotOpacity(0.36)),
+                _ThinkingDot(
+                  opacity: dotOpacity(0.36),
+                  scale: dotScale(0.36),
+                ),
               ],
             ),
           ),
@@ -31842,21 +34338,28 @@ class _ChatThinkingBubbleState extends State<_ChatThinkingBubble>
 }
 
 class _ThinkingDot extends StatelessWidget {
-  const _ThinkingDot({required this.opacity});
+  const _ThinkingDot({
+    required this.opacity,
+    this.scale = 1.0,
+  });
 
   final double opacity;
+  final double scale;
 
   @override
   Widget build(BuildContext context) {
     return Opacity(
       opacity: opacity.clamp(0.0, 1.0),
-      child: const SizedBox(
-        width: 5,
-        height: 5,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: Color(0xFFF4F4F4),
-            shape: BoxShape.circle,
+      child: Transform.scale(
+        scale: scale.clamp(0.7, 1.2),
+        child: const SizedBox(
+          width: 4.0,
+          height: 4.0,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Color(0xFFF4F4F4),
+              shape: BoxShape.circle,
+            ),
           ),
         ),
       ),
@@ -32343,13 +34846,21 @@ class ExportProgressPage extends StatefulWidget {
 
 class _ExportProgressPageState extends State<ExportProgressPage> {
   double _progress = 0.0;
-  Uint8List? _thumbnail;
   bool _cancelled = false;
+  Timer? _ellipsisTimer;
+  int _ellipsisStep = 0;
+  static const String _unicodeEllipsis = '\u2026';
 
   @override
   void initState() {
     super.initState();
     _cancelSignal = Completer();
+    _ellipsisTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted || _cancelled) return;
+      setState(() {
+        _ellipsisStep = (_ellipsisStep + 1) % 3;
+      });
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       unawaited(
         AnalyticsService.instance.trackScreen(AnalyticsScreenNames.export),
@@ -32361,6 +34872,7 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
 
   @override
   void dispose() {
+    _ellipsisTimer?.cancel();
     super.dispose();
   }
 
@@ -32373,76 +34885,196 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
 
   @override
   Widget build(BuildContext context) {
+    final progressValue = _progress.clamp(0.0, 1.0);
+    var exportingLabel = L10n.translate(context, 'Exporting...').trimRight();
+    while (exportingLabel.endsWith('.') ||
+        exportingLabel.endsWith(_unicodeEllipsis)) {
+      exportingLabel = exportingLabel.substring(0, exportingLabel.length - 1);
+      exportingLabel = exportingLabel.trimRight();
+    }
+    if (exportingLabel.isEmpty) {
+      exportingLabel = 'Exporting';
+    }
+    final exportingDots = '.' * ((_ellipsisStep % 3) + 1);
+    const exportingLabelStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      fontSize: 18,
+      height: 22 / 18,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFFF4F4F4),
+      shadows: [
+        Shadow(
+          blurRadius: 25,
+          color: Colors.black,
+        ),
+      ],
+    );
+    final dotSlotPainter = TextPainter(
+      text: const TextSpan(text: '...', style: exportingLabelStyle),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    final dotSlotWidth = dotSlotPainter.width.ceilToDouble() + 1;
+
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Cancel button
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.white),
-              onPressed: () {
-                setState(() => _cancelled = true);
-                _cancelSignal.complete();
-                print("cancelling export progress");
-                Navigator.of(context).pop("");
-              },
+      backgroundColor: const Color(0xFF090909),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            kMixroomExportProgressBgAsset,
+            fit: BoxFit.cover,
+          ),
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.22),
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.34),
+                ],
+                stops: const [0.0, 0.62, 1.0],
+              ),
             ),
-            const SizedBox(height: 24),
-            Text(
-              L10n.translate(context, 'Exporting...'),
-              style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              L10n.translate(
-                  context, "Please don't close the app or lock your screen."),
-              style: TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 24),
-            LinearProgressIndicator(
-              value: _progress,
-              minHeight: 4,
-              backgroundColor: Colors.white24,
-              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-            ),
-            const SizedBox(height: 24),
-            if (_thumbnail != null)
-              SizedBox(
-                height: 160,
-                child: Stack(
-                  alignment: Alignment.center,
+          ),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final trackWidth = math.min(
+                  348.0,
+                  math.max(220.0, constraints.maxWidth - 54),
+                );
+
+                return Stack(
                   children: [
-                    Center(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.memory(
-                          _thumbnail!,
-                          height: 160,
-                          fit: BoxFit.contain, // or omit fit entirely
+                    Align(
+                      alignment: const Alignment(0, -0.03),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                exportingLabel,
+                                style: exportingLabelStyle,
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.visible,
+                              ),
+                              SizedBox(
+                                width: dotSlotWidth,
+                                child: Text(
+                                  exportingDots,
+                                  textAlign: TextAlign.left,
+                                  style: exportingLabelStyle,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  overflow: TextOverflow.visible,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            width: trackWidth,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                Container(
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF4F4F4)
+                                        .withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(24),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color:
+                                            Colors.black.withValues(alpha: 0.2),
+                                        blurRadius: 10,
+                                        spreadRadius: 0,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: FractionallySizedBox(
+                                      widthFactor: progressValue,
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFF4F4F4),
+                                          borderRadius:
+                                              BorderRadius.circular(24),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: const Color(0xFF2596F9)
+                                                  .withValues(alpha: 0.28),
+                                              blurRadius: 10,
+                                              spreadRadius: 0,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Align(
+                      alignment: const Alignment(0, 0.66),
+                      child: Container(
+                        width: 124,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.25),
+                              blurRadius: 15,
+                              spreadRadius: 8,
+                            ),
+                          ],
+                        ),
+                        child: TextButton(
+                          style: TextButton.styleFrom(
+                            backgroundColor:
+                                const Color(0xFFF4F4F4).withValues(alpha: 0.2),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            padding: EdgeInsets.zero,
+                            foregroundColor: const Color(0xFFF4F4F4),
+                            textStyle: const TextStyle(
+                              fontFamily: 'Pretendard',
+                              fontSize: 18,
+                              height: 22 / 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          onPressed: () {
+                            setState(() => _cancelled = true);
+                            if (!_cancelSignal.isCompleted) {
+                              _cancelSignal.complete();
+                            }
+                            print("cancelling export progress");
+                            Navigator.of(context).pop("");
+                          },
+                          child: Text(L10n.translate(context, 'Cancel')),
                         ),
                       ),
                     ),
-                    Text(
-                      "${(_progress * 100).toStringAsFixed(0)}%",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        shadows: [Shadow(blurRadius: 4, color: Colors.black)],
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
                   ],
-                ),
-              ),
-          ],
-        ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -32452,7 +35084,14 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
 
 // EXPORT SUCCESS SCREEN
 
+enum ExportSuccessAction {
+  backToDaw,
+  exitToProjects,
+}
+
 class ExportSuccessScreen extends StatelessWidget {
+  static const MethodChannel _savedExportsChannel =
+      MethodChannel('mixroom/saved_exports');
   final String filePath;
   final String? savedFilePath;
   final String? savedFileName;
@@ -32465,15 +35104,71 @@ class ExportSuccessScreen extends StatelessWidget {
       this.savedFilePath,
       this.savedFileName});
 
+  String? _savedNameFromPathHint() {
+    final saved = savedFilePath?.trim();
+    if (saved == null || saved.isEmpty) return null;
+
+    final normalized = _normalizedCandidatePath(saved);
+    if (!_isUriLikePath(normalized)) {
+      final decoded = Uri.decodeFull(normalized);
+      final base = p.basename(decoded).trim();
+      if (base.isNotEmpty &&
+          base != '.' &&
+          base != p.basename(filePath).trim()) {
+        return base;
+      }
+    }
+
+    final documentId = _extractAndroidDocumentId(saved);
+    if (documentId != null && documentId.contains('/')) {
+      final leaf = documentId.split('/').last.trim();
+      if (leaf.isNotEmpty && leaf != p.basename(filePath).trim()) {
+        return leaf;
+      }
+    }
+    return null;
+  }
+
   String _resolvedFileName() {
+    final hintedFromPath = _savedNameFromPathHint();
+    if (hintedFromPath != null && hintedFromPath.isNotEmpty) {
+      return hintedFromPath;
+    }
+
     final explicit = savedFileName?.trim();
-    if (explicit != null && explicit.isNotEmpty) {
+    if (explicit != null &&
+        explicit.isNotEmpty &&
+        explicit != p.basename(filePath).trim()) {
       return explicit;
+    }
+
+    final savedLocalPath = _resolveSavedLocalPath();
+    if (savedLocalPath != null && savedLocalPath.isNotEmpty) {
+      final base = p.basename(savedLocalPath).trim();
+      if (base.isNotEmpty &&
+          base != '.' &&
+          base != p.basename(filePath).trim()) {
+        return base;
+      }
     }
 
     final saved = savedFilePath?.trim();
     if (saved != null && saved.isNotEmpty) {
-      return p.basename(saved);
+      final normalized = _normalizedCandidatePath(saved);
+      if (_isUriLikePath(normalized)) {
+        final uri = Uri.tryParse(normalized);
+        if (uri != null && uri.pathSegments.isNotEmpty) {
+          final segment = uri.pathSegments.last.trim();
+          if (segment.isNotEmpty) return segment;
+        }
+      } else {
+        final base = p.basename(normalized).trim();
+        if (base.isNotEmpty && base != '.') return base;
+      }
+    }
+
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
     }
 
     return p.basename(filePath);
@@ -32505,57 +35200,235 @@ class ExportSuccessScreen extends StatelessWidget {
     return trimmed;
   }
 
-  String _resolvedActionPath() {
+  String? _extractAndroidDocumentId(String rawPath) {
+    var value = rawPath.trim();
+    if (value.isEmpty) return null;
+
+    try {
+      value = Uri.decodeFull(value);
+    } catch (_) {}
+
+    final uri = Uri.tryParse(value);
+    final path = uri?.path ?? value;
+
+    String? extractFrom(String input) {
+      final markerIndex = input.indexOf('/document/');
+      if (markerIndex >= 0) {
+        return input.substring(markerIndex + '/document/'.length);
+      }
+      if (input.startsWith('document/')) {
+        return input.substring('document/'.length);
+      }
+      return null;
+    }
+
+    var documentId = extractFrom(path);
+    if (documentId == null) {
+      documentId = extractFrom(value);
+    }
+    if (documentId == null || documentId.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      documentId = Uri.decodeComponent(documentId);
+    } catch (_) {}
+    return documentId;
+  }
+
+  String? _androidDocumentPathToAbsolute(String rawPath) {
+    if (kIsWeb || !Platform.isAndroid) return null;
+    final documentId = _extractAndroidDocumentId(rawPath);
+    if (documentId == null || documentId.isEmpty) return null;
+
+    if (documentId.startsWith('raw:')) {
+      final raw = documentId.substring(4);
+      if (raw.startsWith('/')) return p.normalize(raw);
+      return null;
+    }
+    if (documentId.startsWith('primary:')) {
+      final rel = documentId.substring('primary:'.length);
+      return p.normalize('/storage/emulated/0/$rel');
+    }
+    if (documentId.startsWith('home:')) {
+      final rel = documentId.substring('home:'.length);
+      return p.normalize('/storage/emulated/0/Documents/$rel');
+    }
+    if (documentId.startsWith('downloads:')) {
+      final rel = documentId.substring('downloads:'.length);
+      if (rel.isEmpty || RegExp(r'^\d+$').hasMatch(rel)) return null;
+      return p.normalize('/storage/emulated/0/Download/$rel');
+    }
+    return null;
+  }
+
+  String? _resolveSavedLocalPath() {
     final saved = savedFilePath?.trim();
-    if (saved != null && saved.isNotEmpty) {
-      return _normalizedCandidatePath(saved);
+    if (saved == null || saved.isEmpty) return null;
+
+    final normalized = _normalizedCandidatePath(saved);
+    if (!_isUriLikePath(normalized) && File(normalized).existsSync()) {
+      return normalized;
+    }
+
+    final androidAbsolute = _androidDocumentPathToAbsolute(saved);
+    if (androidAbsolute != null && File(androidAbsolute).existsSync()) {
+      return androidAbsolute;
+    }
+
+    return null;
+  }
+
+  List<Uri> _uriCandidatesForPath(String path) {
+    final normalized = _normalizedCandidatePath(path);
+    if (normalized.isEmpty) return const <Uri>[];
+
+    final out = <Uri>[];
+    final seen = <String>{};
+
+    void add(Uri? uri) {
+      if (uri == null) return;
+      final key = uri.toString();
+      if (!seen.add(key)) return;
+      out.add(uri);
+    }
+
+    if (_isUriLikePath(normalized)) {
+      add(Uri.tryParse(normalized));
+      return out;
+    }
+
+    if (!kIsWeb && Platform.isAndroid) {
+      if (normalized.startsWith('/document/') ||
+          normalized.startsWith('/tree/')) {
+        const authorities = <String>[
+          'com.android.externalstorage.documents',
+          'com.android.providers.downloads.documents',
+          'com.android.providers.media.documents',
+        ];
+        final pathValue =
+            normalized.startsWith('/') ? normalized : '/$normalized';
+        for (final authority in authorities) {
+          add(Uri(
+            scheme: 'content',
+            host: authority,
+            path: pathValue,
+          ));
+        }
+      }
+    }
+
+    if (!kIsWeb && Platform.isIOS && normalized.startsWith('/')) {
+      add(Uri.file(normalized));
+    }
+
+    return out;
+  }
+
+  bool _requiresNativeSavedExportOpen(String path) {
+    if (kIsWeb) return false;
+    final normalized = _normalizedCandidatePath(path);
+    if (Platform.isAndroid) {
+      if (_isUriLikePath(normalized)) return true;
+      return normalized.startsWith('/document/') ||
+          normalized.startsWith('/tree/');
+    }
+    if (Platform.isIOS) {
+      return _isUriLikePath(normalized) || normalized.startsWith('/');
+    }
+    return false;
+  }
+
+  Future<bool> _openSavedExportViaNative(String path) async {
+    if (!_requiresNativeSavedExportOpen(path)) return false;
+    try {
+      final opened = await _savedExportsChannel.invokeMethod<bool>(
+        'openSavedExport',
+        <String, dynamic>{'path': path},
+      );
+      return opened == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  String _resolvedActionPath() {
+    final savedLocal = _resolveSavedLocalPath();
+    if (savedLocal != null && savedLocal.isNotEmpty) {
+      return savedLocal;
+    }
+
+    final normalizedFilePath = _normalizedCandidatePath(filePath);
+    if (!_isUriLikePath(normalizedFilePath) &&
+        File(normalizedFilePath).existsSync()) {
+      return normalizedFilePath;
+    }
+
+    return normalizedFilePath;
+  }
+
+  String _resolvedPreviewPath() {
+    final savedLocal = _resolveSavedLocalPath();
+    if (savedLocal != null && savedLocal.isNotEmpty) {
+      return savedLocal;
     }
     return _normalizedCandidatePath(filePath);
   }
 
-  String _resolvedPreviewPath() {
-    final saved = savedFilePath?.trim();
-    if (saved == null || saved.isEmpty) {
-      return filePath;
-    }
-    final normalizedSaved = _normalizedCandidatePath(saved);
-    if (!_isUriLikePath(normalizedSaved) &&
-        File(normalizedSaved).existsSync()) {
-      return normalizedSaved;
-    }
-    return filePath;
-  }
-
   Future<void> _shareFile(BuildContext context) async {
     try {
+      var sharePath = _resolvedActionPath();
+      if (_isUriLikePath(sharePath) || !File(sharePath).existsSync()) {
+        final fallback = _normalizedCandidatePath(filePath);
+        if (!_isUriLikePath(fallback) && File(fallback).existsSync()) {
+          sharePath = fallback;
+        }
+      }
+      if (_isUriLikePath(sharePath) || !File(sharePath).existsSync()) {
+        throw Exception('No readable export file path for sharing.');
+      }
       await Share.shareXFiles([
         XFile(
-          _resolvedActionPath(),
+          sharePath,
           name: _resolvedFileName(),
         )
       ]);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to share.')), // ${e.toString()}')),
+        SnackBar(content: Text(L10n.translate(context, 'Failed to share.'))),
       );
     }
   }
 
   Future<void> _openSavedFile(BuildContext context) async {
+    final saved = savedFilePath?.trim();
+    final savedLocalPath = _resolveSavedLocalPath();
+    final hasSavedTarget = saved != null && saved.isNotEmpty;
     final candidates = <String>[
-      if ((savedFilePath ?? '').trim().isNotEmpty)
-        _normalizedCandidatePath(savedFilePath!),
-      _normalizedCandidatePath(filePath),
+      if (savedLocalPath != null && savedLocalPath.isNotEmpty) savedLocalPath,
+      if (saved != null && saved.isNotEmpty) _normalizedCandidatePath(saved),
+      if (!hasSavedTarget) _normalizedCandidatePath(filePath),
     ];
 
+    final attempted = <String>{};
     for (final candidate in candidates) {
+      if (candidate.trim().isEmpty || !attempted.add(candidate)) continue;
       try {
-        if (_isUriLikePath(candidate)) {
-          final launched = await launchUrl(Uri.parse(candidate));
-          if (launched) {
-            return;
-          }
+        if (await _openSavedExportViaNative(candidate)) {
+          return;
         }
+
+        final uriCandidates = _uriCandidatesForPath(candidate);
+        for (final uri in uriCandidates) {
+          final launched = await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication,
+          );
+          if (launched) return;
+        }
+
+        if (_isUriLikePath(candidate)) continue;
+        if (!File(candidate).existsSync()) continue;
         final result = await OpenFile.open(candidate);
         if (result.type == ResultType.done) {
           return;
@@ -32738,191 +35611,298 @@ class ExportSuccessScreen extends StatelessWidget {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final message = isVideo
-        ? L10n.translate(context, 'Your video was exported successfully!')
-        : L10n.translate(context, 'Your audio was exported successfully!');
-    const pageBg = Color(0xFF0F172A);
-    const topBarBg = Color(0xFF0E1420);
-    const accent = Color(0xFF6C8CFF);
-
-    return Consumer<LocaleProvider>(
-      // Wrap SideMenu with Consumer
-      builder: (context, localeProvider, child) {
-        return Scaffold(
-          backgroundColor: pageBg,
-          appBar: AppBar(
-            backgroundColor: topBarBg,
-            elevation: 0,
-            scrolledUnderElevation: 0,
-            automaticallyImplyLeading: false,
-            title: Text(
-              L10n.translate(context, 'Export Successful'),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.2,
+  Widget _buildTopAction({
+    required IconData icon,
+    required Widget label,
+    required VoidCallback onTap,
+    bool iconTrailing = false,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (iconTrailing) label,
+            if (iconTrailing) const SizedBox(width: 8),
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFF4F4F4).withValues(alpha: 0.2),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.25),
+                    blurRadius: 15,
+                    spreadRadius: 8,
+                  ),
+                ],
+              ),
+              child: Icon(
+                icon,
+                size: 22,
+                color: const Color(0xFFF4F4F4),
               ),
             ),
-            actions: [
-              Padding(
-                padding: const EdgeInsets.only(right: 12, top: 4),
-                child: TextButton.icon(
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    textStyle: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+            if (!iconTrailing) const SizedBox(width: 8),
+            if (!iconTrailing) label,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMainActionButton({
+    required String label,
+    required VoidCallback onPressed,
+    bool primary = false,
+    Widget? child,
+  }) {
+    final decoration = primary
+        ? BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: [0.5625, 1.0],
+              colors: [
+                Color.fromRGBO(244, 244, 244, 0.5),
+                Color.fromRGBO(25, 94, 160, 0.5),
+              ],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 15,
+                spreadRadius: 8,
+              ),
+            ],
+          )
+        : BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            color: const Color(0xFFF4F4F4).withValues(alpha: 0.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 15,
+                spreadRadius: 8,
+              ),
+            ],
+          );
+
+    return SizedBox(
+      width: double.infinity,
+      height: 48,
+      child: DecoratedBox(
+        decoration: decoration,
+        child: TextButton(
+          onPressed: onPressed,
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xFFF4F4F4),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+            textStyle: const TextStyle(
+              fontFamily: 'Pretendard',
+              fontSize: 18,
+              height: 18 / 18,
+              fontWeight: FontWeight.w400,
+            ),
+            padding: EdgeInsets.zero,
+          ),
+          child: child ?? Text(label),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<LocaleProvider>(
+      builder: (context, localeProvider, child) {
+        return Scaffold(
+          backgroundColor: const Color(0xFF090909),
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.asset(
+                kMixroomExportProgressBgAsset,
+                fit: BoxFit.cover,
+              ),
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.26),
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.36),
+                    ],
+                    stops: const [0.0, 0.58, 1.0],
                   ),
-                  onPressed: () {
-                    Navigator.pop(context, true);
+                ),
+              ),
+              SafeArea(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final buttonWidth = math.min(
+                      337.0,
+                      math.max(250.0, constraints.maxWidth - 36),
+                    );
+                    const ctaWidth = 216.945;
+                    const topLabelStyle = TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 15,
+                      height: 18 / 15,
+                      fontWeight: FontWeight.w400,
+                      color: Color(0xFFF4F4F4),
+                      decoration: TextDecoration.underline,
+                    );
+
+                    return Stack(
+                      children: [
+                        Positioned(
+                          left: 27,
+                          right: 27,
+                          top: 8,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              _buildTopAction(
+                                icon: Icons.chevron_left_rounded,
+                                label: Text(
+                                  L10n.translate(context, 'Back'),
+                                  style: topLabelStyle,
+                                ),
+                                onTap: () {
+                                  Navigator.of(context)
+                                      .pop(ExportSuccessAction.backToDaw);
+                                },
+                              ),
+                              _buildTopAction(
+                                icon: Icons.folder_open_outlined,
+                                label: Text(
+                                  L10n.translate(context, 'Exit to\nProjects'),
+                                  textAlign: TextAlign.right,
+                                  style: topLabelStyle,
+                                ),
+                                iconTrailing: true,
+                                onTap: () {
+                                  Navigator.of(context).pop(
+                                    ExportSuccessAction.exitToProjects,
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        Align(
+                          alignment: const Alignment(0, -0.14),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                L10n.translate(
+                                  context,
+                                  'Successfully Exported!',
+                                ),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontSize: 18,
+                                  height: 22 / 18,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFFF4F4F4),
+                                  shadows: [
+                                    Shadow(
+                                      blurRadius: 24,
+                                      color: Colors.black54,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 22),
+                              SizedBox(
+                                width: buttonWidth,
+                                child: ExportSuccessPreviewPlayer(
+                                  filePath: _resolvedPreviewPath(),
+                                  displayName: _resolvedFileName(),
+                                  isVideo: isVideo,
+                                  figmaCompact: true,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Align(
+                          alignment: const Alignment(0, 0.56),
+                          child: SizedBox(
+                            width: math.min(ctaWidth, buttonWidth),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _buildMainActionButton(
+                                  label: L10n.translate(
+                                      context, 'Upload on Platform'),
+                                  onPressed: () =>
+                                      _showUploadComingSoon(context),
+                                  primary: true,
+                                  child: RichText(
+                                    textAlign: TextAlign.center,
+                                    text: TextSpan(
+                                      style: const TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        fontSize: 18,
+                                        height: 22 / 18,
+                                        color: Color(0xFFF4F4F4),
+                                      ),
+                                      children: [
+                                        TextSpan(
+                                          text: L10n.translate(
+                                            context,
+                                            'Upload on ',
+                                          ),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w400,
+                                          ),
+                                        ),
+                                        TextSpan(
+                                          text: L10n.translate(
+                                            context,
+                                            'Platform',
+                                          ),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                _buildMainActionButton(
+                                  label: _openSavedLabel(context),
+                                  onPressed: () => _openSavedFile(context),
+                                ),
+                                const SizedBox(height: 10),
+                                _buildMainActionButton(
+                                  label: L10n.translate(context, 'Share'),
+                                  onPressed: () => _shareFile(context),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
                   },
-                  icon:
-                      const Icon(Icons.check_circle_outline_rounded, size: 18),
-                  label: Text(L10n.translate(context, 'Done')),
                 ),
               ),
             ],
-          ), //title: Text(L10n.translate(context, 'Export Successful'))),
-          body: SafeArea(
-            child: SingleChildScrollView(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 600),
-                child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      TweenAnimationBuilder<double>(
-                        key: ValueKey(filePath),
-                        duration: const Duration(milliseconds: 900),
-                        curve: Curves.easeOutBack,
-                        tween: Tween(begin: 0.6, end: 1.0),
-                        builder: (context, scale, child) {
-                          return Transform.scale(scale: scale, child: child);
-                        },
-                        child: Icon(
-                          Icons.task_alt_rounded,
-                          color: Colors.greenAccent,
-                          size: 96,
-                          shadows: const [
-                            Shadow(
-                              blurRadius: 12,
-                              color: Color(0x6634D399),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      // Text(
-                      //   'Your ${isVideo ? 'video' : 'audio'} was exported successfully!',
-                      //   style: Theme.of(context).textTheme.headlineSmall,
-                      //   textAlign: TextAlign.center,
-                      // ),
-                      Text(
-                        message,
-                        style:
-                            Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 40),
-                      ExportSuccessPreviewPlayer(
-                        filePath: _resolvedPreviewPath(),
-                        displayName: _resolvedFileName(),
-                        isVideo: isVideo,
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: () => _shareFile(context),
-                              icon:
-                                  const Icon(Icons.ios_share_rounded, size: 20),
-                              label: Text(L10n.translate(context, 'share')),
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size.fromHeight(48),
-                                backgroundColor: accent,
-                                foregroundColor: Colors.white,
-                                textStyle: const TextStyle(
-                                    fontWeight: FontWeight.w600),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => _openSavedFile(context),
-                              icon: const Icon(Icons.folder_open_rounded,
-                                  size: 20),
-                              label: Text(_openSavedLabel(context)),
-                              style: OutlinedButton.styleFrom(
-                                minimumSize: const Size.fromHeight(48),
-                                foregroundColor: Colors.white70,
-                                side: const BorderSide(
-                                  color: Color(0xFF4F5A73),
-                                ),
-                                textStyle: const TextStyle(
-                                    fontWeight: FontWeight.w600),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () => _showUploadComingSoon(context),
-                          icon:
-                              const Icon(Icons.cloud_upload_rounded, size: 20),
-                          label: Text(
-                            L10n.translate(context, 'Upload to platform'),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size.fromHeight(46),
-                            foregroundColor: Colors.white70,
-                            side: const BorderSide(
-                              color: Color(0xFF4F5A73),
-                            ),
-                            textStyle:
-                                const TextStyle(fontWeight: FontWeight.w600),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      // const SizedBox(height: 40),
-                      // OutlinedButton(
-                      //   onPressed: () => Navigator.popUntil(
-                      //       context, (route) => route.isFirst),
-                      //   child: Text(L10n.translate(context, 'Back to Editor')),
-                      // ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
           ),
         );
       },
@@ -33167,23 +36147,24 @@ class _DynamicRackContentState extends State<DynamicRackContent>
                 Tab(
                   key: const ValueKey('master_tab_volume'),
                   child: widget.tutorialHighlighter == null
-                      ? const Text('Master Volume')
+                      ? Text(L10n.translate(context, 'Master Volume'))
                       : Halo(
                           highlighter: widget.tutorialHighlighter!,
                           haloKey: const HaloKey('master:tab:volume'),
                           borderRadius: BorderRadius.circular(8),
-                          child: const Text('Master Volume'),
+                          child: Text(L10n.translate(context, 'Master Volume')),
                         ),
                 ),
                 Tab(
                   key: const ValueKey('master_tab_effects'),
                   child: widget.tutorialHighlighter == null
-                      ? const Text('Master Effects')
+                      ? Text(L10n.translate(context, 'Master Effects'))
                       : Halo(
                           highlighter: widget.tutorialHighlighter!,
                           haloKey: const HaloKey('master:tab:effects'),
                           borderRadius: BorderRadius.circular(8),
-                          child: const Text('Master Effects'),
+                          child:
+                              Text(L10n.translate(context, 'Master Effects')),
                         ),
                 ),
               ],
@@ -34840,40 +37821,48 @@ class _ChatBar extends StatelessWidget {
     required this.onSubmit,
   });
 
-  String _badgeLabel() {
-    if (promptRateLimitStatus == null) return 'Limits';
+  String _badgeLabel(BuildContext context) {
+    if (promptRateLimitStatus == null) {
+      return L10n.translate(context, 'Limits');
+    }
     if (promptRateLimitStatus!.canSubmit) {
-      return '${promptRateLimitStatus!.daily.remaining} Left';
+      return '${promptRateLimitStatus!.daily.remaining} ${L10n.translate(context, 'Left')}';
     }
     final resetsAt = promptRateLimitStatus!.blockedResetAt?.toLocal();
-    if (resetsAt == null) return 'Wait';
+    if (resetsAt == null) return L10n.translate(context, 'Wait');
     final remaining = resetsAt.difference(DateTime.now());
-    if (remaining.inDays >= 1) return '${remaining.inDays}d wait';
-    if (remaining.inHours >= 1) return '${remaining.inHours}h wait';
-    if (remaining.inMinutes >= 1) return '${remaining.inMinutes}m wait';
-    return 'Wait';
+    final waitLabel = L10n.translate(context, 'wait');
+    if (remaining.inDays >= 1) return '${remaining.inDays}d $waitLabel';
+    if (remaining.inHours >= 1) return '${remaining.inHours}h $waitLabel';
+    if (remaining.inMinutes >= 1) return '${remaining.inMinutes}m $waitLabel';
+    return L10n.translate(context, 'Wait');
   }
 
-  String _badgeTooltip() {
+  String _badgeTooltip(BuildContext context) {
     if (promptRateLimitStatus == null) {
-      return 'Show prompt limits';
+      return L10n.translate(context, 'Show prompt limits');
     }
     final daily = promptRateLimitStatus!.daily;
     final weekly = promptRateLimitStatus!.weekly;
+    final extraPromptBank = promptRateLimitStatus!.extraPromptBank;
+    final extraBankCopy = extraPromptBank.available
+        ? ' ${L10n.translate(context, 'Extra bank')}: ${extraPromptBank.remaining} ${L10n.translate(context, 'left')}, ${L10n.translate(context, 'used first')}.'
+        : '';
     if (promptRateLimitStatus!.canSubmit) {
-      return 'Daily ${daily.remaining}/${daily.limit} left, weekly ${weekly.remaining}/${weekly.limit} left';
+      return '${L10n.translate(context, 'Daily')} ${daily.remaining}/${daily.limit} ${L10n.translate(context, 'left')}, '
+          '${L10n.translate(context, 'Weekly')} ${weekly.remaining}/${weekly.limit} ${L10n.translate(context, 'left')}.$extraBankCopy';
     }
-    return 'Prompt limit reached. Tap to see reset time.';
+    return '${L10n.translate(context, 'Prompt limit reached. Tap to see reset time.')}$extraBankCopy';
   }
 
-  Widget _buildPromptLimitBadge() {
+  Widget _buildPromptLimitBadge(BuildContext context) {
     Widget badge;
     if (promptRateLimitLoading && promptRateLimitStatus == null) {
       badge = Container(
         width: 26,
         height: 26,
         decoration: BoxDecoration(
-          color: const Color.fromRGBO(48, 86, 126, 0.46),
+          color: const Color.fromRGBO(92, 122, 150, 0.38),
           borderRadius: BorderRadius.circular(999),
           border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
         ),
@@ -34890,13 +37879,13 @@ class _ChatBar extends StatelessWidget {
     } else {
       final status = promptRateLimitStatus;
       final backgroundColor = status == null
-          ? const Color.fromRGBO(56, 88, 122, 0.48)
+          ? const Color.fromRGBO(98, 128, 156, 0.38)
           : status.canSubmit
-              ? const Color.fromRGBO(46, 82, 120, 0.52)
-              : const Color.fromRGBO(122, 84, 80, 0.58);
+              ? const Color.fromRGBO(104, 134, 160, 0.40)
+              : const Color.fromRGBO(152, 116, 110, 0.44);
 
       badge = Tooltip(
-        message: _badgeTooltip(),
+        message: _badgeTooltip(context),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: onShowPromptRateLimits,
@@ -34907,10 +37896,10 @@ class _ChatBar extends StatelessWidget {
             decoration: BoxDecoration(
               color: backgroundColor,
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.10),
+                  color: Colors.black.withValues(alpha: 0.07),
                   blurRadius: 6,
                   offset: const Offset(0, 2),
                 ),
@@ -34936,15 +37925,15 @@ class _ChatBar extends StatelessWidget {
                             fontSize: 13,
                           ),
                         ),
-                        const TextSpan(
-                          text: ' Left',
-                          style: TextStyle(fontSize: 11.5),
+                        TextSpan(
+                          text: ' ${L10n.translate(context, 'Left')}',
+                          style: const TextStyle(fontSize: 11.5),
                         ),
                       ],
                     ),
                   )
                 : Text(
-                    _badgeLabel(),
+                    _badgeLabel(context),
                     style: const TextStyle(
                       fontFamily: 'Pretendard',
                       fontSize: 12,
@@ -34973,7 +37962,6 @@ class _ChatBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final barHeight = _AudioEditorScreenState2._kChatBarFixedHeight;
-    final isSubmitBlocked = promptRateLimitStatus?.canSubmit == false;
     final typeHint = L10n.translate(context, 'Type...');
     const collapsedTextStyle = TextStyle(
       fontFamily: 'Pretendard',
@@ -35001,139 +37989,142 @@ class _ChatBar extends StatelessWidget {
     );
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: onTapBar,
+      onTap: expanded ? null : onTapBar,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(24),
-        child: Container(
-          height: barHeight,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              stops: <double>[0.5625, 1.0],
-              colors: <Color>[
-                Color.fromRGBO(25, 94, 160, 0.80),
-                Color.fromRGBO(244, 244, 244, 0.80),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+          child: Container(
+            height: barHeight,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              gradient: _AudioEditorScreenState2._kChatBarGradient,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  blurRadius: 15,
+                  spreadRadius: 8,
+                  offset: Offset.zero,
+                ),
               ],
             ),
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.25),
-                blurRadius: 15,
-                spreadRadius: 8,
-                offset: Offset.zero,
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: !expanded
-                    ? Row(
-                        children: [
-                          _chatIcon(),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              typeHint,
-                              style: collapsedTextStyle,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          _buildPromptLimitBadge(),
-                        ],
-                      )
-                    : Material(
-                        color: Colors.transparent,
-                        child: Row(
+            child: Row(
+              children: [
+                Expanded(
+                  child: !expanded
+                      ? Row(
                           children: [
+                            _chatIcon(),
+                            const SizedBox(width: 10),
                             Expanded(
-                              child: TextField(
-                                controller: controller,
-                                focusNode: focusNode,
-                                readOnly: readOnly,
-                                style: inputTextStyle,
-                                cursorColor: Colors.white,
-                                decoration: InputDecoration(
-                                  hintText: typeHint,
-                                  hintStyle: hintTextStyle,
-                                  border: InputBorder.none,
-                                  isDense: true,
-                                  contentPadding:
-                                      EdgeInsets.symmetric(vertical: 7),
-                                ),
-                                textAlignVertical: TextAlignVertical.center,
-                                textInputAction: TextInputAction.send,
-                                onSubmitted: (_) => onSubmit(),
+                              child: Text(
+                                typeHint,
+                                style: collapsedTextStyle,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             const SizedBox(width: 10),
-                            _buildPromptLimitBadge(),
-                            const SizedBox(width: 10),
-                            SizedBox(
-                              width: 30,
-                              height: 30,
-                              child: Builder(
-                                builder: (context) {
-                                  Widget sendButton = IgnorePointer(
-                                    ignoring: !hasText || isSubmitBlocked,
-                                    child: Opacity(
-                                      opacity: (hasText && !isSubmitBlocked)
-                                          ? 1
-                                          : 0.32,
-                                      child: GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onTap: onSubmit,
-                                        child: Container(
-                                          width: 30,
-                                          height: 30,
-                                          decoration: BoxDecoration(
-                                            gradient: const LinearGradient(
-                                              begin: Alignment.topCenter,
-                                              end: Alignment.bottomCenter,
-                                              colors: <Color>[
-                                                Color.fromRGBO(
-                                                    111, 133, 157, 0.80),
-                                                Color.fromRGBO(
-                                                    72, 92, 113, 0.84),
-                                              ],
+                            _buildPromptLimitBadge(context),
+                          ],
+                        )
+                      : Material(
+                          color: Colors.transparent,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: controller,
+                                  focusNode: focusNode,
+                                  readOnly: readOnly,
+                                  onTap: onTapBar,
+                                  style: inputTextStyle,
+                                  cursorColor: Colors.white,
+                                  decoration: InputDecoration(
+                                    hintText: typeHint,
+                                    hintStyle: hintTextStyle,
+                                    border: InputBorder.none,
+                                    isDense: true,
+                                    contentPadding:
+                                        EdgeInsets.symmetric(vertical: 7),
+                                  ),
+                                  textAlignVertical: TextAlignVertical.center,
+                                  textInputAction: TextInputAction.send,
+                                  onSubmitted: (_) => onSubmit(),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              _buildPromptLimitBadge(context),
+                              const SizedBox(width: 10),
+                              SizedBox(
+                                width: 34,
+                                height: 34,
+                                child: Builder(
+                                  builder: (context) {
+                                    final sendEnabled = hasText;
+                                    Widget sendButton = Opacity(
+                                      opacity: sendEnabled ? 1 : 0.32,
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        shape: const CircleBorder(),
+                                        child: InkResponse(
+                                          onTap: sendEnabled ? onSubmit : null,
+                                          containedInkWell: true,
+                                          customBorder: const CircleBorder(),
+                                          radius: 20,
+                                          splashColor: Colors.white
+                                              .withValues(alpha: 0.16),
+                                          highlightColor: Colors.white
+                                              .withValues(alpha: 0.10),
+                                          child: Container(
+                                            width: 34,
+                                            height: 34,
+                                            decoration: BoxDecoration(
+                                              gradient: const LinearGradient(
+                                                begin: Alignment.topCenter,
+                                                end: Alignment.bottomCenter,
+                                                colors: <Color>[
+                                                  Color.fromRGBO(
+                                                      111, 133, 157, 0.80),
+                                                  Color.fromRGBO(
+                                                      72, 92, 113, 0.84),
+                                                ],
+                                              ),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.24),
+                                              ),
                                             ),
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                              color: Colors.white
-                                                  .withValues(alpha: 0.24),
+                                            child: const Icon(
+                                              Icons.near_me_rounded,
+                                              color: Colors.white,
+                                              size: 18,
                                             ),
-                                          ),
-                                          child: const Icon(
-                                            Icons.near_me_rounded,
-                                            color: Colors.white,
-                                            size: 18,
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  );
-                                  if (tutorialHighlighter != null) {
-                                    sendButton = Halo(
-                                      highlighter: tutorialHighlighter!,
-                                      haloKey:
-                                          const HaloKey('tutorial:chat_send'),
-                                      borderRadius: BorderRadius.circular(999),
-                                      child: sendButton,
                                     );
-                                  }
-                                  return sendButton;
-                                },
+                                    if (tutorialHighlighter != null) {
+                                      sendButton = Halo(
+                                        highlighter: tutorialHighlighter!,
+                                        haloKey:
+                                            const HaloKey('tutorial:chat_send'),
+                                        borderRadius:
+                                            BorderRadius.circular(999),
+                                        child: sendButton,
+                                      );
+                                    }
+                                    return sendButton;
+                                  },
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -35470,6 +38461,25 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
       final drawX = (x - tp.width / 2).clamp(pad, s.width - pad - tp.width);
       tp.paint(c, Offset(drawX, meterBottomY + 0.5));
     }
+
+    final scalePainter = TextPainter(
+      text: TextSpan(
+        text: 'dBFS',
+        style: TextStyle(
+          color: Colors.white.withOpacity(0.42),
+          fontSize: 6.0,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    scalePainter.paint(
+      c,
+      Offset(
+        s.width - pad - scalePainter.width,
+        meterBottomY + 0.5,
+      ),
+    );
 
     if (showClipIndicator && f.clip) {
       c.drawCircle(Offset(s.width - 5, 5), 2.1, clipPaint);

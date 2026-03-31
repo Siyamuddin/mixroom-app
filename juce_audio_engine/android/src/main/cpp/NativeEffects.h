@@ -170,10 +170,10 @@ private:
             std::abs(parameters.lpfFreq - lastLpfFreq) < kFreqEpsilon)
             return;
 
-        *processChain.get<ChainIndex::HPF>().state = *juce::dsp::FilterDesign<float>::
-                                                         designIIRHighpassHighOrderButterworthMethod(parameters.hpfFreq, sampleRate, 2)[0];
-        *processChain.get<ChainIndex::LPF>().state = *juce::dsp::FilterDesign<float>::
-                                                         designIIRLowpassHighOrderButterworthMethod(parameters.lpfFreq, sampleRate, 2)[0];
+        *processChain.get<ChainIndex::HPF>().state =
+            *juce::dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, parameters.hpfFreq);
+        *processChain.get<ChainIndex::LPF>().state =
+            *juce::dsp::IIR::Coefficients<float>::makeLowPass(sampleRate, parameters.lpfFreq);
         lastHpfFreq = parameters.hpfFreq;
         lastLpfFreq = parameters.lpfFreq;
     }
@@ -935,24 +935,25 @@ public:
     {
         const int up = oversampler.getOversamplingFactor();
         sampleRate = sanitiseEffectSampleRate(inputSampleRate) * up;
-        bufferSize = maxBlockSize * up;
-        dryBuffer.setSize(numOutputs, bufferSize);
-        bandBuffer.setSize(numOutputs, bufferSize);
-        juce::dsp::ProcessSpec spec;
-        spec.sampleRate = sampleRate;
-        spec.maximumBlockSize = bufferSize;
-        spec.numChannels = numOutputs;
-        bandFilterChain.prepare(spec);
-        preShapeChain.prepare(spec);
-        dcFilter.prepare(spec);
-        *dcFilter.state = *juce::dsp::FilterDesign<float>::
-                              designIIRHighpassHighOrderButterworthMethod(10.0f, sampleRate, 4)[0];
-        oversampler.reset();
-        oversampler.initProcessing(maxBlockSize);
+        bufferSize = 0;
+        oversamplerInputBlockSize = 0;
+        lastHpfFreq = -1.0f;
+        lastLpfFreq = -1.0f;
+        lastShapeDb = -1000.0f;
+        lastShapeTilt = false;
+        ensureCapacity(maxBlockSize);
     }
 
     void process(const juce::dsp::ProcessContextReplacing<float> &context)
     {
+        const int inputSamples = (int)context.getInputBlock().getNumSamples();
+        if (inputSamples <= 0)
+            return;
+
+        if (juce::jlimit(0.0f, 1.0f, parameters.mix) <= 1.0e-4f)
+            return;
+
+        ensureCapacity(inputSamples);
         auto upsampleBlock = oversampler.processSamplesUp(context.getInputBlock());
         dryBuffer.clear();
         bandBuffer.clear();
@@ -999,23 +1000,84 @@ public:
     }
 
 private:
+    void ensureCapacity(int inputBlockSamples)
+    {
+        const int requiredInputSamples = juce::jmax(1, inputBlockSamples);
+        const int up = oversampler.getOversamplingFactor();
+        const int requiredBufferSamples = requiredInputSamples * up;
+
+        if (requiredBufferSamples <= bufferSize &&
+            requiredInputSamples <= oversamplerInputBlockSize)
+            return;
+
+        bufferSize = juce::jmax(bufferSize, requiredBufferSamples);
+        oversamplerInputBlockSize = juce::jmax(oversamplerInputBlockSize, requiredInputSamples);
+
+        dryBuffer.setSize(numOutputs, bufferSize);
+        bandBuffer.setSize(numOutputs, bufferSize);
+
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = (juce::uint32)bufferSize;
+        spec.numChannels = (juce::uint32)numOutputs;
+        bandFilterChain.prepare(spec);
+        preShapeChain.prepare(spec);
+        dcFilter.prepare(spec);
+        *dcFilter.state = *juce::dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, 10.0f);
+        bandFilterChain.reset();
+        preShapeChain.reset();
+        dcFilter.reset();
+
+        oversampler.reset();
+        oversampler.initProcessing((juce::uint32)oversamplerInputBlockSize);
+
+        lastHpfFreq = -1.0f;
+        lastLpfFreq = -1.0f;
+        lastShapeDb = -1000.0f;
+        lastShapeTilt = false;
+    }
+
     void applyDriveBandFilters(juce::dsp::AudioBlock<float> &block)
     {
-        *bandFilterChain.get<BandFilterIndex::HPF>().state = *juce::dsp::FilterDesign<float>::
-                                                                  designIIRHighpassHighOrderButterworthMethod(parameters.hpfFreq, sampleRate, 2)[0];
-        *bandFilterChain.get<BandFilterIndex::LPF>().state = *juce::dsp::FilterDesign<float>::
-                                                                  designIIRLowpassHighOrderButterworthMethod(parameters.lpfFreq, sampleRate, 2)[0];
+        constexpr float kFreqEpsilon = 0.01f;
+        if (std::abs(parameters.hpfFreq - lastHpfFreq) >= kFreqEpsilon ||
+            std::abs(parameters.lpfFreq - lastLpfFreq) >= kFreqEpsilon)
+        {
+            *bandFilterChain.get<BandFilterIndex::HPF>().state =
+                *juce::dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, parameters.hpfFreq);
+            *bandFilterChain.get<BandFilterIndex::LPF>().state =
+                *juce::dsp::IIR::Coefficients<float>::makeLowPass(sampleRate, parameters.lpfFreq);
+            lastHpfFreq = parameters.hpfFreq;
+            lastLpfFreq = parameters.lpfFreq;
+        }
         juce::dsp::ProcessContextReplacing<float> filterContext(block);
         bandFilterChain.process(filterContext);
     }
 
     void applyPreShape(juce::dsp::AudioBlock<float> &block)
     {
-        *preShapeChain.get<ShapeFilterIndex::LowShelf>().state = *juce::dsp::IIR::Coefficients<float>::
-                                                                     makeLowShelf(sampleRate, 900.0f, 0.4f, juce::Decibels::decibelsToGain(parameters.shape * -1.0f));
-        *preShapeChain.get<ShapeFilterIndex::HighShelf>().state = *juce::dsp::IIR::Coefficients<float>::
-                                                                      makeHighShelf(sampleRate, 900.0f, 0.4f, juce::Decibels::decibelsToGain(parameters.shape));
-        preShapeChain.setBypassed<ShapeFilterIndex::HighShelf>(!parameters.shapeTilt);
+        constexpr float kShapeEpsilon = 0.01f;
+        if (std::abs(parameters.shape - lastShapeDb) >= kShapeEpsilon)
+        {
+            *preShapeChain.get<ShapeFilterIndex::LowShelf>().state =
+                *juce::dsp::IIR::Coefficients<float>::makeLowShelf(
+                    sampleRate,
+                    900.0f,
+                    0.4f,
+                    juce::Decibels::decibelsToGain(parameters.shape * -1.0f));
+            *preShapeChain.get<ShapeFilterIndex::HighShelf>().state =
+                *juce::dsp::IIR::Coefficients<float>::makeHighShelf(
+                    sampleRate,
+                    900.0f,
+                    0.4f,
+                    juce::Decibels::decibelsToGain(parameters.shape));
+            lastShapeDb = parameters.shape;
+        }
+        if (parameters.shapeTilt != lastShapeTilt)
+        {
+            preShapeChain.setBypassed<ShapeFilterIndex::HighShelf>(!parameters.shapeTilt);
+            lastShapeTilt = parameters.shapeTilt;
+        }
         juce::dsp::ProcessContextReplacing<float> filterContext(block);
         preShapeChain.process(filterContext);
     }
@@ -1094,19 +1156,19 @@ private:
         {
         case 0: // inverse absolute value
             angerValue = -0.9f * parameters.anger + 1.0f;
-            sample = sample / (angerValue + abs(sample));
+            sample = sample / (angerValue + std::abs(sample));
             break;
         case 1: // arctan
             angerValue = -2.5f * parameters.anger + 3.0f;
-            sample = (2.0f / juce::float_Pi) * atan((juce::float_Pi / angerValue) * sample);
+            sample = (2.0f / juce::float_Pi) * std::atan((juce::float_Pi / angerValue) * sample);
             break;
         case 2: // erf
             angerValue = -2.5f * parameters.anger + 3.0f;
-            sample = erf(sample * sqrt(juce::float_Pi) / angerValue);
+            sample = std::erf(sample * std::sqrt(juce::float_Pi) / angerValue);
             break;
         case 3: // inverse square root
             angerValue = 4.5f * parameters.anger + 0.5f;
-            sample = sample / sqrt((1.0f / angerValue) + (sample * sample));
+            sample = sample / std::sqrt((1.0f / angerValue) + (sample * sample));
             break;
         }
     }
@@ -1132,6 +1194,7 @@ private:
 
     double sampleRate{0.0};
     int bufferSize{0};
+    int oversamplerInputBlockSize{0};
     DistortionParameters parameters;
     juce::AudioBuffer<float> dryBuffer;
     juce::AudioBuffer<float> bandBuffer;
@@ -1150,7 +1213,11 @@ private:
         HighShelf
     };
     StereoFilter dcFilter;
-    juce::dsp::Oversampling<float> oversampler{2, 2,
+    float lastHpfFreq{-1.0f};
+    float lastLpfFreq{-1.0f};
+    float lastShapeDb{-1000.0f};
+    bool lastShapeTilt{false};
+    juce::dsp::Oversampling<float> oversampler{2, 1,
                                                juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, false, true};
 };
 
@@ -1220,14 +1287,15 @@ public:
     void prepare(double newSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(newSampleRate);
-        bufferSize = maxBlockSize;
-        lowBuffer.setSize(numOutputs, maxBlockSize);
-        highBuffer.setSize(numOutputs, maxBlockSize);
-        compressionBuffer.setSize(numOutputs, maxBlockSize);
-        envelopeBuffer.setSize(numOutputs, maxBlockSize);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        currentBlockSize = bufferSize;
+        lowBuffer.setSize(numOutputs, bufferSize);
+        highBuffer.setSize(numOutputs, bufferSize);
+        compressionBuffer.setSize(numOutputs, bufferSize);
+        envelopeBuffer.setSize(numOutputs, bufferSize);
         juce::dsp::ProcessSpec spec;
         spec.sampleRate = sampleRate;
-        spec.maximumBlockSize = maxBlockSize;
+        spec.maximumBlockSize = static_cast<juce::uint32>(bufferSize);
         spec.numChannels = numOutputs;
         lowChain.prepare(spec);
         highChain.prepare(spec);
@@ -1235,7 +1303,12 @@ public:
 
     void process(juce::AudioBuffer<float> &inputBuffer)
     {
-        currentBlockSize = juce::jmin(inputBuffer.getNumSamples(), lowBuffer.getNumSamples());
+        const int blockSamples = inputBuffer.getNumSamples();
+        if (blockSamples <= 0)
+            return;
+
+        ensureCapacity(blockSamples);
+        currentBlockSize = juce::jmin(blockSamples, bufferSize);
         if (currentBlockSize <= 0)
             return;
         copyToFixedStereoBuffer(inputBuffer, lowBuffer);
@@ -1260,12 +1333,33 @@ private:
         lowChain.setCutoffFrequency(parameters.crossoverFreq);
         highChain.setType(juce::dsp::LinkwitzRileyFilterType::highpass);
         highChain.setCutoffFrequency(parameters.crossoverFreq);
-        juce::dsp::AudioBlock<float> lowBlock(lowBuffer);
-        juce::dsp::AudioBlock<float> highBlock(highBuffer);
+        auto lowBlock = juce::dsp::AudioBlock<float>(lowBuffer)
+                            .getSubBlock(0, static_cast<size_t>(currentBlockSize));
+        auto highBlock = juce::dsp::AudioBlock<float>(highBuffer)
+                             .getSubBlock(0, static_cast<size_t>(currentBlockSize));
         juce::dsp::ProcessContextReplacing<float> lowContext(lowBlock);
         juce::dsp::ProcessContextReplacing<float> highContext(highBlock);
         lowChain.process(lowContext);
         highChain.process(highContext);
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        lowBuffer.setSize(numOutputs, bufferSize);
+        highBuffer.setSize(numOutputs, bufferSize);
+        compressionBuffer.setSize(numOutputs, bufferSize);
+        envelopeBuffer.setSize(numOutputs, bufferSize);
+
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = static_cast<juce::uint32>(bufferSize);
+        spec.numChannels = numOutputs;
+        lowChain.prepare(spec);
+        highChain.prepare(spec);
     }
 
     void applyHisteresis(float &compLevel, float inputSample)
@@ -1554,8 +1648,9 @@ class CompressorModule
 public:
     void prepare(double newSampleRate, int maxBlockSize)
     {
-        sampleRate = newSampleRate;
-        bufferSize = maxBlockSize;
+        sampleRate = sanitiseEffectSampleRate(newSampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        currentBlockSize = bufferSize;
 
         dryBuffer.setSize(numOutputs, bufferSize);
         wetBuffer.setSize(numOutputs, bufferSize);
@@ -1604,6 +1699,15 @@ public:
     {
         juce::ScopedNoDenormals noDenormals;
 
+        const int blockSamples = buffer.getNumSamples();
+        if (blockSamples <= 0)
+            return;
+
+        ensureCapacity(blockSamples);
+        currentBlockSize = juce::jmin(blockSamples, bufferSize);
+        if (currentBlockSize <= 0)
+            return;
+
         copyToFixedStereoBuffer(buffer, dryBuffer);
         copyToFixedStereoBuffer(buffer, wetBuffer);
 
@@ -1627,7 +1731,7 @@ private:
     {
         for (int ch = 0; ch < numOutputs; ++ch)
             sidechainFilters[ch].processSamples(
-                wetBuffer.getWritePointer(ch), bufferSize);
+                wetBuffer.getWritePointer(ch), currentBlockSize);
     }
 
     void applyEnvelope(float &env, float input)
@@ -1638,7 +1742,7 @@ private:
 
     void createEnvelope()
     {
-        for (int i = 0; i < bufferSize; ++i)
+        for (int i = 0; i < currentBlockSize; ++i)
         {
             if (params.stereo)
             {
@@ -1667,7 +1771,7 @@ private:
     {
         gainReduction = {0.0f, 0.0f};
 
-        for (int i = 0; i < bufferSize; ++i)
+        for (int i = 0; i < currentBlockSize; ++i)
         {
             for (int ch = 0; ch < numOutputs; ++ch)
             {
@@ -1699,7 +1803,7 @@ private:
         const int channels =
             juce::jmin(numOutputs, juce::jmin(buffer.getNumChannels(), dryBuffer.getNumChannels()));
         const int samples =
-            juce::jmin(bufferSize, juce::jmin(buffer.getNumSamples(), dryBuffer.getNumSamples()));
+            juce::jmin(currentBlockSize, juce::jmin(buffer.getNumSamples(), dryBuffer.getNumSamples()));
 
         for (int i = 0; i < samples; ++i)
             for (int ch = 0; ch < channels; ++ch)
@@ -1709,8 +1813,20 @@ private:
                         wetBuffer.getSample(ch, i) * wetMix);
     }
 
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
+        envelopeBuffer.setSize(numOutputs, bufferSize);
+    }
+
     double sampleRate = 0.0;
     int bufferSize = 0;
+    int currentBlockSize = 0;
 
     CompressorParameters params;
 
@@ -1807,16 +1923,21 @@ public:
 
     void prepare(double inputSampleRate, int maxBlockSize)
     {
-        sampleRate = inputSampleRate;
-        bufferSize = maxBlockSize;
-        compressionBuffer.setSize(numOutputs, maxBlockSize);
-        envelopeBuffer.setSize(numOutputs, maxBlockSize);
+        sampleRate = sanitiseEffectSampleRate(inputSampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        currentBlockSize = bufferSize;
+        compressionBuffer.setSize(numOutputs, bufferSize);
+        envelopeBuffer.setSize(numOutputs, bufferSize);
     }
 
     void process(juce::AudioBuffer<float> &inputBuffer)
     {
-        currentBlockSize =
-            juce::jmin(inputBuffer.getNumSamples(), compressionBuffer.getNumSamples());
+        const int blockSamples = inputBuffer.getNumSamples();
+        if (blockSamples <= 0)
+            return;
+
+        ensureCapacity(blockSamples);
+        currentBlockSize = juce::jmin(blockSamples, bufferSize);
         if (currentBlockSize <= 0)
             return;
         copyToFixedStereoBuffer(inputBuffer, compressionBuffer);
@@ -1902,6 +2023,16 @@ private:
                 compressionBuffer.getReadPointer(channel),
                 currentBlockSize);
         }
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        compressionBuffer.setSize(numOutputs, bufferSize);
+        envelopeBuffer.setSize(numOutputs, bufferSize);
     }
 
     double sampleRate{0.0};
@@ -2480,15 +2611,14 @@ public:
 
     void prepare(double sampleRate, int maxBlockSize)
     {
-        dryBuffer.setSize(numOutputs, maxBlockSize);
-        wetBuffer.setSize(numOutputs, maxBlockSize);
-
-        juce::dsp::ProcessSpec spec;
-        spec.sampleRate = sampleRate;
-        spec.maximumBlockSize = (juce::uint32)maxBlockSize;
-        spec.numChannels = (juce::uint32)numOutputs;
-        vibrato.prepare(spec);
-        vibrato.reset();
+        this->sampleRate = sanitiseEffectSampleRate(sampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
+        prepareVibrato();
+        lastRateHz = -1.0f;
+        lastDepth = -1.0f;
+        lastCentreDelayMs = -1.0f;
     }
 
     void process(juce::AudioBuffer<float> &buffer)
@@ -2497,16 +2627,27 @@ public:
         if (n <= 0)
             return;
 
+        ensureCapacity(n);
         copyToFixedStereoBuffer(buffer, dryBuffer);
         copyToFixedStereoBuffer(buffer, wetBuffer);
 
-        vibrato.setRate(params.rateHz);
-        vibrato.setDepth(params.depth);
-        vibrato.setCentreDelay(params.centreDelayMs);
-        vibrato.setFeedback(0.0f);
-        vibrato.setMix(1.0f);
+        constexpr float kParamEpsilon = 0.0001f;
+        if (std::abs(params.rateHz - lastRateHz) >= kParamEpsilon ||
+            std::abs(params.depth - lastDepth) >= kParamEpsilon ||
+            std::abs(params.centreDelayMs - lastCentreDelayMs) >= kParamEpsilon)
+        {
+            vibrato.setRate(params.rateHz);
+            vibrato.setDepth(params.depth);
+            vibrato.setCentreDelay(params.centreDelayMs);
+            vibrato.setFeedback(0.0f);
+            vibrato.setMix(1.0f);
+            lastRateHz = params.rateHz;
+            lastDepth = params.depth;
+            lastCentreDelayMs = params.centreDelayMs;
+        }
 
-        juce::dsp::AudioBlock<float> wetBlock(wetBuffer);
+        auto wetBlock = juce::dsp::AudioBlock<float>(wetBuffer)
+                            .getSubBlock(0, (size_t)n);
         juce::dsp::ProcessContextReplacing<float> ctx(wetBlock);
         vibrato.process(ctx);
 
@@ -2525,7 +2666,36 @@ public:
     }
 
 private:
+    void prepareVibrato()
+    {
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = (juce::uint32)bufferSize;
+        spec.numChannels = (juce::uint32)numOutputs;
+        vibrato.prepare(spec);
+        vibrato.reset();
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
+        prepareVibrato();
+        lastRateHz = -1.0f;
+        lastDepth = -1.0f;
+        lastCentreDelayMs = -1.0f;
+    }
+
     VibratoParameters params{4.5f, 0.6f, 7.0f, 1.0f};
+    double sampleRate{44100.0};
+    int bufferSize{0};
+    float lastRateHz{-1.0f};
+    float lastDepth{-1.0f};
+    float lastCentreDelayMs{-1.0f};
     juce::AudioBuffer<float> dryBuffer, wetBuffer;
     juce::dsp::Chorus<float> vibrato;
 };

@@ -4,7 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 
 import 'ai_debug.dart';
-import 'onnx_session_loader.dart';
+import 'magnitude_predictor_flags.dart';
+import 'remote_magnitude_model_manager.dart';
 import '../models/goal_vector.dart';
 import '../models/mixing_result.dart';
 import '../models/project_state.dart';
@@ -99,15 +100,19 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
   final double applyThreshold;
 
   final OnnxRuntime _ort = OnnxRuntime();
+  final RemoteMagnitudeModelManager _remoteModelManager;
   OrtSession? _applySession;
   OrtSession? _magnitudeSession;
+  MagnitudeModelSelection? _activeSelection;
 
   OnnxMixingMagnitudePredictor({
     required this.enabled,
     required this.applyModelAsset,
     required this.magnitudeModelAsset,
     this.applyThreshold = 0.5,
-  });
+    RemoteMagnitudeModelManager? remoteModelManager,
+  }) : _remoteModelManager =
+            remoteModelManager ?? RemoteMagnitudeModelManager();
 
   @override
   bool get isEnabled => enabled;
@@ -119,37 +124,102 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
   }
 
   @override
+  Map<String, dynamic> get observabilityContext {
+    final selection = _activeSelection;
+    if (selection != null) {
+      return selection.toObservabilityContext();
+    }
+    return _remoteModelManager
+        .bundledSelection(
+          applyModelAsset: applyModelAsset,
+          magnitudeModelAsset: magnitudeModelAsset,
+        )
+        .toObservabilityContext();
+  }
+
+  @override
+  Future<void> startBackgroundRefresh() async {
+    if (!enabled) return;
+    if (kMixPreferBundledMagnitudeModels) {
+      aiDebugLog('onnx-mag', 'remote refresh skipped (prefer bundled models)');
+      return;
+    }
+    await _remoteModelManager.refreshInBackground();
+  }
+
+  @override
   Future<void> load() async {
     if (!enabled) return;
+    if (_applySession != null && _magnitudeSession != null) return;
+
+    final bundledSelection = _remoteModelManager.bundledSelection(
+      applyModelAsset: applyModelAsset,
+      magnitudeModelAsset: magnitudeModelAsset,
+    );
+    final preferredSelection = kMixPreferBundledMagnitudeModels
+        ? bundledSelection
+        : await _remoteModelManager.installedSelection() ?? bundledSelection;
+
+    if (kMixPreferBundledMagnitudeModels) {
+      aiDebugLog(
+        'onnx-mag',
+        'prefer bundled enabled -> remote installed model ignored',
+      );
+    }
 
     aiDebugLog(
       'onnx-mag',
-      'loading assets apply="$applyModelAsset" magnitude="$magnitudeModelAsset"',
+      'loading source=${preferredSelection.source} bundle=${preferredSelection.bundleVersion} apply="${preferredSelection.applyModelReference}" magnitude="${preferredSelection.magnitudeModelReference}"',
     );
 
-    try {
-      _applySession = await createCpuSessionFromAsset(
-        runtime: _ort,
-        assetKey: applyModelAsset,
-        scope: 'onnx-mag',
+    var loaded = await _tryLoadSelection(preferredSelection);
+    if (!loaded && preferredSelection.isRemote) {
+      await _remoteModelManager.markActivationFailed(
+        preferredSelection,
+        StateError('remote_model_load_failed'),
       );
-      aiDebugLog('onnx-mag', 'apply model loaded');
+      loaded = await _tryLoadSelection(bundledSelection);
+    }
+    if (!loaded) {
+      _activeSelection = bundledSelection;
+    }
+  }
+
+  Future<bool> _tryLoadSelection(MagnitudeModelSelection selection) async {
+    try {
+      _applySession = selection.isRemote
+          ? await _ort.createSession(selection.applyModelReference)
+          : await _ort.createSessionFromAsset(selection.applyModelReference);
+      aiDebugLog(
+        'onnx-mag',
+        'apply model loaded source=${selection.source} version=${selection.applyModelVersion}',
+      );
     } catch (error) {
       _applySession = null;
       aiDebugLog('onnx-mag', 'apply model load failed error=$error');
+      return false;
     }
 
     try {
-      _magnitudeSession = await createCpuSessionFromAsset(
-        runtime: _ort,
-        assetKey: magnitudeModelAsset,
-        scope: 'onnx-mag',
+      _magnitudeSession = selection.isRemote
+          ? await _ort.createSession(selection.magnitudeModelReference)
+          : await _ort
+              .createSessionFromAsset(selection.magnitudeModelReference);
+      aiDebugLog(
+        'onnx-mag',
+        'magnitude model loaded source=${selection.source} version=${selection.magnitudeModelVersion}',
       );
-      aiDebugLog('onnx-mag', 'magnitude model loaded');
     } catch (error) {
       _magnitudeSession = null;
       aiDebugLog('onnx-mag', 'magnitude model load failed error=$error');
+      try {
+        await _applySession?.close();
+      } catch (_) {}
+      _applySession = null;
+      return false;
     }
+    _activeSelection = selection;
+    return true;
   }
 
   @override
@@ -158,6 +228,7 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
     final magnitudeSession = _magnitudeSession;
     _applySession = null;
     _magnitudeSession = null;
+    _activeSelection = null;
 
     try {
       await applySession?.close();
@@ -165,6 +236,7 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
     try {
       await magnitudeSession?.close();
     } catch (_) {}
+    await _remoteModelManager.dispose();
   }
 
   @override
@@ -213,7 +285,9 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
     }
 
     final refined = <MixAction>[];
-    for (final action in actions) {
+    final debugEntries = <MagnitudeActionDebugEntry>[];
+    for (int actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+      final action = actions[actionIndex];
       final features = <double>[
         ...contextFeatures,
         ..._buildActionFeatures(project, action),
@@ -255,6 +329,19 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
             'onnx-mag',
             'action=${action.type} applyScore=${applyScore.toStringAsFixed(3)} rawScale=${rawMagnitude.toStringAsFixed(3)} decision=drop(strict=false)',
           );
+          debugEntries.add(
+            MagnitudeActionDebugEntry(
+              actionIndex: actionIndex,
+              actionType: action.type,
+              before: action.toJson(),
+              after: null,
+              applyScore: applyScore,
+              rawMagnitude: rawMagnitude,
+              finalScale: null,
+              decision: 'drop',
+              dropped: true,
+            ),
+          );
           continue;
         }
         predictedScale = math.min(predictedScale, 0.25);
@@ -283,12 +370,27 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
           'actionData=${aiDebugShortMap(action.data)}',
         );
       }
-      refined.add(_scaleAction(project, action, predictedScale));
+      final refinedAction = _scaleAction(project, action, predictedScale);
+      refined.add(refinedAction);
+      debugEntries.add(
+        MagnitudeActionDebugEntry(
+          actionIndex: actionIndex,
+          actionType: action.type,
+          before: action.toJson(),
+          after: refinedAction.toJson(),
+          applyScore: applyScore,
+          rawMagnitude: rawMagnitude,
+          finalScale: predictedScale,
+          decision: decision,
+          dropped: false,
+        ),
+      );
     }
 
     return MagnitudeRefineResult(
       actions: refined,
       fallbackUsed: false,
+      debugEntries: debugEntries,
     );
   }
 

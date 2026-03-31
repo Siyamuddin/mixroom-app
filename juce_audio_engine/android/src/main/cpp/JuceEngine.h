@@ -1670,7 +1670,12 @@ private:
     static juce::File resolveFlutterAssetFile(const juce::String &assetPathRaw)
     {
         const juce::String raw = assetPathRaw.trim();
-        if (raw.isNotEmpty())
+        const bool allowDirectPath =
+            juce::File::isAbsolutePath(raw) ||
+            raw.startsWith("./") ||
+            raw.startsWith("../") ||
+            raw.startsWithChar('~');
+        if (raw.isNotEmpty() && allowDirectPath)
         {
             const juce::File direct(raw);
             if (direct.existsAsFile())
@@ -2044,6 +2049,7 @@ private:
 
         SfzOpcodeMap control;
         SfzOpcodeMap global;
+        SfzOpcodeMap master;
         SfzOpcodeMap group;
         SfzOpcodeMap *region = nullptr;
         std::vector<SfzOpcodeMap> rawRegions;
@@ -2061,9 +2067,14 @@ private:
             {
                 const juce::String tag = parsed.blockTag;
                 currentBlock = tag;
+                region = nullptr;
                 if (tag == "group")
                 {
                     group.clear();
+                }
+                else if (tag == "master")
+                {
+                    master.clear();
                 }
                 else if (tag == "region")
                 {
@@ -2071,6 +2082,7 @@ private:
                     region = &rawRegions.back();
                     mergeOpcodeMap(*region, control);
                     mergeOpcodeMap(*region, global);
+                    mergeOpcodeMap(*region, master);
                     mergeOpcodeMap(*region, group);
                 }
             }
@@ -2083,6 +2095,8 @@ private:
                 mergeOpcodeMap(control, opcodes);
             else if (currentBlock == "global")
                 mergeOpcodeMap(global, opcodes);
+            else if (currentBlock == "master")
+                mergeOpcodeMap(master, opcodes);
             else if (currentBlock == "group")
                 mergeOpcodeMap(group, opcodes);
             else if (currentBlock == "region")
@@ -2093,6 +2107,7 @@ private:
                     region = &rawRegions.back();
                     mergeOpcodeMap(*region, control);
                     mergeOpcodeMap(*region, global);
+                    mergeOpcodeMap(*region, master);
                     mergeOpcodeMap(*region, group);
                 }
                 mergeOpcodeMap(*region, opcodes);
@@ -2907,6 +2922,7 @@ public:
     juce::String exportMix(const juce::File &outFile, const ExportOptions &options);
     juce::String exportTrack(int trackIndex, const juce::File &outFile);
     juce::String exportTrack(int trackIndex, const juce::File &outFile, const ExportOptions &options);
+    double getExportProgress() const;
     void seek(int trackIndex, double positionSeconds);
     void bypassPlugin(int trackIndex, int effectIndex, bool shouldBypass);
     bool getPluginBypassState(int trackIndex, int effectIndex);
@@ -3070,7 +3086,9 @@ public:
     void setMetronomeBpm(double);
     void setMetronomeTransportMs(double);
 
-    std::vector<float> decodeAudioMono16k(const juce::File &file);
+    std::vector<float> decodeAudioMono16k(const juce::File &file, int maxOutputSamples = -1);
+    std::vector<std::vector<float>> sampleAudioMono16kWindows(const juce::File &file, int windowOutputSamples, int windowCount);
+    juce::NamedValueSet analyzeAudioPrompt16k(const juce::File &file);
     juce::NamedValueSet analyzeAudioStereo16k(const juce::File &file);
 
     // Device info
@@ -3191,6 +3209,8 @@ private:
     std::atomic<double> blockTransportStartSec{0.0}; // set each audio callback block
     std::atomic<double> hostSampleRateAtomic{44100.0};
     std::atomic<bool> isPlayingAtomic{false};
+    std::atomic<double> exportProgressAtomic{0.0};
+    std::atomic<bool> exportInProgressAtomic{false};
     std::atomic<int> liveMidiInputTargetClip{-1};
     std::mutex liveMidiInputQueueMutex;
     std::vector<LiveMidiInputEvent> liveMidiInputPendingForAudio;

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
 import time
 from typing import Any, Dict
+from uuid import uuid4
 
 try:
     import boto3
@@ -376,6 +378,47 @@ def _error_code_from_payload(payload: Dict[str, Any], status_code: int) -> str:
     return f"status_{status_code}"
 
 
+def _compact_dict(values: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in values.items()
+        if value is not None and (not isinstance(value, str) or value.strip())
+    }
+
+
+def _prompt_trace_id_from_body(body: Dict[str, Any]) -> str:
+    raw = str(body.get("prompt_trace_id") or "").strip()
+    return raw or str(uuid4())
+
+
+def _runtime_config_fingerprint(
+    *,
+    ai_feature: str,
+    provider_name: str,
+    request_body: Dict[str, Any],
+    runtime_config: Dict[str, Any],
+) -> str:
+    system_prompt = str(
+        request_body.get("instructions") or runtime_config.get("system_prompt") or ""
+    )
+    system_prompt_hash = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()[:16]
+    payload = {
+        "feature": ai_feature,
+        "provider": provider_name,
+        "model": str(request_body.get("model") or "").strip(),
+        "temperature": request_body.get("temperature"),
+        "max_output_tokens": request_body.get("max_output_tokens"),
+        "reasoning": request_body.get("reasoning"),
+        "prompt_cache_retention": request_body.get("prompt_cache_retention"),
+        "has_system_prompt_override": runtime_config.get("has_system_prompt_override") is True,
+        "system_prompt_hash": system_prompt_hash,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return digest[:16]
+
+
 def _resolved_tool_name_from_payload(payload: Dict[str, Any]) -> str:
     output = payload.get("output")
     if not isinstance(output, list):
@@ -642,6 +685,7 @@ def _normalize_mix_model_request_arguments(
 
     wants_clipper = _user_requested_clipper(user_text) and "limiter" not in user_text.lower()
     repaired_actions: list[Dict[str, Any]] = []
+    repaired_clipper_intent = False
 
     for index, action in enumerate(actions):
         if not isinstance(action, dict):
@@ -671,6 +715,7 @@ def _normalize_mix_model_request_arguments(
             if wants_clipper and kind == "limiter":
                 normalized_intent["kind"] = "clipper"
                 kind = "clipper"
+                repaired_clipper_intent = True
             if kind not in _ALLOWED_MIX_INTENT_KINDS:
                 if reset_fx and kind in {"", "null", "none"}:
                     continue
@@ -720,6 +765,10 @@ def _normalize_mix_model_request_arguments(
     if not repaired_actions:
         issues.append("mix_model_request had no valid actions.")
         return None, issues
+
+    assistant_message = str(normalized.get("assistant_message") or "").strip().lower()
+    if repaired_clipper_intent and "clip" not in assistant_message:
+        normalized["assistant_message"] = _fallback_assistant_message("mix_model_request")
 
     normalized["actions"] = repaired_actions
     return normalized, issues
@@ -1102,6 +1151,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error="invalid_body_type",
         )
 
+    prompt_trace_id = _prompt_trace_id_from_body(body)
+    request_log_context["prompt_trace_id"] = prompt_trace_id
     project_id = str(body.get("project_id") or "").strip()
     request_log_context["project_id"] = project_id
     analytics_enabled = analytics_enabled_from_body(body)
@@ -1162,6 +1213,38 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     apply_server_output_token_cap(request_body)
     _update_request_log_context_with_cache_request(request_log_context, request_body)
+    runtime_config_fingerprint = _runtime_config_fingerprint(
+        ai_feature=ai_feature,
+        provider_name=provider.name,
+        request_body=request_body,
+        runtime_config=runtime_config,
+    )
+    request_log_context["provider"] = provider.name
+    request_log_context["effective_model"] = str(request_body.get("model") or "").strip()
+    request_log_context["runtime_config_fingerprint"] = runtime_config_fingerprint
+
+    provider_roundtrip_ms = 0
+    openai_api_ms = 0
+    response_normalize_ms = 0
+    provider_response_id = ""
+
+    def _observability_payload() -> dict[str, Any]:
+        return _compact_dict(
+            {
+                "prompt_trace_id": prompt_trace_id,
+                "request_id": request_log_context.get("request_id"),
+                "provider": provider.name,
+                "effective_model": str(request_body.get("model") or "").strip(),
+                "provider_response_id": provider_response_id,
+                "runtime_config_fingerprint": runtime_config_fingerprint,
+                "has_system_prompt_override": runtime_config.get("has_system_prompt_override")
+                is True,
+                "provider_roundtrip_ms": provider_roundtrip_ms or None,
+                "openai_api_ms": openai_api_ms or None,
+                "response_normalize_ms": response_normalize_ms or None,
+                "proxy_handler_ms_total": int((time.perf_counter() - started_at) * 1000),
+            }
+        )
 
     api_key = _load_api_key(provider.name)
     if not api_key:
@@ -1233,14 +1316,21 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         _safe_log_usage_event(
             user_id=user_id,
             project_id=project_id,
+            prompt_trace_id=prompt_trace_id,
+            request_id=str(request_log_context.get("request_id") or ""),
             feature=ai_feature,
             model=str(request_body.get("model") or ""),
+            provider=provider.name,
             prompt_tokens=0,
             completion_tokens=0,
             total_tokens=0,
             credits_charged=0,
             status="rate_limited",
             error_code=reservation.limit_reason or "ai_usage_limit_hit",
+            runtime_config_fingerprint=runtime_config_fingerprint,
+            app_version=str(client_context.get("app_version") or ""),
+            platform=str(client_context.get("platform") or ""),
+            proxy_handler_ms_total=int((time.perf_counter() - started_at) * 1000),
         )
         capture_event(
             "ai_usage_limit_hit",
@@ -1252,6 +1342,10 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     "project_id": project_id,
                     "ai_feature": ai_feature,
                     "model_name": request_body.get("model"),
+                    "prompt_trace_id": prompt_trace_id,
+                    "runtime_config_fingerprint": runtime_config_fingerprint,
+                    "provider": provider.name,
+                    "proxy_handler_ms_total": int((time.perf_counter() - started_at) * 1000),
                     "limit_type": _limit_type(reservation.limit_reason or "daily_credits"),
                     "limit_reason": reservation.limit_reason or "daily_credits",
                     "success": False,
@@ -1262,10 +1356,13 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         return _finalize(
             json_response(
                 429,
-                _limit_error_payload(
+                {
+                    **_limit_error_payload(
                     reservation.limit_reason,
                     prompt_rate_limit=prompt_rate_limit,
-                ),
+                    ),
+                    "observability": _observability_payload(),
+                },
             ),
             error="ai_usage_limit_hit",
         )
@@ -1294,6 +1391,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 "project_id": project_id,
                 "ai_feature": ai_feature,
                 "model_name": request_body.get("model"),
+                "prompt_trace_id": prompt_trace_id,
+                "runtime_config_fingerprint": runtime_config_fingerprint,
+                "has_system_prompt_override": runtime_config.get("has_system_prompt_override")
+                is True,
+                "provider": provider.name,
             },
         ),
         enabled=analytics_enabled,
@@ -1305,6 +1407,14 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             request_body=request_body,
             timeout_seconds=_request_timeout_seconds(),
         )
+        provider_observability = proxy_response.get("observability") or {}
+        if isinstance(provider_observability, dict):
+            provider_roundtrip_ms = int(provider_observability.get("provider_roundtrip_ms") or 0)
+            openai_api_ms = int(provider_observability.get("openai_api_ms") or 0)
+            if provider_roundtrip_ms > 0:
+                request_log_context["provider_roundtrip_ms"] = provider_roundtrip_ms
+            if openai_api_ms > 0:
+                request_log_context["openai_api_ms"] = openai_api_ms
     except Exception as error:
         capture_exception(
             error,
@@ -1322,6 +1432,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 reserved_credits=reserved_credits,
                 reserved_tokens=reserved_tokens,
                 reserved_prompts=1,
+                reserved_quota_prompts=reservation.reserved_quota_prompts,
+                reserved_grant_prompts=reservation.reserved_grant_prompts,
             )
         except Exception as release_error:
             capture_exception(
@@ -1332,14 +1444,22 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         _safe_log_usage_event(
             user_id=user_id,
             project_id=project_id,
+            prompt_trace_id=prompt_trace_id,
+            request_id=str(request_log_context.get("request_id") or ""),
             feature=ai_feature,
             model=str(request_body.get("model") or ""),
+            provider=provider.name,
             prompt_tokens=0,
             completion_tokens=0,
             total_tokens=0,
             credits_charged=0,
             status="failed",
             error_code="upstream_unavailable",
+            runtime_config_fingerprint=runtime_config_fingerprint,
+            app_version=str(client_context.get("app_version") or ""),
+            platform=str(client_context.get("platform") or ""),
+            proxy_handler_ms_total=int((time.perf_counter() - started_at) * 1000),
+            provider_roundtrip_ms=provider_roundtrip_ms,
         )
         capture_event(
             "ai_response_failed",
@@ -1351,6 +1471,14 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     "project_id": project_id,
                     "ai_feature": ai_feature,
                     "model_name": request_body.get("model"),
+                    "prompt_trace_id": prompt_trace_id,
+                    "runtime_config_fingerprint": runtime_config_fingerprint,
+                    "has_system_prompt_override": runtime_config.get("has_system_prompt_override")
+                    is True,
+                    "provider": provider.name,
+                    "provider_roundtrip_ms": provider_roundtrip_ms or None,
+                    "openai_api_ms": openai_api_ms or None,
+                    "proxy_handler_ms_total": int((time.perf_counter() - started_at) * 1000),
                     "error_code": "upstream_unavailable",
                     "success": False,
                 },
@@ -1358,7 +1486,13 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             enabled=analytics_enabled,
         )
         return _finalize(
-            json_response(502, {"error": "LLM upstream unavailable."}),
+            json_response(
+                502,
+                {
+                    "error": "LLM upstream unavailable.",
+                    "observability": _observability_payload(),
+                },
+            ),
             error="llm_upstream_unavailable",
         )
 
@@ -1374,10 +1508,14 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             response_payload = {}
 
     if 200 <= status_code < 300:
+        normalization_started_at = time.perf_counter()
         response_payload, normalization_issues, normalization_refunded = _normalize_success_payload(
             request_body=request_body,
             payload=response_payload,
         )
+        response_normalize_ms = int((time.perf_counter() - normalization_started_at) * 1000)
+        if response_normalize_ms > 0:
+            request_log_context["response_normalize_ms"] = response_normalize_ms
         _update_request_log_context_with_cache_response(
             request_log_context,
             response_payload,
@@ -1399,7 +1537,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             )
         prompt_tokens, completion_tokens, total_tokens = _usage_from_payload(response_payload)
         resolved_tool = _resolved_tool_name_from_payload(response_payload)
+        if resolved_tool:
+            request_log_context["resolved_tool"] = resolved_tool
         provider_response_id = str(response_payload.get("id") or "").strip()
+        if provider_response_id:
+            request_log_context["provider_response_id"] = provider_response_id
         credits_charged = calculate_credit_cost(
             feature=ai_feature,
             promptTokens=prompt_tokens,
@@ -1417,6 +1559,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     reserved_credits=reserved_credits,
                     reserved_tokens=reserved_tokens,
                     reserved_prompts=1,
+                    reserved_quota_prompts=reservation.reserved_quota_prompts,
+                    reserved_grant_prompts=reservation.reserved_grant_prompts,
                 )
             except Exception as error:
                 capture_exception(
@@ -1432,6 +1576,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     reserved_credits=reserved_credits,
                     reserved_tokens=reserved_tokens,
                     reserved_prompts=1,
+                    reserved_quota_prompts=reservation.reserved_quota_prompts,
+                    reserved_grant_prompts=reservation.reserved_grant_prompts,
                     actual_credits=credits_charged,
                     actual_tokens=total_tokens,
                     actual_prompts=1,
@@ -1469,8 +1615,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         _safe_log_usage_event(
             user_id=user_id,
             project_id=project_id,
+            prompt_trace_id=prompt_trace_id,
+            request_id=str(request_log_context.get("request_id") or ""),
             feature=ai_feature,
             model=str(response_payload.get("model") or request_body.get("model") or ""),
+            provider=provider.name,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
@@ -1478,6 +1627,12 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             status="soft_failed" if refunded_due_to_soft_error else "success",
             resolved_tool=resolved_tool,
             provider_response_id=provider_response_id,
+            runtime_config_fingerprint=runtime_config_fingerprint,
+            app_version=str(client_context.get("app_version") or ""),
+            platform=str(client_context.get("platform") or ""),
+            proxy_handler_ms_total=int((time.perf_counter() - started_at) * 1000),
+            provider_roundtrip_ms=provider_roundtrip_ms,
+            response_normalize_ms=response_normalize_ms,
             error_code=(
                 str(soft_error.get("code") or "invalid_structured_output")
                 if refunded_due_to_soft_error
@@ -1494,12 +1649,21 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     "project_id": project_id,
                     "ai_feature": ai_feature,
                     "model_name": response_payload.get("model") or request_body.get("model"),
+                    "prompt_trace_id": prompt_trace_id,
                     "tokens_prompt": prompt_tokens,
                     "tokens_completion": completion_tokens,
                     "tokens_total": total_tokens,
                     "credits_charged": 0 if refunded_due_to_soft_error else credits_charged,
                     "resolved_tool": resolved_tool,
                     "provider_response_id": provider_response_id,
+                    "runtime_config_fingerprint": runtime_config_fingerprint,
+                    "has_system_prompt_override": runtime_config.get("has_system_prompt_override")
+                    is True,
+                    "provider": provider.name,
+                    "provider_roundtrip_ms": provider_roundtrip_ms or None,
+                    "openai_api_ms": openai_api_ms or None,
+                    "response_normalize_ms": response_normalize_ms or None,
+                    "proxy_handler_ms_total": int((time.perf_counter() - started_at) * 1000),
                     "success": not refunded_due_to_soft_error,
                     "soft_error_code": (
                         str(soft_error.get("code") or "invalid_structured_output")
@@ -1528,7 +1692,16 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                         "ai_feature": ai_feature,
                         "model_name": response_payload.get("model")
                         or request_body.get("model"),
+                        "prompt_trace_id": prompt_trace_id,
                         "provider_response_id": provider_response_id,
+                        "runtime_config_fingerprint": runtime_config_fingerprint,
+                        "has_system_prompt_override": runtime_config.get("has_system_prompt_override")
+                        is True,
+                        "provider": provider.name,
+                        "provider_roundtrip_ms": provider_roundtrip_ms or None,
+                        "openai_api_ms": openai_api_ms or None,
+                        "response_normalize_ms": response_normalize_ms or None,
+                        "proxy_handler_ms_total": int((time.perf_counter() - started_at) * 1000),
                         "soft_error_code": soft_error_code,
                         "refunded_prompt_usage": True,
                         "normalization_issues": normalization_issues,
@@ -1559,6 +1732,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     "ai_feature": ai_feature,
                 },
             )
+        response_payload["observability"] = _observability_payload()
+        proxy_response = {
+            **proxy_response,
+            "body": json.dumps(response_payload),
+        }
         return _finalize(proxy_response)
 
     prompt_tokens, completion_tokens, total_tokens = _usage_from_payload(response_payload)
@@ -1566,6 +1744,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         request_log_context,
         response_payload,
     )
+    provider_response_id = str(response_payload.get("id") or "").strip()
+    if provider_response_id:
+        request_log_context["provider_response_id"] = provider_response_id
     error_code = _error_code_from_payload(response_payload, status_code)
     if status_code >= 400:
         print(
@@ -1589,6 +1770,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             reserved_credits=reserved_credits,
             reserved_tokens=reserved_tokens,
             reserved_prompts=1,
+            reserved_quota_prompts=reservation.reserved_quota_prompts,
+            reserved_grant_prompts=reservation.reserved_grant_prompts,
         )
     except Exception as error:
         capture_exception(
@@ -1599,14 +1782,23 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     _safe_log_usage_event(
         user_id=user_id,
         project_id=project_id,
+        prompt_trace_id=prompt_trace_id,
+        request_id=str(request_log_context.get("request_id") or ""),
         feature=ai_feature,
         model=str(request_body.get("model") or ""),
+        provider=provider.name,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
         credits_charged=0,
         status="failed",
         error_code=error_code,
+        provider_response_id=provider_response_id,
+        runtime_config_fingerprint=runtime_config_fingerprint,
+        app_version=str(client_context.get("app_version") or ""),
+        platform=str(client_context.get("platform") or ""),
+        proxy_handler_ms_total=int((time.perf_counter() - started_at) * 1000),
+        provider_roundtrip_ms=provider_roundtrip_ms,
     )
     capture_event(
         "ai_response_failed",
@@ -1618,6 +1810,15 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 "project_id": project_id,
                 "ai_feature": ai_feature,
                 "model_name": request_body.get("model"),
+                "prompt_trace_id": prompt_trace_id,
+                "runtime_config_fingerprint": runtime_config_fingerprint,
+                "has_system_prompt_override": runtime_config.get("has_system_prompt_override")
+                is True,
+                "provider": provider.name,
+                "provider_response_id": provider_response_id,
+                "provider_roundtrip_ms": provider_roundtrip_ms or None,
+                "openai_api_ms": openai_api_ms or None,
+                "proxy_handler_ms_total": int((time.perf_counter() - started_at) * 1000),
                 "error_code": error_code,
                 "success": False,
             },
@@ -1634,4 +1835,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             },
             tags={"service": "llm_proxy"},
         )
+    response_payload["observability"] = _observability_payload()
+    proxy_response = {
+        **proxy_response,
+        "body": json.dumps(response_payload),
+    }
     return _finalize(proxy_response, error=error_code)

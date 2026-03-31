@@ -440,6 +440,18 @@ def apply_user_profile_patch(
             raise ValueError(username_error)
         record["username"] = username
         record["username_lc"] = username
+        if username and "display_name" not in patch:
+            current_display_name = str(record.get("display_name") or "").strip()
+            email_fallback_display_name = _display_name_from_email(
+                str(record.get("email") or "")
+            )
+            if (
+                not current_display_name
+                or current_display_name.lower().startswith("mixroom-user")
+                or current_display_name.lower()
+                == email_fallback_display_name.lower()
+            ):
+                record["display_name"] = username
 
     if "given_name" in patch:
         record["given_name"] = _normalize_optional_name(

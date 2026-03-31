@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
 
@@ -98,8 +99,8 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
       _showDawOptions ? 460.0 : 440.0,
     );
     final maxHeight = math.min(
-      mediaQuery.size.height * 0.88,
-      _showDawOptions ? 780.0 : 700.0,
+      mediaQuery.size.height * (_showDawOptions ? 0.82 : 0.88),
+      _showDawOptions ? 700.0 : 700.0,
     );
     final keyboardInset = math.min(
       mediaQuery.viewInsets.bottom,
@@ -145,10 +146,10 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                               filterQuality: FilterQuality.high,
                             ),
                             const SizedBox(height: 18),
-                            const Text(
-                              'Send feedback or report a bug',
+                            Text(
+                              L10n.translate(context, 'Send Feedback'),
                               textAlign: TextAlign.center,
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontFamily: 'Pretendard',
                                 color: Color(0xFFF4F4F4),
                                 fontSize: 24,

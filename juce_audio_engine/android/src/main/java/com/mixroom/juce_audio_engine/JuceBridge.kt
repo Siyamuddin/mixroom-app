@@ -180,7 +180,13 @@ object JuceBridge {
 
     // Offline analysis
     @JvmStatic external fun decodeAudioMono16kJNI(path: String): DoubleArray
+    @JvmStatic external fun decodeAudioMono16kForAnalysisJNI(path: String, maxOutputSamples: Int): DoubleArray
     @JvmStatic external fun analyzeAudioStereo16kJNI(path: String): HashMap<String, Double>
+    @JvmStatic external fun analyzeAudioForPromptJNI(
+        path: String,
+        windowSamples: Int,
+        windowCount: Int,
+    ): HashMap<String, Any>
 
     // Input device / recording
     @JvmStatic external fun getInputDevicesJNI(): ArrayList<String>
@@ -222,6 +228,7 @@ object JuceBridge {
         wavDithering: Boolean,
         mp3BitrateKbps: Int,
     ): String
+    @JvmStatic external fun getExportProgressJNI(): Double
 
     @JvmStatic external fun exportTrackJNI(
         trackIndex: Int,

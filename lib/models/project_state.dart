@@ -90,6 +90,9 @@ class RowState {
   /// - bassiness (0..~1+)
   final Map<String, double> audioStats;
 
+  /// Additive interpretation layer derived from role probs + audio stats.
+  final RowInterpretationState interpretation;
+
   /// Current mix state
   final double gain0to3;
   final double pan0To1;
@@ -108,6 +111,7 @@ class RowState {
     required this.roleConsistency,
     required this.clipTopRoles,
     required this.audioStats,
+    required this.interpretation,
     required this.gain0to3,
     required this.pan0To1,
     required this.effects,
@@ -123,10 +127,157 @@ class RowState {
         'role_consistency': roleConsistency,
         'clip_top_roles': clipTopRoles,
         'audio_stats': audioStats,
+        'interpretation': interpretation.toJson(),
         'mix': {'gain_0to3': gain0to3, 'pan_0to1': pan0To1},
         'effects': effects.map((e) => e.toJson()).toList(),
         'volumeAutomation': volumeAutomation.map((v) => v.toJson()).toList(),
         'hasAudio': hasAudio,
+      };
+}
+
+class RowInterpretationState {
+  static const RowInterpretationState empty = RowInterpretationState(
+    topRole: 'other',
+    sourceType: 'single_source',
+    transientProfile: 'mixed',
+    spectralProfile: 'mid_focused',
+    stereoProfile: 'moderate',
+    editRisk: 'low',
+    roleEntropy: 0.0,
+    topRoleMargin: 0.0,
+    classificationConfidence: 0.0,
+    clipsRoleDisagreement: 0.0,
+    overlapDensity: 0.0,
+    singleSourceLikely: false,
+    multiRoleLikely: false,
+    compositeStemLikely: false,
+    fullMixLikely: false,
+    loopLikely: false,
+    oneShotLikely: false,
+    fxOrTextureLikely: false,
+    busLikeLikely: false,
+    lowEndAnchorLikely: false,
+    highFreqPresenceLikely: false,
+    percussiveLikely: false,
+    tonalHarmonicLikely: false,
+    noiseLikeLikely: false,
+    wideStereoLikely: false,
+    monoCenterLikely: false,
+    broadbandProcessingRisk: false,
+    stemSpecificProcessingRisk: false,
+    overprocessingRisk: false,
+    alreadyLoudLikely: false,
+    alreadyCompressedLikely: false,
+    notes: <String>[],
+  );
+
+  const RowInterpretationState({
+    required this.topRole,
+    required this.sourceType,
+    required this.transientProfile,
+    required this.spectralProfile,
+    required this.stereoProfile,
+    required this.editRisk,
+    required this.roleEntropy,
+    required this.topRoleMargin,
+    required this.classificationConfidence,
+    required this.clipsRoleDisagreement,
+    required this.overlapDensity,
+    required this.singleSourceLikely,
+    required this.multiRoleLikely,
+    required this.compositeStemLikely,
+    required this.fullMixLikely,
+    required this.loopLikely,
+    required this.oneShotLikely,
+    required this.fxOrTextureLikely,
+    required this.busLikeLikely,
+    required this.lowEndAnchorLikely,
+    required this.highFreqPresenceLikely,
+    required this.percussiveLikely,
+    required this.tonalHarmonicLikely,
+    required this.noiseLikeLikely,
+    required this.wideStereoLikely,
+    required this.monoCenterLikely,
+    required this.broadbandProcessingRisk,
+    required this.stemSpecificProcessingRisk,
+    required this.overprocessingRisk,
+    required this.alreadyLoudLikely,
+    required this.alreadyCompressedLikely,
+    required this.notes,
+  });
+
+  final String topRole;
+  final String sourceType;
+  final String transientProfile;
+  final String spectralProfile;
+  final String stereoProfile;
+  final String editRisk;
+  final double roleEntropy;
+  final double topRoleMargin;
+  final double classificationConfidence;
+  final double clipsRoleDisagreement;
+  final double overlapDensity;
+  final bool singleSourceLikely;
+  final bool multiRoleLikely;
+  final bool compositeStemLikely;
+  final bool fullMixLikely;
+  final bool loopLikely;
+  final bool oneShotLikely;
+  final bool fxOrTextureLikely;
+  final bool busLikeLikely;
+  final bool lowEndAnchorLikely;
+  final bool highFreqPresenceLikely;
+  final bool percussiveLikely;
+  final bool tonalHarmonicLikely;
+  final bool noiseLikeLikely;
+  final bool wideStereoLikely;
+  final bool monoCenterLikely;
+  final bool broadbandProcessingRisk;
+  final bool stemSpecificProcessingRisk;
+  final bool overprocessingRisk;
+  final bool alreadyLoudLikely;
+  final bool alreadyCompressedLikely;
+  final List<String> notes;
+
+  List<String> get flags {
+    final out = <String>[];
+    if (singleSourceLikely) out.add('single_source');
+    if (multiRoleLikely) out.add('multi_role');
+    if (compositeStemLikely) out.add('composite_stem');
+    if (fullMixLikely) out.add('full_mix');
+    if (loopLikely) out.add('loop');
+    if (oneShotLikely) out.add('one_shot');
+    if (fxOrTextureLikely) out.add('fx_texture');
+    if (busLikeLikely) out.add('bus_like');
+    if (lowEndAnchorLikely) out.add('low_end_anchor');
+    if (highFreqPresenceLikely) out.add('high_freq_presence');
+    if (percussiveLikely) out.add('percussive');
+    if (tonalHarmonicLikely) out.add('tonal_harmonic');
+    if (noiseLikeLikely) out.add('noise_like');
+    if (wideStereoLikely) out.add('wide_stereo');
+    if (monoCenterLikely) out.add('mono_center');
+    if (alreadyLoudLikely) out.add('already_loud');
+    if (alreadyCompressedLikely) out.add('already_compressed');
+    if (broadbandProcessingRisk) out.add('broadband_processing_risk');
+    if (stemSpecificProcessingRisk) out.add('stem_specific_processing_risk');
+    if (overprocessingRisk) out.add('overprocessing_risk');
+    return out;
+  }
+
+  Map<String, dynamic> toJson() => {
+        'top_role': topRole,
+        'source_type': sourceType,
+        'transient_profile': transientProfile,
+        'spectral_profile': spectralProfile,
+        'stereo_profile': stereoProfile,
+        'edit_risk': editRisk,
+        'role_entropy': roleEntropy,
+        'top_role_margin': topRoleMargin,
+        'classification_confidence': classificationConfidence,
+        'clips_role_disagreement': clipsRoleDisagreement,
+        'overlap_density': overlapDensity,
+        'flags': flags,
+        'notes': notes,
       };
 }
 

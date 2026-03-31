@@ -123,7 +123,7 @@ class _AuthGateState extends State<AuthGate> {
         });
 
         return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 260),
+          duration: const Duration(milliseconds: 320),
           switchInCurve: Curves.easeOutCubic,
           switchOutCurve: Curves.easeInCubic,
           transitionBuilder: (child, animation) {
@@ -131,9 +131,19 @@ class _AuthGateState extends State<AuthGate> {
               parent: animation,
               curve: Curves.easeOutCubic,
             );
+            final slide = Tween<Offset>(
+              begin: const Offset(0.08, 0),
+              end: Offset.zero,
+            ).animate(curved);
             return FadeTransition(
-              opacity: curved,
-              child: child,
+              opacity: CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOut,
+              ),
+              child: SlideTransition(
+                position: slide,
+                child: child,
+              ),
             );
           },
           child: KeyedSubtree(
@@ -256,6 +266,8 @@ class _RequiredProfileCompletionGate extends StatefulWidget {
 
 class _RequiredProfileCompletionGateState
     extends State<_RequiredProfileCompletionGate> {
+  static final math.Random _usernameRandom = math.Random();
+
   static final RegExp _usernamePattern =
       RegExp(r'^[a-z0-9](?:[a-z0-9_-]{0,28}[a-z0-9])?$');
   static const Set<String> _reservedUsernames = <String>{
@@ -348,6 +360,19 @@ class _RequiredProfileCompletionGateState
         .padRight(4, '0')
         .substring(0, 4);
     return 'mixroom$userIdSuffix';
+  }
+
+  String _generateMixroomUsername() {
+    final suffix =
+        _usernameRandom.nextInt(1000000000).toString().padLeft(9, '0');
+    return 'mixroom-user$suffix';
+  }
+
+  void _generateUsername() {
+    setState(() {
+      _usernameController.text = _generateMixroomUsername();
+      _inlineError = null;
+    });
   }
 
   String? _normalizeSuggestedUsername(String raw) {
@@ -891,10 +916,35 @@ class _RequiredProfileCompletionGateState
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 14),
-                            SizedBox(
-                              height: 15,
-                              child: Text(
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: busy ? null : _generateUsername,
+                                icon: const Icon(Icons.autorenew_rounded,
+                                    size: 16),
+                                label: Text(
+                                  L10n.translate(context, 'Generate username'),
+                                ),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFFF4F4F4),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  textStyle: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (errorText.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              Text(
                                 errorText,
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
@@ -905,8 +955,9 @@ class _RequiredProfileCompletionGateState
                                   fontWeight: FontWeight.w400,
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 20),
+                              const SizedBox(height: 10),
+                            ] else
+                              const SizedBox(height: 8),
                             Text(
                               L10n.translate(
                                 context,

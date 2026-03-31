@@ -736,6 +736,7 @@ ul {
 }
 
 .panel {
+  position: relative;
   margin-top: 18px;
   border-radius: 18px;
   padding: 18px;
@@ -743,6 +744,26 @@ ul {
     linear-gradient(180deg, rgba(21, 29, 39, 0.92), rgba(17, 24, 34, 0.98)),
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
   border-color: rgba(255, 255, 255, 0.06);
+}
+
+.panel.is-section-loading > :not(.section-loading-state) {
+  opacity: 0.48;
+  transition: opacity 160ms ease;
+}
+
+.section-loading-state {
+  position: absolute;
+  inset: 14px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  border: 1px dashed rgba(148, 216, 255, 0.14);
+  border-radius: 16px;
+  background: rgba(10, 15, 23, 0.5);
+  backdrop-filter: blur(6px);
+  text-align: center;
+  pointer-events: none;
 }
 
 .panel-grid > .panel {

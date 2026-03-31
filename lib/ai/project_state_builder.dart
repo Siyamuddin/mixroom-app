@@ -1,3 +1,5 @@
+import 'dart:collection';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -8,11 +10,63 @@ import 'package:juce_audio_engine/juce_audio_engine.dart';
 import '../models/project_state.dart';
 import 'instrument_classifier.dart';
 
+const int _kProjectAnalysisMaxMono16kSamples = 16000 * 30;
+const Map<String, double> _kFallbackPromptRoleProbs = <String, double>{
+  'vocals': 0.17,
+  'drums': 0.17,
+  'bass': 0.17,
+  'guitar': 0.17,
+  'synth': 0.16,
+  'other': 0.16,
+};
+
 class ProjectStateBuilder {
+  static const int _kMaxPersistentNativePromptAnalysisEntries = 256;
+
   final InstrumentClassifier classifier;
   final int maxRows;
+  final LinkedHashMap<String, _CachedNativePromptAnalysis>
+      _persistentNativePromptAnalysis = LinkedHashMap();
 
   ProjectStateBuilder({required this.classifier, this.maxRows = 0});
+
+  String _clipPathSignature(String path) {
+    try {
+      final stat = FileStat.statSync(path);
+      return '$path|${stat.modified.millisecondsSinceEpoch}|${stat.size}';
+    } catch (_) {
+      return '$path|unavailable';
+    }
+  }
+
+  Map<String, dynamic>? _loadPersistentNativePromptAnalysis(
+    String path,
+    String signature,
+  ) {
+    final cached = _persistentNativePromptAnalysis.remove(path);
+    if (cached == null) return null;
+    if (cached.signature != signature) return null;
+    _persistentNativePromptAnalysis[path] = cached;
+    return cached.payload;
+  }
+
+  void _storePersistentNativePromptAnalysis(
+    String path,
+    String signature,
+    Map<String, dynamic> payload,
+  ) {
+    _persistentNativePromptAnalysis.remove(path);
+    _persistentNativePromptAnalysis[path] = _CachedNativePromptAnalysis(
+      signature: signature,
+      payload: payload,
+    );
+    while (_persistentNativePromptAnalysis.length >
+        _kMaxPersistentNativePromptAnalysisEntries) {
+      _persistentNativePromptAnalysis.remove(
+        _persistentNativePromptAnalysis.keys.first,
+      );
+    }
+  }
 
   Future<ProjectState> build({
     required List<AudioTrack> audioTracks,
@@ -105,6 +159,8 @@ class ProjectStateBuilder {
     final roleProbCache = <String, Map<String, double>>{};
     final monoStatsCache = <String, Map<String, double>>{};
     final stereoStatsCache = <String, Map<String, double>>{};
+    final nativePromptAnalysisCache = <String, Map<String, dynamic>>{};
+    final clipPathSignatureCache = <String, String>{};
 
     final rows = <RowState>[];
     for (var row = 0; row < effectiveMaxRows; row++) {
@@ -146,6 +202,7 @@ class ProjectStateBuilder {
             roleConsistency: 0,
             clipTopRoles: const [],
             audioStats: const {},
+            interpretation: RowInterpretationState.empty,
             gain0to3: gain0to3,
             pan0To1: pan,
             effects: effects,
@@ -215,22 +272,102 @@ class ProjectStateBuilder {
         final w = durMs.clamp(
             100.0, 30000.0); // weight by duration, clamp to avoid extremes
 
-        List<double>? pcm = monoPcmCache[clipPath];
-        if (pcm == null) {
-          final pcmRaw = await JuceAudioEngine.decodeAudioMono16k(clipPath);
-          pcm = _toDoubleList(pcmRaw);
-          monoPcmCache[clipPath] = pcm;
-        }
-
         Map<String, double>? probs = roleProbCache[clipPath];
-        if (probs == null) {
-          final Float32List pcmF32 = Float32List.fromList(
-              pcm.map((x) => x.toDouble()).toList(growable: false));
-          probs = await classifier.classifyAudio(pcmF32);
+        Map<String, double>? stereoStats = stereoStatsCache[clipPath];
+        Map<String, double>? stats = monoStatsCache[clipPath];
+        if (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS) {
+          var nativeAnalysis = nativePromptAnalysisCache[clipPath];
+          if (nativeAnalysis == null) {
+            final signature = clipPathSignatureCache.putIfAbsent(
+              clipPath,
+              () => _clipPathSignature(clipPath),
+            );
+            nativeAnalysis =
+                _loadPersistentNativePromptAnalysis(clipPath, signature);
+          }
+          if (nativeAnalysis == null) {
+            try {
+              nativeAnalysis = await JuceAudioEngine.analyzeAudioForPrompt(
+                clipPath,
+              );
+            } catch (error) {
+              debugPrint(
+                'ProjectStateBuilder: analyzeAudioForPrompt failed for $clipPath: $error',
+              );
+              nativeAnalysis = const <String, dynamic>{};
+            }
+            final signature = clipPathSignatureCache.putIfAbsent(
+              clipPath,
+              () => _clipPathSignature(clipPath),
+            );
+            _storePersistentNativePromptAnalysis(
+              clipPath,
+              signature,
+              nativeAnalysis,
+            );
+          }
+          nativePromptAnalysisCache[clipPath] = nativeAnalysis;
+
+          probs = probs ?? _mapToDoubleMap(nativeAnalysis['roleProbs']);
+          if (probs.isEmpty) {
+            probs = _kFallbackPromptRoleProbs;
+          }
           roleProbCache[clipPath] = probs;
+
+          stats = stats ?? _mapToDoubleMap(nativeAnalysis['audioStats']);
+          if (stats.isEmpty) {
+            stats = _analyzePcm16k(const <double>[]);
+          }
+          monoStatsCache[clipPath] = stats;
+          stereoStats = const <String, double>{};
+          stereoStatsCache[clipPath] = stereoStats;
+        } else {
+          List<double>? pcm = monoPcmCache[clipPath];
+          if (pcm == null) {
+            try {
+              final pcmRaw =
+                  await JuceAudioEngine.decodeAudioMono16kForAnalysis(
+                clipPath,
+                maxOutputSamples: _kProjectAnalysisMaxMono16kSamples,
+              );
+              pcm = _toDoubleList(pcmRaw);
+            } catch (error) {
+              debugPrint(
+                'ProjectStateBuilder: decodeAudioMono16kForAnalysis failed for $clipPath: $error',
+              );
+              pcm = const <double>[];
+            }
+            monoPcmCache[clipPath] = pcm;
+          }
+
+          if (probs == null) {
+            final Float32List pcmF32 = Float32List.fromList(
+              pcm.map((x) => x.toDouble()).toList(growable: false),
+            );
+            probs = await classifier.classifyAudio(pcmF32);
+            roleProbCache[clipPath] = probs;
+          }
+
+          if (stereoStats == null) {
+            try {
+              stereoStats =
+                  await JuceAudioEngine.analyzeAudioStereo16k(clipPath);
+            } catch (error) {
+              debugPrint(
+                'ProjectStateBuilder: analyzeAudioStereo16k failed for $clipPath: $error',
+              );
+              stereoStats = const <String, double>{};
+            }
+            stereoStatsCache[clipPath] = stereoStats;
+          }
+
+          if (stats == null) {
+            stats = _analyzePcm16k(pcm, stereoStats: stereoStats);
+            monoStatsCache[clipPath] = stats;
+          }
         }
 
-        // final probs = classifier.classifyAudio(pcm);
         probs.forEach((k, v) {
           rowRoleAccum[k] = (rowRoleAccum[k] ?? 0) + v;
         });
@@ -238,18 +375,6 @@ class ProjectStateBuilder {
         final topRole = _topRoleFromProbs(probs);
         clipTopRoles.add(topRole);
         roleWeightByTop[topRole] = (roleWeightByTop[topRole] ?? 0) + w;
-
-        Map<String, double>? stereoStats = stereoStatsCache[clipPath];
-        if (stereoStats == null) {
-          stereoStats = await JuceAudioEngine.analyzeAudioStereo16k(clipPath);
-          stereoStatsCache[clipPath] = stereoStats;
-        }
-
-        Map<String, double>? stats = monoStatsCache[clipPath];
-        if (stats == null) {
-          stats = _analyzePcm16k(pcm, stereoStats: stereoStats);
-          monoStatsCache[clipPath] = stats;
-        }
         wSum += w;
         for (final e in acc.entries) {
           acc[e.key] = (acc[e.key] ?? 0) + w * (stats[e.key] ?? 0.0);
@@ -295,6 +420,18 @@ class ProjectStateBuilder {
         roleConsistency = 1.0;
       }
 
+      final interpretation = _buildRowInterpretation(
+        rowIndex: row,
+        clips: clipsByRow[row],
+        roleProbs: roleProbs,
+        roleConsistency: roleConsistency,
+        clipTopRoles: clipTopRoles,
+        audioStats: audioStats,
+        approxRms: rms,
+        approxCrest: crest,
+        overlapRatios: overlapRatio[row],
+      );
+
       rows.add(
         RowState(
           rowIndex: row,
@@ -305,6 +442,7 @@ class ProjectStateBuilder {
           roleConsistency: roleConsistency,
           clipTopRoles: clipTopRoles,
           audioStats: audioStats,
+          interpretation: interpretation,
           gain0to3: gain0to3,
           pan0To1: pan,
           effects: effects,
@@ -442,12 +580,252 @@ List<double> _toDoubleList(dynamic pcmRaw) {
   return const <double>[];
 }
 
+Map<String, double> _mapToDoubleMap(dynamic raw) {
+  if (raw is! Map) return const <String, double>{};
+  final out = <String, double>{};
+  for (final entry in raw.entries) {
+    final key = entry.key?.toString();
+    final value = entry.value;
+    if (key == null || value is! num) continue;
+    out[key] = value.toDouble();
+  }
+  return out;
+}
+
 String _topRoleFromProbs(Map<String, double> probs) {
   if (probs.isEmpty) return 'other';
   final entries = probs.entries.toList()
     ..sort((a, b) => b.value.compareTo(a.value));
   final top = entries.first.key;
   return top.isEmpty ? 'other' : top;
+}
+
+RowInterpretationState _buildRowInterpretation({
+  required int rowIndex,
+  required List<ClipState> clips,
+  required Map<String, double> roleProbs,
+  required double roleConsistency,
+  required List<String> clipTopRoles,
+  required Map<String, double> audioStats,
+  required double approxRms,
+  required double approxCrest,
+  required List<double> overlapRatios,
+}) {
+  if (clips.isEmpty) {
+    return RowInterpretationState.empty;
+  }
+
+  final sortedRoles = roleProbs.entries.toList()
+    ..sort((a, b) => b.value.compareTo(a.value));
+  final topRole = sortedRoles.isEmpty ? 'other' : sortedRoles.first.key;
+  final topProb = sortedRoles.isEmpty ? 0.0 : sortedRoles.first.value;
+  final secondProb = sortedRoles.length >= 2 ? sortedRoles[1].value : 0.0;
+  final topRoleMargin = (topProb - secondProb).clamp(0.0, 1.0);
+  final roleEntropy = _roleEntropy(roleProbs).clamp(0.0, 1.0);
+
+  final uniqueTopRoles = clipTopRoles.toSet();
+  final clipsRoleDisagreement =
+      (uniqueTopRoles.length <= 1 || clipTopRoles.isEmpty)
+          ? 0.0
+          : ((uniqueTopRoles.length - 1) / math.max(1, roleProbs.length - 1))
+              .clamp(0.0, 1.0);
+
+  final overlapDensity = overlapRatios.isEmpty
+      ? 0.0
+      : (overlapRatios
+                  .where((v) => v > 0.0)
+                  .fold<double>(0.0, (sum, v) => sum + v.clamp(0.0, 1.0)) /
+              overlapRatios.length)
+          .clamp(0.0, 1.0);
+
+  final centroidHz = _stat(audioStats, 'centroid_hz');
+  final zcr = _stat(audioStats, 'zcr');
+  final hfRms = _stat(audioStats, 'hf_rms');
+  final transientDensity = _stat(audioStats, 'transient_density');
+  final spectralFlatness = _stat(audioStats, 'spectral_flatness');
+  final spectralBandwidthHz = _stat(audioStats, 'spectral_bandwidth_hz');
+  final onsetRateHz = _stat(audioStats, 'onset_rate_hz');
+  final bassiness = _stat(audioStats, 'bassiness');
+  final sibilance = _stat(audioStats, 'sibilance');
+  final sideRatio = _stat(audioStats, 'side_ratio');
+  final phaseCorr = _stat(audioStats, 'phase_corr', fallback: 1.0);
+  final stereoImbalance = _stat(audioStats, 'stereo_imbalance');
+  final lra = _stat(audioStats, 'lra_est');
+  final truePeakDbfs = _stat(audioStats, 'true_peak_dbfs', fallback: -120.0);
+  final integratedLufs =
+      _stat(audioStats, 'integrated_lufs_est', fallback: -120.0);
+  final stRmsStd = _stat(audioStats, 'st_rms_std');
+  final silenceRatio = _stat(audioStats, 'silence_ratio');
+  final activityRatio = _stat(audioStats, 'activity_ratio');
+  final low = _stat(audioStats, 'low');
+  final mid = _stat(audioStats, 'mid');
+  final high = _stat(audioStats, 'high');
+
+  final coverageMs = _totalClipIntervalMs(_mergeClipIntervals(clips));
+  final shortestClipMs = clips.fold<double>(
+    double.infinity,
+    (minValue, clip) =>
+        math.min(minValue, (clip.endMs - clip.startMs).clamp(0.0, 1e12)),
+  );
+  final longestClipMs = clips.fold<double>(
+    0.0,
+    (maxValue, clip) =>
+        math.max(maxValue, (clip.endMs - clip.startMs).clamp(0.0, 1e12)),
+  );
+  final clipCount = clips.length;
+  final uniqueFileCount =
+      clips.map((clip) => (clip.fileName ?? '').trim()).toSet().length;
+  final repeatedMaterialLikely =
+      clipCount >= 2 && uniqueFileCount < clipCount && longestClipMs <= 20000.0;
+
+  final lowHeavy = low > (mid + high) * 0.85 || bassiness >= 1.15;
+  final bright = centroidHz >= 3600 || hfRms >= 0.58 || sibilance >= 0.42;
+  final broadband =
+      spectralBandwidthHz >= 2200 || (low > 0 && mid > 0 && high > 0);
+  final percussiveLikely = transientDensity >= 0.34 || onsetRateHz >= 3.0;
+  final sustainHeavyLikely =
+      transientDensity <= 0.12 && stRmsStd <= 0.14 && silenceRatio <= 0.18;
+  final tonalHarmonicLikely = spectralFlatness <= 0.22 && zcr <= 0.18;
+  final noiseLikeLikely = spectralFlatness >= 0.45 && zcr >= 0.16;
+  final highFreqPresenceLikely = bright;
+  final lowEndAnchorLikely =
+      (roleProbs['bass'] ?? 0.0) >= 0.28 || lowHeavy || centroidHz <= 650;
+  final wideStereoLikely =
+      sideRatio >= 0.20 || (phaseCorr <= 0.35 && stereoImbalance <= 0.55);
+  final monoCenterLikely =
+      sideRatio <= 0.08 && stereoImbalance <= 0.15 && phaseCorr >= 0.65;
+
+  final multiRoleLikely = roleEntropy >= 0.72 ||
+      topRoleMargin <= 0.16 ||
+      roleConsistency <= 0.58 ||
+      clipsRoleDisagreement >= 0.35;
+  final singleSourceLikely = roleEntropy <= 0.45 &&
+      topRoleMargin >= 0.28 &&
+      roleConsistency >= 0.72 &&
+      clipsRoleDisagreement <= 0.20;
+  final fullMixLikely = multiRoleLikely &&
+      broadband &&
+      activityRatio >= 0.72 &&
+      wideStereoLikely &&
+      (clipCount <= 2 || coverageMs >= 15000.0);
+  final compositeStemLikely =
+      multiRoleLikely && !fullMixLikely && roleConsistency <= 0.74;
+  final oneShotLikely =
+      coverageMs <= 2500.0 && percussiveLikely && silenceRatio >= 0.12;
+  final loopLikely = !oneShotLikely &&
+      coverageMs >= 350.0 &&
+      coverageMs <= 18000.0 &&
+      (repeatedMaterialLikely || (clipCount >= 3 && shortestClipMs <= 16000.0));
+  final fxOrTextureLikely = (roleProbs['other'] ?? 0.0) >= 0.32 &&
+      spectralFlatness >= 0.34 &&
+      transientDensity <= 0.24 &&
+      !lowEndAnchorLikely;
+  final busLikeLikely =
+      fullMixLikely && overlapDensity >= 0.24 && clipCount >= 2;
+
+  final alreadyLoudLikely =
+      integratedLufs >= -14.0 || truePeakDbfs >= -1.5 || approxRms >= 0.33;
+  final alreadyCompressedLikely =
+      lra <= 4.0 && stRmsStd <= 0.09 && approxCrest <= 1.8;
+  final broadbandProcessingRisk = fullMixLikely || busLikeLikely;
+  final stemSpecificProcessingRisk =
+      compositeStemLikely || (multiRoleLikely && !singleSourceLikely);
+  final overprocessingRisk =
+      alreadyLoudLikely || alreadyCompressedLikely || broadbandProcessingRisk;
+
+  final sourceType = () {
+    if (busLikeLikely) return 'bus_like';
+    if (fullMixLikely) return 'full_mix';
+    if (fxOrTextureLikely) return 'fx_texture';
+    if (oneShotLikely) return 'one_shot';
+    if (loopLikely) return 'loop';
+    if (compositeStemLikely) return 'composite_stem';
+    if (multiRoleLikely) return 'multi_role';
+    return 'single_source';
+  }();
+
+  final transientProfile = () {
+    if (oneShotLikely || percussiveLikely) return 'percussive';
+    if (sustainHeavyLikely) return 'sustained';
+    return 'mixed';
+  }();
+
+  final spectralProfile = () {
+    if (noiseLikeLikely) return 'noise_like';
+    if (broadband) return 'broadband';
+    if (lowHeavy) return 'low_heavy';
+    if (bright) return 'bright';
+    return 'mid_focused';
+  }();
+
+  final stereoProfile = () {
+    if (wideStereoLikely && phaseCorr < 0.1) return 'wide_phasey';
+    if (wideStereoLikely) return 'wide';
+    if (monoCenterLikely) return 'monoish';
+    return 'moderate';
+  }();
+
+  final editRisk = () {
+    if (broadbandProcessingRisk || stemSpecificProcessingRisk) return 'high';
+    if (overprocessingRisk || loopLikely || oneShotLikely) return 'medium';
+    return 'low';
+  }();
+
+  final classificationConfidence = ((1.0 - roleEntropy) * 0.45 +
+          topRoleMargin * 0.35 +
+          roleConsistency.clamp(0.0, 1.0) * 0.20)
+      .clamp(0.0, 1.0);
+
+  final notes = <String>[
+    if (fullMixLikely)
+      'Looks like a full mix or premaster rather than a clean stem.',
+    if (compositeStemLikely) 'Likely combines multiple roles in one row.',
+    if (loopLikely) 'Likely short repeating loop material.',
+    if (oneShotLikely) 'Likely one-shot or hit rather than a continuous stem.',
+    if (fxOrTextureLikely) 'Likely FX, ambience, or texture material.',
+    if (busLikeLikely) 'Behaves like a grouped or bus-like layer.',
+    if (alreadyLoudLikely || alreadyCompressedLikely)
+      'Already loud/controlled; avoid aggressive additional processing.',
+    if (wideStereoLikely && !monoCenterLikely)
+      'Stereo width is part of the sound.',
+    if (singleSourceLikely && classificationConfidence >= 0.7)
+      'Role classification looks relatively clean and stable.',
+  ];
+
+  return RowInterpretationState(
+    topRole: topRole,
+    sourceType: sourceType,
+    transientProfile: transientProfile,
+    spectralProfile: spectralProfile,
+    stereoProfile: stereoProfile,
+    editRisk: editRisk,
+    roleEntropy: roleEntropy,
+    topRoleMargin: topRoleMargin,
+    classificationConfidence: classificationConfidence,
+    clipsRoleDisagreement: clipsRoleDisagreement,
+    overlapDensity: overlapDensity,
+    singleSourceLikely: singleSourceLikely,
+    multiRoleLikely: multiRoleLikely,
+    compositeStemLikely: compositeStemLikely,
+    fullMixLikely: fullMixLikely,
+    loopLikely: loopLikely,
+    oneShotLikely: oneShotLikely,
+    fxOrTextureLikely: fxOrTextureLikely,
+    busLikeLikely: busLikeLikely,
+    lowEndAnchorLikely: lowEndAnchorLikely,
+    highFreqPresenceLikely: highFreqPresenceLikely,
+    percussiveLikely: percussiveLikely,
+    tonalHarmonicLikely: tonalHarmonicLikely,
+    noiseLikeLikely: noiseLikeLikely,
+    wideStereoLikely: wideStereoLikely,
+    monoCenterLikely: monoCenterLikely,
+    broadbandProcessingRisk: broadbandProcessingRisk,
+    stemSpecificProcessingRisk: stemSpecificProcessingRisk,
+    overprocessingRisk: overprocessingRisk,
+    alreadyLoudLikely: alreadyLoudLikely,
+    alreadyCompressedLikely: alreadyCompressedLikely,
+    notes: notes,
+  );
 }
 
 Map<String, double> _normalize(Map<String, double> m) {
@@ -459,6 +837,66 @@ Map<String, double> _normalize(Map<String, double> m) {
     return m.map((k, _) => MapEntry(k, v));
   }
   return m.map((k, v) => MapEntry(k, v / sum));
+}
+
+double _roleEntropy(Map<String, double> roleProbs) {
+  if (roleProbs.isEmpty) return 0.0;
+  final values =
+      roleProbs.values.where((v) => v > 1e-9).toList(growable: false);
+  if (values.isEmpty) return 0.0;
+  final logDenom = math.log(values.length);
+  if (logDenom <= 1e-9) return 0.0;
+  var entropy = 0.0;
+  for (final p in values) {
+    entropy += -p * math.log(p);
+  }
+  return (entropy / logDenom).clamp(0.0, 1.0);
+}
+
+List<(double, double)> _mergeClipIntervals(List<ClipState> clips) {
+  final intervals = clips
+      .map((c) => (c.startMs, c.endMs))
+      .where((iv) => iv.$2 > iv.$1)
+      .toList()
+    ..sort((a, b) => a.$1.compareTo(b.$1));
+
+  if (intervals.isEmpty) return const [];
+
+  final out = <(double, double)>[];
+  var curS = intervals.first.$1;
+  var curE = intervals.first.$2;
+
+  for (int i = 1; i < intervals.length; i++) {
+    final s = intervals[i].$1;
+    final e = intervals[i].$2;
+    if (s <= curE) {
+      if (e > curE) curE = e;
+    } else {
+      out.add((curS, curE));
+      curS = s;
+      curE = e;
+    }
+  }
+  out.add((curS, curE));
+  return out;
+}
+
+double _totalClipIntervalMs(List<(double, double)> intervals) {
+  var sum = 0.0;
+  for (final iv in intervals) {
+    sum += (iv.$2 - iv.$1).clamp(0.0, double.infinity);
+  }
+  return sum;
+}
+
+double _stat(
+  Map<String, double> stats,
+  String key, {
+  double fallback = 0.0,
+}) {
+  final value = stats[key];
+  if (value == null || !value.isFinite) return fallback;
+  return value;
 }
 
 /// Lightweight static analysis using Goertzel magnitudes at a few bands.
@@ -961,4 +1399,14 @@ double _percentile(List<double> sorted, double q) {
   if (lo == hi) return sorted[lo];
   final t = pos - lo;
   return sorted[lo] * (1.0 - t) + sorted[hi] * t;
+}
+
+class _CachedNativePromptAnalysis {
+  final String signature;
+  final Map<String, dynamic> payload;
+
+  const _CachedNativePromptAnalysis({
+    required this.signature,
+    required this.payload,
+  });
 }

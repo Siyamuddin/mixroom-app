@@ -19,6 +19,8 @@ final newDir = await ProjectBundleImport.importMixroomBundle(
 
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive_io.dart';
@@ -29,20 +31,41 @@ class ProjectMeta {
   final String name;
   final DateTime createdAt;
   final DateTime lastOpenedAt;
+  final String? bundledDemoAssetPath;
 
   ProjectMeta({
     required this.dir,
     required this.name,
     required this.createdAt,
     required this.lastOpenedAt,
+    this.bundledDemoAssetPath,
+  });
+}
+
+class BundledDemoProjectAsset {
+  final String assetPath;
+  final String name;
+
+  const BundledDemoProjectAsset({
+    required this.assetPath,
+    required this.name,
   });
 }
 
 class ProjectManager {
   static const int maxProjects = 10000;
+  static const String _bundledDemoAssetPrefix = 'assets/demo_projects/';
+  static const String _bundledDemoDismissedStateFileName =
+      '.bundled_demo_dismissed_v1.json';
+  static final ValueNotifier<int> projectLibraryRevision =
+      ValueNotifier<int>(0);
 
   static String _nextProjectId() =>
       DateTime.now().microsecondsSinceEpoch.toString();
+
+  static void notifyProjectLibraryChanged() {
+    projectLibraryRevision.value += 1;
+  }
 
   static Future<Directory> _rootDir() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -91,6 +114,8 @@ class ProjectManager {
       if (!await f.exists()) continue;
       try {
         final json = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+        final bundledDemoAssetPath =
+            (json['bundledDemoAssetPath'] as String?)?.trim();
         metas.add(
           ProjectMeta(
             dir: d,
@@ -99,6 +124,9 @@ class ProjectManager {
                 (json["createdAt"] ?? 0) as int),
             lastOpenedAt: DateTime.fromMillisecondsSinceEpoch(
                 (json["lastOpenedAt"] ?? 0) as int),
+            bundledDemoAssetPath: bundledDemoAssetPath?.isEmpty == true
+                ? null
+                : bundledDemoAssetPath,
           ),
         );
       } catch (_) {}
@@ -292,6 +320,146 @@ class ProjectManager {
   }
 
   static Directory audioDir(Directory dir) => _audioDir(dir);
+
+  static bool isBundledDemoAssetPath(String assetPath) {
+    return assetPath.startsWith(_bundledDemoAssetPrefix) &&
+        assetPath.toLowerCase().endsWith('.mixroom');
+  }
+
+  static Future<List<BundledDemoProjectAsset>>
+      listBundledDemoProjectAssets() async {
+    final paths = await _discoverBundledDemoAssetPaths();
+    return paths
+        .map(
+          (path) => BundledDemoProjectAsset(
+            assetPath: path,
+            name: p.basenameWithoutExtension(path),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  static Future<Set<String>> listDismissedBundledDemoAssetPaths() async {
+    final stateFile = await _bundledDemoDismissedStateFile();
+    return _readDismissedBundledDemoAssetPaths(stateFile);
+  }
+
+  static Future<void> dismissBundledDemoAsset(String assetPath) async {
+    await dismissBundledDemoAssets(<String>[assetPath]);
+  }
+
+  static Future<void> dismissBundledDemoAssets(
+      Iterable<String> assetPaths) async {
+    final normalized = assetPaths
+        .map((path) => path.trim())
+        .where((path) => isBundledDemoAssetPath(path))
+        .toSet();
+    if (normalized.isEmpty) return;
+
+    final stateFile = await _bundledDemoDismissedStateFile();
+    final dismissed = await _readDismissedBundledDemoAssetPaths(stateFile);
+    dismissed.addAll(normalized);
+
+    await stateFile.writeAsString(
+      jsonEncode(<String, dynamic>{
+        'dismissedAssets': dismissed.toList()..sort(),
+        'updatedAt': DateTime.now().toIso8601String(),
+      }),
+    );
+  }
+
+  static Future<Directory> importBundledDemoProjectAsset({
+    required String assetPath,
+    ImportAudioStrategy audioStrategy = ImportAudioStrategy.convertFlacToWav48k,
+  }) async {
+    if (!isBundledDemoAssetPath(assetPath)) {
+      throw FormatException('Unsupported bundled demo asset path: $assetPath');
+    }
+
+    final data = await rootBundle.load(assetPath);
+    final bytes = data.buffer.asUint8List(
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
+
+    final tempDir = await getTemporaryDirectory();
+    final outName =
+        '${DateTime.now().microsecondsSinceEpoch}_${p.basename(assetPath)}';
+    final bundleFile = File(p.join(tempDir.path, outName));
+    await bundleFile.writeAsBytes(bytes, flush: true);
+
+    try {
+      final importedDir = await ProjectBundleImport.importMixroomBundle(
+        bundleFile: bundleFile,
+        audioStrategy: audioStrategy,
+      );
+      final json = await readProjectJson(importedDir);
+      json['bundledDemoAssetPath'] = assetPath;
+      await writeProjectJson(importedDir, json);
+      return importedDir;
+    } finally {
+      if (await bundleFile.exists()) {
+        await bundleFile.delete();
+      }
+    }
+  }
+
+  static Future<List<String>> _discoverBundledDemoAssetPaths() async {
+    final discovered = <String>{};
+
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      discovered.addAll(
+        manifest.listAssets().where(
+              (path) =>
+                  path.startsWith(_bundledDemoAssetPrefix) &&
+                  path.toLowerCase().endsWith('.mixroom'),
+            ),
+      );
+    } catch (_) {
+      // Continue with legacy fallback below.
+    }
+
+    if (discovered.isEmpty) {
+      try {
+        final manifestRaw = await rootBundle.loadString('AssetManifest.json');
+        final decoded = jsonDecode(manifestRaw);
+        if (decoded is Map) {
+          discovered.addAll(
+            decoded.keys.whereType<String>().where(
+                  (path) =>
+                      path.startsWith(_bundledDemoAssetPrefix) &&
+                      path.toLowerCase().endsWith('.mixroom'),
+                ),
+          );
+        }
+      } catch (_) {
+        // Ignore and return empty when no manifest format is available.
+      }
+    }
+
+    final sorted = discovered.toList()..sort();
+    return sorted;
+  }
+
+  static Future<File> _bundledDemoDismissedStateFile() async {
+    final root = await _rootDir();
+    return File(p.join(root.path, _bundledDemoDismissedStateFileName));
+  }
+
+  static Future<Set<String>> _readDismissedBundledDemoAssetPaths(
+      File stateFile) async {
+    if (!await stateFile.exists()) return <String>{};
+    try {
+      final decoded = jsonDecode(await stateFile.readAsString());
+      if (decoded is! Map<String, dynamic>) return <String>{};
+      final raw = decoded['dismissedAssets'];
+      if (raw is! List) return <String>{};
+      return raw.whereType<String>().toSet();
+    } catch (_) {
+      return <String>{};
+    }
+  }
 }
 
 enum BundleAudioMode {
@@ -416,10 +584,10 @@ class ProjectBundle {
     final outFile = File(bundlePath);
     await outFile.writeAsBytes(zipData, flush: true);
 
-    // Optional sanity check
+    // Sanity check: a successfully written bundle should never be empty.
     final len = await outFile.length();
-    if (len < 1024) {
-      throw Exception("Export resulted in tiny file ($len bytes)");
+    if (len <= 0) {
+      throw Exception("Export resulted in empty file");
     }
 
     // Cleanup staging

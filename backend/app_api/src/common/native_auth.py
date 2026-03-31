@@ -176,7 +176,7 @@ def register_email_account(
         _send_verification_email(
             email=safe_email,
             code=verification_code,
-            display_name=display_name or given_name or safe_email.split("@")[0],
+            display_name=display_name or given_name,
             locale=locale,
         )
     except Exception:
@@ -1481,12 +1481,11 @@ def _restore_signup_bootstrap_state(
 
 
 def _send_verification_email(*, email: str, code: str, display_name: str, locale: str = "") -> None:
-    safe_name = display_name.strip() or "Mixroom User"
     email_locale = _auth_email_locale(locale)
     if email_locale == "ko":
         subject = "Mixroom 계정 이메일 인증"
         text_body = (
-            f"안녕하세요 {safe_name}님,\n\n"
+            "안녕하세요,\n\n"
             f"Mixroom 인증 코드는 {code}입니다.\n"
             "이 코드는 20분 후 만료됩니다.\n\n"
             "요청하지 않았다면 이 메일을 무시해 주세요."
@@ -1494,7 +1493,7 @@ def _send_verification_email(*, email: str, code: str, display_name: str, locale
     else:
         subject = "Verify your Mixroom account"
         text_body = (
-            f"Hello {safe_name},\n\n"
+            "Hello,\n\n"
             f"Your Mixroom verification code is {code}.\n"
             "It expires in 20 minutes.\n\n"
             "If you did not request this, you can ignore this email."
@@ -1522,12 +1521,11 @@ def _send_verification_email(*, email: str, code: str, display_name: str, locale
 
 
 def _send_password_reset_email(*, email: str, code: str, display_name: str, locale: str = "") -> None:
-    safe_name = display_name.strip() or "Mixroom User"
     email_locale = _auth_email_locale(locale)
     if email_locale == "ko":
         subject = "Mixroom 비밀번호 재설정"
         text_body = (
-            f"안녕하세요 {safe_name}님,\n\n"
+            "안녕하세요,\n\n"
             f"Mixroom 비밀번호 재설정 코드는 {code}입니다.\n"
             "이 코드는 20분 후 만료됩니다.\n\n"
             "요청하지 않았다면 이 메일을 무시해 주세요."
@@ -1535,7 +1533,7 @@ def _send_password_reset_email(*, email: str, code: str, display_name: str, loca
     else:
         subject = "Reset your Mixroom password"
         text_body = (
-            f"Hello {safe_name},\n\n"
+            "Hello,\n\n"
             f"Your Mixroom password reset code is {code}.\n"
             "It expires in 20 minutes.\n\n"
             "If you did not request this, you can ignore this email."

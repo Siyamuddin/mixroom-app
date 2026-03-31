@@ -1748,10 +1748,28 @@ juce::String JuceEngine::exportMix(const juce::File &outFile)
     return exportMix(outFile, ExportOptions{});
 }
 
+double JuceEngine::getExportProgress() const
+{
+    const auto value = exportProgressAtomic.load(std::memory_order_relaxed);
+    return juce::jlimit(0.0, 1.0, value);
+}
+
 juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOptions &rawOptions)
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     const auto options = sanitiseExportOptions(rawOptions);
+    exportInProgressAtomic.store(true, std::memory_order_relaxed);
+    exportProgressAtomic.store(0.0, std::memory_order_relaxed);
+
+    struct ExportProgressGuard
+    {
+        explicit ExportProgressGuard(std::atomic<bool> &activeRef) : active(activeRef) {}
+        ~ExportProgressGuard()
+        {
+            active.store(false, std::memory_order_relaxed);
+        }
+        std::atomic<bool> &active;
+    } exportProgressGuard(exportInProgressAtomic);
 
     if (options.format == "mp3")
     {
@@ -1807,6 +1825,7 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
     const int64 totalSamples = (int64)std::ceil((endTime + tailSeconds) * sr);
     if (totalSamples <= 0)
     {
+        exportProgressAtomic.store(1.0, std::memory_order_relaxed);
         graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
                             liveBlockSize > 0 ? liveBlockSize : 512);
         hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
@@ -1842,6 +1861,9 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
             transportSec.store(transportSec.load(std::memory_order_relaxed) + (double)toDo / sr,
                                std::memory_order_relaxed);
             processed += toDo;
+            exportProgressAtomic.store(
+                juce::jlimit(0.0, 1.0, (double)processed / (double)totalSamples),
+                std::memory_order_relaxed);
         }
     };
     runOfflinePass();
@@ -1852,6 +1874,7 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
     hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
     transportSec.store(previousTransport, std::memory_order_relaxed);
     isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
+    exportProgressAtomic.store(1.0, std::memory_order_relaxed);
     return outFile.getFullPathName();
 }
 
@@ -1867,6 +1890,18 @@ juce::String JuceEngine::exportTrack(int trackIndex,
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     const auto options = sanitiseExportOptions(rawOptions);
+    exportInProgressAtomic.store(true, std::memory_order_relaxed);
+    exportProgressAtomic.store(0.0, std::memory_order_relaxed);
+
+    struct ExportProgressGuard
+    {
+        explicit ExportProgressGuard(std::atomic<bool> &activeRef) : active(activeRef) {}
+        ~ExportProgressGuard()
+        {
+            active.store(false, std::memory_order_relaxed);
+        }
+        std::atomic<bool> &active;
+    } exportProgressGuard(exportInProgressAtomic);
 
     if (options.format == "mp3")
     {
@@ -1974,6 +2009,7 @@ juce::String JuceEngine::exportTrack(int trackIndex,
         (int64)std::ceil((targetClip.lengthSec + tailSeconds) * sr);
     if (totalSamples <= 0)
     {
+        exportProgressAtomic.store(1.0, std::memory_order_relaxed);
         restoreClips();
         graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
                             liveBlockSize > 0 ? liveBlockSize : 512);
@@ -2011,6 +2047,9 @@ juce::String JuceEngine::exportTrack(int trackIndex,
             transportSec.load(std::memory_order_relaxed) + (double)toDo / sr,
             std::memory_order_relaxed);
         processed += toDo;
+        exportProgressAtomic.store(
+            juce::jlimit(0.0, 1.0, (double)processed / (double)totalSamples),
+            std::memory_order_relaxed);
     }
 
     restoreClips();
@@ -2019,6 +2058,7 @@ juce::String JuceEngine::exportTrack(int trackIndex,
     hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
     transportSec.store(previousTransport, std::memory_order_relaxed);
     isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
+    exportProgressAtomic.store(1.0, std::memory_order_relaxed);
     return outFile.getFullPathName();
 }
 
@@ -2425,16 +2465,10 @@ void JuceEngine::rewireTrackBusFxChain(int row)
     if (!inputNode || !automationNode)
         return;
 
-    juce::Array<AudioProcessorGraph::NodeID> chainNodes;
-    chainNodes.add(inputNode->nodeID);
-    for (int i = 0; i < chain.size(); ++i)
-        chainNodes.add(chain.getReference(i));
-    chainNodes.add(automationNode->nodeID);
-
-    auto isInChain = [&](AudioProcessorGraph::NodeID id)
+    auto isFxNode = [&](AudioProcessorGraph::NodeID id)
     {
-        for (auto n : chainNodes)
-            if (n == id)
+        for (int i = 0; i < chain.size(); ++i)
+            if (chain.getReference(i) == id)
                 return true;
         return false;
     };
@@ -2442,10 +2476,21 @@ void JuceEngine::rewireTrackBusFxChain(int row)
     juce::Array<AudioProcessorGraph::Connection> toRemove;
     auto connections = graph.getConnections();
 
+    const auto inputNodeId = inputNode->nodeID;
+    const auto automationNodeId = automationNode->nodeID;
+
     for (const auto &c : connections)
     {
-        if (isInChain(c.source.nodeID) && isInChain(c.destination.nodeID))
+        const bool touchesFx =
+            isFxNode(c.source.nodeID) || isFxNode(c.destination.nodeID);
+        const bool touchesInputPath =
+            c.source.nodeID == inputNodeId ||
+            c.destination.nodeID == automationNodeId;
+
+        if (touchesFx || touchesInputPath)
+        {
             toRemove.addIfNotAlreadyThere(c);
+        }
     }
 
     for (const auto &c : toRemove)
@@ -2479,16 +2524,36 @@ void JuceEngine::compactRowFxChain(int row)
         return;
 
     auto &r = rows[(size_t)row];
-    for (int i = r.fxChain.size() - 1; i >= 0; --i)
+    juce::Array<AudioProcessorGraph::NodeID> compactedChain;
+    juce::StringArray compactedIds;
+    compactedChain.ensureStorageAllocated(r.fxChain.size());
+    compactedIds.ensureStorageAllocated(r.fxIds.size());
+
+    for (int i = 0; i < r.fxChain.size(); ++i)
     {
         const auto id = r.fxChain.getReference(i);
-        if (graph.getNodeForId(id) != nullptr)
+        if (graph.getNodeForId(id) == nullptr)
             continue;
 
-        r.fxChain.removeRange(i, 1);
+        bool alreadySeen = false;
+        for (auto existing : compactedChain)
+        {
+            if (existing == id)
+            {
+                alreadySeen = true;
+                break;
+            }
+        }
+        if (alreadySeen)
+            continue;
+
+        compactedChain.add(id);
         if (i >= 0 && i < r.fxIds.size())
-            r.fxIds.removeRange(i, 1);
+            compactedIds.add(r.fxIds[i]);
     }
+
+    r.fxChain.swapWith(compactedChain);
+    r.fxIds.swapWith(compactedIds);
 
     while (r.fxIds.size() > r.fxChain.size())
         r.fxIds.removeRange(r.fxIds.size() - 1, 1);
@@ -2499,16 +2564,36 @@ void JuceEngine::compactMasterFxChain()
     if (!masterEffectChain)
         return;
 
-    for (int i = masterEffectChain->size() - 1; i >= 0; --i)
+    juce::Array<juce::AudioProcessorGraph::NodeID> compactedChain;
+    juce::StringArray compactedIds;
+    compactedChain.ensureStorageAllocated(masterEffectChain->size());
+    compactedIds.ensureStorageAllocated(masterEffectIds.size());
+
+    for (int i = 0; i < masterEffectChain->size(); ++i)
     {
         const auto id = masterEffectChain->getReference(i);
-        if (graph.getNodeForId(id) != nullptr)
+        if (graph.getNodeForId(id) == nullptr)
             continue;
 
-        masterEffectChain->removeRange(i, 1);
+        bool alreadySeen = false;
+        for (auto existing : compactedChain)
+        {
+            if (existing == id)
+            {
+                alreadySeen = true;
+                break;
+            }
+        }
+        if (alreadySeen)
+            continue;
+
+        compactedChain.add(id);
         if (i >= 0 && i < masterEffectIds.size())
-            masterEffectIds.removeRange(i, 1);
+            compactedIds.add(masterEffectIds[i]);
     }
+
+    masterEffectChain->swapWith(compactedChain);
+    masterEffectIds.swapWith(compactedIds);
 
     while (masterEffectIds.size() > masterEffectChain->size())
         masterEffectIds.removeRange(masterEffectIds.size() - 1, 1);
@@ -3787,9 +3872,21 @@ void JuceEngine::rewireMasterFxChain()
         return false;
     };
 
+    auto isRowMeterTap = [&](AudioProcessorGraph::NodeID id)
+    {
+        for (const auto &r : rows)
+        {
+            if (r.meterTapNode != nullptr && r.meterTapNode->nodeID == id)
+                return true;
+        }
+        return false;
+    };
+
     for (auto &c : connections)
     {
-        if (isMaster(c.source.nodeID) || isMaster(c.destination.nodeID))
+        if (isMaster(c.source.nodeID) ||
+            isMaster(c.destination.nodeID) ||
+            isRowMeterTap(c.source.nodeID))
             toRemove.add(c);
     }
 
@@ -4170,7 +4267,565 @@ void JuceEngine::setMetronomeTransportMs(double ms)
         metronomeCallback->setTransportMs(ms);
 }
 
-std::vector<float> JuceEngine::decodeAudioMono16k(const juce::File &file)
+namespace
+{
+constexpr double kPromptAnalysisSampleRate = 16000.0;
+constexpr int kPromptStatsMaxSamples = 24000;
+
+struct PromptShortTermRmsStats
+{
+    double mean = 0.0;
+    double p95 = 0.0;
+    double std = 0.0;
+    double transientDensity = 0.0;
+};
+
+struct PromptLufsStats
+{
+    double integratedLufs = -120.0;
+    double shortMeanLufs = -120.0;
+    double shortP95Lufs = -120.0;
+    double lra = 0.0;
+};
+
+double clamp01(double value)
+{
+    return juce::jlimit(0.0, 1.0, value);
+}
+
+double percentileSorted(const std::vector<double> &sorted, double q)
+{
+    if (sorted.empty())
+        return 0.0;
+    if (sorted.size() == 1)
+        return sorted.front();
+
+    const double qq = juce::jlimit(0.0, 1.0, q);
+    const double pos = qq * (double)(sorted.size() - 1);
+    const int lo = (int)std::floor(pos);
+    const int hi = (int)std::ceil(pos);
+    if (lo == hi)
+        return sorted[(size_t)lo];
+
+    const double t = pos - (double)lo;
+    return sorted[(size_t)lo] * (1.0 - t) + sorted[(size_t)hi] * t;
+}
+
+double linearToDb(double linear)
+{
+    return 20.0 * std::log10(std::max(linear, 1.0e-9));
+}
+
+double goertzelMag(const std::vector<float> &x, double fs, double freq)
+{
+    const double w = 2.0 * juce::MathConstants<double>::pi * (freq / fs);
+    const double cosw = std::cos(w);
+    const double sinw = std::sin(w);
+    const double coeff = 2.0 * cosw;
+
+    double s0 = 0.0;
+    double s1 = 0.0;
+    double s2 = 0.0;
+    for (const float sample : x)
+    {
+        s0 = (double)sample + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+
+    const double real = s1 - s2 * cosw;
+    const double imag = s2 * sinw;
+    return std::sqrt(real * real + imag * imag);
+}
+
+PromptShortTermRmsStats windowedRmsStats(const std::vector<float> &x, int frameSize, int hop)
+{
+    PromptShortTermRmsStats out;
+    if (x.empty() || frameSize <= 0 || hop <= 0)
+        return out;
+
+    std::vector<double> frames;
+    for (int start = 0; start < (int)x.size(); start += hop)
+    {
+        const int end = juce::jmin(start + frameSize, (int)x.size());
+        if (end <= start)
+            break;
+
+        double sumSq = 0.0;
+        for (int i = start; i < end; ++i)
+        {
+            const double v = (double)x[(size_t)i];
+            sumSq += v * v;
+        }
+
+        frames.push_back(juce::jlimit(0.0, 1.0, std::sqrt(sumSq / (double)(end - start))));
+        if (end == (int)x.size())
+            break;
+    }
+
+    if (frames.empty())
+        return out;
+
+    const double mean = std::accumulate(frames.begin(), frames.end(), 0.0) / (double)frames.size();
+    double varAcc = 0.0;
+    for (const double v : frames)
+    {
+        const double d = v - mean;
+        varAcc += d * d;
+    }
+
+    std::vector<double> sorted = frames;
+    std::sort(sorted.begin(), sorted.end());
+
+    int transientCount = 0;
+    for (size_t i = 1; i < frames.size(); ++i)
+    {
+        if ((frames[i] - frames[i - 1]) > 0.06)
+            transientCount++;
+    }
+
+    out.mean = juce::jlimit(0.0, 1.0, mean);
+    out.p95 = juce::jlimit(0.0, 1.0, percentileSorted(sorted, 0.95));
+    out.std = juce::jlimit(0.0, 1.0, std::sqrt(varAcc / (double)frames.size()));
+    out.transientDensity = juce::jlimit(0.0, 1.0, (double)transientCount / (double)juce::jmax(1, (int)frames.size() - 1));
+    return out;
+}
+
+PromptLufsStats lufsStats16k(const std::vector<float> &x)
+{
+    PromptLufsStats out;
+    if (x.empty())
+        return out;
+
+    std::vector<double> kw((size_t)x.size(), 0.0);
+    kw[0] = (double)x[0];
+    for (size_t i = 1; i < x.size(); ++i)
+        kw[i] = (double)x[i] - (0.97 * (double)x[i - 1]);
+
+    double sumSq = 0.0;
+    for (const double v : kw)
+        sumSq += v * v;
+
+    const double meanSq = sumSq / (double)juce::jmax(1, (int)kw.size());
+    out.integratedLufs = juce::jlimit(-120.0, 0.0, -0.691 + 10.0 * std::log10(std::max(meanSq, 1.0e-12)));
+
+    constexpr int frame = 6400;
+    constexpr int hop = 3200;
+    std::vector<double> shortLufs;
+    for (int s = 0; s < (int)kw.size(); s += hop)
+    {
+        const int e = juce::jmin(s + frame, (int)kw.size());
+        if (e <= s)
+            break;
+
+        double ss = 0.0;
+        for (int i = s; i < e; ++i)
+        {
+            const double v = kw[(size_t)i];
+            ss += v * v;
+        }
+
+        const double ms = ss / (double)(e - s);
+        shortLufs.push_back(juce::jlimit(-120.0, 0.0, -0.691 + 10.0 * std::log10(std::max(ms, 1.0e-12))));
+        if (e == (int)kw.size())
+            break;
+    }
+
+    if (shortLufs.empty())
+    {
+        out.shortMeanLufs = out.integratedLufs;
+        out.shortP95Lufs = out.integratedLufs;
+        out.lra = 0.0;
+        return out;
+    }
+
+    std::vector<double> sorted = shortLufs;
+    std::sort(sorted.begin(), sorted.end());
+    const double mean = std::accumulate(shortLufs.begin(), shortLufs.end(), 0.0) / (double)shortLufs.size();
+    const double p95 = percentileSorted(sorted, 0.95);
+    const double p10 = percentileSorted(sorted, 0.10);
+    out.shortMeanLufs = juce::jlimit(-120.0, 0.0, mean);
+    out.shortP95Lufs = juce::jlimit(-120.0, 0.0, p95);
+    out.lra = juce::jlimit(0.0, 40.0, p95 - p10);
+    return out;
+}
+
+double spectralFlatness(const std::vector<std::pair<double, double>> &mags)
+{
+    if (mags.empty())
+        return 0.0;
+
+    double logSum = 0.0;
+    double arith = 0.0;
+    for (const auto &[_, mag] : mags)
+    {
+        const double safe = std::max(mag, 1.0e-12);
+        logSum += std::log(safe);
+        arith += safe;
+    }
+
+    const double geo = std::exp(logSum / (double)mags.size());
+    const double arithMean = arith / (double)mags.size();
+    return juce::jlimit(0.0, 1.0, geo / std::max(arithMean, 1.0e-12));
+}
+
+double spectralRolloffHz(const std::vector<std::pair<double, double>> &mags, double pct)
+{
+    if (mags.empty())
+        return 0.0;
+
+    double total = 0.0;
+    for (const auto &[_, mag] : mags)
+        total += mag;
+    if (total <= 1.0e-12)
+        return 0.0;
+
+    const double target = total * juce::jlimit(0.0, 1.0, pct);
+    double acc = 0.0;
+    for (const auto &[freq, mag] : mags)
+    {
+        acc += mag;
+        if (acc >= target)
+            return freq;
+    }
+    return mags.back().first;
+}
+
+double spectralSlope(const std::vector<std::pair<double, double>> &mags)
+{
+    if (mags.size() < 2)
+        return 0.0;
+
+    std::vector<double> xs;
+    std::vector<double> ys;
+    xs.reserve(mags.size());
+    ys.reserve(mags.size());
+    for (const auto &[freq, mag] : mags)
+    {
+        xs.push_back(std::log(std::max(freq, 1.0)));
+        ys.push_back(std::log(std::max(mag, 1.0e-12)));
+    }
+
+    const double mx = std::accumulate(xs.begin(), xs.end(), 0.0) / (double)xs.size();
+    const double my = std::accumulate(ys.begin(), ys.end(), 0.0) / (double)ys.size();
+    double num = 0.0;
+    double den = 0.0;
+    for (size_t i = 0; i < xs.size(); ++i)
+    {
+        const double dx = xs[i] - mx;
+        num += dx * (ys[i] - my);
+        den += dx * dx;
+    }
+    if (den <= 1.0e-12)
+        return 0.0;
+    return num / den;
+}
+
+double spectralBandwidthHz(const std::vector<std::pair<double, double>> &mags, double centroidHz)
+{
+    if (mags.empty())
+        return 0.0;
+
+    double total = 0.0;
+    double num = 0.0;
+    for (const auto &[freq, mag] : mags)
+    {
+        total += mag;
+        const double d = freq - centroidHz;
+        num += mag * d * d;
+    }
+    if (total <= 1.0e-12)
+        return 0.0;
+    return std::sqrt(num / total);
+}
+
+double onsetRateHz(const std::vector<float> &x, double sampleRate)
+{
+    if (x.size() < 1024 || sampleRate <= 0.0)
+        return 0.0;
+
+    constexpr int frame = 512;
+    constexpr int hop = 256;
+    std::vector<double> frameRms;
+    for (int s = 0; s + frame <= (int)x.size(); s += hop)
+    {
+        double sumSq = 0.0;
+        for (int i = s; i < s + frame; ++i)
+        {
+            const double v = (double)x[(size_t)i];
+            sumSq += v * v;
+        }
+        frameRms.push_back(std::sqrt(sumSq / (double)frame));
+    }
+
+    if (frameRms.size() < 2)
+        return 0.0;
+
+    int onsets = 0;
+    for (size_t i = 1; i < frameRms.size(); ++i)
+    {
+        const double delta = frameRms[i] - frameRms[i - 1];
+        if (delta > 0.06 && frameRms[i] > 0.02)
+            onsets++;
+    }
+
+    const double durationSec = (double)x.size() / sampleRate;
+    if (durationSec <= 1.0e-6)
+        return 0.0;
+    return onsets / durationSec;
+}
+
+double spectralFluxProxy(const std::vector<float> &x, double fs)
+{
+    if (x.size() < 1024)
+        return 0.0;
+
+    constexpr double freqs[] = {100.0, 250.0, 500.0, 1000.0, 3000.0, 6000.0};
+    constexpr int frame = 512;
+    constexpr int hop = 256;
+    std::vector<double> prev;
+    double fluxAcc = 0.0;
+    int count = 0;
+
+    for (int s = 0; s + frame <= (int)x.size(); s += hop)
+    {
+        std::vector<float> chunk(x.begin() + s, x.begin() + s + frame);
+        std::vector<double> cur;
+        cur.reserve(std::size(freqs));
+        for (const double f : freqs)
+            cur.push_back(goertzelMag(chunk, fs, f));
+
+        if (!prev.empty())
+        {
+            double ss = 0.0;
+            for (size_t i = 0; i < cur.size(); ++i)
+            {
+                const double d = cur[i] - prev[i];
+                if (d > 0.0)
+                    ss += d * d;
+            }
+            fluxAcc += std::sqrt(ss / (double)cur.size());
+            count++;
+        }
+        prev = cur;
+    }
+
+    if (count == 0)
+        return 0.0;
+    return juce::jlimit(0.0, 1.0, fluxAcc / (double)count / 2.5);
+}
+
+int estimateOutputSamples(const juce::AudioFormatReader &reader, int inputSamples)
+{
+    if (inputSamples <= 0)
+        return 0;
+    if (reader.sampleRate == kPromptAnalysisSampleRate)
+        return inputSamples;
+    const double speedRatio = reader.sampleRate / kPromptAnalysisSampleRate;
+    return juce::jmax(0, (int)std::ceil((double)inputSamples / speedRatio));
+}
+
+std::vector<float> decodeMono16kWindow(juce::AudioFormatReader &reader, int totalInputSamples, int outputStartSample, int outputSamples)
+{
+    std::vector<float> out((size_t)juce::jmax(0, outputSamples), 0.0f);
+    if (out.empty() || totalInputSamples <= 0)
+        return out;
+
+    if (reader.sampleRate == kPromptAnalysisSampleRate)
+    {
+        const int inputStart = juce::jlimit(0, totalInputSamples, outputStartSample);
+        const int inputToRead = juce::jlimit(0, totalInputSamples - inputStart, outputSamples);
+        if (inputToRead <= 0)
+            return out;
+
+        juce::AudioBuffer<float> mono(1, inputToRead);
+        reader.read(&mono, 0, inputToRead, inputStart, true, false);
+        std::memcpy(out.data(), mono.getReadPointer(0), (size_t)inputToRead * sizeof(float));
+        return out;
+    }
+
+    const double speedRatio = reader.sampleRate / kPromptAnalysisSampleRate;
+    const int inputStart = juce::jlimit(0, totalInputSamples, (int)std::floor((double)outputStartSample * speedRatio));
+    const int inputNeeded = juce::jmax(1, (int)std::ceil((double)outputSamples * speedRatio) + 8);
+    const int inputToRead = juce::jlimit(0, totalInputSamples - inputStart, inputNeeded);
+    if (inputToRead <= 0)
+        return out;
+
+    juce::AudioBuffer<float> mono(1, inputToRead);
+    reader.read(&mono, 0, inputToRead, inputStart, true, false);
+
+    juce::LagrangeInterpolator resampler;
+    resampler.reset();
+    resampler.process(
+        speedRatio,
+        mono.getReadPointer(0),
+        out.data(),
+        outputSamples,
+        mono.getNumSamples(),
+        0);
+
+    return out;
+}
+
+juce::NamedValueSet analyzePromptStatsFromMono(const std::vector<float> &pcm, const juce::NamedValueSet &stereoStats)
+{
+    juce::NamedValueSet out;
+    auto putDefaults = [&]()
+    {
+        out.set("centroid_hz", 0.0);
+        out.set("zcr", 0.0);
+        out.set("hf_rms", 0.0);
+        out.set("st_rms_mean", 0.0);
+        out.set("st_rms_p95", 0.0);
+        out.set("st_rms_std", 0.0);
+        out.set("transient_density", 0.0);
+        out.set("true_peak_dbfs", -120.0);
+        out.set("integrated_lufs_est", -120.0);
+        out.set("short_lufs_mean", -120.0);
+        out.set("short_lufs_p95", -120.0);
+        out.set("lra_est", 0.0);
+        out.set("clip_ratio", 0.0);
+        out.set("spectral_flatness", 0.0);
+        out.set("spectral_rolloff_hz", 0.0);
+        out.set("spectral_slope", 0.0);
+        out.set("spectral_flux", 0.0);
+        out.set("spectral_bandwidth_hz", 0.0);
+        out.set("silence_ratio", 0.0);
+        out.set("activity_ratio", 0.0);
+        out.set("onset_rate_hz", 0.0);
+        out.set("noise_floor_dbfs", -120.0);
+        out.set("phase_corr", 1.0);
+        out.set("side_ratio", 0.0);
+        out.set("stereo_imbalance", 0.0);
+        out.set("low", 0.0);
+        out.set("lowmid", 0.0);
+        out.set("mid", 0.0);
+        out.set("high", 0.0);
+        out.set("sibilance", 0.0);
+        out.set("bassiness", 0.0);
+    };
+
+    if (pcm.empty())
+    {
+        putDefaults();
+        return out;
+    }
+
+    const int n = juce::jmin((int)pcm.size(), kPromptStatsMaxSamples);
+    std::vector<float> x(pcm.begin(), pcm.begin() + n);
+
+    double sumSq = 0.0;
+    for (const float v : x)
+        sumSq += (double)v * (double)v;
+    const double baseRms = juce::jlimit(0.0, 1.0, std::sqrt(sumSq / (double)juce::jmax(1, n)));
+
+    int zc = 0;
+    for (int i = 1; i < n; ++i)
+    {
+        const float a = x[(size_t)(i - 1)];
+        const float b = x[(size_t)i];
+        if ((a >= 0.0f && b < 0.0f) || (a < 0.0f && b >= 0.0f))
+            zc++;
+    }
+    const double zcr = juce::jlimit(0.0, 1.0, (double)zc / (double)juce::jmax(1, n - 1));
+
+    double hfSumSq = 0.0;
+    for (int i = 1; i < n; ++i)
+    {
+        const double hp = (double)x[(size_t)i] - (double)x[(size_t)(i - 1)];
+        hfSumSq += hp * hp;
+    }
+    const double hfRaw = std::sqrt(hfSumSq / (double)juce::jmax(1, n - 1));
+    const double hfRms = juce::jlimit(0.0, 1.0, hfRaw / (baseRms + 1.0e-9));
+
+    const auto st = windowedRmsStats(x, 512, 256);
+    const auto lufs = lufsStats16k(x);
+
+    std::vector<std::pair<double, double>> mags;
+    mags.reserve(7);
+    mags.emplace_back(100.0, goertzelMag(x, kPromptAnalysisSampleRate, 100.0));
+    mags.emplace_back(250.0, goertzelMag(x, kPromptAnalysisSampleRate, 250.0));
+    mags.emplace_back(500.0, goertzelMag(x, kPromptAnalysisSampleRate, 500.0));
+    mags.emplace_back(1000.0, goertzelMag(x, kPromptAnalysisSampleRate, 1000.0));
+    mags.emplace_back(3000.0, goertzelMag(x, kPromptAnalysisSampleRate, 3000.0));
+    mags.emplace_back(6000.0, goertzelMag(x, kPromptAnalysisSampleRate, 6000.0));
+    mags.emplace_back(7500.0, goertzelMag(x, kPromptAnalysisSampleRate, 7500.0));
+
+    const double low = mags[0].second + mags[1].second;
+    const double lowmid = mags[2].second;
+    const double mid = mags[3].second + mags[4].second;
+    const double high = mags[5].second + mags[6].second;
+
+    double centroidNum = 0.0;
+    double centroidDen = 1.0e-9;
+    for (const auto &[freq, mag] : mags)
+    {
+        centroidNum += freq * mag;
+        centroidDen += mag;
+    }
+    const double centroidHz = juce::jlimit(0.0, 8000.0, centroidNum / centroidDen);
+
+    const double sibilance = juce::jlimit(0.0, 5.0, high / (mid + lowmid + low + 1.0e-9));
+    const double bassiness = juce::jlimit(0.0, 5.0, low / (mid + high + 1.0e-9));
+
+    double truePeak = 0.0;
+    int clipCount = 0;
+    int silenceCount = 0;
+    std::vector<double> absValues;
+    absValues.reserve((size_t)n);
+    for (const float sample : x)
+    {
+        const double absV = std::abs((double)sample);
+        truePeak = std::max(truePeak, absV);
+        if (absV >= 0.995)
+            clipCount++;
+        if (absV < 0.01)
+            silenceCount++;
+        absValues.push_back(absV);
+    }
+    std::sort(absValues.begin(), absValues.end());
+
+    const double clipRatio = juce::jlimit(0.0, 1.0, (double)clipCount / (double)juce::jmax(1, n));
+    const double silenceRatio = juce::jlimit(0.0, 1.0, (double)silenceCount / (double)juce::jmax(1, n));
+    const double activityRatio = juce::jlimit(0.0, 1.0, 1.0 - silenceRatio);
+    const double noiseFloorDbfs = juce::jlimit(-120.0, 0.0, linearToDb(percentileSorted(absValues, 0.10)));
+
+    out.set("centroid_hz", centroidHz);
+    out.set("zcr", zcr);
+    out.set("hf_rms", hfRms);
+    out.set("st_rms_mean", st.mean);
+    out.set("st_rms_p95", st.p95);
+    out.set("st_rms_std", st.std);
+    out.set("transient_density", st.transientDensity);
+    out.set("true_peak_dbfs", juce::jlimit(-120.0, 0.0, linearToDb(truePeak)));
+    out.set("integrated_lufs_est", lufs.integratedLufs);
+    out.set("short_lufs_mean", lufs.shortMeanLufs);
+    out.set("short_lufs_p95", lufs.shortP95Lufs);
+    out.set("lra_est", lufs.lra);
+    out.set("clip_ratio", clipRatio);
+    out.set("spectral_flatness", spectralFlatness(mags));
+    out.set("spectral_rolloff_hz", juce::jlimit(0.0, 8000.0, spectralRolloffHz(mags, 0.85)));
+    out.set("spectral_slope", juce::jlimit(-2.0, 2.0, spectralSlope(mags)));
+    out.set("spectral_flux", spectralFluxProxy(x, kPromptAnalysisSampleRate));
+    out.set("spectral_bandwidth_hz", juce::jlimit(0.0, 8000.0, spectralBandwidthHz(mags, centroidHz)));
+    out.set("silence_ratio", silenceRatio);
+    out.set("activity_ratio", activityRatio);
+    out.set("onset_rate_hz", juce::jlimit(0.0, 20.0, onsetRateHz(x, kPromptAnalysisSampleRate)));
+    out.set("noise_floor_dbfs", noiseFloorDbfs);
+    out.set("phase_corr", juce::jlimit(-1.0, 1.0, (double)stereoStats.getWithDefault("phase_corr", 1.0)));
+    out.set("side_ratio", juce::jlimit(0.0, 2.0, (double)stereoStats.getWithDefault("side_ratio", 0.0)));
+    out.set("stereo_imbalance", juce::jlimit(0.0, 1.0, (double)stereoStats.getWithDefault("stereo_imbalance", 0.0)));
+    out.set("low", low);
+    out.set("lowmid", lowmid);
+    out.set("mid", mid);
+    out.set("high", high);
+    out.set("sibilance", sibilance);
+    out.set("bassiness", bassiness);
+    return out;
+}
+} // namespace
+
+std::vector<float> JuceEngine::decodeAudioMono16k(const juce::File &file, int maxOutputSamples)
 {
     std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
     if (!reader)
@@ -4178,9 +4833,21 @@ std::vector<float> JuceEngine::decodeAudioMono16k(const juce::File &file)
 
     const int64 totalSamples64 = reader->lengthInSamples;
     const int totalSamples = (int)totalSamples64;
+    if (totalSamples <= 0)
+        return {};
 
-    juce::AudioBuffer<float> mono(1, totalSamples);
-    reader->read(&mono, 0, totalSamples, 0, true, false);
+    int inputSamplesToRead = totalSamples;
+    if (maxOutputSamples > 0)
+    {
+        const double inputPerOutput = reader->sampleRate / 16000.0;
+        const double cappedInputSamples = std::ceil((double)maxOutputSamples * inputPerOutput);
+        inputSamplesToRead = juce::jlimit(0, totalSamples, (int)cappedInputSamples);
+    }
+    if (inputSamplesToRead <= 0)
+        return {};
+
+    juce::AudioBuffer<float> mono(1, inputSamplesToRead);
+    reader->read(&mono, 0, inputSamplesToRead, 0, true, false);
 
     if (reader->sampleRate != 16000.0)
     {
@@ -4188,7 +4855,11 @@ std::vector<float> JuceEngine::decodeAudioMono16k(const juce::File &file)
         resampler.reset();
 
         const double speedRatio = reader->sampleRate / 16000.0; // input per output
-        const int outSamples = (int)std::ceil(totalSamples / speedRatio);
+        int outSamples = (int)std::ceil(inputSamplesToRead / speedRatio);
+        if (maxOutputSamples > 0)
+            outSamples = juce::jmin(outSamples, maxOutputSamples);
+        if (outSamples <= 0)
+            return {};
 
         juce::AudioBuffer<float> resampled(1, outSamples);
         resampled.clear();
@@ -4206,10 +4877,60 @@ std::vector<float> JuceEngine::decodeAudioMono16k(const juce::File &file)
 
         mono = std::move(resampled); // keep full outSamples output
     }
+    else if (maxOutputSamples > 0 && mono.getNumSamples() > maxOutputSamples)
+    {
+        juce::AudioBuffer<float> trimmed(1, maxOutputSamples);
+        trimmed.copyFrom(0, 0, mono, 0, 0, maxOutputSamples);
+        mono = std::move(trimmed);
+    }
 
     std::vector<float> out(mono.getNumSamples());
     std::memcpy(out.data(), mono.getReadPointer(0), out.size() * sizeof(float));
     return out;
+}
+
+std::vector<std::vector<float>> JuceEngine::sampleAudioMono16kWindows(const juce::File &file, int windowOutputSamples, int windowCount)
+{
+    std::vector<std::vector<float>> windows;
+    if (windowOutputSamples <= 0 || windowCount <= 0)
+        return windows;
+
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+    if (!reader)
+        return windows;
+
+    const int64 totalSamples64 = reader->lengthInSamples;
+    const int totalSamples = (int)totalSamples64;
+    if (totalSamples <= 0)
+        return windows;
+
+    const int totalOutputSamples = estimateOutputSamples(*reader, totalSamples);
+    if (totalOutputSamples <= 0)
+        return windows;
+
+    if (totalOutputSamples <= windowOutputSamples)
+    {
+        windows.push_back(decodeMono16kWindow(*reader, totalSamples, 0, windowOutputSamples));
+        return windows;
+    }
+
+    windows.reserve((size_t)windowCount);
+    for (int i = 0; i < windowCount; ++i)
+    {
+        const double t = windowCount <= 1 ? 0.5 : (double)i / (double)(windowCount - 1);
+        const int maxOffset = juce::jmax(0, totalOutputSamples - windowOutputSamples);
+        const int offset = juce::jlimit(0, maxOffset, (int)std::round(t * (double)maxOffset));
+        windows.push_back(decodeMono16kWindow(*reader, totalSamples, offset, windowOutputSamples));
+    }
+
+    return windows;
+}
+
+juce::NamedValueSet JuceEngine::analyzeAudioPrompt16k(const juce::File &file)
+{
+    const auto mono = decodeAudioMono16k(file, kPromptStatsMaxSamples);
+    const auto stereo = analyzeAudioStereo16k(file);
+    return analyzePromptStatsFromMono(mono, stereo);
 }
 
 juce::NamedValueSet JuceEngine::analyzeAudioStereo16k(const juce::File &file)

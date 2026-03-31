@@ -25,6 +25,24 @@
 
 @implementation JuceAudioEnginePlugin
 
+static dispatch_queue_t MixroomPromptAnalysisQueue(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_queue_attr_t attr =
+            dispatch_queue_attr_make_with_qos_class(
+                DISPATCH_QUEUE_SERIAL,
+                QOS_CLASS_USER_INITIATED,
+                0
+            );
+        queue = dispatch_queue_create(
+            "com.mixroom.juce_audio_engine.prompt_analysis",
+            attr
+        );
+    });
+    return queue;
+}
+
 static NSString *MixroomRouteKindForPortType(NSString *portType) {
     if (portType == nil) {
         return @"unknown";
@@ -303,6 +321,8 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"exportMix"]) {
         NSString* out = [JuceBridge exportMixObjC:args[@"outPath"] settings:args];
         result(out);
+    } else if ([call.method isEqualToString:@"getExportProgress"]) {
+        result(@([JuceBridge getExportProgressObjC]));
     } else if ([call.method isEqualToString:@"exportTrack"]) {
         NSInteger track = [args[@"track"] integerValue];
         NSString* out = [JuceBridge exportTrackObjC:track outPath:args[@"outPath"] settings:args];
@@ -834,6 +854,14 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSString *path = args[@"path"];
         NSArray *samples = [JuceBridge decodeAudioMono16kObjC:path];
         result(samples);
+    } else if ([call.method isEqualToString:@"analyzeAudioForPrompt"]) {
+        NSString *path = [args[@"path"] copy];
+        dispatch_async(MixroomPromptAnalysisQueue(), ^{
+            NSDictionary *analysis = [JuceBridge analyzeAudioForPromptObjC:path];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                result(analysis);
+            });
+        });
     } else if ([call.method isEqualToString:@"analyzeAudioStereo16k"]) {
         NSString *path = args[@"path"];
         NSDictionary *stats = [JuceBridge analyzeAudioStereo16kObjC:path];

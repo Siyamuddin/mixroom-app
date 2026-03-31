@@ -19,6 +19,9 @@ AI_USAGE_EVENTS_TABLE = os.environ.get("AI_USAGE_EVENTS_TABLE", "").strip()
 AI_PROMPT_LIMIT_SETTINGS_TABLE = os.environ.get(
     "AI_PROMPT_LIMIT_SETTINGS_TABLE", ""
 ).strip()
+PRODUCER_CAPTURE_WHITELIST_TABLE = os.environ.get(
+    "PRODUCER_CAPTURE_WHITELIST_TABLE", ""
+).strip()
 FEEDBACK_SUBMISSIONS_TABLE = os.environ.get("FEEDBACK_SUBMISSIONS_TABLE", "").strip()
 ADMIN_ALLOWLIST_TABLE = os.environ.get("ADMIN_ALLOWLIST_TABLE", "").strip()
 ADMIN_COGNITO_APP_CLIENT_ID = os.environ.get(
@@ -27,7 +30,6 @@ ADMIN_COGNITO_APP_CLIENT_ID = os.environ.get(
 ADMIN_COGNITO_USER_POOL_ID = os.environ.get(
     "ADMIN_COGNITO_USER_POOL_ID", ""
 ).strip()
-ADMIN_ALLOWED_EMAILS = os.environ.get("ADMIN_ALLOWED_EMAILS", "").strip()
 AI_ADMIN_EDITOR_EMAILS = os.environ.get(
     "AI_ADMIN_EDITOR_EMAILS",
     "andrew@mixroom.ai",
@@ -54,7 +56,6 @@ AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS = frozenset(
     if value.strip()
 )
 
-ENFORCE_SUBSCRIPTIONS = os.environ.get("ENFORCE_SUBSCRIPTIONS", "false").lower() == "true"
 ALLOW_STUDIO_TIER = os.environ.get("ALLOW_STUDIO_TIER", "false").lower() == "true"
 HTTP_TIMEOUT_SECONDS = int(os.environ.get("HTTP_TIMEOUT_SECONDS", "20") or "20")
 SECRET_CACHE_TTL_SECONDS = int(os.environ.get("SECRET_CACHE_TTL_SECONDS", "300") or "300")

@@ -83,9 +83,6 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     _mode = widget.initialMode;
-    if (_mode == LoginEntryMode.createAccount) {
-      _ensureSuggestedSignupUsername();
-    }
   }
 
   @override
@@ -263,6 +260,21 @@ class _LoginScreenState extends State<LoginScreen> {
     return _validateUsername(safe);
   }
 
+  String _generateMixroomUsername() {
+    final suffix =
+        _usernameRandom.nextInt(1000000000).toString().padLeft(9, '0');
+    return 'mixroom-user$suffix';
+  }
+
+  void _generateSignupUsername() {
+    setState(() {
+      _signupUsernameController.text = _generateMixroomUsername();
+      _registerUsernameError = null;
+      _registerInlineError = null;
+      _registerInlineInfo = null;
+    });
+  }
+
   String _composeSignupDisplayName() {
     final parts = <String>[
       _trimmedFirstName(),
@@ -271,18 +283,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (parts.isNotEmpty) {
       return parts.join(' ');
     }
-    return _signupUsernameController.text.trim().toLowerCase();
-  }
-
-  String _generateSuggestedUsername() {
-    final suffix =
-        _usernameRandom.nextInt(1000000000).toString().padLeft(9, '0');
-    return 'mixroom-user$suffix';
-  }
-
-  void _ensureSuggestedSignupUsername() {
-    if (_signupUsernameController.text.trim().isNotEmpty) return;
-    _signupUsernameController.text = _generateSuggestedUsername();
+    return '';
   }
 
   Future<void> _stagePendingSignupProfile(
@@ -375,9 +376,6 @@ class _LoginScreenState extends State<LoginScreen> {
       _newsletterOptIn = false;
       _clearSignInErrors();
       _clearRegisterErrors();
-      if (next == LoginEntryMode.createAccount) {
-        _ensureSuggestedSignupUsername();
-      }
     });
   }
 
@@ -397,7 +395,6 @@ class _LoginScreenState extends State<LoginScreen> {
         if (!_validateRegisterAccountStep()) return;
         setState(() {
           _registerStep = _RegisterStep.profile;
-          _ensureSuggestedSignupUsername();
           _registerUsernameError = null;
           _registerBirthdateError = null;
           _registerInlineInfo = null;
@@ -1901,7 +1898,7 @@ class _LoginScreenState extends State<LoginScreen> {
               controller: _signupUsernameController,
               errorText: _registerUsernameError,
               helperText:
-                  'Used for your username and sign-in. Leave blank to get an auto-generated mixroom-user name you can change later.',
+                  'Used for your username and sign-in. Leave blank to get an auto-generated mixroom-user name.',
               onChanged: (_) {
                 setState(() {
                   _registerUsernameError = null;
@@ -1909,6 +1906,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   _registerInlineInfo = null;
                 });
               },
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _generateSignupUsername,
+                child: Text(L10n.translate(context, 'Generate username')),
+              ),
             ),
             const SizedBox(height: 8),
             _Field(

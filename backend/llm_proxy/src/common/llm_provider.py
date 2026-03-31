@@ -50,6 +50,7 @@ class OpenAiResponsesProvider(LlmProviderAdapter):
         request_body: NormalizedLlmRequest,
         timeout_seconds: int,
     ) -> Dict[str, Any]:
+        started_at = time.perf_counter()
         upstream_body = build_openai_responses_request(request_body)
         status_code, response_body = _post_json_request(
             url=_OPENAI_RESPONSES_URL,
@@ -61,7 +62,14 @@ class OpenAiResponsesProvider(LlmProviderAdapter):
             timeout_seconds=timeout_seconds,
             fallback_error_message="OpenAI upstream error",
         )
-        return _json_response(status_code, response_body)
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        return {
+            **_json_response(status_code, response_body),
+            "observability": {
+                "provider_roundtrip_ms": elapsed_ms,
+                "openai_api_ms": elapsed_ms,
+            },
+        }
 
 
 class AnthropicMessagesProvider(LlmProviderAdapter):
@@ -149,6 +157,7 @@ class AnthropicMessagesProvider(LlmProviderAdapter):
         request_body: NormalizedLlmRequest,
         timeout_seconds: int,
     ) -> Dict[str, Any]:
+        started_at = time.perf_counter()
         status_code, response_body = _post_json_request(
             url=_ANTHROPIC_MESSAGES_URL,
             headers={
@@ -161,11 +170,23 @@ class AnthropicMessagesProvider(LlmProviderAdapter):
             fallback_error_message="Anthropic upstream error",
         )
         if status_code >= 400:
-            return _json_response(status_code, response_body)
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            return {
+                **_json_response(status_code, response_body),
+                "observability": {
+                    "provider_roundtrip_ms": elapsed_ms,
+                },
+            }
 
         payload = _parse_json_object(response_body)
         normalized = self._normalize_success_payload(payload)
-        return _json_response(status_code, json.dumps(normalized))
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        return {
+            **_json_response(status_code, json.dumps(normalized)),
+            "observability": {
+                "provider_roundtrip_ms": elapsed_ms,
+            },
+        }
 
 
 class GeminiGenerateContentProvider(LlmProviderAdapter):
@@ -283,6 +304,7 @@ class GeminiGenerateContentProvider(LlmProviderAdapter):
         request_body: NormalizedLlmRequest,
         timeout_seconds: int,
     ) -> Dict[str, Any]:
+        started_at = time.perf_counter()
         model = str(request_body.get("model") or DEFAULT_MODEL)
         status_code, response_body = _post_json_request(
             url=self._build_url(model),
@@ -295,11 +317,23 @@ class GeminiGenerateContentProvider(LlmProviderAdapter):
             fallback_error_message="Gemini upstream error",
         )
         if status_code >= 400:
-            return _json_response(status_code, response_body)
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            return {
+                **_json_response(status_code, response_body),
+                "observability": {
+                    "provider_roundtrip_ms": elapsed_ms,
+                },
+            }
 
         payload = _parse_json_object(response_body)
         normalized = self._normalize_success_payload(payload)
-        return _json_response(status_code, json.dumps(normalized))
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        return {
+            **_json_response(status_code, json.dumps(normalized)),
+            "observability": {
+                "provider_roundtrip_ms": elapsed_ms,
+            },
+        }
 
 
 _PROVIDER_REGISTRY = {

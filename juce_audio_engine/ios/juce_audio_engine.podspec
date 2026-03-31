@@ -31,9 +31,9 @@ Pod::Spec.new do |s|
   # Link against prebuilt .a libs from the xcframework
   s.ios.vendored_libraries = [
     # Release on a real device: uncomment this and comment out the other two entries.
-    # 'JuceModules.xcframework/ios-arm64/libJuceModules.a',
+    'JuceModules.xcframework/ios-arm64/libJuceModules.a',
     # Debug on a real device: uncomment this and comment out the other two entries.
-    'JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a',
+    # 'JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a',
     # Simulator builds: keep this uncommented and comment out the two iphoneos entries above.
     # 'JuceModules.xcframework/ios-arm64_x86_64-simulator/libJuceModules_sim.a'
   ]
@@ -44,6 +44,7 @@ Pod::Spec.new do |s|
   s.requires_arc     = false
   s.swift_version    = '5.0'
   s.dependency       'Flutter'
+  s.dependency       'onnxruntime-objc', '1.22.0'
   # s.resources = ['Assets/Plugins/**/*']
 
 

@@ -32,6 +32,7 @@
 + (NSArray<NSDictionary *> *)getPluginParametersObjC:(NSInteger)track
                                          effectIndex:(NSInteger)effect;
 + (NSString *)exportMixObjC:(NSString *)outPath settings:(NSDictionary *)settings;
++ (double)getExportProgressObjC;
 + (NSString *)exportTrackObjC:(NSInteger)track outPath:(NSString *)outPath settings:(NSDictionary *)settings;
 + (NSString *)renderInstrumentClipObjC:(NSString *)outPath
                           instrumentId:(NSString *)instrumentId
@@ -201,6 +202,7 @@
 
 + (NSArray<NSNumber *> *)decodeAudioMono16kObjC:(NSString *)path;
 + (NSDictionary<NSString *, NSNumber *> *)analyzeAudioStereo16kObjC:(NSString *)path;
++ (NSDictionary<NSString *, id> *)analyzeAudioForPromptObjC:(NSString *)path;
 
 + (NSArray<NSString *> *)getInputDevicesObjC;
 + (BOOL)selectInputDeviceObjC:(NSString *)name;

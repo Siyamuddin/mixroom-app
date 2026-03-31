@@ -4,6 +4,23 @@
 #include "InstrumentRenderers.h"
 #include "JuceHeader.h"
 #import "JuceAudioEnginePlugin.h" // To access debugLogChannel
+#if __has_include(<Flutter/Flutter.h>)
+#import <Flutter/Flutter.h>
+#elif __has_include(<FlutterMacOS/FlutterMacOS.h>)
+#import <FlutterMacOS/FlutterMacOS.h>
+#endif
+#import <onnxruntime_objc/ort_env.h>
+#import <onnxruntime_objc/ort_session.h>
+#import <onnxruntime_objc/ort_value.h>
+#if __has_include(<onnxruntime_objc/ort_session_internal.h>)
+#import <onnxruntime_objc/ort_session_internal.h>
+#define MIXROOM_ORT_HAS_INTERNAL_SESSION_OPTIONS 1
+#elif __has_include("ort_session_internal.h")
+#import "ort_session_internal.h"
+#define MIXROOM_ORT_HAS_INTERNAL_SESSION_OPTIONS 1
+#else
+#define MIXROOM_ORT_HAS_INTERNAL_SESSION_OPTIONS 0
+#endif
 
 namespace
 {
@@ -72,7 +89,256 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
 
     return parsed;
 }
+
+NSDictionary<NSString *, NSNumber *> *namedValueStatsToNSDictionary(const juce::NamedValueSet &stats)
+{
+    NSMutableDictionary<NSString *, NSNumber *> *out = [NSMutableDictionary dictionaryWithCapacity:(NSUInteger)stats.size()];
+    for (int i = 0; i < stats.size(); ++i)
+    {
+        const auto key = stats.getName(i).toString();
+        const auto value = (double)stats.getValueAt(i);
+        out[[NSString stringWithUTF8String:key.toRawUTF8()] ?: @""] = @(value);
+    }
+    return out;
+}
+
+NSDictionary<NSString *, NSNumber *> *fallbackPromptRoleProbs()
+{
+    return @{
+        @"vocals" : @0.17,
+        @"drums" : @0.17,
+        @"bass" : @0.17,
+        @"guitar" : @0.17,
+        @"synth" : @0.16,
+        @"other" : @0.16,
+    };
+}
+
+NSDictionary<NSString *, NSNumber *> *normalizePromptRoleProbs(NSDictionary<NSString *, NSNumber *> *raw)
+{
+    double sum = 0.0;
+    for (NSNumber *value in raw.objectEnumerator)
+        sum += value.doubleValue;
+
+    if (sum <= 0.0)
+        return fallbackPromptRoleProbs();
+
+    NSMutableDictionary<NSString *, NSNumber *> *out = [NSMutableDictionary dictionaryWithCapacity:raw.count];
+    [raw enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSNumber *value, BOOL *stop) {
+        out[key] = @(value.doubleValue / sum);
+    }];
+    return out;
+}
+
+NSString *yamnetModelPath()
+{
+    NSString *assetKey = [FlutterDartProject lookupKeyForAsset:@"assets/models/yamnet.onnx"];
+    NSString *bundlePath = [[NSBundle mainBundle] pathForResource:assetKey ofType:nil];
+    if (bundlePath != nil)
+        return bundlePath;
+
+    NSString *resourcePath = [[NSBundle mainBundle] resourcePath];
+    NSString *fallback = [resourcePath stringByAppendingPathComponent:assetKey];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:fallback])
+        return fallback;
+
+    return nil;
+}
 } // namespace
+
+@interface MixroomPromptAnalysisService : NSObject
++ (instancetype)sharedService;
+- (NSDictionary<NSString *, NSNumber *> *)classifyWindows:(const std::vector<std::vector<float>> &)windows;
+@end
+
+@implementation MixroomPromptAnalysisService
+{
+    NSLock *_lock;
+    ORTEnv *_env;
+    ORTSession *_session;
+    NSString *_inputName;
+    NSString *_outputName;
+}
+
++ (instancetype)sharedService
+{
+    static MixroomPromptAnalysisService *service = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+      service = [[MixroomPromptAnalysisService alloc] init];
+    });
+    return service;
+}
+
+- (instancetype)init
+{
+    self = [super init];
+    if (self != nil)
+        _lock = [[NSLock alloc] init];
+    return self;
+}
+
+- (BOOL)ensureSession
+{
+    [_lock lock];
+    @try
+    {
+        if (_session != nil)
+            return YES;
+
+        NSError *error = nil;
+        if (_env == nil)
+        {
+            _env = [[ORTEnv alloc] initWithLoggingLevel:ORTLoggingLevelWarning error:&error];
+            if (_env == nil || error != nil)
+                return NO;
+        }
+
+        NSString *modelPath = yamnetModelPath();
+        if (modelPath == nil)
+            return NO;
+
+        ORTSessionOptions *options = [[ORTSessionOptions alloc] initWithError:&error];
+        if (options == nil || error != nil)
+            return NO;
+
+        if (![options setIntraOpNumThreads:1 error:&error] || error != nil)
+            return NO;
+#if MIXROOM_ORT_HAS_INTERNAL_SESSION_OPTIONS
+        // Best effort parity with Android to avoid thread oversubscription.
+        [options CXXAPIOrtSessionOptions].SetInterOpNumThreads(1);
+#endif
+
+        _session = [[ORTSession alloc] initWithEnv:_env modelPath:modelPath sessionOptions:options error:&error];
+        if (_session == nil || error != nil)
+            return NO;
+
+        NSArray<NSString *> *inputNames = [_session inputNamesWithError:&error];
+        if (inputNames.count == 0 || error != nil)
+            return NO;
+        NSArray<NSString *> *outputNames = [_session outputNamesWithError:&error];
+        if (outputNames.count == 0 || error != nil)
+            return NO;
+
+        _inputName = inputNames.firstObject;
+        _outputName = outputNames.firstObject;
+        return YES;
+    }
+    @finally
+    {
+        [_lock unlock];
+    }
+}
+
+- (BOOL)runWindow:(const std::vector<float> &)window
+        scoresOut:(std::vector<double> &)scoresOut
+{
+    if (window.empty() || ![self ensureSession])
+        return NO;
+
+    [_lock lock];
+    @try
+    {
+        NSError *error = nil;
+        NSMutableData *tensorData = [NSMutableData dataWithBytes:window.data()
+                                                          length:window.size() * sizeof(float)];
+        ORTValue *inputValue = [[ORTValue alloc] initWithTensorData:tensorData
+                                                        elementType:ORTTensorElementDataTypeFloat
+                                                              shape:@[ @1, @((NSInteger)window.size()) ]
+                                                              error:&error];
+        if (inputValue == nil || error != nil)
+            return NO;
+
+        NSDictionary<NSString *, ORTValue *> *outputs =
+            [_session runWithInputs:@{ _inputName : inputValue }
+                        outputNames:[NSSet setWithObject:_outputName]
+                         runOptions:nil
+                              error:&error];
+        if (outputs == nil || error != nil)
+            return NO;
+
+        ORTValue *outputValue = outputs[_outputName];
+        if (outputValue == nil)
+            return NO;
+
+        NSMutableData *outputData = [outputValue tensorDataWithError:&error];
+        if (outputData == nil || error != nil || outputData.length == 0)
+            return NO;
+
+        const float *values = (const float *)outputData.bytes;
+        const NSUInteger count = outputData.length / sizeof(float);
+        scoresOut.assign(count, 0.0);
+        for (NSUInteger i = 0; i < count; ++i)
+            scoresOut[(size_t)i] = (double)values[i];
+        return YES;
+    }
+    @finally
+    {
+        [_lock unlock];
+    }
+}
+
+- (NSDictionary<NSString *, NSNumber *> *)classifyWindows:(const std::vector<std::vector<float>> &)windows
+{
+    if (windows.empty())
+        return fallbackPromptRoleProbs();
+
+    std::vector<double> accum;
+    int used = 0;
+
+    for (const auto &window : windows)
+    {
+        std::vector<double> scores;
+        if (![self runWindow:window scoresOut:scores] || scores.empty())
+            continue;
+
+        if (accum.empty())
+            accum.assign(scores.size(), 0.0);
+
+        const size_t count = (size_t)juce::jmin((int)accum.size(), (int)scores.size());
+        for (size_t i = 0; i < count; ++i)
+            accum[i] += scores[i];
+        used++;
+    }
+
+    if (accum.empty() || used <= 0)
+        return fallbackPromptRoleProbs();
+
+    for (double &value : accum)
+        value /= (double)used;
+
+    double vocals = 0.0;
+    double guitar = 0.0;
+    double bass = 0.0;
+    double drums = 0.0;
+    double synth = 0.0;
+
+    for (size_t i = 0; i < accum.size(); ++i)
+    {
+        const double score = accum[i];
+        if (i == 135 || i == 136 || i == 138 || i == 141)
+            guitar += score;
+        if (i == 137)
+            bass += score;
+        if (i >= 156 && i <= 168)
+            drums += score;
+        if (i == 0 || i == 24 || i == 31 || i == 249)
+            vocals += score;
+        if (i == 153 || i == 147 || i == 148)
+            synth += score;
+    }
+
+    return normalizePromptRoleProbs(@{
+        @"vocals" : @(vocals),
+        @"guitar" : @(guitar),
+        @"bass" : @(bass),
+        @"drums" : @(drums),
+        @"synth" : @(synth),
+        @"other" : @0.01,
+    });
+}
+
+@end
 
 @implementation JuceBridge
 
@@ -453,6 +719,14 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
                                                   { result = JuceEngine::get().exportMix(juce::File(jucePath), options); });
 
     return [NSString stringWithUTF8String:result.toRawUTF8()];
+}
+
++ (double)getExportProgressObjC
+{
+    double progress = 0.0;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { progress = JuceEngine::get().getExportProgress(); });
+    return progress;
 }
 
 + (NSString *)exportTrackObjC:(NSInteger)track outPath:(NSString *)outPath settings:(NSDictionary *)settings
@@ -1539,6 +1813,19 @@ juce::NamedValueSet parseMidiParams(NSDictionary<NSString *, NSNumber *> *params
         @"phase_corr" : @((double)stats.getWithDefault("phase_corr", 1.0)),
         @"side_ratio" : @((double)stats.getWithDefault("side_ratio", 0.0)),
         @"stereo_imbalance" : @((double)stats.getWithDefault("stereo_imbalance", 0.0)),
+    };
+}
+
++ (NSDictionary<NSString *, id> *)analyzeAudioForPromptObjC:(NSString *)path
+{
+    juce::File file = juceFileFromNSString(path);
+    auto stats = JuceEngine::get().analyzeAudioPrompt16k(file);
+    auto windows = JuceEngine::get().sampleAudioMono16kWindows(file, 15600, 3);
+    NSDictionary<NSString *, NSNumber *> *roleProbs =
+        [[MixroomPromptAnalysisService sharedService] classifyWindows:windows];
+    return @{
+        @"audioStats" : namedValueStatsToNSDictionary(stats),
+        @"roleProbs" : roleProbs ?: fallbackPromptRoleProbs(),
     };
 }
 

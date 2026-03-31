@@ -9,6 +9,7 @@ import AVFAudio
   private var channel: FlutterMethodChannel?
   private var hapticsChannel: FlutterMethodChannel?
   private var edgeGesturesChannel: FlutterMethodChannel?
+  private var savedExportsChannel: FlutterMethodChannel?
   private var initialMixroomPath: String?
   private var didAttemptHapticsAudioSessionConfig = false
   private var channelsInitialized = false
@@ -153,6 +154,10 @@ import AVFAudio
       name: "mixroom/edge_gestures",
       binaryMessenger: messenger
     )
+    savedExportsChannel = FlutterMethodChannel(
+      name: "mixroom/saved_exports",
+      binaryMessenger: messenger
+    )
 
     channel?.setMethodCallHandler { [weak self] call, result in
       guard let self = self else { return }
@@ -198,6 +203,72 @@ import AVFAudio
       result(nil)
     }
 
+    savedExportsChannel?.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else {
+        result(false)
+        return
+      }
+      guard call.method == "openSavedExport" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String else {
+        result(false)
+        return
+      }
+      self.openSavedExport(path: path, result: result)
+    }
+
     channelsInitialized = true
+  }
+
+  private func openSavedExport(path: String, result: @escaping FlutterResult) {
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+      result(false)
+      return
+    }
+
+    var candidates: [URL] = []
+    if let url = URL(string: trimmed), url.scheme != nil {
+      candidates.append(url)
+    }
+    if trimmed.hasPrefix("/") {
+      candidates.append(URL(fileURLWithPath: trimmed))
+    }
+
+    var seen = Set<String>()
+    candidates = candidates.filter { url in
+      let key = url.absoluteString
+      if seen.contains(key) { return false }
+      seen.insert(key)
+      return true
+    }
+
+    DispatchQueue.main.async {
+      for url in candidates {
+        var didStartAccess = false
+        if url.isFileURL {
+          didStartAccess = url.startAccessingSecurityScopedResource()
+        }
+
+        let canOpen = UIApplication.shared.canOpenURL(url)
+        if canOpen {
+          UIApplication.shared.open(url, options: [:]) { _ in
+            if didStartAccess {
+              url.stopAccessingSecurityScopedResource()
+            }
+          }
+          result(true)
+          return
+        }
+
+        if didStartAccess {
+          url.stopAccessingSecurityScopedResource()
+        }
+      }
+      result(false)
+    }
   }
 }

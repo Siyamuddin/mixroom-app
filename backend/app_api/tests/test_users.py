@@ -154,6 +154,80 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
         self.assertEqual(updated["music_profile"], "artist")
         self.assertEqual(updated["onboarding_state"], "profile_ready")
 
+    def test_apply_patch_sets_display_name_from_username_when_display_name_is_email_fallback(
+        self,
+    ) -> None:
+        updated = apply_user_profile_patch(
+            {
+                "user_id": "user-123",
+                "email": "hello@example.com",
+                "display_name": "Hello",
+                "email_verified": True,
+                "cognito_username": "hello@example.com",
+                "auth_provider": "email",
+                "username": None,
+                "username_lc": None,
+                "given_name": None,
+                "family_name": None,
+                "birthdate": None,
+                "avatar_url": None,
+                "bio": None,
+                "profile_status": "active",
+                "onboarding_state": "bootstrap_only",
+                "accepted_terms_version": None,
+                "accepted_privacy_version": None,
+                "accepted_at": None,
+                "newsletter_opt_in": False,
+                "newsletter_opt_in_at": None,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "last_seen_at": "2026-01-01T00:00:00+00:00",
+                "schema_version": 1,
+            },
+            {
+                "username": "new_handle",
+            },
+        )
+
+        self.assertEqual(updated["username"], "new_handle")
+        self.assertEqual(updated["display_name"], "new_handle")
+
+    def test_apply_patch_keeps_existing_display_name_when_setting_username(self) -> None:
+        updated = apply_user_profile_patch(
+            {
+                "user_id": "user-123",
+                "email": "hello@example.com",
+                "display_name": "Existing Name",
+                "email_verified": True,
+                "cognito_username": "hello@example.com",
+                "auth_provider": "email",
+                "username": None,
+                "username_lc": None,
+                "given_name": None,
+                "family_name": None,
+                "birthdate": None,
+                "avatar_url": None,
+                "bio": None,
+                "profile_status": "active",
+                "onboarding_state": "bootstrap_only",
+                "accepted_terms_version": None,
+                "accepted_privacy_version": None,
+                "accepted_at": None,
+                "newsletter_opt_in": False,
+                "newsletter_opt_in_at": None,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "last_seen_at": "2026-01-01T00:00:00+00:00",
+                "schema_version": 1,
+            },
+            {
+                "username": "new_handle",
+            },
+        )
+
+        self.assertEqual(updated["username"], "new_handle")
+        self.assertEqual(updated["display_name"], "Existing Name")
+
     def test_apply_patch_records_legal_consent(self) -> None:
         updated = apply_user_profile_patch(
             {

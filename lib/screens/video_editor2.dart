@@ -20,6 +20,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:mixroom/helpers/audio_export_plan.dart';
 import 'package:mixroom/helpers/export_save_dialog.dart';
+import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
@@ -1478,6 +1479,7 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
             }) {
               return DropdownButtonFormField<T>(
                 value: value,
+                dropdownColor: kMixroomGlassDropdownMenuColor,
                 decoration: InputDecoration(
                   labelText: label,
                   border: const OutlineInputBorder(),
@@ -3669,6 +3671,24 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     );
 
     if (savedPath != null) {
+      if (Platform.isAndroid) {
+        final savedDisplayName =
+            await ExportSaveDialog.resolveSavedDisplayNameFromPlatform(
+          savedPath,
+        );
+        if (savedDisplayName != null &&
+            savedDisplayName.isNotEmpty &&
+            savedDisplayName.toLowerCase() !=
+                suggestedFileName.trim().toLowerCase()) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Name already existed. Saved as "$savedDisplayName".',
+              ),
+            ),
+          );
+        }
+      }
       // final success_str = L10n.translate(context, 'Exported file saved!');
       // ScaffoldMessenger.of(context).showSnackBar(
       //   SnackBar(content: Text(success_str)),// at: $savedPath')),
@@ -6693,6 +6713,8 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
 // EXPORT SUCCESS SCREEN
 
 class ExportSuccessScreen extends StatelessWidget {
+  static const MethodChannel _savedExportsChannel =
+      MethodChannel('mixroom/saved_exports');
   final String filePath;
   final String? savedFilePath;
   final String? savedFileName;
@@ -6705,15 +6727,71 @@ class ExportSuccessScreen extends StatelessWidget {
       this.savedFilePath,
       this.savedFileName});
 
+  String? _savedNameFromPathHint() {
+    final saved = savedFilePath?.trim();
+    if (saved == null || saved.isEmpty) return null;
+
+    final normalized = _normalizedCandidatePath(saved);
+    if (!_isUriLikePath(normalized)) {
+      final decoded = Uri.decodeFull(normalized);
+      final base = p.basename(decoded).trim();
+      if (base.isNotEmpty &&
+          base != '.' &&
+          base != p.basename(filePath).trim()) {
+        return base;
+      }
+    }
+
+    final documentId = _extractAndroidDocumentId(saved);
+    if (documentId != null && documentId.contains('/')) {
+      final leaf = documentId.split('/').last.trim();
+      if (leaf.isNotEmpty && leaf != p.basename(filePath).trim()) {
+        return leaf;
+      }
+    }
+    return null;
+  }
+
   String _resolvedFileName() {
+    final hintedFromPath = _savedNameFromPathHint();
+    if (hintedFromPath != null && hintedFromPath.isNotEmpty) {
+      return hintedFromPath;
+    }
+
     final explicit = savedFileName?.trim();
-    if (explicit != null && explicit.isNotEmpty) {
+    if (explicit != null &&
+        explicit.isNotEmpty &&
+        explicit != p.basename(filePath).trim()) {
       return explicit;
+    }
+
+    final savedLocalPath = _resolveSavedLocalPath();
+    if (savedLocalPath != null && savedLocalPath.isNotEmpty) {
+      final base = p.basename(savedLocalPath).trim();
+      if (base.isNotEmpty &&
+          base != '.' &&
+          base != p.basename(filePath).trim()) {
+        return base;
+      }
     }
 
     final saved = savedFilePath?.trim();
     if (saved != null && saved.isNotEmpty) {
-      return p.basename(saved);
+      final normalized = _normalizedCandidatePath(saved);
+      if (_isUriLikePath(normalized)) {
+        final uri = Uri.tryParse(normalized);
+        if (uri != null && uri.pathSegments.isNotEmpty) {
+          final segment = uri.pathSegments.last.trim();
+          if (segment.isNotEmpty) return segment;
+        }
+      } else {
+        final base = p.basename(normalized).trim();
+        if (base.isNotEmpty && base != '.') return base;
+      }
+    }
+
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
     }
 
     return p.basename(filePath);
@@ -6745,32 +6823,196 @@ class ExportSuccessScreen extends StatelessWidget {
     return trimmed;
   }
 
-  String _resolvedActionPath() {
+  String? _extractAndroidDocumentId(String rawPath) {
+    var value = rawPath.trim();
+    if (value.isEmpty) return null;
+
+    try {
+      value = Uri.decodeFull(value);
+    } catch (_) {}
+
+    final uri = Uri.tryParse(value);
+    final path = uri?.path ?? value;
+
+    String? extractFrom(String input) {
+      final markerIndex = input.indexOf('/document/');
+      if (markerIndex >= 0) {
+        return input.substring(markerIndex + '/document/'.length);
+      }
+      if (input.startsWith('document/')) {
+        return input.substring('document/'.length);
+      }
+      return null;
+    }
+
+    var documentId = extractFrom(path);
+    if (documentId == null) {
+      documentId = extractFrom(value);
+    }
+    if (documentId == null || documentId.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      documentId = Uri.decodeComponent(documentId);
+    } catch (_) {}
+    return documentId;
+  }
+
+  String? _androidDocumentPathToAbsolute(String rawPath) {
+    if (kIsWeb || !Platform.isAndroid) return null;
+    final documentId = _extractAndroidDocumentId(rawPath);
+    if (documentId == null || documentId.isEmpty) return null;
+
+    if (documentId.startsWith('raw:')) {
+      final raw = documentId.substring(4);
+      if (raw.startsWith('/')) return p.normalize(raw);
+      return null;
+    }
+    if (documentId.startsWith('primary:')) {
+      final rel = documentId.substring('primary:'.length);
+      return p.normalize('/storage/emulated/0/$rel');
+    }
+    if (documentId.startsWith('home:')) {
+      final rel = documentId.substring('home:'.length);
+      return p.normalize('/storage/emulated/0/Documents/$rel');
+    }
+    if (documentId.startsWith('downloads:')) {
+      final rel = documentId.substring('downloads:'.length);
+      if (rel.isEmpty || RegExp(r'^\d+$').hasMatch(rel)) return null;
+      return p.normalize('/storage/emulated/0/Download/$rel');
+    }
+    return null;
+  }
+
+  String? _resolveSavedLocalPath() {
     final saved = savedFilePath?.trim();
-    if (saved != null && saved.isNotEmpty) {
-      return _normalizedCandidatePath(saved);
+    if (saved == null || saved.isEmpty) return null;
+
+    final normalized = _normalizedCandidatePath(saved);
+    if (!_isUriLikePath(normalized) && File(normalized).existsSync()) {
+      return normalized;
+    }
+
+    final androidAbsolute = _androidDocumentPathToAbsolute(saved);
+    if (androidAbsolute != null && File(androidAbsolute).existsSync()) {
+      return androidAbsolute;
+    }
+
+    return null;
+  }
+
+  List<Uri> _uriCandidatesForPath(String path) {
+    final normalized = _normalizedCandidatePath(path);
+    if (normalized.isEmpty) return const <Uri>[];
+
+    final out = <Uri>[];
+    final seen = <String>{};
+
+    void add(Uri? uri) {
+      if (uri == null) return;
+      final key = uri.toString();
+      if (!seen.add(key)) return;
+      out.add(uri);
+    }
+
+    if (_isUriLikePath(normalized)) {
+      add(Uri.tryParse(normalized));
+      return out;
+    }
+
+    if (!kIsWeb && Platform.isAndroid) {
+      if (normalized.startsWith('/document/') ||
+          normalized.startsWith('/tree/')) {
+        const authorities = <String>[
+          'com.android.externalstorage.documents',
+          'com.android.providers.downloads.documents',
+          'com.android.providers.media.documents',
+        ];
+        final pathValue =
+            normalized.startsWith('/') ? normalized : '/$normalized';
+        for (final authority in authorities) {
+          add(Uri(
+            scheme: 'content',
+            host: authority,
+            path: pathValue,
+          ));
+        }
+      }
+    }
+
+    if (!kIsWeb && Platform.isIOS && normalized.startsWith('/')) {
+      add(Uri.file(normalized));
+    }
+
+    return out;
+  }
+
+  bool _requiresNativeSavedExportOpen(String path) {
+    if (kIsWeb) return false;
+    final normalized = _normalizedCandidatePath(path);
+    if (Platform.isAndroid) {
+      if (_isUriLikePath(normalized)) return true;
+      return normalized.startsWith('/document/') ||
+          normalized.startsWith('/tree/');
+    }
+    if (Platform.isIOS) {
+      return _isUriLikePath(normalized) || normalized.startsWith('/');
+    }
+    return false;
+  }
+
+  Future<bool> _openSavedExportViaNative(String path) async {
+    if (!_requiresNativeSavedExportOpen(path)) return false;
+    try {
+      final opened = await _savedExportsChannel.invokeMethod<bool>(
+        'openSavedExport',
+        <String, dynamic>{'path': path},
+      );
+      return opened == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  String _resolvedActionPath() {
+    final savedLocal = _resolveSavedLocalPath();
+    if (savedLocal != null && savedLocal.isNotEmpty) {
+      return savedLocal;
+    }
+
+    final normalizedFilePath = _normalizedCandidatePath(filePath);
+    if (!_isUriLikePath(normalizedFilePath) &&
+        File(normalizedFilePath).existsSync()) {
+      return normalizedFilePath;
+    }
+
+    return normalizedFilePath;
+  }
+
+  String _resolvedPreviewPath() {
+    final savedLocal = _resolveSavedLocalPath();
+    if (savedLocal != null && savedLocal.isNotEmpty) {
+      return savedLocal;
     }
     return _normalizedCandidatePath(filePath);
   }
 
-  String _resolvedPreviewPath() {
-    final saved = savedFilePath?.trim();
-    if (saved == null || saved.isEmpty) {
-      return filePath;
-    }
-    final normalizedSaved = _normalizedCandidatePath(saved);
-    if (!_isUriLikePath(normalizedSaved) &&
-        File(normalizedSaved).existsSync()) {
-      return normalizedSaved;
-    }
-    return filePath;
-  }
-
   Future<void> _shareFile(BuildContext context) async {
     try {
+      var sharePath = _resolvedActionPath();
+      if (_isUriLikePath(sharePath) || !File(sharePath).existsSync()) {
+        final fallback = _normalizedCandidatePath(filePath);
+        if (!_isUriLikePath(fallback) && File(fallback).existsSync()) {
+          sharePath = fallback;
+        }
+      }
+      if (_isUriLikePath(sharePath) || !File(sharePath).existsSync()) {
+        throw Exception('No readable export file path for sharing.');
+      }
       await Share.shareXFiles([
         XFile(
-          _resolvedActionPath(),
+          sharePath,
           name: _resolvedFileName(),
         )
       ]);
@@ -6782,20 +7024,34 @@ class ExportSuccessScreen extends StatelessWidget {
   }
 
   Future<void> _openSavedFile(BuildContext context) async {
+    final saved = savedFilePath?.trim();
+    final savedLocalPath = _resolveSavedLocalPath();
+    final hasSavedTarget = saved != null && saved.isNotEmpty;
     final candidates = <String>[
-      if ((savedFilePath ?? '').trim().isNotEmpty)
-        _normalizedCandidatePath(savedFilePath!),
-      _normalizedCandidatePath(filePath),
+      if (savedLocalPath != null && savedLocalPath.isNotEmpty) savedLocalPath,
+      if (saved != null && saved.isNotEmpty) _normalizedCandidatePath(saved),
+      if (!hasSavedTarget) _normalizedCandidatePath(filePath),
     ];
 
+    final attempted = <String>{};
     for (final candidate in candidates) {
+      if (candidate.trim().isEmpty || !attempted.add(candidate)) continue;
       try {
-        if (_isUriLikePath(candidate)) {
-          final launched = await launchUrl(Uri.parse(candidate));
-          if (launched) {
-            return;
-          }
+        if (await _openSavedExportViaNative(candidate)) {
+          return;
         }
+
+        final uriCandidates = _uriCandidatesForPath(candidate);
+        for (final uri in uriCandidates) {
+          final launched = await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication,
+          );
+          if (launched) return;
+        }
+
+        if (_isUriLikePath(candidate)) continue;
+        if (!File(candidate).existsSync()) continue;
         final result = await OpenFile.open(candidate);
         if (result.type == ResultType.done) {
           return;
@@ -8517,6 +8773,7 @@ Widget _slopePicker({
         DropdownButton<String>(
           isExpanded: true,
           value: current.isNotEmpty ? current : choices.first,
+          dropdownColor: kMixroomGlassDropdownMenuColor,
           items: choices
               .map((c) => DropdownMenuItem(value: c, child: Text(c)))
               .toList(),

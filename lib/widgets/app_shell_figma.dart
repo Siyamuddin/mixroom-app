@@ -153,7 +153,8 @@ double mixroomShellBottomPadding(BuildContext context) {
 }
 
 double mixroomShellDockBottomInset(BuildContext context) {
-  final bottomPadding = MediaQuery.of(context).padding.bottom;
+  // Use viewPadding so keyboard (viewInsets) changes do not shift the dock.
+  final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
   if (defaultTargetPlatform == TargetPlatform.android) {
     return bottomPadding;
   }
@@ -262,51 +263,72 @@ class MixroomShellRoundButton extends StatelessWidget {
                 ? const Color.fromRGBO(0, 149, 255, 0.60)
                 : const Color.fromRGBO(244, 244, 244, 0.60))
             : const Color.fromRGBO(244, 244, 244, 0.22));
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: ClipRRect(
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(24),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(24),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Stack(
-            children: [
-              Container(
-                width: width,
-                height: size,
-                decoration: BoxDecoration(
-                  color: fill,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: active ? 0.14 : 0.10),
+        splashFactory: InkRipple.splashFactory,
+        splashColor: Colors.white.withValues(alpha: 0.12),
+        highlightColor: Colors.white.withValues(alpha: 0.05),
+        overlayColor: WidgetStateProperty.resolveWith<Color?>((states) {
+          if (states.contains(WidgetState.pressed)) {
+            return Colors.white.withValues(alpha: 0.16);
+          }
+          if (states.contains(WidgetState.hovered)) {
+            return Colors.white.withValues(alpha: 0.08);
+          }
+          if (states.contains(WidgetState.focused)) {
+            return Colors.white.withValues(alpha: 0.10);
+          }
+          return Colors.transparent;
+        }),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Stack(
+              children: [
+                Container(
+                  width: width,
+                  height: size,
+                  decoration: BoxDecoration(
+                    color: fill,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color:
+                          Colors.white.withValues(alpha: active ? 0.14 : 0.10),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.24),
+                        blurRadius: 18,
+                        spreadRadius: 1,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.24),
-                      blurRadius: 18,
-                      spreadRadius: 1,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
+                  alignment: Alignment.center,
+                  child: icon ??
+                      SvgPicture.asset(
+                        assetPath!,
+                        width: iconExtent ?? (activeWide ? 16 : 20),
+                        height: iconExtent ?? (activeWide ? 16 : 20),
+                        colorFilter: tint == null
+                            ? null
+                            : ColorFilter.mode(tint!, BlendMode.srcIn),
+                      ),
                 ),
-                alignment: Alignment.center,
-                child: icon ??
-                    SvgPicture.asset(
-                      assetPath!,
-                      width: iconExtent ?? (activeWide ? 16 : 20),
-                      height: iconExtent ?? (activeWide ? 16 : 20),
-                      colorFilter: tint == null
-                          ? null
-                          : ColorFilter.mode(tint!, BlendMode.srcIn),
-                    ),
-              ),
-              Positioned.fill(
-                child: _mixroomShellChromeOverlay(
-                  radius: 24,
-                  intense: active || activeWide,
+                Positioned.fill(
+                  child: _mixroomShellChromeOverlay(
+                    radius: 24,
+                    intense: active || activeWide,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -427,30 +449,49 @@ class MixroomShellSegmentedControl<T> extends StatelessWidget {
                     children: [
                       for (var i = 0; i < options.length; i++)
                         Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              HapticFeedback.selectionClick();
-                              onChanged(options[i]);
-                            },
-                            behavior: HitTestBehavior.opaque,
-                            child: Container(
-                              alignment: Alignment.center,
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  labelBuilder(options[i]),
-                                  maxLines: 1,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontFamily: 'Pretendard',
-                                    color: Colors.white.withValues(
-                                      alpha: options[i] == value ? 0.98 : 0.62,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                onChanged(options[i]);
+                              },
+                              borderRadius: thumbRadiusForIndex(i),
+                              overlayColor:
+                                  WidgetStateProperty.resolveWith<Color?>(
+                                      (states) {
+                                if (states.contains(WidgetState.pressed)) {
+                                  return Colors.white.withValues(alpha: 0.12);
+                                }
+                                if (states.contains(WidgetState.hovered)) {
+                                  return Colors.white.withValues(alpha: 0.06);
+                                }
+                                if (states.contains(WidgetState.focused)) {
+                                  return Colors.white.withValues(alpha: 0.08);
+                                }
+                                return Colors.transparent;
+                              }),
+                              child: Container(
+                                alignment: Alignment.center,
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    labelBuilder(options[i]),
+                                    maxLines: 1,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color: Colors.white.withValues(
+                                        alpha:
+                                            options[i] == value ? 0.98 : 0.62,
+                                      ),
+                                      fontSize: 15,
+                                      fontWeight: options[i] == value
+                                          ? FontWeight.w600
+                                          : FontWeight.w400,
                                     ),
-                                    fontSize: 15,
-                                    fontWeight: options[i] == value
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
                                   ),
                                 ),
                               ),
@@ -569,6 +610,7 @@ class MixroomInlineFeedbackComposer extends StatefulWidget {
     required this.onSubmit,
     this.initialSubmitted = false,
     this.compact = false,
+    this.showBetaNotice = false,
   });
 
   final Future<void> Function(
@@ -578,6 +620,7 @@ class MixroomInlineFeedbackComposer extends StatefulWidget {
   ) onSubmit;
   final bool initialSubmitted;
   final bool compact;
+  final bool showBetaNotice;
 
   @override
   State<MixroomInlineFeedbackComposer> createState() =>
@@ -639,6 +682,10 @@ class _MixroomInlineFeedbackComposerState
   @override
   Widget build(BuildContext context) {
     final topGap = widget.compact ? 14.0 : 96.0;
+    final betaNoticeTopGap =
+        widget.showBetaNotice && !widget.compact ? 34.0 : 0.0;
+    final betaNoticeBottomGap =
+        widget.showBetaNotice && !widget.compact ? 40.0 : topGap;
     return Column(
       children: [
         if (widget.compact)
@@ -650,9 +697,41 @@ class _MixroomInlineFeedbackComposerState
           )
         else
           MixroomShellWordmarkHeader(showWordmark: true),
-        SizedBox(height: topGap),
+        if (widget.showBetaNotice) ...[
+          SizedBox(height: betaNoticeTopGap),
+          Text(
+            L10n.translate(context, 'Open Beta Version'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: 'Pretendard',
+              color: Color(0xFFF4F4F4),
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              height: 22 / 18,
+            ),
+          ),
+          const SizedBox(height: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 272),
+            child: Text(
+              L10n.translate(
+                context,
+                'There may be bugs or unexpected errors.',
+              ),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white.withValues(alpha: 0.68),
+                fontSize: 13,
+                fontWeight: FontWeight.w400,
+                height: 18 / 13,
+              ),
+            ),
+          ),
+        ],
+        SizedBox(height: betaNoticeBottomGap),
         Text(
-          L10n.translate(context, 'Feedback for'),
+          L10n.translate(context, 'Send Feedback'),
           style: const TextStyle(
             fontFamily: 'Pretendard',
             color: Color(0xFFF4F4F4),

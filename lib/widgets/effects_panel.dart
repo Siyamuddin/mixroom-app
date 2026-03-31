@@ -3,6 +3,7 @@ import 'package:fftea/fftea.dart';
 
 import 'package:flutter/material.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
+import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'dart:math' as math;
 import 'package:provider/provider.dart';
@@ -1009,6 +1010,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               // ---- PRESET DROPDOWN ----
               DropdownButton<String>(
                 value: presetLabel,
+                dropdownColor: kMixroomGlassDropdownMenuColor,
                 underline: const SizedBox(),
                 items: [
                   DropdownMenuItem(
@@ -1341,7 +1343,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
 
     // ~30fps is plenty; 60fps if you want (16ms)
     _compMeterTimer =
-        Timer.periodic(const Duration(milliseconds: 33), (_) async {
+        Timer.periodic(const Duration(milliseconds: 40), (_) async {
       if (!mounted || !_compMeterRunning) return;
 
       try {
@@ -1385,7 +1387,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     _refreshEqAnalyzerSampleRate();
 
     _eqWaveformTimer =
-        Timer.periodic(const Duration(milliseconds: 33), (_) async {
+        Timer.periodic(const Duration(milliseconds: 40), (_) async {
       if (!mounted || !_eqWaveformRunning) return;
 
       try {
@@ -4031,6 +4033,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               // ---- PRESET DROPDOWN ----
               DropdownButton<String>(
                 value: presetLabel,
+                dropdownColor: kMixroomGlassDropdownMenuColor,
                 underline: const SizedBox(),
                 items: [
                   DropdownMenuItem(
@@ -4268,7 +4271,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     _compMeterRunning = true;
 
     _compMeterTimer =
-        Timer.periodic(const Duration(milliseconds: 33), (_) async {
+        Timer.periodic(const Duration(milliseconds: 40), (_) async {
       if (!mounted || !_compMeterRunning) return;
 
       try {
@@ -4313,7 +4316,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     _refreshEqAnalyzerSampleRate();
 
     _eqWaveformTimer =
-        Timer.periodic(const Duration(milliseconds: 33), (_) async {
+        Timer.periodic(const Duration(milliseconds: 40), (_) async {
       if (!mounted || !_eqWaveformRunning) return;
 
       try {
@@ -7036,6 +7039,11 @@ class _EqPreviewFullPainter extends CustomPainter {
       hpf = (mid - 1).clamp(_minF, _maxF);
       lpf = (mid + 1).clamp(_minF, _maxF);
     }
+    // At boundary settings (HPF min / LPF max), treat filters as neutral so
+    // the default visualizer edges stay straight instead of showing a -3 dB knee.
+    const cutoffNeutralToleranceHz = 1.0;
+    final hpfIsNeutral = (hpf - _minF).abs() <= cutoffNeutralToleranceHz;
+    final lpfIsNeutral = (lpf - _maxF).abs() <= cutoffNeutralToleranceHz;
 
     // HPF/LPF markers
     final xHPF = _xForHz(hpf, w);
@@ -7055,16 +7063,20 @@ class _EqPreviewFullPainter extends CustomPainter {
       // start flat at 0dB
       double db = 0.0;
 
-      db += _butterworthHighpassDb(
-        f: f.toDouble(),
-        fc: hpf,
-        slopeDbOct: hpfSlopeDbOct,
-      );
-      db += _butterworthLowpassDb(
-        f: f.toDouble(),
-        fc: lpf,
-        slopeDbOct: lpfSlopeDbOct,
-      );
+      if (!hpfIsNeutral) {
+        db += _butterworthHighpassDb(
+          f: f.toDouble(),
+          fc: hpf,
+          slopeDbOct: hpfSlopeDbOct,
+        );
+      }
+      if (!lpfIsNeutral) {
+        db += _butterworthLowpassDb(
+          f: f.toDouble(),
+          fc: lpf,
+          slopeDbOct: lpfSlopeDbOct,
+        );
+      }
 
       // Add band gains as bumps
       for (int i = 0; i < bandFreqs.length; i++) {
@@ -7747,6 +7759,7 @@ class GainReductionSliderMeterHorizontal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final clamped = grDb.clamp(0.0, maxDb);
+    final displayDb = grDb.clamp(0.0, 120.0);
     final t = (clamped / maxDb).clamp(0.0, 1.0); // 0..1 (0 = no GR)
 
     final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -7778,13 +7791,15 @@ class GainReductionSliderMeterHorizontal extends StatelessWidget {
             children: [
               Text(title, style: readoutStyle),
               const SizedBox(width: 8),
-              // Expanded(
-              //   child: Opacity(
-              //     opacity: 0.0, // keeps right text aligned without extra layout jitter
-              //     child: Text("GR", style: readoutStyle),
-              //   ),
-              // ),
-              // Text("${clamped.toStringAsFixed(1)} dB", style: readoutStyle),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    "-${displayDb.toStringAsFixed(1)} dB",
+                    style: readoutStyle,
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 6),

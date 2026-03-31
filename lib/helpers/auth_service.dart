@@ -1226,6 +1226,7 @@ class AuthService extends ChangeNotifier {
     }
 
     AnalyticsService.instance.setSubscriptionTier(null);
+    AnalyticsService.instance.setMusicProfile(null);
     await AnalyticsService.instance.identifyUser(
       userId: user.userId,
       email: user.email,

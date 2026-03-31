@@ -115,9 +115,45 @@ class UsageRepositoryTests(unittest.TestCase):
         values = repo._state_table.last_update_kwargs["ExpressionAttributeValues"]
         condition = repo._state_table.last_update_kwargs["ConditionExpression"]
         update = repo._state_table.last_update_kwargs["UpdateExpression"]
-        self.assertEqual(values[":required_bonus_prompts"], 1)
-        self.assertIn("admin_prompt_grants_remaining >= :required_bonus_prompts", condition)
-        self.assertIn("admin_prompt_grants_remaining - :required_bonus_prompts", update)
+        self.assertEqual(result.reserved_grant_prompts, 1)
+        self.assertEqual(result.reserved_quota_prompts, 0)
+        self.assertEqual(values[":reserved_grant_prompts"], 1)
+        self.assertEqual(values[":reserved_quota_prompts"], 0)
+        self.assertIn("admin_prompt_grants_remaining >= :reserved_grant_prompts", condition)
+        self.assertIn("admin_prompt_grants_remaining - :reserved_grant_prompts", update)
+
+    def test_reserve_usage_still_uses_quota_when_no_bonus_bank_exists(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = _FakeStateTable()
+        repo._events_table = None
+        repo._entitlements_table = None
+        repo.reset_counters_if_needed = lambda *args, **kwargs: None
+        repo.get_usage_state = lambda *args, **kwargs: {
+            "ai_prompts_used_today": 4,
+            "ai_prompts_used_week": 12,
+            "admin_prompt_grants_remaining": 0,
+            "ai_prompts_day_reset": "2026-03-17",
+            "ai_prompts_week_reset": "2026-03-16",
+            "ai_last_reset": "2026-03-17",
+            "ai_tokens_month_reset": "2026-03",
+        }
+
+        result = repo.reserve_usage(
+            "user-123",
+            subscription_tier="free",
+            reserved_credits=0,
+            reserved_tokens=0,
+            reserved_prompts=1,
+            daily_credit_limit=0,
+            monthly_token_limit=0,
+            daily_prompt_limit=10,
+            weekly_prompt_limit=20,
+            now=datetime(2026, 3, 17, tzinfo=timezone.utc),
+        )
+
+        self.assertTrue(result.allowed)
+        self.assertEqual(result.reserved_grant_prompts, 0)
+        self.assertEqual(result.reserved_quota_prompts, 1)
 
     def test_get_prompt_limit_status_includes_admin_prompt_grants_in_remaining(self) -> None:
         repo = object.__new__(AiUsageRepository)
@@ -140,9 +176,11 @@ class UsageRepositoryTests(unittest.TestCase):
         )
 
         self.assertTrue(status["can_submit"])
-        self.assertEqual(status["daily"]["remaining"], 2)
-        self.assertEqual(status["weekly"]["remaining"], 2)
+        self.assertEqual(status["daily"]["remaining"], 0)
+        self.assertEqual(status["weekly"]["remaining"], 0)
         self.assertEqual(status["extra_prompts_remaining"], 2)
+        self.assertEqual(status["extra_prompt_bank"]["remaining"], 2)
+        self.assertTrue(status["extra_prompt_bank"]["consumed_first"])
 
 
 if __name__ == "__main__":

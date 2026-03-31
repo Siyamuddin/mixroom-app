@@ -42,6 +42,20 @@ enum _ProjectSortMode {
   alphabetical,
 }
 
+class _ProjectListEntry {
+  const _ProjectListEntry.project(this.project)
+      : bundledDemo = null,
+        isBundledDemo = false;
+
+  const _ProjectListEntry.bundledDemo(this.bundledDemo)
+      : project = null,
+        isBundledDemo = true;
+
+  final ProjectMeta? project;
+  final BundledDemoProjectAsset? bundledDemo;
+  final bool isBundledDemo;
+}
+
 class _ProjectsScreenState extends State<ProjectsScreen> {
   static const Key _projectsScreenKey = Key('projects_screen');
   static const Key _newProjectCardKey = Key('projects_new_project_card');
@@ -54,6 +68,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   static const Key _deleteCancelKey = ValueKey('projects_delete_cancel');
   static const Key _deleteConfirmKey = ValueKey('projects_delete_confirm');
   List<ProjectMeta> _projects = [];
+  List<BundledDemoProjectAsset> _bundledDemoProjects = [];
   bool _loading = true;
   bool _filePickerInFlight = false;
   StreamSubscription<String>? _importSub;
@@ -63,6 +78,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   final GlobalKey _projectToolsButtonKey = GlobalKey();
   _ProjectSortMode _sortMode = _ProjectSortMode.recent;
   final Set<String> _selectedProjectPaths = <String>{};
+  final Set<String> _selectedBundledDemoAssetPaths = <String>{};
+  bool _selectionModePinned = false;
 
   String _projectActionKeyToken(String name) =>
       Uri.encodeComponent(name.trim());
@@ -85,6 +102,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (!mounted) return;
       setState(() {});
     });
+    ProjectManager.projectLibraryRevision.addListener(
+      _handleProjectLibraryChanged,
+    );
     _refresh();
 
     // Cold start
@@ -106,9 +126,17 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   @override
   void dispose() {
     _importSub?.cancel();
+    ProjectManager.projectLibraryRevision.removeListener(
+      _handleProjectLibraryChanged,
+    );
     _searchFocusNode.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _handleProjectLibraryChanged() {
+    if (!mounted) return;
+    unawaited(_refresh());
   }
 
   Future<void> _refresh() async {
@@ -118,8 +146,24 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     });
     try {
       _projects = await ProjectManager.listProjects();
+      final bundledDemoProjects =
+          await ProjectManager.listBundledDemoProjectAssets();
+      final dismissedDemoAssetPaths =
+          await ProjectManager.listDismissedBundledDemoAssetPaths();
+      final importedDemoAssetPaths = _projects
+          .map((project) => project.bundledDemoAssetPath)
+          .whereType<String>()
+          .toSet();
+      _bundledDemoProjects = bundledDemoProjects
+          .where(
+            (demo) =>
+                !importedDemoAssetPaths.contains(demo.assetPath) &&
+                !dismissedDemoAssetPaths.contains(demo.assetPath),
+          )
+          .toList(growable: false);
     } catch (e) {
       _projects = <ProjectMeta>[];
+      _bundledDemoProjects = <BundledDemoProjectAsset>[];
       _loadError = _friendlyLoadError(e);
     } finally {
       if (mounted) {
@@ -257,10 +301,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final controller = TextEditingController(text: meta.name);
     final focusNode = FocusNode(debugLabel: 'projects_rename');
     var focusScheduled = false;
+    var dialogClosing = false;
 
     void closeWithResult(BuildContext ctx, String? result) {
+      if (dialogClosing) return;
+      dialogClosing = true;
       focusNode.unfocus();
-      Navigator.pop(ctx, result);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!ctx.mounted) return;
+        Navigator.of(ctx).pop(result);
+      });
     }
 
     try {
@@ -283,6 +333,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               key: _renameDialogKey,
               alignment: Alignment.topCenter,
               backgroundColor: Colors.transparent,
+              surfaceTintColor: Colors.transparent,
+              shadowColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
+              clipBehavior: Clip.antiAlias,
               elevation: 0,
               insetPadding: const EdgeInsets.fromLTRB(16, 72, 16, 16),
               child: ConstrainedBox(
@@ -488,7 +544,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   bool _isSelected(ProjectMeta meta) =>
       _selectedProjectPaths.contains(_projectSelectionKey(meta));
 
-  bool get _selectionMode => _selectedProjectPaths.isNotEmpty;
+  bool _isBundledDemoSelected(BundledDemoProjectAsset demo) =>
+      _selectedBundledDemoAssetPaths.contains(demo.assetPath);
+
+  int get _selectedEntryCount =>
+      _selectedProjectPaths.length + _selectedBundledDemoAssetPaths.length;
+
+  bool get _selectionMode => _selectionModePinned || _selectedEntryCount > 0;
 
   List<ProjectMeta> _visibleProjects() {
     final query = _searchController.text.trim().toLowerCase();
@@ -509,6 +571,25 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return filtered;
   }
 
+  List<BundledDemoProjectAsset> _visibleBundledDemoProjects() {
+    final query = _searchController.text.trim().toLowerCase();
+    final filtered = _bundledDemoProjects.where((demo) {
+      if (query.isEmpty) return true;
+      return demo.name.toLowerCase().contains(query);
+    }).toList();
+    filtered
+        .sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return filtered;
+  }
+
+  List<_ProjectListEntry> _visibleEntries() {
+    final entries = <_ProjectListEntry>[
+      ..._visibleProjects().map(_ProjectListEntry.project),
+      ..._visibleBundledDemoProjects().map(_ProjectListEntry.bundledDemo),
+    ];
+    return entries;
+  }
+
   void _toggleSelection(ProjectMeta meta) {
     final key = _projectSelectionKey(meta);
     setState(() {
@@ -521,16 +602,47 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   void _clearSelection() {
-    if (_selectedProjectPaths.isEmpty) return;
-    setState(_selectedProjectPaths.clear);
+    if (!_selectionModePinned && _selectedEntryCount == 0) return;
+    setState(() {
+      _selectionModePinned = false;
+      _selectedProjectPaths.clear();
+      _selectedBundledDemoAssetPaths.clear();
+    });
+  }
+
+  void _toggleSelectionMode() {
+    if (_selectionMode) {
+      _clearSelection();
+      return;
+    }
+    setState(() => _selectionModePinned = true);
   }
 
   void _selectAllVisible() {
-    final visible = _visibleProjects();
+    final visibleEntries = _visibleEntries();
     setState(() {
-      _selectedProjectPaths
-        ..clear()
-        ..addAll(visible.map(_projectSelectionKey));
+      _selectedProjectPaths.clear();
+      _selectedBundledDemoAssetPaths.clear();
+      for (final entry in visibleEntries) {
+        if (entry.isBundledDemo) {
+          final demo = entry.bundledDemo!;
+          _selectedBundledDemoAssetPaths.add(demo.assetPath);
+        } else {
+          final project = entry.project!;
+          _selectedProjectPaths.add(_projectSelectionKey(project));
+        }
+      }
+    });
+  }
+
+  void _toggleBundledDemoSelection(BundledDemoProjectAsset demo) {
+    final key = demo.assetPath;
+    setState(() {
+      if (_selectedBundledDemoAssetPaths.contains(key)) {
+        _selectedBundledDemoAssetPaths.remove(key);
+      } else {
+        _selectedBundledDemoAssetPaths.add(key);
+      }
     });
   }
 
@@ -600,47 +712,191 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
   }
 
+  Future<bool> _showDeleteProjectsDialog({
+    required String message,
+    Key? dialogKey,
+    Key? cancelKey,
+    Key? confirmKey,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        return Dialog(
+          key: dialogKey,
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+          ),
+          clipBehavior: Clip.antiAlias,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: MixroomShellSurface(
+              radius: 30,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: const Color.fromRGBO(255, 119, 119, 0.16),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.delete_outline_rounded,
+                          color: Color(0xFFFF8D8D),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              L10n.translate(
+                                dialogContext,
+                                'Delete project?',
+                              ),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              L10n.translate(
+                                dialogContext,
+                                'This action cannot be undone.',
+                              ),
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.68),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    message,
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.84),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          key: cancelKey,
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(false),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFF4F4F4),
+                            backgroundColor:
+                                const Color.fromRGBO(244, 244, 244, 0.08),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.10),
+                              ),
+                            ),
+                          ),
+                          child: Text(L10n.translate(dialogContext, 'Cancel')),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          key: confirmKey,
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(true),
+                          style: FilledButton.styleFrom(
+                            backgroundColor:
+                                const Color.fromRGBO(196, 74, 74, 0.92),
+                            foregroundColor: const Color(0xFFFDF4F4),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: Text(L10n.translate(dialogContext, 'Delete')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    return result == true;
+  }
+
   Future<void> _deleteSelectedProjects() async {
-    final selected = _projects
+    final selectedProjects = _projects
         .where((project) => _selectedProjectPaths.contains(project.dir.path))
         .toList();
-    if (selected.isEmpty) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1D2430),
-        title: Text(
-          L10n.translate(context, 'Delete project?'),
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          '${selected.length} ${L10n.translate(context, 'Projects')} ${L10n.translate(context, 'will be permanently deleted.')}',
-          style: const TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(L10n.translate(context, 'Cancel')),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(L10n.translate(context, 'Delete')),
-          ),
-        ],
-      ),
+    final selectedDemos = _bundledDemoProjects
+        .where(
+            (demo) => _selectedBundledDemoAssetPaths.contains(demo.assetPath))
+        .toList();
+    final selectedCount = selectedProjects.length + selectedDemos.length;
+    if (selectedCount == 0) return;
+    final ok = await _showDeleteProjectsDialog(
+      message:
+          '$selectedCount ${L10n.translate(context, 'Projects')} ${L10n.translate(context, 'will be permanently deleted.')}',
     );
-    if (ok != true) return;
-    for (final project in selected) {
+    if (!ok) return;
+    for (final project in selectedProjects) {
       await ProjectManager.deleteProject(project.dir);
+    }
+    if (selectedDemos.isNotEmpty) {
+      await ProjectManager.dismissBundledDemoAssets(
+        selectedDemos.map((demo) => demo.assetPath),
+      );
     }
     _clearSelection();
     await _refresh();
   }
 
   Future<void> _showProjectTools() async {
-    final allVisibleSelected = _visibleProjects().isNotEmpty &&
-        _visibleProjects().every(
-            (project) => _selectedProjectPaths.contains(project.dir.path));
+    final visibleEntries = _visibleEntries();
+    final allVisibleSelected = visibleEntries.isNotEmpty &&
+        visibleEntries.every((entry) {
+          if (entry.isBundledDemo) {
+            return _selectedBundledDemoAssetPaths
+                .contains(entry.bundledDemo!.assetPath);
+          }
+          return _selectedProjectPaths.contains(entry.project!.dir.path);
+        });
     final selected = await _showAnchoredShellMenu(
       anchorKey: _projectToolsButtonKey,
       width: 228,
@@ -767,30 +1023,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<void> _deleteProject(ProjectMeta meta) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        key: _deleteDialogKey,
-        backgroundColor: const Color(0xFF0C1A32),
-        title: Text(L10n.translate(context, 'Delete project?'),
-            style: const TextStyle(color: Colors.white)),
-        content: Text(
-            '“${meta.name}” ${L10n.translate(context, 'will be permanently deleted.')}',
-            style: const TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-              key: _deleteCancelKey,
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(L10n.translate(context, 'Cancel'))),
-          ElevatedButton(
-              key: _deleteConfirmKey,
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(L10n.translate(context, 'Delete'))),
-        ],
-      ),
+    final ok = await _showDeleteProjectsDialog(
+      message:
+          '“${meta.name}” ${L10n.translate(context, 'will be permanently deleted.')}',
+      dialogKey: _deleteDialogKey,
+      cancelKey: _deleteCancelKey,
+      confirmKey: _deleteConfirmKey,
     );
 
-    if (ok != true) return;
+    if (!ok) return;
     await ProjectManager.deleteProject(meta.dir);
     await _refresh();
   }
@@ -879,6 +1120,58 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
 
       // Open imported project immediately (optional)
+      final resolvedMode = _resolvedEditorMode();
+      final isProEntitled = _isProEntitled();
+      await Navigator.push(
+        context,
+        _NoSwipeMaterialPageRoute(
+          builder: (_) => AudioEditorScreen(
+            mode: resolvedMode,
+            projectDir: newDir,
+            isProEntitled: isProEntitled,
+          ),
+        ),
+      );
+      if (!mounted) return;
+
+      await _refresh();
+    } catch (e) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Import failed')}: $e',
+        tone: AppPopupTone.error,
+      );
+    }
+  }
+
+  Future<void> _importBundledDemoAndOpen(BundledDemoProjectAsset demo) async {
+    final canCreate = await ProjectManager.canCreateNew();
+    if (!mounted) return;
+
+    if (!canCreate) {
+      _showProjectLimitDialog();
+      return;
+    }
+
+    try {
+      showLoadingDialog(
+        context,
+        message: L10n.translate(context, 'Importing…'),
+      );
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+
+      final newDir = await ProjectManager.importBundledDemoProjectAsset(
+        assetPath: demo.assetPath,
+      );
+      if (!mounted) return;
+
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+
       final resolvedMode = _resolvedEditorMode();
       final isProEntitled = _isProEntitled();
       await Navigator.push(
@@ -1068,9 +1361,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   @override
   Widget build(BuildContext context) {
     final canCreate = _projects.length < ProjectManager.maxProjects;
-    final visibleProjects = _visibleProjects();
+    final visibleEntries = _visibleEntries();
     final hasSearchQuery = _searchController.text.trim().isNotEmpty;
     final searchFocused = _searchFocusNode.hasFocus;
+    final showSearchClear = searchFocused || hasSearchQuery;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final dockOverlayBottom =
         mixroomShellDockBottomInset(context) + kMixroomMainDockHeight;
@@ -1134,22 +1428,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       const SizedBox(width: 8),
                       MixroomShellRoundButton(
                         size: 44,
-                        iconExtent: 17,
-                        assetPath: kMixroomShellImportAsset,
-                        onTap: () async {
-                          if (!canCreate) {
-                            _showProjectLimitDialog();
-                            return;
-                          }
-                          final res = await _pickFilesSafely(
-                            type: FileType.any,
-                            withData: false,
-                          );
-                          if (res == null || res.files.isEmpty) return;
-                          final path = res.files.single.path;
-                          if (path == null) return;
-                          _importProjectFromFile(path);
-                        },
+                        active: _selectionMode,
+                        icon: Icon(
+                          _selectionMode
+                              ? Icons.close_rounded
+                              : Icons.checklist_rounded,
+                          color: const Color(0xFFF4F4F4),
+                          size: _selectionMode ? 22 : 21,
+                        ),
+                        onTap: _toggleSelectionMode,
                       ),
                     ],
                   ),
@@ -1164,7 +1451,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              '${_selectedProjectPaths.length} ${L10n.translate(context, 'Projects')}',
+                              '$_selectedEntryCount ${L10n.translate(context, 'Projects')}',
                               style: const TextStyle(
                                 fontFamily: 'Pretendard',
                                 color: Color(0xFFF4F4F4),
@@ -1239,12 +1526,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                   ),
                                 ),
                               )
-                            : visibleProjects.isEmpty
+                            : visibleEntries.isEmpty
                                 ? Center(
                                     child: Text(
                                       L10n.translate(
                                         context,
-                                        _projects.isEmpty
+                                        _projects.isEmpty &&
+                                                _bundledDemoProjects.isEmpty
                                             ? 'No saved projects yet.'
                                             : 'No matching projects.',
                                       ),
@@ -1283,144 +1571,389 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                         blendMode: BlendMode.dstIn,
                                         child: ListView.separated(
                                           key: _projectsListKey,
-                                          itemCount: visibleProjects.length,
+                                          itemCount: visibleEntries.length,
                                           separatorBuilder: (_, __) =>
                                               const SizedBox(height: 14),
                                           itemBuilder: (_, i) {
-                                            final project = visibleProjects[i];
+                                            final entry = visibleEntries[i];
+                                            if (entry.isBundledDemo) {
+                                              final demo = entry.bundledDemo!;
+                                              final selected =
+                                                  _isBundledDemoSelected(demo);
+                                              return Material(
+                                                color: Colors.transparent,
+                                                borderRadius:
+                                                    BorderRadius.circular(24),
+                                                clipBehavior: Clip.antiAlias,
+                                                child: InkWell(
+                                                  onLongPress: () =>
+                                                      _toggleBundledDemoSelection(
+                                                    demo,
+                                                  ),
+                                                  onTap: () {
+                                                    if (_selectionMode) {
+                                                      _toggleBundledDemoSelection(
+                                                        demo,
+                                                      );
+                                                      return;
+                                                    }
+                                                    _importBundledDemoAndOpen(
+                                                      demo,
+                                                    );
+                                                  },
+                                                  splashFactory:
+                                                      InkRipple.splashFactory,
+                                                  splashColor: Colors.white
+                                                      .withValues(alpha: 0.12),
+                                                  highlightColor: Colors.white
+                                                      .withValues(alpha: 0.04),
+                                                  overlayColor:
+                                                      WidgetStateProperty
+                                                          .resolveWith<Color?>(
+                                                    (states) {
+                                                      if (states.contains(
+                                                        WidgetState.pressed,
+                                                      )) {
+                                                        return Colors.white
+                                                            .withValues(
+                                                                alpha: 0.14);
+                                                      }
+                                                      if (states.contains(
+                                                        WidgetState.hovered,
+                                                      )) {
+                                                        return Colors.white
+                                                            .withValues(
+                                                                alpha: 0.08);
+                                                      }
+                                                      if (states.contains(
+                                                        WidgetState.focused,
+                                                      )) {
+                                                        return Colors.white
+                                                            .withValues(
+                                                                alpha: 0.10);
+                                                      }
+                                                      return Colors.transparent;
+                                                    },
+                                                  ),
+                                                  child: MixroomShellSurface(
+                                                    padding: const EdgeInsets
+                                                        .fromLTRB(
+                                                      18,
+                                                      16,
+                                                      12,
+                                                      16,
+                                                    ),
+                                                    color: selected
+                                                        ? const Color.fromRGBO(
+                                                            193,
+                                                            221,
+                                                            249,
+                                                            0.34,
+                                                          )
+                                                        : const Color.fromRGBO(
+                                                            244,
+                                                            244,
+                                                            244,
+                                                            0.30,
+                                                          ),
+                                                    child: Row(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Expanded(
+                                                          child: Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              Text(
+                                                                demo.name,
+                                                                maxLines: 1,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                                style:
+                                                                    const TextStyle(
+                                                                  fontFamily:
+                                                                      'Pretendard',
+                                                                  color: Color(
+                                                                      0xFFF4F4F4),
+                                                                  fontSize: 15,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w600,
+                                                                  height:
+                                                                      22 / 15,
+                                                                ),
+                                                              ),
+                                                              const SizedBox(
+                                                                  height: 8),
+                                                              Container(
+                                                                height: 1,
+                                                                color: Colors
+                                                                    .white
+                                                                    .withValues(
+                                                                        alpha:
+                                                                            0.22),
+                                                              ),
+                                                              const SizedBox(
+                                                                  height: 8),
+                                                              Text(
+                                                                L10n.translate(
+                                                                  context,
+                                                                  'Tap to import demo project',
+                                                                ),
+                                                                style:
+                                                                    TextStyle(
+                                                                  fontFamily:
+                                                                      'Pretendard',
+                                                                  color: Colors
+                                                                      .white
+                                                                      .withValues(
+                                                                          alpha:
+                                                                              0.80),
+                                                                  fontSize: 12,
+                                                                  height:
+                                                                      22 / 12,
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                            width: 8),
+                                                        if (_selectionMode)
+                                                          Padding(
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .only(
+                                                                    top: 12),
+                                                            child: selected
+                                                                ? SvgPicture
+                                                                    .asset(
+                                                                    kMixroomShellCheckboxCheckedAsset,
+                                                                    width: 22,
+                                                                    height: 22,
+                                                                  )
+                                                                : Container(
+                                                                    width: 22,
+                                                                    height: 22,
+                                                                    decoration:
+                                                                        BoxDecoration(
+                                                                      shape: BoxShape
+                                                                          .circle,
+                                                                      border:
+                                                                          Border
+                                                                              .all(
+                                                                        color: Colors
+                                                                            .white
+                                                                            .withValues(alpha: 0.6),
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                          )
+                                                        else
+                                                          MixroomShellRoundButton(
+                                                            size: 40,
+                                                            iconExtent: 18,
+                                                            icon: const Icon(
+                                                              Icons
+                                                                  .file_download_outlined,
+                                                              color:
+                                                                  Colors.white,
+                                                              size: 20,
+                                                            ),
+                                                            onTap: () =>
+                                                                _importBundledDemoAndOpen(
+                                                              demo,
+                                                            ),
+                                                          ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            }
+
+                                            final project = entry.project!;
                                             final keyToken =
                                                 _projectActionKeyToken(
                                               project.name,
                                             );
                                             final selected =
                                                 _isSelected(project);
-                                            return GestureDetector(
-                                              onLongPress: () =>
-                                                  _toggleSelection(project),
-                                              onTap: () {
-                                                if (_selectionMode) {
-                                                  _toggleSelection(project);
-                                                  return;
-                                                }
-                                                _openProject(project.dir);
-                                              },
-                                              child: MixroomShellSurface(
-                                                padding:
-                                                    const EdgeInsets.fromLTRB(
-                                                  18,
-                                                  16,
-                                                  12,
-                                                  16,
+                                            return Material(
+                                              color: Colors.transparent,
+                                              borderRadius:
+                                                  BorderRadius.circular(24),
+                                              clipBehavior: Clip.antiAlias,
+                                              child: InkWell(
+                                                onLongPress: () =>
+                                                    _toggleSelection(project),
+                                                onTap: () {
+                                                  if (_selectionMode) {
+                                                    _toggleSelection(project);
+                                                    return;
+                                                  }
+                                                  _openProject(project.dir);
+                                                },
+                                                splashFactory:
+                                                    InkRipple.splashFactory,
+                                                splashColor: Colors.white
+                                                    .withValues(alpha: 0.12),
+                                                highlightColor: Colors.white
+                                                    .withValues(alpha: 0.04),
+                                                overlayColor:
+                                                    WidgetStateProperty
+                                                        .resolveWith<Color?>(
+                                                  (states) {
+                                                    if (states.contains(
+                                                      WidgetState.pressed,
+                                                    )) {
+                                                      return Colors.white
+                                                          .withValues(
+                                                              alpha: 0.14);
+                                                    }
+                                                    if (states.contains(
+                                                      WidgetState.hovered,
+                                                    )) {
+                                                      return Colors.white
+                                                          .withValues(
+                                                              alpha: 0.08);
+                                                    }
+                                                    if (states.contains(
+                                                      WidgetState.focused,
+                                                    )) {
+                                                      return Colors.white
+                                                          .withValues(
+                                                              alpha: 0.10);
+                                                    }
+                                                    return Colors.transparent;
+                                                  },
                                                 ),
-                                                color: selected
-                                                    ? const Color.fromRGBO(
-                                                        193,
-                                                        221,
-                                                        249,
-                                                        0.34,
-                                                      )
-                                                    : const Color.fromRGBO(
-                                                        244,
-                                                        244,
-                                                        244,
-                                                        0.30,
-                                                      ),
-                                                child: Row(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Expanded(
-                                                      child: Column(
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .start,
-                                                        children: [
-                                                          Text(
-                                                            project.name,
-                                                            maxLines: 1,
-                                                            overflow:
-                                                                TextOverflow
-                                                                    .ellipsis,
-                                                            style:
-                                                                const TextStyle(
-                                                              fontFamily:
-                                                                  'Pretendard',
-                                                              color: Color(
-                                                                  0xFFF4F4F4),
-                                                              fontSize: 15,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w600,
-                                                              height: 22 / 15,
+                                                child: MixroomShellSurface(
+                                                  padding:
+                                                      const EdgeInsets.fromLTRB(
+                                                    18,
+                                                    16,
+                                                    12,
+                                                    16,
+                                                  ),
+                                                  color: selected
+                                                      ? const Color.fromRGBO(
+                                                          193,
+                                                          221,
+                                                          249,
+                                                          0.34,
+                                                        )
+                                                      : const Color.fromRGBO(
+                                                          244,
+                                                          244,
+                                                          244,
+                                                          0.30,
+                                                        ),
+                                                  child: Row(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Expanded(
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Text(
+                                                              project.name,
+                                                              maxLines: 1,
+                                                              overflow:
+                                                                  TextOverflow
+                                                                      .ellipsis,
+                                                              style:
+                                                                  const TextStyle(
+                                                                fontFamily:
+                                                                    'Pretendard',
+                                                                color: Color(
+                                                                    0xFFF4F4F4),
+                                                                fontSize: 15,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                                height: 22 / 15,
+                                                              ),
                                                             ),
-                                                          ),
-                                                          const SizedBox(
-                                                              height: 8),
-                                                          Container(
-                                                            height: 1,
-                                                            color: Colors.white
-                                                                .withValues(
-                                                                    alpha:
-                                                                        0.22),
-                                                          ),
-                                                          const SizedBox(
-                                                              height: 8),
-                                                          Text(
-                                                            '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}',
-                                                            style: TextStyle(
-                                                              fontFamily:
-                                                                  'Pretendard',
+                                                            const SizedBox(
+                                                                height: 8),
+                                                            Container(
+                                                              height: 1,
                                                               color: Colors
                                                                   .white
                                                                   .withValues(
                                                                       alpha:
-                                                                          0.80),
-                                                              fontSize: 12,
-                                                              height: 22 / 12,
+                                                                          0.22),
                                                             ),
-                                                          ),
-                                                        ],
+                                                            const SizedBox(
+                                                                height: 8),
+                                                            Text(
+                                                              '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}',
+                                                              style: TextStyle(
+                                                                fontFamily:
+                                                                    'Pretendard',
+                                                                color: Colors
+                                                                    .white
+                                                                    .withValues(
+                                                                        alpha:
+                                                                            0.80),
+                                                                fontSize: 12,
+                                                                height: 22 / 12,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
                                                       ),
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    if (_selectionMode)
-                                                      Padding(
-                                                        padding:
-                                                            const EdgeInsets
-                                                                .only(top: 12),
-                                                        child: selected
-                                                            ? SvgPicture.asset(
-                                                                kMixroomShellCheckboxCheckedAsset,
-                                                                width: 22,
-                                                                height: 22,
-                                                              )
-                                                            : Container(
-                                                                width: 22,
-                                                                height: 22,
-                                                                decoration:
-                                                                    BoxDecoration(
-                                                                  shape: BoxShape
-                                                                      .circle,
-                                                                  border: Border
-                                                                      .all(
-                                                                    color: Colors
-                                                                        .white
-                                                                        .withValues(
-                                                                            alpha:
-                                                                                0.6),
+                                                      const SizedBox(width: 8),
+                                                      if (_selectionMode)
+                                                        Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .only(
+                                                                  top: 12),
+                                                          child: selected
+                                                              ? SvgPicture
+                                                                  .asset(
+                                                                  kMixroomShellCheckboxCheckedAsset,
+                                                                  width: 22,
+                                                                  height: 22,
+                                                                )
+                                                              : Container(
+                                                                  width: 22,
+                                                                  height: 22,
+                                                                  decoration:
+                                                                      BoxDecoration(
+                                                                    shape: BoxShape
+                                                                        .circle,
+                                                                    border:
+                                                                        Border
+                                                                            .all(
+                                                                      color: Colors
+                                                                          .white
+                                                                          .withValues(
+                                                                              alpha: 0.6),
+                                                                    ),
                                                                   ),
                                                                 ),
-                                                              ),
-                                                      )
-                                                    else
-                                                      _buildProjectTrailingActions(
-                                                        context: context,
-                                                        project: project,
-                                                        keyToken: keyToken,
-                                                        compact:
-                                                            useCompactProjectMenus,
-                                                      ),
-                                                  ],
+                                                        )
+                                                      else
+                                                        _buildProjectTrailingActions(
+                                                          context: context,
+                                                          project: project,
+                                                          keyToken: keyToken,
+                                                          compact:
+                                                              useCompactProjectMenus,
+                                                        ),
+                                                    ],
+                                                  ),
                                                 ),
                                               ),
                                             );
@@ -1434,79 +1967,134 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               ),
             ),
           ),
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
+          Positioned(
             left: 27,
             right: 85,
             bottom: searchBarBottom,
-            child: MixroomShellSurface(
-              radius: 24,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
-              color: searchFocused
-                  ? const Color.fromRGBO(76, 101, 130, 0.96)
-                  : const Color.fromRGBO(108, 132, 160, 0.76),
-              strong: true,
-              child: Row(
-                children: [
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 140),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
-                    transitionBuilder: (child, animation) {
-                      return FadeTransition(opacity: animation, child: child);
-                    },
-                    child: hasSearchQuery
-                        ? Padding(
-                            key: const ValueKey('search-clear-visible'),
-                            padding: const EdgeInsets.only(right: 8),
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                _searchController.clear();
-                                setState(() {});
-                              },
-                              child: SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: Icon(
-                                  Icons.close_rounded,
-                                  size: 16,
-                                  color: Colors.white.withValues(alpha: 0.86),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+                decoration: const BoxDecoration(
+                  color: Color.fromRGBO(244, 244, 244, 0.28),
+                  borderRadius: BorderRadius.all(Radius.circular(24)),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: Color.fromRGBO(0, 0, 0, 0.25),
+                      blurRadius: 15,
+                      spreadRadius: 8,
+                      offset: Offset.zero,
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 140),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, animation) {
+                        return FadeTransition(opacity: animation, child: child);
+                      },
+                      child: showSearchClear
+                          ? Padding(
+                              key: const ValueKey('search-clear-visible'),
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Material(
+                                color: Colors.transparent,
+                                borderRadius: BorderRadius.circular(999),
+                                clipBehavior: Clip.antiAlias,
+                                child: InkWell(
+                                  onTap: () {
+                                    if (hasSearchQuery) {
+                                      _searchController.clear();
+                                      setState(() {});
+                                    } else {
+                                      _searchFocusNode.unfocus();
+                                    }
+                                  },
+                                  borderRadius: BorderRadius.circular(999),
+                                  splashFactory: InkRipple.splashFactory,
+                                  splashColor:
+                                      Colors.white.withValues(alpha: 0.12),
+                                  overlayColor:
+                                      WidgetStateProperty.resolveWith<Color?>(
+                                    (states) {
+                                      if (states
+                                          .contains(WidgetState.pressed)) {
+                                        return Colors.white
+                                            .withValues(alpha: 0.14);
+                                      }
+                                      if (states
+                                          .contains(WidgetState.hovered)) {
+                                        return Colors.white
+                                            .withValues(alpha: 0.08);
+                                      }
+                                      if (states
+                                          .contains(WidgetState.focused)) {
+                                        return Colors.white
+                                            .withValues(alpha: 0.10);
+                                      }
+                                      return Colors.transparent;
+                                    },
+                                  ),
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: Icon(
+                                      Icons.close_rounded,
+                                      size: 16,
+                                      color:
+                                          Colors.white.withValues(alpha: 0.86),
+                                    ),
+                                  ),
                                 ),
                               ),
+                            )
+                          : const SizedBox(
+                              key: ValueKey('search-clear-hidden'),
+                              width: 0,
+                              height: 20,
                             ),
-                          )
-                        : const SizedBox(
-                            key: ValueKey('search-clear-hidden'),
-                            width: 0,
-                            height: 20,
-                          ),
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      focusNode: _searchFocusNode,
-                      onChanged: (_) => setState(() {}),
-                      scrollPadding: const EdgeInsets.only(bottom: 120),
-                      style: const TextStyle(
-                        fontFamily: 'Pretendard',
-                        color: Color(0xFFF4F4F4),
-                        fontSize: 15,
+                    ),
+                    if (!showSearchClear) ...[
+                      const SizedBox(width: 6),
+                      Icon(
+                        Icons.search_rounded,
+                        size: 18,
+                        color: Colors.white.withValues(alpha: 0.78),
                       ),
-                      decoration: InputDecoration(
-                        border: InputBorder.none,
-                        isCollapsed: true,
-                        hintText: L10n.translate(context, 'Search'),
-                        hintStyle: TextStyle(
+                      const SizedBox(width: 8),
+                    ],
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        focusNode: _searchFocusNode,
+                        onChanged: (_) => setState(() {}),
+                        scrollPadding: const EdgeInsets.only(bottom: 120),
+                        style: const TextStyle(
                           fontFamily: 'Pretendard',
-                          color: Colors.white.withValues(alpha: 0.68),
+                          color: Color(0xFFF4F4F4),
                           fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        decoration: InputDecoration(
+                          border: InputBorder.none,
+                          isCollapsed: true,
+                          hintText: L10n.translate(context, 'Search'),
+                          hintStyle: TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Colors.white.withValues(alpha: 0.68),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 0.08,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1516,6 +2104,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             child: MixroomShellRoundButton(
               iconExtent: 17,
               assetPath: kMixroomShellImportAsset,
+              fillColor: const Color.fromRGBO(244, 244, 244, 0.28),
               onTap: () async {
                 if (!canCreate) {
                   _showProjectLimitDialog();

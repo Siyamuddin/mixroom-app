@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 
 import 'ai_debug.dart';
-import 'onnx_session_loader.dart';
 
 class InstrumentClassifier {
   static const int _sr = 16000;
@@ -19,11 +18,7 @@ class InstrumentClassifier {
   Future<void> load() async {
     if (!enabled) return;
     try {
-      _session = await createCpuSessionFromAsset(
-        runtime: _ort,
-        assetKey: 'assets/models/yamnet.onnx',
-        scope: 'yamnet',
-      );
+      _session = await _ort.createSessionFromAsset('assets/models/yamnet.onnx');
       aiDebugLog('yamnet', 'classifier model loaded');
     } catch (e) {
       _session = null;

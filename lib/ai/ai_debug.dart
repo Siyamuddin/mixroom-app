@@ -1,8 +1,9 @@
 import 'dart:developer' as developer;
+import 'package:flutter/foundation.dart' show debugPrint;
 
 const bool kAiDebugLogs = bool.fromEnvironment(
   'MIXROOM_AI_DEBUG',
-  defaultValue: false,
+  defaultValue: true,
 );
 
 const bool kAiDebugVerbose = bool.fromEnvironment(
@@ -12,7 +13,9 @@ const bool kAiDebugVerbose = bool.fromEnvironment(
 
 void aiDebugLog(String scope, String message) {
   if (!kAiDebugLogs) return;
-  developer.log(message, name: 'AI.$scope');
+  final loggerName = 'AI.$scope';
+  developer.log(message, name: loggerName);
+  debugPrint('[$loggerName] $message');
 }
 
 String aiDebugShortMap(

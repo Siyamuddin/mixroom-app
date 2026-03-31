@@ -410,6 +410,8 @@ jdoubleArray floatVectorToJDoubleArray(JNIEnv *env, const std::vector<float> &va
 {
     const auto size = (jsize)values.size();
     jdoubleArray out = env->NewDoubleArray(size);
+    if (out == nullptr || env->ExceptionCheck())
+        return nullptr;
     if (size == 0)
         return out;
 
@@ -417,6 +419,23 @@ jdoubleArray floatVectorToJDoubleArray(JNIEnv *env, const std::vector<float> &va
     for (jsize i = 0; i < size; ++i)
         tmp[(size_t)i] = (jdouble)values[(size_t)i];
     env->SetDoubleArrayRegion(out, 0, size, tmp.data());
+    if (env->ExceptionCheck())
+        return nullptr;
+    return out;
+}
+
+jfloatArray floatVectorToJFloatArray(JNIEnv *env, const std::vector<float> &values)
+{
+    const auto size = (jsize)values.size();
+    jfloatArray out = env->NewFloatArray(size);
+    if (out == nullptr || env->ExceptionCheck())
+        return nullptr;
+    if (size == 0)
+        return out;
+
+    env->SetFloatArrayRegion(out, 0, size, values.data());
+    if (env->ExceptionCheck())
+        return nullptr;
     return out;
 }
 
@@ -586,9 +605,46 @@ jobject namedValueStatsToJavaMap(JNIEnv *env, const juce::NamedValueSet &stats)
         env->DeleteLocalRef(jValue);
     };
 
-    putDouble("phase_corr", stats.getWithDefault("phase_corr", 1.0));
-    putDouble("side_ratio", stats.getWithDefault("side_ratio", 0.0));
-    putDouble("stereo_imbalance", stats.getWithDefault("stereo_imbalance", 0.0));
+    for (int i = 0; i < stats.size(); ++i)
+    {
+        const auto key = stats.getName(i).toString();
+        const auto value = (double)stats.getValueAt(i);
+        putDouble(key.toRawUTF8(), value);
+    }
+    return outMap;
+}
+
+jobject promptAnalysisToJavaMap(JNIEnv *env, const juce::NamedValueSet &stats, const std::vector<std::vector<float>> &windows)
+{
+    jclass mapClass = env->FindClass("java/util/HashMap");
+    jmethodID mapCtor = env->GetMethodID(mapClass, "<init>", "()V");
+    jmethodID mapPut = env->GetMethodID(mapClass, "put",
+                                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+    jobject outMap = env->NewObject(mapClass, mapCtor);
+
+    jclass listClass = env->FindClass("java/util/ArrayList");
+    jmethodID listCtor = env->GetMethodID(listClass, "<init>", "()V");
+    jmethodID listAdd = env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
+    jobject windowList = env->NewObject(listClass, listCtor);
+
+    for (const auto &window : windows)
+    {
+        jfloatArray jWindow = floatVectorToJFloatArray(env, window);
+        if (jWindow == nullptr)
+            continue;
+        env->CallBooleanMethod(windowList, listAdd, jWindow);
+        env->DeleteLocalRef(jWindow);
+    }
+
+    jobject statsMap = namedValueStatsToJavaMap(env, stats);
+    jstring statsKey = env->NewStringUTF("audioStats");
+    jstring windowsKey = env->NewStringUTF("windows");
+    env->CallObjectMethod(outMap, mapPut, statsKey, statsMap);
+    env->CallObjectMethod(outMap, mapPut, windowsKey, windowList);
+    env->DeleteLocalRef(statsKey);
+    env->DeleteLocalRef(windowsKey);
+    env->DeleteLocalRef(statsMap);
+    env->DeleteLocalRef(windowList);
     return outMap;
 }
 } // namespace
@@ -1159,6 +1215,13 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *env,
     juce::MessageManager::getInstance()->callSync([&]
                                                   { result = JuceEngine::get().exportMix(juce::File(jucePath), options); });
     return env->NewStringUTF(result.toRawUTF8());
+}
+
+extern "C" JNIEXPORT jdouble JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getExportProgressJNI(JNIEnv *,
+                                                                      jclass)
+{
+    return (jdouble)JuceEngine::get().getExportProgress();
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -1893,6 +1956,16 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_decodeAudioMono16kJNI(JNIEnv *en
     return floatVectorToJDoubleArray(env, samples);
 }
 
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_decodeAudioMono16kForAnalysisJNI(JNIEnv *env, jclass, jstring path, jint maxOutputSamples)
+{
+    const juce::String jucePath = juceStringFromJString(env, path);
+    std::vector<float> samples;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { samples = JuceEngine::get().decodeAudioMono16k(juce::File(jucePath), (int)maxOutputSamples); });
+    return floatVectorToJDoubleArray(env, samples);
+}
+
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioStereo16kJNI(JNIEnv *env, jclass, jstring path)
 {
@@ -1901,6 +1974,21 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioStereo16kJNI(JNIEnv 
     juce::MessageManager::getInstance()->callSync([&]
                                                   { stats = JuceEngine::get().analyzeAudioStereo16k(juce::File(jucePath)); });
     return namedValueStatsToJavaMap(env, stats);
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioForPromptJNI(JNIEnv *env, jclass, jstring path, jint windowSamples, jint windowCount)
+{
+    const juce::String jucePath = juceStringFromJString(env, path);
+    juce::NamedValueSet stats;
+    std::vector<std::vector<float>> windows;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  {
+                                                      const auto file = juce::File(jucePath);
+                                                      stats = JuceEngine::get().analyzeAudioPrompt16k(file);
+                                                      windows = JuceEngine::get().sampleAudioMono16kWindows(file, (int)windowSamples, (int)windowCount);
+                                                  });
+    return promptAnalysisToJavaMap(env, stats, windows);
 }
 
 extern "C" JNIEXPORT jobject JNICALL

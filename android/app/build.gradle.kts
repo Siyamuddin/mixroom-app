@@ -96,6 +96,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.activity:activity-ktx:1.9.0")
     // implementation(project(":ffmpeg_kit_flutter_full_gpl"))
     // ... your other deps
     implementation("com.arthenica:smart-exception-java:0.2.1")

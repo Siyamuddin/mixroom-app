@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import sys
 import unittest
@@ -139,9 +140,22 @@ class _FakeRepo:
         self.delete_calls.append({"user_id": user_id, "username_lc": username_lc})
 
 
+class _FakeProducerCaptureWhitelistRepo:
+    def __init__(self, settings=None):
+        self._settings = settings or {
+            "usernames": [],
+            "source": "default",
+            "configurable": True,
+        }
+
+    def get_whitelist_settings(self):
+        return dict(self._settings)
+
+
 class UsersApiHandlerTests(unittest.TestCase):
     def setUp(self):
         self._original_repo = users_module.repo
+        self._original_whitelist_repo = users_module.producer_capture_whitelist_repo
         self._original_extract_claims = users_module.extract_claims_from_event
         self._original_rate_limiter = users_module.rate_limiter
         self._original_users_table = users_module.config.USERS_TABLE
@@ -151,6 +165,7 @@ class UsersApiHandlerTests(unittest.TestCase):
 
     def tearDown(self):
         users_module.repo = self._original_repo
+        users_module.producer_capture_whitelist_repo = self._original_whitelist_repo
         users_module.extract_claims_from_event = self._original_extract_claims
         users_module.rate_limiter = self._original_rate_limiter
         users_module.config.USERS_TABLE = self._original_users_table
@@ -191,6 +206,65 @@ class UsersApiHandlerTests(unittest.TestCase):
         self.assertEqual(result["statusCode"], 200)
         self.assertIn('"available": false', result["body"])
         self.assertIn('already taken', result["body"])
+
+    def test_reports_producer_capture_access_enabled_for_allowlisted_username(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-123",
+            "username": "andrewtest",
+            "username_lc": "andrewtest",
+        }
+        users_module.repo = repo
+        users_module.producer_capture_whitelist_repo = _FakeProducerCaptureWhitelistRepo(
+            settings={
+                "usernames": ["andrewtest", "lavitababy1004"],
+                "source": "remote",
+                "configurable": True,
+            }
+        )
+        users_module.extract_claims_from_event = lambda event: {"sub": "user-123"}
+
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me/producer-capture-ui-access",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertIn('"enabled": true', result["body"])
+        self.assertIn('"username": "andrewtest"', result["body"])
+        self.assertIn('"source": "remote"', result["body"])
+
+    def test_reports_producer_capture_access_disabled_for_non_allowlisted_username(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-123",
+            "username": "someoneelse",
+            "username_lc": "someoneelse",
+        }
+        users_module.repo = repo
+        users_module.producer_capture_whitelist_repo = _FakeProducerCaptureWhitelistRepo(
+            settings={
+                "usernames": ["andrewtest", "lavitababy1004"],
+                "source": "remote",
+                "configurable": True,
+            }
+        )
+        users_module.extract_claims_from_event = lambda event: {"sub": "user-123"}
+
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me/producer-capture-ui-access",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertIn('"enabled": false', result["body"])
+        self.assertIn('"username": "someoneelse"', result["body"])
 
     def test_username_availability_returns_429_when_rate_limited(self):
         class _Decision:
@@ -551,6 +625,62 @@ class UsersApiHandlerTests(unittest.TestCase):
         self.assertEqual(result["statusCode"], 200)
         self.assertEqual(repo.upsert_calls[-1]["profile"]["music_profile"], "producer")
         self.assertIn('"music_profile": "producer"', result["body"])
+
+    def test_patch_me_generates_default_username_when_signup_completion_has_no_username(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-1",
+            "email": "user@example.com",
+            "email_lc": "user@example.com",
+            "display_name": "User",
+            "email_verified": True,
+            "cognito_username": "user@example.com",
+            "auth_provider": "email",
+            "username": None,
+            "username_lc": None,
+            "music_profile": None,
+            "profile_status": "active",
+            "onboarding_state": "bootstrap_only",
+            "accepted_terms_version": None,
+            "accepted_privacy_version": None,
+            "accepted_at": None,
+            "newsletter_opt_in": False,
+            "newsletter_opt_in_at": None,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "last_seen_at": "2026-01-01T00:00:00+00:00",
+            "schema_version": 4,
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {
+            "sub": "user-1",
+            "email": "user@example.com",
+            "email_verified": "true",
+            "cognito:username": "user@example.com",
+        }
+
+        with mock.patch.object(
+            users_module,
+            "_generate_default_username",
+            return_value="mixroom-user000000123",
+        ):
+            result = users_module.handler(
+                {
+                    "rawPath": "/v1/users/me",
+                    "requestContext": {"http": {"method": "PATCH"}},
+                    "body": (
+                        '{"birthdate":"1998-08-09",'
+                        '"accepted_terms_version":"2026-03-10",'
+                        '"accepted_privacy_version":"2026-03-10"}'
+                    ),
+                },
+                object(),
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        self.assertEqual(payload.get("username"), "mixroom-user000000123")
+        self.assertEqual(payload.get("onboarding_state"), "signup_complete")
 
     def test_delete_me_removes_account_for_free_user(self):
         repo = _FakeRepo()

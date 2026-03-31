@@ -11,11 +11,13 @@ from common.models import normalize_tier, status_has_active_access
 from common.native_auth import AppUserAuthError, verify_current_password
 from common.rate_limits import RequestRateLimiter, client_ip_from_event
 from common.repository import BillingRepository, UsernameClaimConflictError
+from common.producer_capture_whitelist_repository import (
+    ProducerCaptureWhitelistRepository,
+)
 from common.social_auth import SocialAuthError, verify_social_reauthentication
 from common.users import (
     apply_user_profile_patch,
     build_user_profile_from_claims,
-    default_onboarding_state,
     normalize_username,
     user_profile_needs_claim_sync,
     validate_username,
@@ -23,6 +25,7 @@ from common.users import (
 
 repo = BillingRepository()
 rate_limiter = RequestRateLimiter()
+producer_capture_whitelist_repo = ProducerCaptureWhitelistRepository()
 _AUTO_USERNAME_PREFIX = "mixroom-user"
 _AUTO_USERNAME_MAX_ATTEMPTS = 10
 
@@ -52,12 +55,8 @@ def _generate_default_username() -> str:
 
 
 def _assign_generated_username(profile: Dict[str, Any]) -> Dict[str, Any]:
-    updated = dict(profile)
     generated = _generate_default_username()
-    updated["username"] = generated
-    updated["username_lc"] = generated
-    updated["onboarding_state"] = default_onboarding_state(updated)
-    return updated
+    return apply_user_profile_patch(profile, {"username": generated})
 
 
 def _get_username_availability(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -116,9 +115,17 @@ def _get_me(event: Dict[str, Any]) -> Dict[str, Any]:
     if not config.USERS_TABLE:
         return json_response(503, {"error": "Users table is not configured."})
 
+    profile = _resolve_user_profile_for_claims(claims)
+    return json_response(200, profile)
+
+
+def _resolve_user_profile_for_claims(claims: Dict[str, Any]) -> Dict[str, Any]:
+    user_id = str(claims.get("sub") or "").strip()
+    if not user_id:
+        raise ValueError("Missing user identifier.")
     existing = repo.get_user_profile(user_id)
     if existing and not user_profile_needs_claim_sync(claims, existing=existing):
-        profile = existing
+        return existing
     else:
         profile = build_user_profile_from_claims(claims, existing=existing)
         repo.upsert_user_profile(
@@ -126,7 +133,34 @@ def _get_me(event: Dict[str, Any]) -> Dict[str, Any]:
             previous_username_lc=str((existing or {}).get("username_lc") or "").strip().lower()
             or None,
         )
-    return json_response(200, profile)
+        return profile
+
+
+def _get_producer_capture_ui_access(event: Dict[str, Any]) -> Dict[str, Any]:
+    claims = extract_claims_from_event(event)
+    user_id = str(claims.get("sub") or "").strip()
+    if not user_id:
+        return unauthorized()
+    if not config.USERS_TABLE:
+        return json_response(503, {"error": "Users table is not configured."})
+
+    profile = _resolve_user_profile_for_claims(claims)
+    username = normalize_username(str(profile.get("username") or ""))
+    settings = producer_capture_whitelist_repo.get_whitelist_settings()
+    usernames = settings.get("usernames") if isinstance(settings, dict) else []
+    allowlist = {
+        normalize_username(item)
+        for item in usernames
+        if normalize_username(item)
+    }
+    return json_response(
+        200,
+        {
+            "enabled": bool(username and username in allowlist),
+            "username": username,
+            "source": str(settings.get("source") or "default"),
+        },
+    )
 
 
 def _patch_me(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -298,6 +332,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     if method == "GET" and path.endswith("/v1/users/username-availability"):
         return _get_username_availability(event)
+    if method == "GET" and path.endswith("/v1/users/me/producer-capture-ui-access"):
+        return _get_producer_capture_ui_access(event)
     if method == "GET" and path.endswith("/v1/users/me"):
         return _get_me(event)
     if method == "PATCH" and path.endswith("/v1/users/me"):

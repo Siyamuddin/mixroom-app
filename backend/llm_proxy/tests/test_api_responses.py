@@ -88,9 +88,18 @@ class _FakeProvider:
 
 
 class _ReservationResult:
-    def __init__(self, allowed: bool, limit_reason: str = "") -> None:
+    def __init__(
+        self,
+        allowed: bool,
+        limit_reason: str = "",
+        *,
+        reserved_quota_prompts: int = 1,
+        reserved_grant_prompts: int = 0,
+    ) -> None:
         self.allowed = allowed
         self.limit_reason = limit_reason
+        self.reserved_quota_prompts = reserved_quota_prompts
+        self.reserved_grant_prompts = reserved_grant_prompts
 
 
 class _FakeUsageRepo:
@@ -120,6 +129,10 @@ class _FakeUsageRepo:
             },
             "can_submit": True,
             "blocked_by": "",
+            "extra_prompt_bank": {
+                "remaining": 0,
+                "consumed_first": True,
+            },
         }
 
     def load_user_context(self, user_id: str) -> dict:
@@ -296,6 +309,59 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(provider.request_body["reasoning"], {"effort": "medium"})
         self.assertEqual(provider.request_body["prompt_cache_retention"], "24h")
         self.assertNotIn("temperature", provider.request_body)
+
+    def test_handler_includes_observability_payload_and_logs_trace_fields(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_123",
+                "model": "gpt-4.1-mini",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "informational_response",
+                        "arguments": {
+                            "message": "Done.",
+                            "cancels_pending": False,
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "prompt_trace_id": "trace-123",
+                    "client_context": {
+                        "app_version": "1.0.8+14",
+                        "platform": "android",
+                    },
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": "Help me.",
+                        }
+                    ],
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        self.assertEqual(payload["observability"]["prompt_trace_id"], "trace-123")
+        self.assertTrue(payload["observability"]["runtime_config_fingerprint"])
+        self.assertEqual(payload["observability"]["provider_response_id"], "resp_123")
+        self.assertEqual(self.fake_usage_repo.log_calls[-1]["prompt_trace_id"], "trace-123")
+        self.assertEqual(self.fake_usage_repo.log_calls[-1]["app_version"], "1.0.8+14")
+        self.assertEqual(self.fake_usage_repo.log_calls[-1]["platform"], "android")
 
     def test_handler_uses_video_contract_for_video_editor_feature(self) -> None:
         provider = _FakeProvider()

@@ -35,19 +35,10 @@ class AdminAccessRepository:
         if self._ddb is not None and config.ADMIN_ALLOWLIST_TABLE:
             self._table = self._ddb.Table(config.ADMIN_ALLOWLIST_TABLE)
 
-        self._env_allowlist = {
-            normalize_email(email)
-            for email in config.ADMIN_ALLOWED_EMAILS.split(",")
-            if normalize_email(email)
-        }
-
     def is_email_allowed(self, email: str) -> bool:
         normalized = normalize_email(email)
         if not normalized:
             return False
-
-        if normalized in self._env_allowlist:
-            return True
 
         if self._table is None:
             return False

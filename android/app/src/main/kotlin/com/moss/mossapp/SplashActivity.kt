@@ -2,10 +2,12 @@ package com.mixroom.mixroomapp
 
 import android.content.Intent
 import android.os.Bundle
-import android.app.Activity
+import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 
-class SplashActivity : Activity() {
+class SplashActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
+    enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_splash)
 

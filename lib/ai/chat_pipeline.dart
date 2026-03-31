@@ -35,6 +35,25 @@ class ChatPipeline {
   }) : magnitudePredictor =
             magnitudePredictor ?? const NoopMixingMagnitudePredictor();
 
+  Map<String, dynamic> _mergeObservabilityMeta(
+    Map<String, dynamic>? meta,
+    Map<String, dynamic> localObservability,
+  ) {
+    final merged = <String, dynamic>{
+      if (meta != null) ...meta,
+    };
+    final existingObservability = merged['observability'];
+    final observability = <String, dynamic>{
+      if (existingObservability is Map<String, dynamic>)
+        ...existingObservability,
+      if (existingObservability is Map)
+        ...existingObservability.cast<String, dynamic>(),
+      ...localObservability,
+    };
+    merged['observability'] = observability;
+    return merged;
+  }
+
   Future<ChatPipelineResult> handleUserText({
     required String text,
     required List<AudioTrack> audioTracks,
@@ -48,6 +67,7 @@ class ChatPipeline {
     int primarySelectedClipIndex = -1,
     int? selectedRowIndex,
     String automationClipSnapshot = '',
+    String? promptTraceId,
     String? projectId,
     String? aiFeature,
     bool autoApplyProposals = false,
@@ -70,11 +90,15 @@ class ChatPipeline {
 
     onThinkingChanged?.call(true);
     try {
+      int projectStatsMs = 0;
+      int mixModelHeuristicMs = 0;
+      int? mixModelOnnxMs;
       aiDebugLog(
         'pipeline',
         'start text="$userText" autoApplyProposals=$autoApplyProposals selectedRow=$selectedRowIndex primaryClip=$primarySelectedClipIndex clips=${selectedClipIndices.length}',
       );
       // 1) Build project snapshot (local)
+      final projectBuildStopwatch = Stopwatch()..start();
       final project = await projectBuilder.build(
         audioTracks: audioTracks,
         bpmFallback: bpmFallback,
@@ -85,6 +109,8 @@ class ChatPipeline {
         masterPan0to1: masterPan0to1,
         roleOverrides: _roleOverrides,
       );
+      projectBuildStopwatch.stop();
+      projectStatsMs = projectBuildStopwatch.elapsedMilliseconds;
 
       final snapshot = _projectSnapshot(project);
       final selectionSnapshot = _selectionSnapshot(
@@ -109,15 +135,36 @@ class ChatPipeline {
         userText: userText,
         projectSnapshot: snapshot,
         selectionSnapshot: selectionSnapshot,
+        promptTraceId: promptTraceId,
         projectId: projectId,
         aiFeature: aiFeature,
         pendingMix: _pendingMix,
       );
+      final mixPlanStopwatch = Stopwatch()..start();
       final llmMeta = <String, dynamic>{
         'tool': llmRes.toolName,
         if (llmRes.toolArgs != null) 'tool_args': llmRes.toolArgs,
         if (llmRes.meta != null) ...llmRes.meta!,
       };
+      Map<String, dynamic> finalizeMeta(
+        Map<String, dynamic>? meta, {
+        String? toolName,
+      }) {
+        return _mergeObservabilityMeta(
+          meta,
+          <String, dynamic>{
+            if ((promptTraceId ?? '').trim().isNotEmpty)
+              'prompt_trace_id': promptTraceId!.trim(),
+            'project_stats_ms': projectStatsMs,
+            'mix_plan_ms': mixPlanStopwatch.elapsedMilliseconds,
+            if (mixModelHeuristicMs > 0)
+              'mix_model_heuristic_ms': mixModelHeuristicMs,
+            if (mixModelOnnxMs != null) 'mix_model_onnx_ms': mixModelOnnxMs,
+            if ((toolName ?? '').trim().isNotEmpty) 'tool_name': toolName,
+            ...magnitudePredictor.observabilityContext,
+          },
+        );
+      }
 
       aiDebugLog(
         'pipeline',
@@ -136,7 +183,10 @@ class ChatPipeline {
         final msg = llmRes.text!.trim();
         _push('user', userText);
         _push('assistant', msg);
-        return ChatPipelineResult.message(msg, meta: llmMeta);
+        return ChatPipelineResult.message(
+          msg,
+          meta: finalizeMeta(llmMeta, toolName: llmRes.toolName),
+        );
       }
 
       // 2.1b) General DAW editor / tutorial actions (single-chatbar workflow).
@@ -207,12 +257,15 @@ class ChatPipeline {
         }
         return ChatPipelineResult.message(
           msg,
-          meta: <String, dynamic>{
-            ...llmMeta,
-            'daw_actions': calls.length == 1
-                ? calls.first
-                : <String, dynamic>{'calls': calls},
-          },
+          meta: finalizeMeta(
+            <String, dynamic>{
+              ...llmMeta,
+              'daw_actions': calls.length == 1
+                  ? calls.first
+                  : <String, dynamic>{'calls': calls},
+            },
+            toolName: llmRes.toolName,
+          ),
           assistantActions: assistantActions,
         );
       }
@@ -257,7 +310,10 @@ class ChatPipeline {
 
         _push('user', userText);
         _push('assistant', msg);
-        return ChatPipelineResult.message(msg, meta: llmMeta);
+        return ChatPipelineResult.message(
+          msg,
+          meta: finalizeMeta(llmMeta, toolName: llmRes.toolName),
+        );
       }
 
       // Normalize tool args into a list of "calls" (supports both single and multi tool outputs)
@@ -306,6 +362,7 @@ class ChatPipeline {
       final bool strict = rawMode == 'execute';
       final learnedMagnitudeEnabled =
           magnitudePredictor.isEnabled && !bypassLearnedMagnitudes;
+      final List<Map<String, dynamic>> mixDebugSteps = <Map<String, dynamic>>[];
       final modelMeta = <String, dynamic>{
         ...llmMeta,
         'mode': rawMode,
@@ -345,11 +402,14 @@ class ChatPipeline {
           'goal intensity=${goal.intensity.toStringAsFixed(2)} scope=${goal.target.scope} intents=${_intentSummary(goal)}',
         );
 
+        final heuristicStopwatch = Stopwatch()..start();
         final mix = mixModel.run(
             project: project,
             goal: goal,
             strict: strict,
             roleOverrides: _roleOverrides);
+        heuristicStopwatch.stop();
+        mixModelHeuristicMs += heuristicStopwatch.elapsedMilliseconds;
 
         aiDebugLog(
           'mix-plan',
@@ -368,7 +428,10 @@ class ChatPipeline {
           aiDebugLog('mix-plan', 'notes: ${mix.notes.take(4).join(' | ')}');
         }
 
+        final heuristicActionsJson =
+            mix.actions.map((a) => a.toJson()).toList(growable: false);
         var resolvedActions = mix.actions;
+        MagnitudeRefineResult? refineResult;
         if (resolvedActions.isNotEmpty) {
           if (bypassLearnedMagnitudes) {
             fallbackUsed = true;
@@ -378,12 +441,16 @@ class ChatPipeline {
               'magnitude refine bypassed -> using heuristic actions only',
             );
           } else {
-            final refineResult = await magnitudePredictor.refine(
+            final refineStopwatch = Stopwatch()..start();
+            refineResult = await magnitudePredictor.refine(
               project: project,
               goal: goal,
               actions: resolvedActions,
               strict: strict,
             );
+            refineStopwatch.stop();
+            mixModelOnnxMs =
+                (mixModelOnnxMs ?? 0) + refineStopwatch.elapsedMilliseconds;
             resolvedActions = refineResult.actions;
             if (refineResult.fallbackUsed) {
               fallbackUsed = true;
@@ -408,6 +475,40 @@ class ChatPipeline {
           }
         }
 
+        if (kAiDebugLogs) {
+          mixDebugSteps.add(<String, dynamic>{
+            'goal': <String, dynamic>{
+              'scope': goal.target.scope,
+              if (goal.target.rowIndex != null)
+                'row_index': goal.target.rowIndex,
+              if ((goal.target.role ?? '').trim().isNotEmpty)
+                'role': goal.target.role,
+              'intensity': goal.intensity,
+              'intents': goal.intents
+                  .map(
+                    (intent) => <String, dynamic>{
+                      'kind': intent.kind,
+                      if (intent.direction != null)
+                        'direction': intent.direction,
+                      if (intent.descriptor != null)
+                        'descriptor': intent.descriptor,
+                      'confidence': intent.confidence,
+                    },
+                  )
+                  .toList(growable: false),
+            },
+            'heuristic_actions': heuristicActionsJson,
+            'refined_actions':
+                resolvedActions.map((a) => a.toJson()).toList(growable: false),
+            if (refineResult != null)
+              'magnitude_debug': refineResult.debugEntries
+                  .map((entry) => entry.toJson())
+                  .toList(growable: false),
+            if (refineResult?.fallbackReason != null)
+              'fallback_reason': refineResult!.fallbackReason,
+          });
+        }
+
         if (resolvedActions.isNotEmpty) {
           mergedActions.addAll(resolvedActions);
         }
@@ -421,6 +522,9 @@ class ChatPipeline {
         modelMeta['learned_magnitude_fallback_reasons'] =
             fallbackReasons.toList();
       }
+      if (kAiDebugLogs && mixDebugSteps.isNotEmpty) {
+        modelMeta['mix_debug_steps'] = mixDebugSteps;
+      }
       aiDebugLog(
         'pipeline',
         'mergedActions=${mergedActions.length} fallbackUsed=$fallbackUsed fallbackReasons=${fallbackReasons.join(",")}',
@@ -431,8 +535,8 @@ class ChatPipeline {
           bypassLearnedMagnitudes
               ? 'learned magnitudes bypassed for producer capture mode; using heuristic actions'
               : !magnitudePredictor.isEnabled
-              ? 'learned magnitudes disabled; using heuristic actions'
-              : 'learned magnitudes fallback engaged (${fallbackReasons.join(",")})',
+                  ? 'learned magnitudes disabled; using heuristic actions'
+                  : 'learned magnitudes fallback engaged (${fallbackReasons.join(",")})',
         );
       }
 
@@ -446,7 +550,10 @@ class ChatPipeline {
 
         aiDebugLog('pipeline', 'no-op result');
         _push('assistant', msg);
-        return ChatPipelineResult.message(msg, meta: modelMeta);
+        return ChatPipelineResult.message(
+          msg,
+          meta: finalizeMeta(modelMeta, toolName: llmRes.toolName),
+        );
       }
 
       // Build merged mix result
@@ -469,7 +576,11 @@ class ChatPipeline {
         aiDebugLog(
             'pipeline', 'execute result actions=${mergedMix.actions.length}');
         _push('assistant', msg);
-        return ChatPipelineResult.mix(mergedMix, msg, meta: modelMeta);
+        return ChatPipelineResult.mix(
+          mergedMix,
+          msg,
+          meta: finalizeMeta(modelMeta, toolName: llmRes.toolName),
+        );
       }
 
       // Otherwise this is a PROPOSAL (store pending + ask permission)
@@ -481,7 +592,11 @@ class ChatPipeline {
         aiDebugLog('pipeline',
             'auto-apply proposal actions=${mergedMix.actions.length}');
         _push('assistant', msg);
-        return ChatPipelineResult.mix(mergedMix, msg, meta: modelMeta);
+        return ChatPipelineResult.mix(
+          mergedMix,
+          msg,
+          meta: finalizeMeta(modelMeta, toolName: llmRes.toolName),
+        );
       }
 
       _pendingMix = mergedMix;
@@ -497,7 +612,10 @@ class ChatPipeline {
       aiDebugLog(
           'pipeline', 'proposal result actions=${mergedMix.actions.length}');
       _push('assistant', msg);
-      return ChatPipelineResult.message(msg, meta: modelMeta);
+      return ChatPipelineResult.message(
+        msg,
+        meta: finalizeMeta(modelMeta, toolName: llmRes.toolName),
+      );
     } finally {
       onThinkingChanged?.call(false);
     }
@@ -828,6 +946,9 @@ class ChatPipeline {
       final stRmsP95 = (r.audioStats['st_rms_p95'] ?? 0).toStringAsFixed(3);
       final transientDensity =
           (r.audioStats['transient_density'] ?? 0).toStringAsFixed(3);
+      final interpretation = r.interpretation;
+      final interpretationFlags = interpretation.flags.take(8).join(', ');
+      final interpretationNotes = interpretation.notes.take(2).join(' | ');
 
       b.writeln(
         'Track ${r.rowIndex + 1}: '
@@ -838,6 +959,21 @@ class ChatPipeline {
         'roles=[$top] role_consistency=${r.roleConsistency.toStringAsFixed(2)} '
         'spectral{centroid_hz=$centroid zcr=$zcr hf_rms=$hfRms sibil=$sibil bassy=$bassy} '
         'dynamics{st_rms_p95=$stRmsP95 transient_density=$transientDensity} '
+        'interpretation{'
+        'top_role=${interpretation.topRole} '
+        'source_type=${interpretation.sourceType} '
+        'transient_profile=${interpretation.transientProfile} '
+        'spectral_profile=${interpretation.spectralProfile} '
+        'stereo_profile=${interpretation.stereoProfile} '
+        'edit_risk=${interpretation.editRisk} '
+        'role_entropy=${interpretation.roleEntropy.toStringAsFixed(2)} '
+        'top_role_margin=${interpretation.topRoleMargin.toStringAsFixed(2)} '
+        'classification_confidence=${interpretation.classificationConfidence.toStringAsFixed(2)} '
+        'clip_role_disagreement=${interpretation.clipsRoleDisagreement.toStringAsFixed(2)} '
+        'overlap_density=${interpretation.overlapDensity.toStringAsFixed(2)} '
+        'flags=[${interpretationFlags.isEmpty ? 'none' : interpretationFlags}]'
+        '} '
+        '${interpretationNotes.isEmpty ? '' : 'notes="$interpretationNotes" '}'
         'overlaps=${overlaps.isEmpty ? "none" : overlaps.join(",")} '
         'fx=[$fx] '
         'automation_targets=[$automationTargets]',

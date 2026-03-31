@@ -12,10 +12,6 @@ Parameters:
   CognitoAppClientId:
     Type: String
     Default: ''
-  EnforceSubscriptions:
-    Type: String
-    AllowedValues: ['true', 'false']
-    Default: 'false'
   AllowStudioTier:
     Type: String
     AllowedValues: ['true', 'false']
@@ -33,9 +29,6 @@ Parameters:
     Type: String
     Default: ''
   AdminCognitoUserPoolId:
-    Type: String
-    Default: ''
-  AdminAllowedEmails:
     Type: String
     Default: ''
   AiAdminEditorEmails:
@@ -225,6 +218,7 @@ Globals:
         AI_USAGE_STATE_TABLE: !Ref AiUsageStateTableName
         AI_USAGE_EVENTS_TABLE: !Ref AiUsageEventsTableName
         AI_PROMPT_LIMIT_SETTINGS_TABLE: !Ref AiPromptLimitSettingsTableName
+        PRODUCER_CAPTURE_WHITELIST_TABLE: !Ref ProducerCaptureWhitelistTable
         FEEDBACK_SUBMISSIONS_TABLE: !Ref FeedbackSubmissionsTable
         ADMIN_ALLOWLIST_TABLE: !Ref AdminAllowlistTable
         ADMIN_COGNITO_APP_CLIENT_ID: !If
@@ -235,7 +229,6 @@ Globals:
           - HasAdminCognitoUserPoolId
           - !Ref AdminCognitoUserPoolId
           - !Ref CognitoUserPoolId
-        ADMIN_ALLOWED_EMAILS: !Ref AdminAllowedEmails
         AI_ADMIN_EDITOR_EMAILS: !Ref AiAdminEditorEmails
         AI_RUNTIME_DEFAULT_MODEL: !Ref AiRuntimeDefaultModel
         AI_CHAT_DEFAULT_TEMPERATURE: !Ref AiChatDefaultTemperature
@@ -254,7 +247,6 @@ Globals:
         APP_AUTH_ACCESS_TOKEN_TTL_SECONDS: !Ref AppAuthAccessTokenTtlSeconds
         APP_AUTH_REFRESH_TOKEN_TTL_SECONDS: !Ref AppAuthRefreshTokenTtlSeconds
         GOOGLE_OAUTH_CLIENT_IDS: !Ref GoogleOauthClientIds
-        ENFORCE_SUBSCRIPTIONS: !Ref EnforceSubscriptions
         ALLOW_STUDIO_TIER: !Ref AllowStudioTier
         SECRET_CACHE_TTL_SECONDS: !Ref SecretCacheTtlSeconds
         HTTP_TIMEOUT_SECONDS: !Ref HttpTimeoutSeconds
@@ -296,7 +288,7 @@ Resources:
           ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
           ThrottlingRateLimit: !Ref ApiThrottleRateLimit
       Cors:
-        AllowMethods: "'GET,POST,PATCH,OPTIONS'"
+        AllowMethods: "'GET,POST,PATCH,PUT,OPTIONS'"
         AllowHeaders: "'Content-Type,Authorization,X-Signature'"
         AllowOrigin: "'*'"
 
@@ -665,6 +657,23 @@ Resources:
         - AttributeName: email
           KeyType: HASH
 
+  ProducerCaptureWhitelistTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub mixroom-producer-capture-whitelist-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: setting_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: setting_key
+          KeyType: HASH
+
   UserTombstonesTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -757,6 +766,8 @@ Resources:
             TableName: !Ref AuthSessionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AuthRateLimitsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProducerCaptureWhitelistTable
         - !If
           - HasAppAuthSecretArn
           - Statement:
@@ -778,6 +789,12 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/users/me
             Method: ANY
+        UsersMeProducerCaptureAccess:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/users/me/producer-capture-ui-access
+            Method: get
 
   FeedbackApiFunction:
     Type: AWS::Serverless::Function
@@ -1064,11 +1081,8 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AdminAllowlistTable
-        - !If
-          - HasAiPromptLimitSettingsTableName
-          - DynamoDBCrudPolicy:
-              TableName: !Ref AiPromptLimitSettingsTableName
-          - !Ref AWS::NoValue
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProducerCaptureWhitelistTable
       Events:
         AdminAiPromptLimitsGet:
           Type: Api
@@ -1108,6 +1122,30 @@ Resources:
           Properties:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/settings/ai-runtime
+            Method: put
+
+  AdminProducerCaptureWhitelistApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_admin_producer_capture_whitelist.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AdminAllowlistTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProducerCaptureWhitelistTable
+      Events:
+        AdminProducerCaptureWhitelistGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/producer-capture-whitelist
+            Method: get
+        AdminProducerCaptureWhitelistPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/producer-capture-whitelist
             Method: put
 
   BillingApiFunction:
@@ -1722,3 +1760,5 @@ Outputs:
     Value: !Ref FeedbackSubmissionsTable
   AiPromptLimitSettingsTableName:
     Value: !Ref AiPromptLimitSettingsTableName
+  ProducerCaptureWhitelistTableName:
+    Value: !Ref ProducerCaptureWhitelistTable

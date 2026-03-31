@@ -79,44 +79,20 @@ def _int_value(value: Any) -> int:
         return 0
 
 
-def _prompt_overage(used: int, limit: int) -> int:
-    return max(int(used or 0) - max(int(limit or 0), 0), 0)
+def _prompt_quota_remaining(used: int, limit: int) -> int:
+    return max(max(int(limit or 0), 0) - max(int(used or 0), 0), 0)
 
 
-def _shared_prompt_grant_usage(
+def _reserved_prompt_split(
     *,
-    daily_used: int,
-    weekly_used: int,
-    daily_limit: int,
-    weekly_limit: int,
-) -> int:
-    return max(
-        _prompt_overage(daily_used, daily_limit),
-        _prompt_overage(weekly_used, weekly_limit),
-    )
-
-
-def _additional_prompt_grants_needed(
-    *,
-    daily_used: int,
-    weekly_used: int,
     reserved_prompts: int,
-    daily_limit: int,
-    weekly_limit: int,
-) -> int:
-    current_usage = _shared_prompt_grant_usage(
-        daily_used=daily_used,
-        weekly_used=weekly_used,
-        daily_limit=daily_limit,
-        weekly_limit=weekly_limit,
-    )
-    next_usage = _shared_prompt_grant_usage(
-        daily_used=daily_used + max(int(reserved_prompts or 0), 0),
-        weekly_used=weekly_used + max(int(reserved_prompts or 0), 0),
-        daily_limit=daily_limit,
-        weekly_limit=weekly_limit,
-    )
-    return max(next_usage - current_usage, 0)
+    bonus_remaining: int,
+) -> tuple[int, int]:
+    safe_reserved = max(int(reserved_prompts or 0), 0)
+    safe_bonus = max(int(bonus_remaining or 0), 0)
+    grant_prompts = min(safe_reserved, safe_bonus)
+    quota_prompts = safe_reserved - grant_prompts
+    return quota_prompts, grant_prompts
 
 
 def _prompt_limit_failure_reason(
@@ -128,11 +104,15 @@ def _prompt_limit_failure_reason(
     daily_prompt_limit: int,
     weekly_prompt_limit: int,
 ) -> str:
-    daily_remaining = max(int(daily_prompt_limit or 0) - daily_used, 0) + max(bonus_remaining, 0)
-    weekly_remaining = max(int(weekly_prompt_limit or 0) - weekly_used, 0) + max(bonus_remaining, 0)
-    if daily_remaining < max(int(reserved_prompts or 0), 0):
+    quota_prompts, _grant_prompts = _reserved_prompt_split(
+        reserved_prompts=reserved_prompts,
+        bonus_remaining=bonus_remaining,
+    )
+    daily_remaining = _prompt_quota_remaining(daily_used, daily_prompt_limit)
+    weekly_remaining = _prompt_quota_remaining(weekly_used, weekly_prompt_limit)
+    if daily_remaining < quota_prompts:
         return "daily_prompts"
-    if weekly_remaining < max(int(reserved_prompts or 0), 0):
+    if weekly_remaining < quota_prompts:
         return "weekly_prompts"
     return ""
 
@@ -141,6 +121,8 @@ def _prompt_limit_failure_reason(
 class UsageReservationResult:
     allowed: bool
     limit_reason: str = ""
+    reserved_quota_prompts: int = 0
+    reserved_grant_prompts: int = 0
 
 
 class AiUsageRepository:
@@ -370,35 +352,20 @@ class AiUsageRepository:
             state = self.get_usage_state(user_id)
             daily_used = _int_value(state.get("ai_prompts_used_today"))
             weekly_used = _int_value(state.get("ai_prompts_used_week"))
-            daily_bonus_used = _prompt_overage(daily_used, daily_prompt_limit)
-            weekly_bonus_used = _prompt_overage(weekly_used, weekly_prompt_limit)
             bonus_remaining = max(_int_value(state.get("admin_prompt_grants_remaining")), 0)
-            required_bonus_prompts = _additional_prompt_grants_needed(
-                daily_used=daily_used,
-                weekly_used=weekly_used,
+            reserved_quota_prompts, reserved_grant_prompts = _reserved_prompt_split(
                 reserved_prompts=reserved_prompts,
-                daily_limit=daily_prompt_limit,
-                weekly_limit=weekly_prompt_limit,
+                bonus_remaining=bonus_remaining,
             )
-            max_daily_prompts_before = (
-                max(int(daily_prompt_limit or 0), 0)
-                + daily_bonus_used
-                + bonus_remaining
-                - reserved_prompts
-            )
-            max_weekly_prompts_before = (
-                max(int(weekly_prompt_limit or 0), 0)
-                + weekly_bonus_used
-                + bonus_remaining
-                - reserved_prompts
-            )
+            max_daily_prompts_before = max(int(daily_prompt_limit or 0), 0) - reserved_quota_prompts
+            max_weekly_prompts_before = max(int(weekly_prompt_limit or 0), 0) - reserved_quota_prompts
             if max_daily_prompts_before < 0:
                 return UsageReservationResult(False, "daily_prompts")
             if max_weekly_prompts_before < 0:
                 return UsageReservationResult(False, "weekly_prompts")
 
             values = {
-                ":reserved_prompts": reserved_prompts,
+                ":reserved_quota_prompts": reserved_quota_prompts,
                 ":reserved_credits": max(int(reserved_credits or 0), 0),
                 ":reserved_tokens": max(int(reserved_tokens or 0), 0),
                 ":max_daily_prompts_before": max_daily_prompts_before,
@@ -418,10 +385,10 @@ class AiUsageRepository:
                 "ai_prompts_used_today <= :max_daily_prompts_before",
                 "ai_prompts_used_week <= :max_weekly_prompts_before",
             ]
-            if required_bonus_prompts > 0:
-                values[":required_bonus_prompts"] = required_bonus_prompts
+            if reserved_grant_prompts > 0:
+                values[":reserved_grant_prompts"] = reserved_grant_prompts
                 condition_parts.append("attribute_exists(admin_prompt_grants_remaining)")
-                condition_parts.append("admin_prompt_grants_remaining >= :required_bonus_prompts")
+                condition_parts.append("admin_prompt_grants_remaining >= :reserved_grant_prompts")
             if enforce_daily_credit_limit:
                 condition_parts.append("ai_credits_used_today <= :max_daily_before")
                 values[":max_daily_before"] = max_daily_before
@@ -430,17 +397,17 @@ class AiUsageRepository:
                 values[":max_monthly_before"] = max_monthly_before
 
             update_expression = (
-                "SET ai_prompts_used_today = ai_prompts_used_today + :reserved_prompts, "
-                "ai_prompts_used_week = ai_prompts_used_week + :reserved_prompts, "
+                "SET ai_prompts_used_today = ai_prompts_used_today + :reserved_quota_prompts, "
+                "ai_prompts_used_week = ai_prompts_used_week + :reserved_quota_prompts, "
                 "ai_credits_used_today = ai_credits_used_today + :reserved_credits, "
                 "ai_tokens_used_month = ai_tokens_used_month + :reserved_tokens, "
                 "subscription_tier = :subscription_tier, "
                 "updated_at = :updated_at"
             )
-            if required_bonus_prompts > 0:
+            if reserved_grant_prompts > 0:
                 update_expression += (
                     ", admin_prompt_grants_remaining = "
-                    "admin_prompt_grants_remaining - :required_bonus_prompts"
+                    "admin_prompt_grants_remaining - :reserved_grant_prompts"
                 )
             try:
                 self._state_table.update_item(
@@ -449,7 +416,12 @@ class AiUsageRepository:
                     ConditionExpression=(" AND ".join(condition_parts)),
                     ExpressionAttributeValues=values,
                 )
-                return UsageReservationResult(True, "")
+                return UsageReservationResult(
+                    True,
+                    "",
+                    reserved_quota_prompts=reserved_quota_prompts,
+                    reserved_grant_prompts=reserved_grant_prompts,
+                )
             except ClientError as exc:
                 if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
                     raise
@@ -500,21 +472,40 @@ class AiUsageRepository:
         reserved_credits: int,
         reserved_tokens: int,
         reserved_prompts: int = 0,
+        reserved_quota_prompts: int = 0,
+        reserved_grant_prompts: int = 0,
         actual_credits: int,
         actual_tokens: int,
         actual_prompts: int = 0,
         now: datetime | None = None,
     ) -> None:
-        prompt_delta = int(actual_prompts or 0) - int(reserved_prompts or 0)
+        safe_reserved_quota = max(int(reserved_quota_prompts or 0), 0)
+        safe_reserved_grant = max(int(reserved_grant_prompts or 0), 0)
+        safe_reserved_prompts = max(int(reserved_prompts or 0), 0)
+        if safe_reserved_quota + safe_reserved_grant == 0 and safe_reserved_prompts > 0:
+            safe_reserved_quota = safe_reserved_prompts
+        prompt_delta = int(actual_prompts or 0) - safe_reserved_prompts
         credit_delta = int(actual_credits or 0) - int(reserved_credits or 0)
         token_delta = int(actual_tokens or 0) - int(reserved_tokens or 0)
         if prompt_delta == 0 and credit_delta == 0 and token_delta == 0:
             self._touch_state(user_id, subscription_tier=subscription_tier, now=now)
             return
+        prompt_quota_delta = prompt_delta
+        prompt_grant_delta = 0
+        if prompt_delta < 0:
+            prompt_quota_delta = -min(abs(prompt_delta), safe_reserved_quota)
+            prompt_grant_delta = prompt_delta - prompt_quota_delta
+        elif prompt_delta > 0:
+            state = self.get_usage_state(user_id)
+            prompt_quota_delta, prompt_grant_delta = _reserved_prompt_split(
+                reserved_prompts=prompt_delta,
+                bonus_remaining=_int_value(state.get("admin_prompt_grants_remaining")),
+            )
         self._adjust_usage(
             user_id,
             subscription_tier=subscription_tier,
-            prompt_delta=prompt_delta,
+            prompt_quota_delta=prompt_quota_delta,
+            prompt_grant_delta=prompt_grant_delta,
             credit_delta=credit_delta,
             token_delta=token_delta,
             now=now,
@@ -528,12 +519,20 @@ class AiUsageRepository:
         reserved_credits: int,
         reserved_tokens: int,
         reserved_prompts: int = 0,
+        reserved_quota_prompts: int = 0,
+        reserved_grant_prompts: int = 0,
         now: datetime | None = None,
     ) -> None:
+        safe_reserved_quota = max(int(reserved_quota_prompts or 0), 0)
+        safe_reserved_grant = max(int(reserved_grant_prompts or 0), 0)
+        safe_reserved_prompts = max(int(reserved_prompts or 0), 0)
+        if safe_reserved_quota + safe_reserved_grant == 0 and safe_reserved_prompts > 0:
+            safe_reserved_quota = safe_reserved_prompts
         self._adjust_usage(
             user_id,
             subscription_tier=subscription_tier,
-            prompt_delta=-max(int(reserved_prompts or 0), 0),
+            prompt_quota_delta=-safe_reserved_quota,
+            prompt_grant_delta=-safe_reserved_grant,
             credit_delta=-max(int(reserved_credits or 0), 0),
             token_delta=-max(int(reserved_tokens or 0), 0),
             now=now,
@@ -560,32 +559,34 @@ class AiUsageRepository:
         bonus_remaining = max(_int_value(state.get("admin_prompt_grants_remaining")), 0)
         daily_limit = max(int(daily_prompt_limit or 0), 0)
         weekly_limit = max(int(weekly_prompt_limit or 0), 0)
-        daily_bonus_used = _prompt_overage(daily_used, daily_limit)
-        weekly_bonus_used = _prompt_overage(weekly_used, weekly_limit)
-        daily_remaining = max(daily_limit - daily_used, 0) + bonus_remaining
-        weekly_remaining = max(weekly_limit - weekly_used, 0) + bonus_remaining
+        daily_remaining = _prompt_quota_remaining(daily_used, daily_limit)
+        weekly_remaining = _prompt_quota_remaining(weekly_used, weekly_limit)
         blocked_by = ""
-        if daily_remaining <= 0:
+        if bonus_remaining <= 0 and daily_remaining <= 0:
             blocked_by = "daily_prompts"
-        elif weekly_remaining <= 0:
+        elif bonus_remaining <= 0 and weekly_remaining <= 0:
             blocked_by = "weekly_prompts"
 
         return {
             "daily": {
                 "used": daily_used,
-                "limit": daily_limit + daily_bonus_used + bonus_remaining,
+                "limit": daily_limit,
                 "remaining": daily_remaining,
                 "resets_at": _utc_now_iso(_next_day_reset_at(current)),
             },
             "weekly": {
                 "used": weekly_used,
-                "limit": weekly_limit + weekly_bonus_used + bonus_remaining,
+                "limit": weekly_limit,
                 "remaining": weekly_remaining,
                 "resets_at": _utc_now_iso(_next_week_reset_at(current)),
             },
             "can_submit": blocked_by == "",
             "blocked_by": blocked_by,
             "extra_prompts_remaining": bonus_remaining,
+            "extra_prompt_bank": {
+                "remaining": bonus_remaining,
+                "consumed_first": True,
+            },
         }
 
     def log_usage_event(
@@ -593,8 +594,11 @@ class AiUsageRepository:
         *,
         user_id: str,
         project_id: str = "",
+        prompt_trace_id: str = "",
+        request_id: str = "",
         feature: str,
         model: str,
+        provider: str = "",
         prompt_tokens: int,
         completion_tokens: int,
         total_tokens: int,
@@ -603,6 +607,12 @@ class AiUsageRepository:
         error_code: str = "",
         resolved_tool: str = "",
         provider_response_id: str = "",
+        runtime_config_fingerprint: str = "",
+        app_version: str = "",
+        platform: str = "",
+        proxy_handler_ms_total: int = 0,
+        provider_roundtrip_ms: int = 0,
+        response_normalize_ms: int = 0,
         created_at: datetime | None = None,
     ) -> None:
         if self._events_table is None:
@@ -624,12 +634,30 @@ class AiUsageRepository:
         }
         if project_id:
             item["project_id"] = project_id
+        if prompt_trace_id:
+            item["prompt_trace_id"] = prompt_trace_id
+        if request_id:
+            item["request_id"] = request_id
+        if provider:
+            item["provider"] = provider
         if error_code:
             item["error_code"] = error_code
         if resolved_tool:
             item["resolved_tool"] = resolved_tool
         if provider_response_id:
             item["provider_response_id"] = provider_response_id
+        if runtime_config_fingerprint:
+            item["runtime_config_fingerprint"] = runtime_config_fingerprint
+        if app_version:
+            item["app_version"] = app_version
+        if platform:
+            item["platform"] = platform
+        if proxy_handler_ms_total > 0:
+            item["proxy_handler_ms_total"] = proxy_handler_ms_total
+        if provider_roundtrip_ms > 0:
+            item["provider_roundtrip_ms"] = provider_roundtrip_ms
+        if response_normalize_ms > 0:
+            item["response_normalize_ms"] = response_normalize_ms
         self._events_table.put_item(Item=item)
 
     def _touch_state(
@@ -657,7 +685,8 @@ class AiUsageRepository:
         user_id: str,
         *,
         subscription_tier: str,
-        prompt_delta: int,
+        prompt_quota_delta: int,
+        prompt_grant_delta: int,
         credit_delta: int,
         token_delta: int,
         now: datetime | None = None,
@@ -666,28 +695,8 @@ class AiUsageRepository:
             raise RuntimeError("AI usage state table is not configured.")
 
         current = now or _utc_now()
-        prompt_limits = get_prompt_limits(subscription_tier)
-        daily_prompt_limit = int(prompt_limits.get("daily_prompts") or 0)
-        weekly_prompt_limit = int(prompt_limits.get("weekly_prompts") or 0)
-        state = self.get_usage_state(user_id)
-        current_daily_used = _int_value(state.get("ai_prompts_used_today"))
-        current_weekly_used = _int_value(state.get("ai_prompts_used_week"))
-        current_shared_grant_usage = _shared_prompt_grant_usage(
-            daily_used=current_daily_used,
-            weekly_used=current_weekly_used,
-            daily_limit=daily_prompt_limit,
-            weekly_limit=weekly_prompt_limit,
-        )
-        next_shared_grant_usage = _shared_prompt_grant_usage(
-            daily_used=current_daily_used + int(prompt_delta or 0),
-            weekly_used=current_weekly_used + int(prompt_delta or 0),
-            daily_limit=daily_prompt_limit,
-            weekly_limit=weekly_prompt_limit,
-        )
-        grant_charge = max(next_shared_grant_usage - current_shared_grant_usage, 0)
-        grant_refund = max(current_shared_grant_usage - next_shared_grant_usage, 0)
         expression_values: dict[str, Any] = {
-            ":prompt_delta": int(prompt_delta or 0),
+            ":prompt_quota_delta": int(prompt_quota_delta or 0),
             ":credit_delta": int(credit_delta or 0),
             ":token_delta": int(token_delta or 0),
             ":subscription_tier": subscription_tier,
@@ -695,16 +704,16 @@ class AiUsageRepository:
         }
         condition_parts = ["attribute_exists(user_id)"]
         update_parts = [
-            "ai_prompts_used_today = ai_prompts_used_today + :prompt_delta",
-            "ai_prompts_used_week = ai_prompts_used_week + :prompt_delta",
+            "ai_prompts_used_today = ai_prompts_used_today + :prompt_quota_delta",
+            "ai_prompts_used_week = ai_prompts_used_week + :prompt_quota_delta",
             "ai_credits_used_today = ai_credits_used_today + :credit_delta",
             "ai_tokens_used_month = ai_tokens_used_month + :token_delta",
             "subscription_tier = :subscription_tier",
             "updated_at = :updated_at",
         ]
-        if prompt_delta < 0:
-            expression_values[":refundable_prompts_today"] = abs(prompt_delta)
-            expression_values[":refundable_prompts_week"] = abs(prompt_delta)
+        if prompt_quota_delta < 0:
+            expression_values[":refundable_prompts_today"] = abs(prompt_quota_delta)
+            expression_values[":refundable_prompts_week"] = abs(prompt_quota_delta)
             condition_parts.append("ai_prompts_used_today >= :refundable_prompts_today")
             condition_parts.append("ai_prompts_used_week >= :refundable_prompts_week")
         if credit_delta < 0:
@@ -713,15 +722,15 @@ class AiUsageRepository:
         if token_delta < 0:
             expression_values[":refundable_tokens"] = abs(token_delta)
             condition_parts.append("ai_tokens_used_month >= :refundable_tokens")
-        if grant_charge > 0:
-            expression_values[":grant_charge"] = grant_charge
+        if prompt_grant_delta > 0:
+            expression_values[":grant_charge"] = prompt_grant_delta
             condition_parts.append("attribute_exists(admin_prompt_grants_remaining)")
             condition_parts.append("admin_prompt_grants_remaining >= :grant_charge")
             update_parts.append(
                 "admin_prompt_grants_remaining = admin_prompt_grants_remaining - :grant_charge"
             )
-        if grant_refund > 0:
-            expression_values[":grant_refund"] = grant_refund
+        if prompt_grant_delta < 0:
+            expression_values[":grant_refund"] = abs(prompt_grant_delta)
             expression_values[":zero"] = 0
             update_parts.append(
                 "admin_prompt_grants_remaining = if_not_exists(admin_prompt_grants_remaining, :zero) + :grant_refund"

@@ -26,6 +26,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   private val mainHandler = Handler(Looper.getMainLooper())
   private var instrumentExtractionFuture: Future<*>? = null
   private lateinit var applicationContext: Context
+  private lateinit var promptAnalysisService: PromptAnalysisService
 
   private var eventsSink: EventChannel.EventSink? = null
   private var logsSink: EventChannel.EventSink? = null
@@ -50,6 +51,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   override fun onAttachedToEngine(binding: FlutterPluginBinding) {
     sharedInstance = this
     applicationContext = binding.applicationContext
+    promptAnalysisService = PromptAnalysisService(binding.applicationContext)
 
     JuceBridge.setAndroidContextJNI(binding.applicationContext)
 
@@ -108,16 +110,45 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   }
 
   private fun extractInstrumentAssets(context: Context) {
-    val marker = File(context.filesDir, ".mixroom_instruments_extracted_v1")
+    val marker = File(context.filesDir, ".mixroom_instruments_extracted_v2")
     if (marker.exists()) return
 
-    val root = "assets/instruments"
     val targetRoot = File(context.filesDir, "flutter_assets")
+    val sourceCandidates =
+      listOf(
+        "assets/instruments",
+        "flutter_assets/assets/instruments",
+      )
+
+    fun sourceExists(path: String): Boolean {
+      val entries = context.assets.list(path) ?: return false
+      if (entries.isNotEmpty()) return true
+      return try {
+        context.assets.open(path).use { _ -> }
+        true
+      } catch (_: Exception) {
+        false
+      }
+    }
+
+    val sourceRoot = sourceCandidates.firstOrNull { sourceExists(it) }
+    if (sourceRoot == null) {
+      Log.e("JuceAudioEngine", "Could not locate instrument asset root in APK assets")
+      return
+    }
+
+    fun outputRelativePath(path: String): String {
+      return if (path.startsWith("flutter_assets/")) {
+        path.removePrefix("flutter_assets/")
+      } else {
+        path
+      }
+    }
 
     fun copyAssetTree(path: String) {
       val entries = context.assets.list(path) ?: return
       if (entries.isEmpty()) {
-        val outFile = File(targetRoot, path)
+        val outFile = File(targetRoot, outputRelativePath(path))
         outFile.parentFile?.mkdirs()
         if (!outFile.exists() || outFile.length() == 0L) {
           context.assets.open(path).use { input ->
@@ -136,7 +167,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     try {
-      copyAssetTree(root)
+      copyAssetTree(sourceRoot)
       marker.writeText("ok")
     } catch (e: Exception) {
       Log.e("JuceAudioEngine", "Failed extracting instrument assets", e)
@@ -536,6 +567,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
               (args["mp3BitrateKbps"] as? Number)?.toInt() ?: 192,
             )
           }
+        }
+        "getExportProgress" -> {
+          result.success(JuceBridge.getExportProgressJNI())
         }
         "exportTrack" -> {
           runHeavyTask("exportTrack", result) {
@@ -1057,10 +1091,39 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(null)
         }
         "decodeAudioMono16k" -> {
-          result.success(JuceBridge.decodeAudioMono16kJNI(args.stringValue("path")).toList())
+          try {
+            result.success(JuceBridge.decodeAudioMono16kJNI(args.stringValue("path")).toList())
+          } catch (t: Throwable) {
+            result.error("decode_audio_mono_16k_failed", t.message, null)
+          }
+        }
+        "decodeAudioMono16kForAnalysis" -> {
+          try {
+            result.success(
+              JuceBridge.decodeAudioMono16kForAnalysisJNI(
+                args.stringValue("path"),
+                args.intValue("maxOutputSamples"),
+              ).toList(),
+            )
+          } catch (t: Throwable) {
+            result.error("decode_audio_mono_16k_analysis_failed", t.message, null)
+          }
         }
         "analyzeAudioStereo16k" -> {
           result.success(JuceBridge.analyzeAudioStereo16kJNI(args.stringValue("path")))
+        }
+        "analyzeAudioForPrompt" -> {
+          val path = args.stringValue("path")
+          heavyWorkExecutor.execute {
+            try {
+              val analysis = promptAnalysisService.analyzeClip(path)
+              mainHandler.post { result.success(analysis) }
+            } catch (t: Throwable) {
+              mainHandler.post {
+                result.error("analyze_audio_for_prompt_failed", t.message, null)
+              }
+            }
+          }
         }
         "getInputDevices" -> {
           result.success(JuceBridge.getInputDevicesJNI())
@@ -1144,6 +1207,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     methodChannel.setMethodCallHandler(null)
     eventsChannel.setStreamHandler(null)
     logsChannel.setStreamHandler(null)
+    promptAnalysisService.close()
     heavyWorkExecutor.shutdown()
     eventsSink = null
     logsSink = null

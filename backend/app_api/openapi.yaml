@@ -48,6 +48,14 @@ paths:
           description: Account records deleted
         '409':
           description: Active paid subscription must be cancelled first
+  /v1/users/me/producer-capture-ui-access:
+    get:
+      summary: Check whether the signed-in user is allowlisted for Producer Capture UI
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Producer capture UI access for the current user
   /v1/entitlements/me:
     get:
       summary: Get current user's canonical entitlement snapshot
@@ -244,6 +252,33 @@ paths:
       responses:
         '200':
           description: AI runtime settings updated
+  /v1/internal/admin/settings/producer-capture-whitelist:
+    get:
+      summary: Get internal admin producer capture UI username whitelist
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current producer capture whitelist settings
+    put:
+      summary: Update internal admin producer capture UI username whitelist
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usernames]
+              properties:
+                usernames:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Producer capture whitelist settings updated
   /v1/billing/web/checkout-session:
     post:
       summary: Create web checkout session (Paddle/Toss)

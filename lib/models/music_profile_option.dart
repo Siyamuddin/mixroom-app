@@ -13,6 +13,7 @@ const List<MusicProfileOption> kMusicProfileOptions = <MusicProfileOption>[
   MusicProfileOption(value: 'artist', label: 'Artist'),
   MusicProfileOption(value: 'songwriter', label: 'Songwriter'),
   MusicProfileOption(value: 'audio_engineer', label: 'Audio engineer'),
+  MusicProfileOption(value: 'student', label: 'Student'),
   MusicProfileOption(value: 'music_enthusiast', label: 'Music enthusiast'),
   MusicProfileOption(value: 'beginner', label: 'Beginner'),
   MusicProfileOption(value: 'music_for_work', label: 'Make music for work'),

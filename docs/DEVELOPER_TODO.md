@@ -38,6 +38,8 @@ These should live in AWS env vars, SAM parameters, or AWS Secrets Manager, not i
 
 ### Detailed setup docs
 
+- Remote-operable app surfaces and rollback/testing SOPs:
+  - [REMOTE_OPERATIONS.md](REMOTE_OPERATIONS.md)
 - LLM proxy secrets and deploy inputs:
   - [backend/llm_proxy/README.md](../backend/llm_proxy/README.md)
   - [BETA_AWS_OPENAI_SETUP_CHECKLIST.md](BETA_AWS_OPENAI_SETUP_CHECKLIST.md)
@@ -213,7 +215,11 @@ These should live in AWS env vars, SAM parameters, or AWS Secrets Manager, not i
 - Test informational prompts, DAW assistant prompts, and corrective mix prompts.
 - Test no-audio, ambiguous, expired-session, and network-failure cases.
 - Check latency, repeated-prompt consistency, and no-op behavior.
-- Log prompt type, tool path, learned-model usage, fallback usage, and latency.
+- Prompt-cycle observability is now live; use admin/PostHog to confirm:
+  - runtime fingerprint
+  - tool path
+  - learned-model usage / fallback
+  - end-to-end latency breakdown
 
 ## 5. Playback / Device QA
 
@@ -235,29 +241,17 @@ These should live in AWS env vars, SAM parameters, or AWS Secrets Manager, not i
 
 ## 7. Analytics / Monitoring
 
-- Create a PostHog project for Mixroom.
-- Decide the correct PostHog region/host:
-  - US Cloud usually uses `https://us.i.posthog.com`
-  - EU Cloud usually uses `https://eu.i.posthog.com`
-  - self-hosted should use your own PostHog base URL
-- Generate a PostHog project API key and wire it into:
-  - Flutter build `--dart-define=POSTHOG_API_KEY=...`
-  - backend SAM parameter `PostHogApiKey`
-- Wire the PostHog host into:
-  - Flutter build `--dart-define=POSTHOG_HOST=...`
-  - backend SAM parameter `PostHogHost`
-- Set app environment names consistently:
-  - Flutter `--dart-define=APP_ENV=dev|staging|prod`
-  - backend SAM `StageName`
-- Create Sentry projects and DSNs for:
-  - Flutter app
-  - LLM proxy backend
-  - app API backend
-- Wire Sentry DSNs into:
-  - Flutter build `--dart-define=SENTRY_DSN=...`
-  - backend SAM parameter `SentryDsn`
-- For release builds, make sure Sentry symbol/upload steps are configured for the platforms you ship so stack traces are readable.
-- Deploy the LLM proxy stack so the `AiUsageMetricsTable` is created.
+- PostHog and Sentry are already wired for the current production path.
+- Keep app/build/backend env values aligned:
+  - Flutter `APP_ENV`
+  - backend `StageName`
+- For release builds, keep Sentry symbol/upload steps healthy so stack traces stay readable.
+- Keep admin/PostHog observability working for:
+  - prompt timing
+  - prompt failures
+  - tool usage
+  - remote magnitude model usage/update events
+  - remote welcome / announcement events
 - Deploy the subscriptions stack with PostHog and Sentry envs enabled.
 - In PostHog, verify these events are arriving from real test sessions:
   - `app_opened`

@@ -11,12 +11,14 @@ class ExportSuccessPreviewPlayer extends StatefulWidget {
   final String filePath;
   final bool isVideo;
   final String? displayName;
+  final bool figmaCompact;
 
   const ExportSuccessPreviewPlayer({
     super.key,
     required this.filePath,
     required this.isVideo,
     this.displayName,
+    this.figmaCompact = false,
   });
 
   @override
@@ -225,41 +227,103 @@ class _ExportSuccessPreviewPlayerState
     final progress = totalMs <= 0
         ? 0.0
         : (_position.inMilliseconds / totalMs).clamp(0.0, 1.0);
+    final isCompact = widget.figmaCompact;
+    final panelPadding = isCompact
+        ? const EdgeInsets.fromLTRB(12, 11, 12, 11)
+        : const EdgeInsets.fromLTRB(8, 6, 8, 8);
+    final panelRadius = isCompact ? 24.0 : 10.0;
+    final panelMargin = isCompact
+        ? EdgeInsets.zero
+        : const EdgeInsets.only(top: 12, bottom: 12);
+    final waveHeight = isCompact ? 46.0 : 28.0;
+    final playedColor = isCompact
+        ? const Color(0xFFF4F4F4)
+        : (_isPlaying ? const Color(0xFF7EECC2) : const Color(0xFF7DB4FF));
+    final unplayedColor =
+        isCompact ? const Color(0x73F4F4F4) : const Color(0x66FFFFFF);
+    final strokeWidth = isCompact ? 2.1 : 1.7;
 
     return Container(
-      margin: const EdgeInsets.only(top: 12, bottom: 12),
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+      margin: panelMargin,
+      padding: panelPadding,
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
+        color: Colors.white.withValues(alpha: isCompact ? 0.2 : 0.05),
+        borderRadius: BorderRadius.circular(panelRadius),
+        border: isCompact
+            ? null
+            : Border.all(
+                color: Colors.white.withValues(alpha: 0.12),
+              ),
+        boxShadow: isCompact
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  blurRadius: 15,
+                  spreadRadius: 8,
+                ),
+              ]
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              IconButton(
-                iconSize: 26,
-                visualDensity: VisualDensity.compact,
-                color: Colors.white,
-                disabledColor: Colors.white38,
-                onPressed: _isReady ? _togglePlayback : null,
-                icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
-              ),
+              if (isCompact)
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: _isReady ? _togglePlayback : null,
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withValues(alpha: 0.18),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      child: Icon(
+                        _isPlaying
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        size: 19,
+                        color: _isReady
+                            ? const Color(0xFFF4F4F4)
+                            : const Color(0x66F4F4F4),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                IconButton(
+                  iconSize: 26,
+                  visualDensity: VisualDensity.compact,
+                  color: Colors.white,
+                  disabledColor: Colors.white38,
+                  onPressed: _isReady ? _togglePlayback : null,
+                  icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
+                ),
+              if (isCompact) const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   '$fileName · ${_formatClock(_position)} / ${_formatClock(_duration)}',
-                  maxLines: 1,
+                  maxLines: isCompact ? 2 : 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11.5,
+                  textAlign: TextAlign.left,
+                  style: TextStyle(
+                    color: const Color(0xFFF4F4F4)
+                        .withValues(alpha: isCompact ? 0.82 : 0.7),
+                    fontSize: isCompact ? 11.8 : 11.5,
+                    fontWeight: isCompact ? FontWeight.w500 : FontWeight.w400,
                   ),
                 ),
               ),
             ],
           ),
+          SizedBox(height: isCompact ? 7 : 0),
           LayoutBuilder(
             builder: (context, constraints) {
               return GestureDetector(
@@ -269,13 +333,16 @@ class _ExportSuccessPreviewPlayerState
                         _seekFromDx(d.localPosition.dx, constraints.maxWidth)
                     : null,
                 child: SizedBox(
-                  height: 28,
+                  height: waveHeight,
                   child: _waveformLoading
-                      ? const Center(
+                      ? Center(
                           child: SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 1.8),
+                            width: isCompact ? 18 : 14,
+                            height: isCompact ? 18 : 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: isCompact ? 2.1 : 1.8,
+                              color: const Color(0xBFF4F4F4),
+                            ),
                           ),
                         )
                       : CustomPaint(
@@ -283,13 +350,16 @@ class _ExportSuccessPreviewPlayerState
                             waveform: _waveform,
                             progress: progress,
                             active: _isPlaying,
+                            playedColor: playedColor,
+                            unplayedColor: unplayedColor,
+                            strokeWidth: strokeWidth,
                           ),
                         ),
                 ),
               );
             },
           ),
-          const SizedBox(height: 2),
+          SizedBox(height: isCompact ? 4 : 2),
           if (!_isReady)
             const SizedBox(
               height: 14,
@@ -308,24 +378,30 @@ class _WaveformPreviewPainter extends CustomPainter {
   final List<double> waveform;
   final double progress;
   final bool active;
+  final Color playedColor;
+  final Color unplayedColor;
+  final double strokeWidth;
 
   const _WaveformPreviewPainter({
     required this.waveform,
     required this.progress,
     required this.active,
+    required this.playedColor,
+    required this.unplayedColor,
+    required this.strokeWidth,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final bars = waveform.isEmpty ? List<double>.filled(64, 0.18) : waveform;
     final barPaint = Paint()
-      ..color = const Color(0x66FFFFFF)
+      ..color = unplayedColor
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 1.7;
+      ..strokeWidth = strokeWidth;
     final playedPaint = Paint()
-      ..color = active ? const Color(0xFF7EECC2) : const Color(0xFF7DB4FF)
+      ..color = playedColor
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 1.7;
+      ..strokeWidth = strokeWidth;
     final dxStep = size.width / bars.length;
     final centerY = size.height / 2;
     final playedX = size.width * progress.clamp(0.0, 1.0);
@@ -342,7 +418,7 @@ class _WaveformPreviewPainter extends CustomPainter {
       );
     }
 
-    final headPaint = Paint()..color = Colors.white.withOpacity(0.9);
+    final headPaint = Paint()..color = Colors.white.withValues(alpha: 0.9);
     canvas.drawCircle(Offset(playedX, centerY), 2.0, headPaint);
   }
 
@@ -350,6 +426,9 @@ class _WaveformPreviewPainter extends CustomPainter {
   bool shouldRepaint(covariant _WaveformPreviewPainter oldDelegate) {
     return oldDelegate.waveform != waveform ||
         oldDelegate.progress != progress ||
-        oldDelegate.active != active;
+        oldDelegate.active != active ||
+        oldDelegate.playedColor != playedColor ||
+        oldDelegate.unplayedColor != unplayedColor ||
+        oldDelegate.strokeWidth != strokeWidth;
   }
 }

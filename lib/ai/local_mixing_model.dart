@@ -66,6 +66,11 @@ class LocalMixingModel {
   };
 
   static const bool preferLoudCleanOverConservative = true;
+  static const double _kGainUiMin = 0.0;
+  static const double _kGainUiMax = 3.0;
+  static const double _kGainUiUnity = 2.0;
+  static const double _kGainDbMin = -60.0;
+  static const double _kGainDbMax = 6.0;
 
   bool _isAllowedFxParam(String effectContains, List<String> paramContainsAny) {
     final eff = effectContains.toLowerCase();
@@ -1182,7 +1187,11 @@ class LocalMixingModel {
     return _MixRef(medianEffRms: median.clamp(0.02, 10.0));
   }
 
-  double _gainLin(RowState r) => math.min(r.gain0to3 * r.gain0to3, 9.0);
+  double _gainLin(RowState r) {
+    final db = _sliderToDb(r.gain0to3);
+    return math.pow(10.0, db / 20.0).toDouble();
+  }
+
   double _effRms(RowState r) => r.approxRms * _gainLin(r);
   double _effPeak(RowState r) => (r.approxRms * r.approxCrest) * _gainLin(r);
 
@@ -1313,12 +1322,12 @@ class LocalMixingModel {
     final oldSlider = r.gain0to3.clamp(0.0, 3.0);
     final oldDb = _sliderToDb(oldSlider);
 
-    final baseDb = oldDb.isFinite ? oldDb : -30.0;
+    final baseDb = oldDb.isFinite ? oldDb : _kGainDbMin;
 
     // Target db after delta
     final targetDb = (baseDb + dbDelta).clamp(
-      -30.0,
-      18.0,
+      _kGainDbMin,
+      _kGainDbMax,
     );
 
     // HARD STOP: no more movement possible
@@ -1343,16 +1352,27 @@ class LocalMixingModel {
   }
 
   double _sliderToDb(double s) {
-    if (s <= 0.0001) return double.negativeInfinity;
-    final perceptual = math.min(s * s, 9.0);
-    return 20 * math.log(perceptual) / math.log(10);
+    final clamped = s.clamp(_kGainUiMin, _kGainUiMax).toDouble();
+    if (clamped <= _kGainUiUnity) {
+      final t = ((clamped - _kGainUiMin) / (_kGainUiUnity - _kGainUiMin))
+          .clamp(0.0, 1.0);
+      return _kGainDbMin + ((0.0 - _kGainDbMin) * t);
+    }
+    final t = ((clamped - _kGainUiUnity) / (_kGainUiMax - _kGainUiUnity))
+        .clamp(0.0, 1.0);
+    return _kGainDbMax * t;
   }
 
   double _dbToSlider(double db) {
-    if (!db.isFinite) return 0.0;
-    final perceptual = math.pow(10.0, db / 20.0).toDouble();
-    final slider = math.sqrt(perceptual).toDouble();
-    return slider.clamp(0.0, 3.0);
+    if (!db.isFinite) return _kGainUiMin;
+    final clampedDb = db.clamp(_kGainDbMin, _kGainDbMax).toDouble();
+    if (clampedDb <= 0.0) {
+      final t =
+          ((clampedDb - _kGainDbMin) / (0.0 - _kGainDbMin)).clamp(0.0, 1.0);
+      return _kGainUiMin + ((_kGainUiUnity - _kGainUiMin) * t);
+    }
+    final t = (clampedDb / _kGainDbMax).clamp(0.0, 1.0);
+    return _kGainUiUnity + ((_kGainUiMax - _kGainUiUnity) * t);
   }
 
   // -----------------------------

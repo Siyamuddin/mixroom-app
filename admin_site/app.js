@@ -10,10 +10,14 @@ const ADMIN_USERS_GRANT_PROMPTS_PATH = "/v1/internal/admin/users/grant-prompts";
 const ADMIN_FEEDBACK_PATH = "/v1/internal/admin/feedback";
 const ADMIN_AI_PROMPT_LIMITS_PATH = "/v1/internal/admin/settings/ai-prompt-limits";
 const ADMIN_AI_RUNTIME_PATH = "/v1/internal/admin/settings/ai-runtime";
+const ADMIN_PRODUCER_CAPTURE_WHITELIST_PATH =
+  "/v1/internal/admin/settings/producer-capture-whitelist";
 const DEFAULT_ADMIN_USERS_LIMIT = 8;
 const DEFAULT_FEEDBACK_LIMIT = 8;
-const DEFAULT_OVERVIEW_USERS_LIMIT = 8;
-const DEFAULT_OVERVIEW_PROJECTS_LIMIT = 8;
+const DEFAULT_OVERVIEW_USERS_LIMIT = 5;
+const DEFAULT_OVERVIEW_PROJECTS_LIMIT = 5;
+const DEFAULT_OVERVIEW_TRACE_LIMIT = 5;
+const OVERVIEW_RESULT_LIMIT_STEP = 5;
 const RESULT_LIMIT_STEP = 8;
 const RESULT_LIMIT_MAX = 40;
 const DEFAULT_LOCALE = "en";
@@ -25,11 +29,17 @@ const DEFAULT_TAB = "home";
 const TAB_KEYS = ["home", "users", "feedback", "dev"];
 const ANDREW_ADMIN_EMAIL = "andrew@mixroom.ai";
 const AI_PROMPT_LIMITS_CONFIRM_PHRASE = "APPLY PROMPT LIMITS";
+const PRODUCER_CAPTURE_WHITELIST_CONFIRM_PHRASE = "APPLY PRODUCER WHITELIST";
 const ANALYTICS_RANGE_OPTIONS = [
   { key: "365d", days: 365, labelKey: "analytics.range.1y" },
   { key: "90d", days: 90, labelKey: "analytics.range.3m" },
   { key: "30d", days: 30, labelKey: "analytics.range.1m" },
   { key: "7d", days: 7, labelKey: "analytics.range.1w" },
+];
+const AI_TOOL_USAGE_RANGE_OPTIONS = [
+  { key: "7d", label: "Week" },
+  { key: "30d", label: "Month" },
+  { key: "all", label: "All time" },
 ];
 const AI_MODEL_OPTIONS = [
   "",
@@ -47,6 +57,26 @@ const AI_MODEL_OPTIONS = [
 const AI_REASONING_EFFORT_OPTIONS = ["", "minimal", "low", "medium", "high"];
 const AI_PROMPT_CACHE_RETENTION_OPTIONS = ["", "in_memory", "24h"];
 
+function buildOverviewIncludes() {
+  return {
+    aiUsage: false,
+    productAnalytics: false,
+    aiObservability: false,
+    users: false,
+    projects: false,
+  };
+}
+
+function buildHomeSectionLoading() {
+  return {
+    analytics: false,
+    usage: false,
+    observability: false,
+    users: false,
+    projects: false,
+  };
+}
+
 const MESSAGES = {
   en: {
     "language.label": "Language",
@@ -61,6 +91,7 @@ const MESSAGES = {
     "action.showLess": "Show less",
     "action.saving": "Saving...",
     "action.savePromptLimits": "Save prompt limits",
+    "action.saveProducerCaptureWhitelist": "Save producer whitelist",
     "action.saveAiOverride": "Save AI override",
     "auth.kicker": "Employee access",
     "auth.title": "Sign in",
@@ -120,6 +151,10 @@ const MESSAGES = {
     "panel.aiRuntime.label": "AI Runtime",
     "panel.aiRuntime.title": "Server prompt and model config",
     "panel.aiRuntime.meta": "Prompt and runtime overrides for server-owned AI features.",
+    "panel.producerCaptureWhitelist.label": "Producer Capture Whitelist",
+    "panel.producerCaptureWhitelist.title": "Producer capture usernames",
+    "panel.producerCaptureWhitelist.meta":
+      "Usernames allowlisted to see the Producer Capture UI toggle.",
     "panel.features.title": "Features",
     "panel.tiers.label": "Subscription Tier",
     "panel.tiers.title": "Tiers",
@@ -164,6 +199,8 @@ const MESSAGES = {
     "empty.signInFeedback": "Sign in to load user feedback and bug reports.",
     "empty.signInAiPromptLimits": "Sign in to load AI prompt limit settings.",
     "empty.signInAiRuntime": "Sign in to load AI runtime settings.",
+    "empty.signInProducerCaptureWhitelist":
+      "Sign in to load producer capture whitelist settings.",
     "empty.selectFeedback": "Select a feedback item or bug report to review the full submission.",
     "empty.feedbackLoading": "Loading feedback detail...",
     "status.configIncomplete":
@@ -179,19 +216,31 @@ const MESSAGES = {
     "status.loadingFeedback": "Loading feedback and bug inbox...",
     "status.loadingAiPromptLimits": "Loading AI prompt limit settings...",
     "status.loadingAiRuntime": "Loading AI runtime settings...",
+    "status.loadingProducerCaptureWhitelist":
+      "Loading producer capture whitelist settings...",
     "status.aiPromptLimitsLoaded": "AI prompt limit settings loaded.",
     "status.aiRuntimeLoaded": "AI runtime settings loaded.",
+    "status.producerCaptureWhitelistLoaded":
+      "Producer capture whitelist settings loaded.",
     "status.noUsersFound": "No users found.",
     "status.searchUsersFailed": "Could not search users.",
     "status.loadFeedbackFailed": "Could not load user feedback or bug reports.",
     "status.loadAiPromptLimitsFailed": "Could not load AI prompt limit settings.",
     "status.loadAiRuntimeFailed": "Could not load AI runtime settings.",
+    "status.loadProducerCaptureWhitelistFailed":
+      "Could not load producer capture whitelist settings.",
     "status.grantingPrompts": "Granting extra AI prompts to {target}...",
     "status.promptsGranted": "Extra AI prompts granted.",
     "status.grantPromptsFailed": "Could not grant extra AI prompts.",
     "status.savingAiPromptLimits": "Saving AI prompt limit settings...",
     "status.aiPromptLimitsSaved": "AI prompt limit settings saved.",
     "status.saveAiPromptLimitsFailed": "Could not save AI prompt limit settings.",
+    "status.savingProducerCaptureWhitelist":
+      "Saving producer capture whitelist settings...",
+    "status.producerCaptureWhitelistSaved":
+      "Producer capture whitelist settings saved.",
+    "status.saveProducerCaptureWhitelistFailed":
+      "Could not save producer capture whitelist settings.",
     "status.savingAiRuntime": "Saving AI runtime settings...",
     "status.aiRuntimeSaved": "AI runtime settings saved.",
     "status.saveAiRuntimeFailed": "Could not save AI runtime settings.",
@@ -230,6 +279,8 @@ const MESSAGES = {
     "usage.successRate": "Success rate",
     "usage.na": "n/a",
     "usage.noFeatures": "No AI feature events recorded yet.",
+    "overview.loading": "Loading…",
+    "overview.loadingSection": "Loading this section…",
     "analytics.metric.dau": "DAU",
     "analytics.metric.wau": "WAU",
     "analytics.metric.mau": "MAU",
@@ -294,6 +345,12 @@ const MESSAGES = {
     "detail.updated": "Updated",
     "settings.currentLimits": "Current effective limits",
     "settings.currentAiRuntime": "Current AI runtime override",
+    "settings.currentProducerCaptureWhitelist": "Current producer capture whitelist",
+    "settings.producerCaptureWhitelistUsernames": "Usernames (comma or line separated)",
+    "settings.producerCaptureWhitelistNone": "No usernames are currently allowlisted.",
+    "settings.editableByAnyAdmin": "Any admin can edit this list.",
+    "settings.confirmProducerCaptureWhitelist":
+      "Type APPLY PRODUCER WHITELIST to confirm",
     "settings.freeDailyPromptLimit": "Free daily prompt limit",
     "settings.freeWeeklyPromptLimit": "Free weekly prompt limit",
     "settings.feature.ai_chat": "DAW chat",
@@ -318,7 +375,8 @@ const MESSAGES = {
     "settings.updatedBy": "by {email}",
     "support.label": "AI Support",
     "support.title": "Grant extra prompts",
-    "support.copy": "Adds a one-time extra prompt bank for support cases.",
+    "support.copy":
+      "Adds a one-time extra prompt bank for support cases. These prompts are consumed before daily and weekly limits.",
     "support.readOnly": "Visible to admins, editable only by andrew@mixroom.ai.",
     "support.inputLabel": "Extra prompts to add",
     "support.granting": "Granting...",
@@ -361,6 +419,7 @@ const MESSAGES = {
     "value.musicProfile.artist": "Artist",
     "value.musicProfile.songwriter": "Songwriter",
     "value.musicProfile.audio_engineer": "Audio engineer",
+    "value.musicProfile.student": "Student",
     "value.musicProfile.music_enthusiast": "Music enthusiast",
     "value.musicProfile.beginner": "Beginner",
     "value.musicProfile.music_for_work": "Make music for work",
@@ -409,6 +468,7 @@ const MESSAGES = {
     "action.saveLimits": "제한 저장",
     "action.saving": "저장 중...",
     "action.savePromptLimits": "프롬프트 제한 저장",
+    "action.saveProducerCaptureWhitelist": "프로듀서 화이트리스트 저장",
     "action.saveAiOverride": "AI 재정의 저장",
     "auth.kicker": "직원 접근",
     "auth.title": "로그인",
@@ -468,6 +528,10 @@ const MESSAGES = {
     "panel.aiRuntime.label": "AI 런타임",
     "panel.aiRuntime.title": "서버 프롬프트 및 모델 설정",
     "panel.aiRuntime.meta": "서버가 소유하는 AI 기능의 프롬프트와 런타임 재정의입니다.",
+    "panel.producerCaptureWhitelist.label": "프로듀서 캡처 화이트리스트",
+    "panel.producerCaptureWhitelist.title": "프로듀서 캡처 사용자명",
+    "panel.producerCaptureWhitelist.meta":
+      "프로듀서 캡처 UI 토글을 볼 수 있는 사용자명 허용 목록입니다.",
     "panel.features.title": "기능",
     "panel.tiers.label": "구독 티어",
     "panel.tiers.title": "티어",
@@ -512,6 +576,8 @@ const MESSAGES = {
     "empty.signInFeedback": "사용자 피드백과 버그 제보를 불러오려면 로그인하세요.",
     "empty.signInAiPromptLimits": "AI 프롬프트 제한 설정을 불러오려면 로그인하세요.",
     "empty.signInAiRuntime": "AI 런타임 설정을 불러오려면 로그인하세요.",
+    "empty.signInProducerCaptureWhitelist":
+      "프로듀서 캡처 화이트리스트 설정을 불러오려면 로그인하세요.",
     "empty.selectFeedback": "전체 제출 내용을 보려면 피드백 항목 또는 버그 제보를 선택하세요.",
     "empty.feedbackLoading": "피드백 상세를 불러오는 중...",
     "status.configIncomplete":
@@ -527,19 +593,31 @@ const MESSAGES = {
     "status.loadingFeedback": "피드백 및 버그 받은 편지함을 불러오는 중...",
     "status.loadingAiPromptLimits": "AI 프롬프트 제한 설정을 불러오는 중...",
     "status.loadingAiRuntime": "AI 런타임 설정을 불러오는 중...",
+    "status.loadingProducerCaptureWhitelist":
+      "프로듀서 캡처 화이트리스트 설정을 불러오는 중...",
     "status.aiPromptLimitsLoaded": "AI 프롬프트 제한 설정을 불러왔습니다.",
     "status.aiRuntimeLoaded": "AI 런타임 설정을 불러왔습니다.",
+    "status.producerCaptureWhitelistLoaded":
+      "프로듀서 캡처 화이트리스트 설정을 불러왔습니다.",
     "status.noUsersFound": "일치하는 사용자가 없습니다.",
     "status.searchUsersFailed": "사용자 검색에 실패했습니다.",
     "status.loadFeedbackFailed": "사용자 피드백 또는 버그 제보를 불러오지 못했습니다.",
     "status.loadAiPromptLimitsFailed": "AI 프롬프트 제한 설정을 불러오지 못했습니다.",
     "status.loadAiRuntimeFailed": "AI 런타임 설정을 불러오지 못했습니다.",
+    "status.loadProducerCaptureWhitelistFailed":
+      "프로듀서 캡처 화이트리스트 설정을 불러오지 못했습니다.",
     "status.grantingPrompts": "{target}에 추가 AI 프롬프트를 부여하는 중...",
     "status.promptsGranted": "추가 AI 프롬프트를 부여했습니다.",
     "status.grantPromptsFailed": "추가 AI 프롬프트 부여에 실패했습니다.",
     "status.savingAiPromptLimits": "AI 프롬프트 제한 설정을 저장하는 중...",
     "status.aiPromptLimitsSaved": "AI 프롬프트 제한 설정을 저장했습니다.",
     "status.saveAiPromptLimitsFailed": "AI 프롬프트 제한 설정 저장에 실패했습니다.",
+    "status.savingProducerCaptureWhitelist":
+      "프로듀서 캡처 화이트리스트 설정을 저장하는 중...",
+    "status.producerCaptureWhitelistSaved":
+      "프로듀서 캡처 화이트리스트 설정을 저장했습니다.",
+    "status.saveProducerCaptureWhitelistFailed":
+      "프로듀서 캡처 화이트리스트 설정 저장에 실패했습니다.",
     "status.savingAiRuntime": "AI 런타임 설정을 저장하는 중...",
     "status.aiRuntimeSaved": "AI 런타임 설정을 저장했습니다.",
     "status.saveAiRuntimeFailed": "AI 런타임 설정 저장에 실패했습니다.",
@@ -578,6 +656,8 @@ const MESSAGES = {
     "usage.successRate": "성공률",
     "usage.na": "해당 없음",
     "usage.noFeatures": "기록된 AI 기능 이벤트가 아직 없습니다.",
+    "overview.loading": "불러오는 중…",
+    "overview.loadingSection": "이 섹션을 불러오는 중…",
     "analytics.metric.dau": "DAU",
     "analytics.metric.wau": "WAU",
     "analytics.metric.mau": "MAU",
@@ -642,6 +722,12 @@ const MESSAGES = {
     "detail.updated": "수정일",
     "settings.currentLimits": "현재 적용 중인 제한",
     "settings.currentAiRuntime": "현재 AI 런타임 재정의",
+    "settings.currentProducerCaptureWhitelist": "현재 프로듀서 캡처 화이트리스트",
+    "settings.producerCaptureWhitelistUsernames": "사용자명(쉼표 또는 줄바꿈 구분)",
+    "settings.producerCaptureWhitelistNone": "현재 허용된 사용자명이 없습니다.",
+    "settings.editableByAnyAdmin": "모든 관리자가 이 목록을 수정할 수 있습니다.",
+    "settings.confirmProducerCaptureWhitelist":
+      "확인을 위해 APPLY PRODUCER WHITELIST 를 입력하세요",
     "settings.freeDailyPromptLimit": "무료 일일 프롬프트 제한",
     "settings.freeWeeklyPromptLimit": "무료 주간 프롬프트 제한",
     "settings.feature.ai_chat": "DAW 채팅",
@@ -666,7 +752,8 @@ const MESSAGES = {
     "settings.updatedBy": "{email}에 의해 수정",
     "support.label": "AI 지원",
     "support.title": "추가 프롬프트 부여",
-    "support.copy": "지원 상황에서 사용할 일회성 추가 프롬프트 뱅크를 더합니다.",
+    "support.copy":
+      "지원 상황에서 사용할 일회성 추가 프롬프트 뱅크를 더합니다. 이 프롬프트는 일일/주간 한도보다 먼저 사용됩니다.",
     "support.readOnly": "관리자에게는 보이지만 andrew@mixroom.ai 계정만 수정할 수 있습니다.",
     "support.inputLabel": "추가할 프롬프트 수",
     "support.granting": "부여 중...",
@@ -707,6 +794,7 @@ const MESSAGES = {
     "value.musicProfile.artist": "아티스트",
     "value.musicProfile.songwriter": "송라이터",
     "value.musicProfile.audio_engineer": "오디오 엔지니어",
+    "value.musicProfile.student": "학생",
     "value.musicProfile.music_enthusiast": "음악 애호가",
     "value.musicProfile.beginner": "입문자",
     "value.musicProfile.music_for_work": "업무로 음악 제작",
@@ -771,6 +859,24 @@ const elements = {
       node,
     ]),
   ),
+  homeSectionPanels: Object.fromEntries(
+    Array.from(document.querySelectorAll("[data-home-section-panel]")).map((node) => [
+      `${node.dataset.homeSectionPanel || ""}`.trim(),
+      node,
+    ]),
+  ),
+  homeSectionLoadingStates: Object.fromEntries(
+    Array.from(document.querySelectorAll("[data-home-section-loading]")).map((node) => [
+      `${node.dataset.homeSectionLoading || ""}`.trim(),
+      node,
+    ]),
+  ),
+  homeSectionLoadingLabels: Object.fromEntries(
+    Array.from(document.querySelectorAll("[data-home-section-loading-label]")).map((node) => [
+      `${node.dataset.homeSectionLoadingLabel || ""}`.trim(),
+      node,
+    ]),
+  ),
   generatedAt: document.querySelector("#generated-at"),
   aiPromptLimitsMeta: document.querySelector("#ai-prompt-limits-meta"),
   aiPromptLimitsSummary: document.querySelector("#ai-prompt-limits-summary"),
@@ -783,6 +889,28 @@ const elements = {
   aiPromptLimitsConfirmInput: document.querySelector("#ai-prompt-limits-confirm-input"),
   aiPromptLimitsSaveButton: document.querySelector("#ai-prompt-limits-save-button"),
   aiPromptLimitsFeedback: document.querySelector("#ai-prompt-limits-feedback"),
+  producerCaptureWhitelistMeta: document.querySelector("#producer-capture-whitelist-meta"),
+  producerCaptureWhitelistSummary: document.querySelector("#producer-capture-whitelist-summary"),
+  producerCaptureWhitelistForm: document.querySelector("#producer-capture-whitelist-form"),
+  producerCaptureWhitelistInput: document.querySelector("#producer-capture-whitelist-input"),
+  producerCaptureWhitelistEditorNote: document.querySelector(
+    "#producer-capture-whitelist-editor-note",
+  ),
+  producerCaptureWhitelistConfirmWrap: document.querySelector(
+    "#producer-capture-whitelist-confirm-wrap",
+  ),
+  producerCaptureWhitelistConfirmLabel: document.querySelector(
+    "#producer-capture-whitelist-confirm-label",
+  ),
+  producerCaptureWhitelistConfirmInput: document.querySelector(
+    "#producer-capture-whitelist-confirm-input",
+  ),
+  producerCaptureWhitelistSaveButton: document.querySelector(
+    "#producer-capture-whitelist-save-button",
+  ),
+  producerCaptureWhitelistFeedback: document.querySelector(
+    "#producer-capture-whitelist-feedback",
+  ),
   aiRuntimePanel: document.querySelector("#ai-runtime-panel"),
   aiRuntimeMeta: document.querySelector("#ai-runtime-meta"),
   aiRuntimeSettings: document.querySelector("#ai-runtime-settings"),
@@ -822,6 +950,13 @@ const elements = {
   analyticsActivityTrend: document.querySelector("#analytics-activity-trend"),
   analyticsHoursTrend: document.querySelector("#analytics-hours-trend"),
   analyticsCountryList: document.querySelector("#analytics-country-list"),
+  aiObservabilityMeta: document.querySelector("#ai-observability-meta"),
+  aiObservabilitySummary: document.querySelector("#ai-observability-summary"),
+  aiObservabilityCounts: document.querySelector("#ai-observability-counts"),
+  aiObservabilityTracesBody: document.querySelector("#ai-observability-traces-body"),
+  aiObservabilityTracePageMeta: document.querySelector("#ai-observability-traces-page-meta"),
+  aiObservabilityTracesShowLessButton: document.querySelector("#ai-observability-traces-show-less-button"),
+  aiObservabilityTracesShowMoreButton: document.querySelector("#ai-observability-traces-show-more-button"),
   languageSelector: document.querySelector("#language-selector"),
   signedOutLanguageSelector: document.querySelector("#signed-out-language-selector"),
 };
@@ -832,14 +967,18 @@ const state = {
   userSearchBusy: false,
   feedbackBusy: false,
   aiPromptLimitsBusy: false,
+  producerCaptureWhitelistBusy: false,
   aiRuntimeBusy: false,
   deleteBusy: false,
   grantBusy: false,
   activeTab: DEFAULT_TAB,
   currentSearchQuery: "",
   overview: null,
+  overviewIncludes: buildOverviewIncludes(),
+  homeSectionLoading: buildHomeSectionLoading(),
   overviewUserLimit: DEFAULT_OVERVIEW_USERS_LIMIT,
   overviewProjectLimit: DEFAULT_OVERVIEW_PROJECTS_LIMIT,
+  overviewTraceLimit: DEFAULT_OVERVIEW_TRACE_LIMIT,
   lastUserSearchPayload: null,
   userSearchLimit: DEFAULT_ADMIN_USERS_LIMIT,
   adminUsers: [],
@@ -851,13 +990,17 @@ const state = {
   selectedFeedback: null,
   aiPromptLimits: null,
   aiPromptLimitsFeedback: null,
+  producerCaptureWhitelist: null,
+  producerCaptureWhitelistFeedback: null,
   aiRuntimeSettings: null,
   aiRuntimeFeedbackByFeature: {},
   analyticsRange: "30d",
+  aiToolUsageRange: "30d",
   feedbackRequestId: 0,
   deleteFeedback: null,
   grantFeedback: null,
   searchRequestId: 0,
+  overviewRequestId: 0,
   loadedTabs: buildLoadedTabs(),
 };
 
@@ -889,6 +1032,9 @@ function bindEvents() {
   elements.trackedUsersShowMoreButton.addEventListener("click", handleTrackedUsersShowMore);
   elements.projectsShowLessButton.addEventListener("click", handleProjectsShowLess);
   elements.projectsShowMoreButton.addEventListener("click", handleProjectsShowMore);
+  elements.aiObservabilityTracesShowLessButton.addEventListener("click", handleAiObservabilityTracesShowLess);
+  elements.aiObservabilityTracesShowMoreButton.addEventListener("click", handleAiObservabilityTracesShowMore);
+  elements.aiObservabilityCounts.addEventListener("click", handleAiToolUsageRangeClick);
   elements.feedbackTableBody.addEventListener("click", handleFeedbackTableClick);
   elements.feedbackShowLessButton.addEventListener("click", handleFeedbackShowLess);
   elements.feedbackShowMoreButton.addEventListener("click", handleFeedbackShowMore);
@@ -896,6 +1042,11 @@ function bindEvents() {
   elements.userInspector.addEventListener("submit", handleInspectorSubmit);
   elements.aiPromptLimitsForm.addEventListener("submit", handleAiPromptLimitsSubmit);
   elements.aiPromptLimitsConfirmInput.addEventListener("input", updateBusyState);
+  elements.producerCaptureWhitelistForm.addEventListener(
+    "submit",
+    handleProducerCaptureWhitelistSubmit,
+  );
+  elements.producerCaptureWhitelistConfirmInput.addEventListener("input", updateBusyState);
   elements.aiRuntimeSettings.addEventListener("submit", handleAiRuntimeSubmit);
   elements.aiRuntimeSettings.addEventListener("input", handleAiRuntimeInputChange);
   elements.aiRuntimeSettings.addEventListener("change", handleAiRuntimeInputChange);
@@ -996,6 +1147,7 @@ function rerenderForLocale() {
   renderFeedbackInspector();
   renderWelcomeBanner(currentUser);
   renderAiPromptLimitSettings();
+  renderProducerCaptureWhitelistSettings();
   renderAiRuntimeSettings();
   renderUserSearchMeta(state.lastUserSearchPayload || {});
   updateTabView();
@@ -1008,6 +1160,112 @@ function buildLoadedTabs() {
     feedback: false,
     dev: false,
   };
+}
+
+function getOverviewSectionIncludes(overview = state.overview) {
+  const includes = overview?.section_includes || {};
+  return {
+    aiUsage: state.overviewIncludes.aiUsage || includes.ai_usage === true,
+    productAnalytics: state.overviewIncludes.productAnalytics || includes.product_analytics === true,
+    aiObservability: state.overviewIncludes.aiObservability || includes.ai_observability === true,
+    users: state.overviewIncludes.users || includes.users === true,
+    projects: state.overviewIncludes.projects || includes.projects === true,
+  };
+}
+
+function syncOverviewIncludesFromPayload(overview) {
+  state.overviewIncludes = getOverviewSectionIncludes(overview);
+}
+
+function buildOverviewParams(includeOverrides = {}) {
+  const includes = {
+    ...buildOverviewIncludes(),
+    ...state.overviewIncludes,
+    ...includeOverrides,
+  };
+  return new URLSearchParams({
+    user_limit: `${state.overviewUserLimit}`,
+    project_limit: `${state.overviewProjectLimit}`,
+    trace_limit: `${state.overviewTraceLimit}`,
+    tool_usage_range: `${state.aiToolUsageRange}`,
+    include_ai_usage: `${includes.aiUsage}`,
+    include_product_analytics: `${includes.productAnalytics}`,
+    include_ai_observability: `${includes.aiObservability}`,
+    include_users: `${includes.users}`,
+    include_projects: `${includes.projects}`,
+  });
+}
+
+function mergeOverviewPayload(currentOverview, nextOverview) {
+  const current = currentOverview || {};
+  const next = nextOverview || {};
+  const nextRawIncludes = next.section_includes || {};
+  const includes = {
+    ...getOverviewSectionIncludes(current),
+    ...getOverviewSectionIncludes(next),
+  };
+  const mergedSummary = {
+    ...(current.summary || {}),
+  };
+  Object.entries(next.summary || {}).forEach(([key, value]) => {
+    if (value !== null && value !== undefined) {
+      mergedSummary[key] = value;
+    }
+  });
+  return {
+    ...current,
+    ...next,
+    summary: mergedSummary,
+    section_includes: {
+      ai_usage: includes.aiUsage,
+      product_analytics: includes.productAnalytics,
+      ai_observability: includes.aiObservability,
+      users: includes.users,
+      projects: includes.projects,
+    },
+    data_sources: {
+      ...(current.data_sources || {}),
+      ...(next.data_sources || {}),
+    },
+    warnings: Array.isArray(next.warnings) ? next.warnings : (current.warnings || []),
+    subscription_tiers: Array.isArray(next.subscription_tiers)
+      ? next.subscription_tiers
+      : (current.subscription_tiers || []),
+    ai_usage: nextRawIncludes.ai_usage === true
+      ? (next.ai_usage || current.ai_usage || {})
+      : (current.ai_usage || next.ai_usage || {}),
+    ai_observability: nextRawIncludes.ai_observability === true
+      ? (next.ai_observability || current.ai_observability || {})
+      : (current.ai_observability || next.ai_observability || {}),
+    product_analytics: nextRawIncludes.product_analytics === true
+      ? (next.product_analytics || current.product_analytics || {})
+      : (current.product_analytics || next.product_analytics || {}),
+    users: nextRawIncludes.users === true
+      ? (Array.isArray(next.users) ? next.users : (current.users || []))
+      : (current.users || next.users || []),
+    projects: nextRawIncludes.projects === true
+      ? (Array.isArray(next.projects) ? next.projects : (current.projects || []))
+      : (current.projects || next.projects || []),
+  };
+}
+
+function setHomeSectionLoading(keys, loading, message = "") {
+  keys.forEach((key) => {
+    state.homeSectionLoading[key] = loading;
+    const panel = elements.homeSectionPanels[key];
+    const overlay = elements.homeSectionLoadingStates[key];
+    const label = elements.homeSectionLoadingLabels[key];
+    if (panel) {
+      panel.classList.toggle("is-section-loading", loading);
+      panel.setAttribute("aria-busy", loading ? "true" : "false");
+    }
+    if (overlay) {
+      overlay.classList.toggle("hidden", !loading);
+    }
+    if (label && message) {
+      label.textContent = message;
+    }
+  });
 }
 
 function handleTabClick(event) {
@@ -1025,11 +1283,35 @@ function handleAnalyticsRangeClick(event) {
     return;
   }
   const nextRange = `${button.dataset.analyticsRange || ""}`.trim();
-  if (!ANALYTICS_RANGE_OPTIONS.some((option) => option.key === nextRange) || nextRange === state.analyticsRange) {
+  if (!ANALYTICS_RANGE_OPTIONS.some((option) => option.key === nextRange)) {
+    return;
+  }
+  if (nextRange === state.analyticsRange) {
     return;
   }
   state.analyticsRange = nextRange;
   renderProductAnalytics(state.overview.product_analytics || {});
+}
+
+function handleAiToolUsageRangeClick(event) {
+  const button = event.target.closest("[data-ai-tool-usage-range]");
+  if (!button || state.overviewBusy) {
+    return;
+  }
+  const nextRange = `${button.dataset.aiToolUsageRange || ""}`.trim();
+  if (!AI_TOOL_USAGE_RANGE_OPTIONS.some((option) => option.key === nextRange)) {
+    return;
+  }
+  if (nextRange === state.aiToolUsageRange) {
+    return;
+  }
+  state.aiToolUsageRange = nextRange;
+  void refreshOverviewSections({
+    include_ai_usage: true,
+    include_ai_observability: true,
+    loadingKeys: ["usage", "observability"],
+    statusMessage: t("status.loadingAdminOverview"),
+  });
 }
 
 function updateTabView() {
@@ -1183,6 +1465,10 @@ function isAndrewAdmin() {
 
 function canViewAiRuntimeSettings() {
   return canEditAiSettings() && isAndrewAdmin();
+}
+
+function canEditProducerCaptureWhitelist() {
+  return !!tokens?.idToken;
 }
 
 function canGrantAiPrompts() {
@@ -1436,6 +1722,9 @@ async function loadDevTabData({ silent = false, force = false } = {}) {
   if (force || !state.loadedTabs.dev || !state.aiPromptLimits) {
     requests.push(loadAiPromptLimitSettings({ silent }));
   }
+  if (force || !state.loadedTabs.dev || !state.producerCaptureWhitelist) {
+    requests.push(loadProducerCaptureWhitelistSettings({ silent }));
+  }
   if (canViewAiRuntimeSettings() && (force || !state.loadedTabs.dev || !state.aiRuntimeSettings)) {
     requests.push(loadAiRuntimeSettings({ silent }));
   } else if (!canViewAiRuntimeSettings()) {
@@ -1446,7 +1735,7 @@ async function loadDevTabData({ silent = false, force = false } = {}) {
     state.loadedTabs.dev = true;
     return;
   }
-  setTabLoading("dev", true, t("status.loadingAiRuntime"));
+  setTabLoading("dev", true, t("status.loadingProducerCaptureWhitelist"));
   try {
     await Promise.all(requests);
     state.loadedTabs.dev = true;
@@ -1462,10 +1751,15 @@ async function refreshOverview() {
     return;
   }
 
+  const requestId = ++state.overviewRequestId;
   state.overviewBusy = true;
   updateBusyState();
-  setTabLoading("home", true, t("status.loadingAdminOverview"));
   setStatus(t("status.loadingAdminOverview"), "info");
+  setHomeSectionLoading(
+    ["analytics", "usage", "observability", "users", "projects"],
+    true,
+    t("overview.loadingSection"),
+  );
   try {
     currentUser = decodeIdToken(tokens?.idToken);
     if (!currentUser?.email) {
@@ -1473,21 +1767,91 @@ async function refreshOverview() {
       throw new Error(t("status.sessionMissingEmail"));
     }
 
-    const params = new URLSearchParams({
-      user_limit: `${state.overviewUserLimit}`,
-      project_limit: `${state.overviewProjectLimit}`,
-    });
+    state.overviewIncludes = buildOverviewIncludes();
+    const params = buildOverviewParams(buildOverviewIncludes());
     const payload = await fetchAdminJson(`${OVERVIEW_PATH}?${params.toString()}`);
-    state.overview = payload;
+    if (requestId !== state.overviewRequestId) {
+      return;
+    }
+    state.overview = mergeOverviewPayload(state.overview, payload);
+    syncOverviewIncludesFromPayload(state.overview);
     setSignedInState(currentUser);
-    renderOverview(payload);
+    renderOverview(state.overview);
+    state.loadedTabs.home = true;
     setStatus(t("status.adminOverviewLoaded"), "success");
+
+    state.overviewBusy = false;
+    updateBusyState();
+
+    void Promise.allSettled([
+      refreshOverviewSections({
+        requestId,
+        include_ai_usage: true,
+        include_ai_observability: true,
+        include_users: true,
+        include_projects: true,
+        loadingKeys: ["usage", "observability", "users", "projects"],
+      }),
+      refreshOverviewSections({
+        requestId,
+        include_product_analytics: true,
+        loadingKeys: ["analytics"],
+      }),
+    ]);
   } catch (error) {
     handleAdminRequestError(error, t("status.loadAdminOverviewFailed"));
   } finally {
-    state.overviewBusy = false;
-    updateBusyState();
-    clearTabLoading("home");
+    if (requestId === state.overviewRequestId && state.overviewBusy) {
+      state.overviewBusy = false;
+      updateBusyState();
+    }
+  }
+}
+
+async function refreshOverviewSections({
+  requestId = state.overviewRequestId,
+  include_ai_usage = false,
+  include_product_analytics = false,
+  include_ai_observability = false,
+  include_users = false,
+  include_projects = false,
+  loadingKeys = [],
+  statusMessage = "",
+} = {}) {
+  if (!tokens?.idToken) {
+    return null;
+  }
+
+  const includeOverrides = {
+    aiUsage: include_ai_usage,
+    productAnalytics: include_product_analytics,
+    aiObservability: include_ai_observability,
+    users: include_users,
+    projects: include_projects,
+  };
+  setHomeSectionLoading(loadingKeys, true, t("overview.loadingSection"));
+  if (statusMessage) {
+    setStatus(statusMessage, "info");
+  }
+  try {
+    const payload = await fetchAdminJson(`${OVERVIEW_PATH}?${buildOverviewParams(includeOverrides).toString()}`);
+    if (requestId !== state.overviewRequestId) {
+      return null;
+    }
+    state.overview = mergeOverviewPayload(state.overview, payload);
+    syncOverviewIncludesFromPayload(state.overview);
+    renderOverview(state.overview);
+    return payload;
+  } catch (error) {
+    if (requestId === state.overviewRequestId) {
+      handleAdminRequestError(error, t("status.loadAdminOverviewFailed"));
+    }
+    return null;
+  } finally {
+    if (requestId === state.overviewRequestId) {
+      setHomeSectionLoading(loadingKeys, false);
+      updateBusyState();
+    }
   }
 }
 
@@ -1644,6 +2008,32 @@ async function loadAiRuntimeSettings({ silent = false } = {}) {
   }
 }
 
+async function loadProducerCaptureWhitelistSettings({ silent = false } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+
+  state.producerCaptureWhitelistBusy = true;
+  updateBusyState();
+  if (!silent) {
+    setStatus(t("status.loadingProducerCaptureWhitelist"), "info");
+  }
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_PRODUCER_CAPTURE_WHITELIST_PATH);
+    state.producerCaptureWhitelist = payload.settings || null;
+    renderProducerCaptureWhitelistSettings();
+    if (!silent) {
+      setStatus(t("status.producerCaptureWhitelistLoaded"), "success");
+    }
+  } catch (error) {
+    handleAdminRequestError(error, t("status.loadProducerCaptureWhitelistFailed"));
+  } finally {
+    state.producerCaptureWhitelistBusy = false;
+    updateBusyState();
+  }
+}
+
 async function loadSelectedFeedbackDetail({ silent = false } = {}) {
   if (!state.selectedFeedbackId) {
     state.selectedFeedback = null;
@@ -1671,9 +2061,11 @@ async function loadSelectedFeedbackDetail({ silent = false } = {}) {
 }
 
 function renderOverview(overview) {
+  syncOverviewIncludesFromPayload(overview);
   renderSummary(overview.summary || {});
   renderProductAnalytics(overview.product_analytics || {});
   renderUsage(overview);
+  renderAiObservability(overview.ai_observability || {});
   renderTiers(overview.subscription_tiers || []);
   renderTrackedUsers(overview.users || []);
   renderProjects(overview.projects || []);
@@ -1691,6 +2083,13 @@ function renderOverview(overview) {
     });
   }
   renderWelcomeBanner({ email: overview.requested_email || currentUser?.email || "" });
+}
+
+function formatOverviewMetricValue(value, formatter = formatNumber) {
+  if (value == null) {
+    return t("overview.loading");
+  }
+  return formatter(value);
 }
 
 function renderAiPromptLimitSettings() {
@@ -1742,6 +2141,60 @@ function renderAiPromptLimitSettings() {
   elements.aiPromptLimitsFeedback.textContent = state.aiPromptLimitsFeedback?.message || "";
   elements.aiPromptLimitsFeedback.className = state.aiPromptLimitsFeedback?.tone
     ? `panel-meta status-${state.aiPromptLimitsFeedback.tone}`
+    : "panel-meta";
+  updateBusyState();
+}
+
+function renderProducerCaptureWhitelistSettings() {
+  const settings = state.producerCaptureWhitelist;
+  const canEdit = canEditProducerCaptureWhitelist();
+  if (!settings) {
+    elements.producerCaptureWhitelistMeta.textContent = t("panel.producerCaptureWhitelist.meta");
+    elements.producerCaptureWhitelistSummary.innerHTML = `
+      <div class="detail-label">${escapeHtml(t("settings.currentProducerCaptureWhitelist"))}</div>
+      <div class="detail-value">${escapeHtml(t("empty.signInProducerCaptureWhitelist"))}</div>
+    `;
+    elements.producerCaptureWhitelistInput.value = "";
+    elements.producerCaptureWhitelistConfirmInput.value = "";
+    elements.producerCaptureWhitelistForm.classList.add("hidden");
+    elements.producerCaptureWhitelistEditorNote.classList.add("hidden");
+    elements.producerCaptureWhitelistConfirmWrap.classList.add("hidden");
+    elements.producerCaptureWhitelistFeedback.textContent = "";
+    elements.producerCaptureWhitelistFeedback.className = "panel-meta";
+    updateBusyState();
+    return;
+  }
+
+  const sourceKey =
+    settings.source === "remote" ? "settings.source.remote" : "settings.source.default";
+  const metaParts = [t(sourceKey)];
+  if (settings.updated_at) {
+    metaParts.push(t("settings.updatedAt", { date: formatDate(settings.updated_at) }));
+  }
+  if (settings.updated_by_email) {
+    metaParts.push(t("settings.updatedBy", { email: settings.updated_by_email }));
+  }
+  const usernames = Array.isArray(settings.usernames)
+    ? settings.usernames.map((value) => `${value || ""}`.trim()).filter(Boolean)
+    : [];
+  elements.producerCaptureWhitelistMeta.textContent = metaParts.join(" • ");
+  elements.producerCaptureWhitelistSummary.innerHTML = `
+    <div class="detail-label">${escapeHtml(t("settings.currentProducerCaptureWhitelist"))}</div>
+    <div class="detail-value">${escapeHtml(
+      usernames.length ? usernames.join(", ") : t("settings.producerCaptureWhitelistNone"),
+    )}</div>
+  `;
+  elements.producerCaptureWhitelistInput.value = usernames.join("\n");
+  elements.producerCaptureWhitelistForm.classList.toggle("hidden", !canEdit);
+  elements.producerCaptureWhitelistEditorNote.classList.toggle("hidden", !canEdit);
+  elements.producerCaptureWhitelistConfirmWrap.classList.toggle("hidden", !canEdit);
+  elements.producerCaptureWhitelistConfirmLabel.textContent = t(
+    "settings.confirmProducerCaptureWhitelist",
+  );
+  elements.producerCaptureWhitelistFeedback.textContent =
+    state.producerCaptureWhitelistFeedback?.message || "";
+  elements.producerCaptureWhitelistFeedback.className = state.producerCaptureWhitelistFeedback?.tone
+    ? `panel-meta status-${state.producerCaptureWhitelistFeedback.tone}`
     : "panel-meta";
   updateBusyState();
 }
@@ -1959,6 +2412,13 @@ function promptLimitsConfirmationMatches() {
   return `${elements.aiPromptLimitsConfirmInput.value || ""}`.trim() === AI_PROMPT_LIMITS_CONFIRM_PHRASE;
 }
 
+function producerCaptureWhitelistConfirmationMatches() {
+  return (
+    `${elements.producerCaptureWhitelistConfirmInput.value || ""}`.trim()
+    === PRODUCER_CAPTURE_WHITELIST_CONFIRM_PHRASE
+  );
+}
+
 function runtimeConfirmationMatches(form) {
   const input = form?.querySelector(".ai-runtime-confirm-input");
   const expected = `${input?.dataset?.confirmPhrase || ""}`.trim();
@@ -1985,31 +2445,35 @@ function renderSummary(summary) {
   const cards = [
     {
       title: t("summary.users"),
-      value: formatNumber(summary.total_users || 0),
+      value: formatOverviewMetricValue(summary.total_users),
       detail: t("summary.usersDetail", {
-        count: formatNumber(summary.tracked_users || 0),
+        count: formatOverviewMetricValue(summary.tracked_users),
       }),
       className: "summary-users",
     },
     {
       title: t("summary.projects"),
-      value: formatNumber(summary.tracked_projects || 0),
-      detail: t("summary.projectsDetail"),
+      value: formatOverviewMetricValue(summary.tracked_projects),
+      detail: summary.tracked_projects == null
+        ? t("overview.loading")
+        : t("summary.projectsDetail"),
       className: "summary-projects",
     },
     {
       title: t("summary.aiRequests"),
-      value: formatNumber(summary.ai_requests_total || 0),
-      detail: t("summary.aiRequestsDetail", {
-        count: formatNumber(summary.ai_credits_charged_total || 0),
-      }),
+      value: formatOverviewMetricValue(summary.ai_requests_total),
+      detail: summary.ai_requests_total == null
+        ? t("overview.loading")
+        : t("summary.aiRequestsDetail", {
+          count: formatOverviewMetricValue(summary.ai_credits_charged_total),
+        }),
       className: "summary-ai",
     },
     {
       title: t("summary.paidUsers"),
-      value: formatNumber(summary.paid_users || 0),
+      value: formatOverviewMetricValue(summary.paid_users),
       detail: t("summary.paidUsersDetail", {
-        count: formatNumber(summary.active_subscriptions || 0),
+        count: formatOverviewMetricValue(summary.active_subscriptions),
       }),
       className: "summary-paid",
     },
@@ -2034,21 +2498,25 @@ function renderProductAnalytics(productAnalytics) {
   const range = getAnalyticsRangeOption(state.analyticsRange);
   const emptyLabel = status === "live"
     ? t("analytics.emptyTrend")
+    : status === "deferred"
+      ? t("overview.loading")
     : status === "error"
       ? t("panel.kpi.unavailable")
       : t("panel.kpi.unconfigured");
   const emptyCountryLabel = status === "live"
     ? t("analytics.emptyCountries")
+    : status === "deferred"
+      ? t("overview.loading")
     : status === "error"
       ? t("panel.kpi.unavailable")
       : t("panel.kpi.unconfigured");
   const cards = [
-    { label: t("analytics.metric.dau"), value: formatNumber(metrics.dau || 0) },
-    { label: t("analytics.metric.wau"), value: formatNumber(metrics.wau || 0) },
-    { label: t("analytics.metric.mau"), value: formatNumber(metrics.mau || 0) },
+    { label: t("analytics.metric.dau"), value: formatOverviewMetricValue(metrics.dau) },
+    { label: t("analytics.metric.wau"), value: formatOverviewMetricValue(metrics.wau) },
+    { label: t("analytics.metric.mau"), value: formatOverviewMetricValue(metrics.mau) },
     {
       label: t("analytics.metric.hours24h"),
-      value: formatDecimal(metrics.hours_24h || 0),
+      value: formatOverviewMetricValue(metrics.hours_24h, formatDecimal),
     },
   ];
 
@@ -2072,6 +2540,8 @@ function renderProductAnalytics(productAnalytics) {
     elements.kpiMeta.textContent = updatedAt
       ? `${t("panel.kpi.meta.live")} • ${updatedAt}`
       : t("panel.kpi.meta.live");
+  } else if (status === "deferred") {
+    elements.kpiMeta.textContent = t("overview.loading");
   } else if (status === "error") {
     elements.kpiMeta.textContent = t("panel.kpi.meta.error");
   } else {
@@ -2357,18 +2827,31 @@ function renderCountryConstellation(container, countries, { emptyLabel } = {}) {
 }
 
 function renderUsage(overview) {
+  const includes = getOverviewSectionIncludes(overview);
   const summary = overview.summary || {};
   const usage = overview.ai_usage || {};
+  const usageLoaded = includes.aiUsage;
   const eventRecords = Number(usage.event_records || 0);
   const successfulRequests = Number(usage.successful_requests || 0);
-  const successRate = eventRecords
+  const successRate = !usageLoaded
+    ? t("overview.loading")
+    : eventRecords
     ? `${Math.round((successfulRequests / eventRecords) * 100)}%`
     : t("usage.na");
 
   const metrics = [
-    { label: t("usage.creditsToday"), value: formatNumber(summary.ai_credits_used_today || 0) },
-    { label: t("usage.tokensMonth"), value: formatNumber(summary.ai_tokens_used_month || 0) },
-    { label: t("usage.activeUsers"), value: formatNumber(usage.tracked_users || 0) },
+    {
+      label: t("usage.creditsToday"),
+      value: usageLoaded ? formatNumber(summary.ai_credits_used_today || 0) : t("overview.loading"),
+    },
+    {
+      label: t("usage.tokensMonth"),
+      value: usageLoaded ? formatNumber(summary.ai_tokens_used_month || 0) : t("overview.loading"),
+    },
+    {
+      label: t("usage.activeUsers"),
+      value: usageLoaded ? formatNumber(usage.tracked_users || 0) : t("overview.loading"),
+    },
     { label: t("usage.successRate"), value: successRate },
   ];
 
@@ -2384,6 +2867,11 @@ function renderUsage(overview) {
     .join("");
 
   const features = Array.isArray(usage.top_features) ? usage.top_features : [];
+  if (!usageLoaded) {
+    elements.topFeatures.textContent = t("overview.loading");
+    elements.topFeatures.classList.add("empty-state");
+    return;
+  }
   if (!features.length) {
     elements.topFeatures.textContent = t("usage.noFeatures");
     elements.topFeatures.classList.add("empty-state");
@@ -2407,6 +2895,457 @@ function renderUsage(overview) {
       `;
     })
     .join("");
+}
+
+function renderAiObservability(aiObservability) {
+  const observabilityLoaded = getOverviewSectionIncludes().aiObservability;
+  const toolUsageRangeControlsHtml = AI_TOOL_USAGE_RANGE_OPTIONS
+    .map((option) => {
+      const activeClass = option.key === state.aiToolUsageRange ? " is-active" : "";
+      return `
+        <button
+          type="button"
+          class="range-chip${activeClass}"
+          data-ai-tool-usage-range="${escapeHtml(option.key)}"
+        >
+          ${escapeHtml(option.label)}
+        </button>
+      `;
+    })
+    .join("");
+  const backendTimings = aiObservability?.backend_timings || {};
+  const dashboardMetrics = aiObservability?.dashboard_metrics || {};
+  const dashboardTimings = dashboardMetrics?.timings || {};
+  const exportUsage = dashboardMetrics?.export_usage || {};
+  const exportTotals = exportUsage?.totals || {};
+  const aiUsageMetrics = dashboardMetrics?.ai_usage || {};
+  const aiUsageTotals = aiUsageMetrics?.totals || {};
+  const formatUsd = (value) =>
+    `$${new Intl.NumberFormat(state.locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4,
+    }).format(Number(value || 0))}`;
+  const summaryCards = [
+    {
+      label: "Median full prompt time",
+      value: observabilityLoaded
+        ? formatMilliseconds(dashboardTimings?.prompt_cycle_total_ms?.p50 || 0)
+        : t("overview.loading"),
+    },
+    {
+      label: "Slow full prompt time (p95)",
+      value: observabilityLoaded
+        ? formatMilliseconds(dashboardTimings?.prompt_cycle_total_ms?.p95 || 0)
+        : t("overview.loading"),
+    },
+    {
+      label: "Median backend proxy time",
+      value: observabilityLoaded
+        ? formatMilliseconds(backendTimings?.proxy_handler_ms_total?.p50 || 0)
+        : t("overview.loading"),
+    },
+    {
+      label: "Slow backend proxy time (p95)",
+      value: observabilityLoaded
+        ? formatMilliseconds(backendTimings?.proxy_handler_ms_total?.p95 || 0)
+        : t("overview.loading"),
+    },
+    {
+      label: "Exports (wav/mp3)",
+      value: observabilityLoaded
+        ? `${formatWholeNumber(exportTotals?.exports_total || 0)} (${formatWholeNumber(
+            exportTotals?.exports_wav || 0,
+          )}/${formatWholeNumber(exportTotals?.exports_mp3 || 0)})`
+        : t("overview.loading"),
+    },
+    {
+      label: "Avg exports per user",
+      value: observabilityLoaded
+        ? formatDecimal(exportTotals?.avg_exports_per_user || 0)
+        : t("overview.loading"),
+    },
+    {
+      label: "AI prompts / user",
+      value: observabilityLoaded
+        ? formatDecimal(aiUsageTotals?.avg_prompts_per_user || 0)
+        : t("overview.loading"),
+    },
+    {
+      label: "AI tokens / user",
+      value: observabilityLoaded
+        ? formatWholeNumber(aiUsageTotals?.avg_tokens_per_user || 0)
+        : t("overview.loading"),
+    },
+    {
+      label: "Estimated AI $ / user",
+      value: observabilityLoaded
+        ? Number(aiUsageTotals?.avg_cost_usd_per_user || 0) > 0
+          ? formatUsd(aiUsageTotals?.avg_cost_usd_per_user || 0)
+          : t("usage.na")
+        : t("overview.loading"),
+    },
+  ];
+
+  elements.aiObservabilitySummary.innerHTML = summaryCards
+    .map(
+      (metric) => `
+        <div class="mini-metric">
+          <div class="mini-label">${escapeHtml(metric.label)}</div>
+          <div class="mini-value">${escapeHtml(metric.value)}</div>
+        </div>
+      `,
+    )
+    .join("");
+
+  const dashboardStatus = `${aiObservability?.dashboard_status || ""}`.trim();
+  const runtimeSuccess = Array.isArray(dashboardMetrics?.runtime_success)
+    ? dashboardMetrics.runtime_success
+    : [];
+  const promptToolUsage = Array.isArray(dashboardMetrics?.prompt_tool_usage)
+    ? dashboardMetrics.prompt_tool_usage
+    : [];
+  const promptToolUsageRange = dashboardMetrics?.prompt_tool_usage_range || {};
+  const magnitudeModelUsage = Array.isArray(dashboardMetrics?.magnitude_model_usage)
+    ? dashboardMetrics.magnitude_model_usage
+    : [];
+  const magnitudeModelUpdates = Array.isArray(dashboardMetrics?.magnitude_model_updates)
+    ? dashboardMetrics.magnitude_model_updates
+    : [];
+  const exportByUserType = Array.isArray(exportUsage?.by_user_type)
+    ? exportUsage.by_user_type
+    : [];
+  const aiUsageByUserType = Array.isArray(aiUsageMetrics?.by_user_type)
+    ? aiUsageMetrics.by_user_type
+    : [];
+  const recentTracesMeta = aiObservability?.recent_traces_meta || {};
+  const countGroups = aiObservability?.counts || {};
+  const countSections = [
+    {
+      title: "AI setups",
+      items: Array.isArray(countGroups.runtime_config_fingerprint)
+        ? countGroups.runtime_config_fingerprint
+        : [],
+      valueKey: "value",
+      formatter: (value) => shortenIdentifier(value, 10, 4),
+    },
+    {
+      title: "LLM models",
+      items: Array.isArray(countGroups.effective_model) ? countGroups.effective_model : [],
+      valueKey: "value",
+      formatter: (value) => `${value || "unknown"}`,
+    },
+  ];
+
+  const runtimeSuccessHtml = runtimeSuccess.length
+    ? `
+      <div class="subsection compact-subsection">
+        <div class="subsection-header">
+          <div>
+            <h3>AI setup success</h3>
+            <p class="subsection-meta">30-day success and failure rate for each backend AI setup.</p>
+          </div>
+        </div>
+        <div class="feature-list">
+          ${runtimeSuccess
+            .map(
+              (row) => `
+                <div class="feature-row">
+                  <div class="feature-head">
+                    <strong>${escapeHtml(shortenIdentifier(row.runtime_config_fingerprint || "unknown", 10, 4))}</strong>
+                    <span>${escapeHtml(`${formatDecimal(row.success_rate || 0)}%`)}</span>
+                  </div>
+                  <div class="meter"><span style="width:${Math.max(Number(row.success_rate || 0), 2)}%"></span></div>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+      </div>
+    `
+    : "";
+
+  const promptToolUsageHtml = `
+      <div class="subsection compact-subsection">
+        <div class="subsection-header">
+          <div>
+            <h3>Prompt tools used</h3>
+            <p class="subsection-meta">Server-side counts from PostHog. Monthly is the default to keep this cheap; all time only loads when selected.</p>
+          </div>
+          <div class="range-controls">${toolUsageRangeControlsHtml}</div>
+        </div>
+        ${
+          promptToolUsage.length
+            ? `<div class="feature-list">
+                ${promptToolUsage
+                  .map((row) => {
+                    const count = Number(row.count || 0);
+                    const maxCount = Math.max(...promptToolUsage.map((item) => Number(item.count || 0)), 1);
+                    const ratio = `${Math.max((count / maxCount) * 100, 2)}%`;
+                    return `
+                      <div class="feature-row">
+                        <div class="feature-head">
+                          <strong>${escapeHtml(row.tool_name || "unknown")}</strong>
+                          <span>${escapeHtml(formatNumber(count))}</span>
+                        </div>
+                        <div class="meter"><span style="width:${ratio}"></span></div>
+                      </div>
+                    `;
+                  })
+                  .join("")}
+              </div>`
+            : `<div class="empty-state">No tool usage found for ${escapeHtml(promptToolUsageRange?.label || "this range")}.</div>`
+        }
+      </div>
+    `;
+
+  const exportUsageHtml = `
+      <div class="subsection compact-subsection">
+        <div class="subsection-header">
+          <div>
+            <h3>Export usage by user type</h3>
+            <p class="subsection-meta">Completed wav/mp3 exports and average exports per user segment.</p>
+          </div>
+        </div>
+        ${
+          exportByUserType.length
+            ? `<div class="feature-list">
+                ${exportByUserType
+                  .map((row) => {
+                    const count = Number(row.exports_total || 0);
+                    const maxCount = Math.max(...exportByUserType.map((item) => Number(item.exports_total || 0)), 1);
+                    const ratio = `${Math.max((count / maxCount) * 100, 2)}%`;
+                    return `
+                      <div class="feature-row">
+                        <div class="feature-head">
+                          <strong>${escapeHtml(formatMusicProfileLabel(row.user_type || "unknown"))}</strong>
+                          <span>${escapeHtml(
+                            `${formatWholeNumber(count)} exports • ${formatDecimal(row.avg_exports_per_user || 0)}/user`,
+                          )}</span>
+                        </div>
+                        <div class="meter"><span style="width:${ratio}"></span></div>
+                        <div class="user-subtext">${escapeHtml(
+                          `${formatWholeNumber(row.exports_wav || 0)} wav • ${formatWholeNumber(row.exports_mp3 || 0)} mp3`,
+                        )}</div>
+                      </div>
+                    `;
+                  })
+                  .join("")}
+              </div>`
+            : `<div class="empty-state">No export data found for ${escapeHtml(promptToolUsageRange?.label || "this range")}.</div>`
+        }
+      </div>
+    `;
+
+  const aiUsageByTypeHtml = `
+      <div class="subsection compact-subsection">
+        <div class="subsection-header">
+          <div>
+            <h3>AI usage by user type</h3>
+            <p class="subsection-meta">Prompts, tokens, and estimated AI cost segmented by profile type.</p>
+          </div>
+        </div>
+        ${
+          aiUsageByUserType.length
+            ? `<div class="feature-list">
+                ${aiUsageByUserType
+                  .map((row) => {
+                    const prompts = Number(row.prompts_total || 0);
+                    const maxPrompts = Math.max(...aiUsageByUserType.map((item) => Number(item.prompts_total || 0)), 1);
+                    const ratio = `${Math.max((prompts / maxPrompts) * 100, 2)}%`;
+                    const avgCostPerUser = Number(row.avg_cost_usd_per_user || 0);
+                    const costLabel = avgCostPerUser > 0 ? formatUsd(avgCostPerUser) : t("usage.na");
+                    return `
+                      <div class="feature-row">
+                        <div class="feature-head">
+                          <strong>${escapeHtml(formatMusicProfileLabel(row.user_type || "unknown"))}</strong>
+                          <span>${escapeHtml(
+                            `${formatWholeNumber(prompts)} prompts • ${formatWholeNumber(row.tokens_total || 0)} tokens`,
+                          )}</span>
+                        </div>
+                        <div class="meter"><span style="width:${ratio}"></span></div>
+                        <div class="user-subtext">${escapeHtml(
+                          `${formatDecimal(row.avg_prompts_per_user || 0)} prompts/user • ${formatWholeNumber(
+                            row.avg_tokens_per_user || 0,
+                          )} tokens/user • ${costLabel}/user`,
+                        )}</div>
+                      </div>
+                    `;
+                  })
+                  .join("")}
+              </div>`
+            : `<div class="empty-state">No AI usage data found for ${escapeHtml(promptToolUsageRange?.label || "this range")}.</div>`
+        }
+      </div>
+    `;
+
+  const magnitudeUsageHtml = magnitudeModelUsage.length
+    ? `
+      <div class="subsection compact-subsection">
+        <div class="subsection-header">
+          <div>
+            <h3>Magnitude model usage</h3>
+            <p class="subsection-meta">30-day prompt completions grouped by active bundle version and source.</p>
+          </div>
+        </div>
+        <div class="feature-list">
+          ${magnitudeModelUsage
+            .map((row) => {
+              const label = `${row.bundle_version || "unknown"} • ${row.source || "unknown"}`;
+              return `
+                <div class="feature-row">
+                  <div class="feature-head">
+                    <strong>${escapeHtml(label)}</strong>
+                    <span>${escapeHtml(formatNumber(row.count || 0))}</span>
+                  </div>
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    `
+    : "";
+
+  const magnitudeUpdateHtml = magnitudeModelUpdates.length
+    ? `
+      <div class="subsection compact-subsection">
+        <div class="subsection-header">
+          <div>
+            <h3>Magnitude model updates</h3>
+            <p class="subsection-meta">Background manifest/download results from clients.</p>
+          </div>
+        </div>
+        <div class="feature-list">
+          ${magnitudeModelUpdates
+            .map((row) => {
+              const label = `${row.status || "unknown"} • ${row.bundle_version || "unknown"}`;
+              return `
+                <div class="feature-row">
+                  <div class="feature-head">
+                    <strong>${escapeHtml(label)}</strong>
+                    <span>${escapeHtml(formatNumber(row.count || 0))}</span>
+                  </div>
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    `
+    : "";
+
+  const countsHtml = countSections
+    .map((section) => {
+      if (!Array.isArray(section.items) || !section.items.length) {
+        return `
+          <div class="subsection compact-subsection">
+            <div class="subsection-header">
+              <div>
+                <h3>${escapeHtml(section.title)}</h3>
+              </div>
+            </div>
+            <div class="empty-state">${escapeHtml("No data yet.")}</div>
+          </div>
+        `;
+      }
+      const maxCount = Math.max(...section.items.map((item) => Number(item.count || 0)), 1);
+      return `
+        <div class="subsection compact-subsection">
+          <div class="subsection-header">
+            <div>
+              <h3>${escapeHtml(section.title)}</h3>
+            </div>
+          </div>
+          <div class="feature-list">
+            ${section.items
+              .map((item) => {
+                const count = Number(item.count || 0);
+                const ratio = `${Math.max((count / maxCount) * 100, 2)}%`;
+                return `
+                  <div class="feature-row">
+                    <div class="feature-head">
+                      <strong>${escapeHtml(section.formatter(item[section.valueKey]))}</strong>
+                      <span>${escapeHtml(formatNumber(count))}</span>
+                    </div>
+                    <div class="meter"><span style="width:${ratio}"></span></div>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  if (!observabilityLoaded) {
+    elements.aiObservabilityCounts.classList.add("empty-state");
+    elements.aiObservabilityCounts.textContent = t("overview.loading");
+  } else {
+    elements.aiObservabilityCounts.classList.remove("empty-state");
+    elements.aiObservabilityCounts.innerHTML = `${runtimeSuccessHtml}${promptToolUsageHtml}${exportUsageHtml}${aiUsageByTypeHtml}${magnitudeUsageHtml}${magnitudeUpdateHtml}${countsHtml}`;
+  }
+
+  const traces = Array.isArray(aiObservability?.recent_traces)
+    ? aiObservability.recent_traces
+    : [];
+  if (!observabilityLoaded) {
+    elements.aiObservabilityTracesBody.innerHTML = `
+      <tr>
+        <td colspan="6" class="table-empty">${escapeHtml(t("overview.loading"))}</td>
+      </tr>
+    `;
+  } else if (!traces.length) {
+    elements.aiObservabilityTracesBody.innerHTML = `
+      <tr>
+        <td colspan="6" class="table-empty">${escapeHtml("No prompt traces yet.")}</td>
+      </tr>
+    `;
+  } else {
+    elements.aiObservabilityTracesBody.innerHTML = traces
+      .map(
+        (trace) => `
+          <tr>
+            <td>
+              <div class="user-name">${escapeHtml(shortenIdentifier(trace.prompt_trace_id || trace.request_id || "unknown", 10, 4))}</div>
+              <div class="user-subtext">${escapeHtml(shortenIdentifier(trace.request_id || "", 10, 4))}</div>
+            </td>
+            <td>${escapeHtml(trace.status || "unknown")}</td>
+            <td>
+              <div class="user-name">${escapeHtml(trace.effective_model || "unknown")}</div>
+              <div class="user-subtext">${escapeHtml(shortenIdentifier(trace.runtime_config_fingerprint || "unknown", 10, 4))}</div>
+            </td>
+            <td>${escapeHtml(trace.resolved_tool || "unknown")}</td>
+            <td>
+              <div class="user-name">${escapeHtml(
+                `proxy ${formatWholeNumber(trace.proxy_handler_ms_total || 0)}ms`,
+              )}</div>
+              <div class="user-subtext">${escapeHtml(
+                `provider ${formatWholeNumber(trace.provider_roundtrip_ms || 0)}ms • normalize ${formatWholeNumber(trace.response_normalize_ms || 0)}ms`,
+              )}</div>
+            </td>
+            <td>${escapeHtml(formatDate(trace.created_at))}</td>
+          </tr>
+        `,
+      )
+      .join("");
+  }
+
+  renderAiObservabilityTracePagination(
+    observabilityLoaded ? Number(recentTracesMeta?.shown_count || traces.length || 0) : 0,
+    observabilityLoaded ? Number(recentTracesMeta?.total_count || traces.length || 0) : 0,
+    observabilityLoaded && recentTracesMeta?.has_more === true,
+  );
+
+  if (!observabilityLoaded) {
+    elements.aiObservabilityMeta.textContent = t("overview.loading");
+  } else if (dashboardStatus === "live") {
+    elements.aiObservabilityMeta.textContent = `Full prompt time includes app work, network, backend, and apply. Backend proxy time is one slice inside it. Updated ${formatDate(
+      aiObservability?.dashboard_updated_at || "",
+    )}`;
+  } else {
+    elements.aiObservabilityMeta.textContent = "Full prompt time is the end-to-end user wait. Backend proxy time is only the server slice.";
+  }
 }
 
 function renderTiers(tiers) {
@@ -2442,6 +3381,16 @@ function renderTiers(tiers) {
 }
 
 function renderTrackedUsers(users) {
+  const includes = getOverviewSectionIncludes();
+  if (!includes.users) {
+    elements.trackedUsersTableBody.innerHTML = `
+      <tr>
+        <td colspan="7" class="table-empty">${escapeHtml(t("overview.loading"))}</td>
+      </tr>
+    `;
+    renderTrackedUsersPagination(0);
+    return;
+  }
   if (!Array.isArray(users) || !users.length) {
     elements.trackedUsersTableBody.innerHTML = `
       <tr>
@@ -2487,6 +3436,16 @@ function renderTrackedUsers(users) {
 }
 
 function renderProjects(projects) {
+  const includes = getOverviewSectionIncludes();
+  if (!includes.projects) {
+    elements.projectsTableBody.innerHTML = `
+      <tr>
+        <td colspan="6" class="table-empty">${escapeHtml(t("overview.loading"))}</td>
+      </tr>
+    `;
+    renderProjectsPagination(0);
+    return;
+  }
   if (!Array.isArray(projects) || !projects.length) {
     elements.projectsTableBody.innerHTML = `
       <tr>
@@ -2713,6 +3672,12 @@ function renderFeedbackPagination(shownCount, hasMore) {
 
 function renderTrackedUsersPagination(shownCount) {
   const signedIn = !!tokens?.idToken;
+  if (state.homeSectionLoading.users) {
+    elements.trackedUsersPageMeta.textContent = t("overview.loading");
+    elements.trackedUsersShowLessButton.disabled = true;
+    elements.trackedUsersShowMoreButton.disabled = !signedIn || state.overviewBusy;
+    return;
+  }
   const canShowMore =
     Array.isArray(state.overview?.users)
     && state.overview.users.length >= state.overviewUserLimit
@@ -2730,6 +3695,12 @@ function renderTrackedUsersPagination(shownCount) {
 
 function renderProjectsPagination(shownCount) {
   const signedIn = !!tokens?.idToken;
+  if (state.homeSectionLoading.projects) {
+    elements.projectsPageMeta.textContent = t("overview.loading");
+    elements.projectsShowLessButton.disabled = true;
+    elements.projectsShowMoreButton.disabled = !signedIn || state.overviewBusy;
+    return;
+  }
   const canShowMore =
     Array.isArray(state.overview?.projects)
     && state.overview.projects.length >= state.overviewProjectLimit
@@ -2743,6 +3714,26 @@ function renderProjectsPagination(shownCount) {
     !signedIn || state.overviewBusy || state.overviewProjectLimit <= DEFAULT_OVERVIEW_PROJECTS_LIMIT;
   elements.projectsShowMoreButton.disabled =
     !signedIn || state.overviewBusy || !canShowMore;
+}
+
+function renderAiObservabilityTracePagination(shownCount, totalCount, hasMore) {
+  const signedIn = !!tokens?.idToken;
+  if (state.homeSectionLoading.observability) {
+    elements.aiObservabilityTracePageMeta.textContent = t("overview.loading");
+    elements.aiObservabilityTracesShowLessButton.disabled = true;
+    elements.aiObservabilityTracesShowMoreButton.disabled = !signedIn || state.overviewBusy;
+    return;
+  }
+  elements.aiObservabilityTracePageMeta.textContent = shownCount
+    ? t("value.showingOfTotal", {
+        shown: formatWholeNumber(shownCount),
+        total: formatWholeNumber(Math.max(totalCount || 0, shownCount)),
+      })
+    : "";
+  elements.aiObservabilityTracesShowLessButton.disabled =
+    !signedIn || state.overviewBusy || state.overviewTraceLimit <= DEFAULT_OVERVIEW_TRACE_LIMIT;
+  elements.aiObservabilityTracesShowMoreButton.disabled =
+    !signedIn || state.overviewBusy || !hasMore || state.overviewTraceLimit >= 24;
 }
 
 function renderInspector() {
@@ -3217,21 +4208,34 @@ function updateBusyState() {
     || state.userSearchLimit >= RESULT_LIMIT_MAX
     || state.lastUserSearchPayload?.has_more !== true;
   elements.trackedUsersShowLessButton.disabled =
-    !signedIn || state.overviewBusy || state.overviewUserLimit <= DEFAULT_OVERVIEW_USERS_LIMIT;
+    !signedIn
+    || state.homeSectionLoading.users
+    || state.overviewUserLimit <= DEFAULT_OVERVIEW_USERS_LIMIT;
   elements.trackedUsersShowMoreButton.disabled =
     !signedIn
-    || state.overviewBusy
+    || state.homeSectionLoading.users
     || !Array.isArray(state.overview?.users)
     || state.overview.users.length < state.overviewUserLimit
     || state.overviewUserLimit >= RESULT_LIMIT_MAX;
   elements.projectsShowLessButton.disabled =
-    !signedIn || state.overviewBusy || state.overviewProjectLimit <= DEFAULT_OVERVIEW_PROJECTS_LIMIT;
+    !signedIn
+    || state.homeSectionLoading.projects
+    || state.overviewProjectLimit <= DEFAULT_OVERVIEW_PROJECTS_LIMIT;
   elements.projectsShowMoreButton.disabled =
     !signedIn
-    || state.overviewBusy
+    || state.homeSectionLoading.projects
     || !Array.isArray(state.overview?.projects)
     || state.overview.projects.length < state.overviewProjectLimit
     || state.overviewProjectLimit >= RESULT_LIMIT_MAX;
+  elements.aiObservabilityTracesShowLessButton.disabled =
+    !signedIn
+    || state.homeSectionLoading.observability
+    || state.overviewTraceLimit <= DEFAULT_OVERVIEW_TRACE_LIMIT;
+  elements.aiObservabilityTracesShowMoreButton.disabled =
+    !signedIn
+    || state.homeSectionLoading.observability
+    || state.overviewTraceLimit >= 24
+    || state.overview?.ai_observability?.recent_traces_meta?.has_more !== true;
   elements.feedbackShowLessButton.disabled =
     !signedIn || state.feedbackBusy || state.feedbackLimit <= DEFAULT_FEEDBACK_LIMIT;
   elements.feedbackShowMoreButton.disabled =
@@ -3253,6 +4257,18 @@ function updateBusyState() {
   elements.aiPromptLimitsSaveButton.textContent = state.aiPromptLimitsBusy
     ? t("action.saving")
     : t("action.savePromptLimits");
+  elements.producerCaptureWhitelistInput.disabled =
+    state.producerCaptureWhitelistBusy || !signedIn || !canEditProducerCaptureWhitelist();
+  elements.producerCaptureWhitelistConfirmInput.disabled =
+    state.producerCaptureWhitelistBusy || !signedIn || !canEditProducerCaptureWhitelist();
+  elements.producerCaptureWhitelistSaveButton.disabled =
+    state.producerCaptureWhitelistBusy
+    || !signedIn
+    || !canEditProducerCaptureWhitelist()
+    || !producerCaptureWhitelistConfirmationMatches();
+  elements.producerCaptureWhitelistSaveButton.textContent = state.producerCaptureWhitelistBusy
+    ? t("action.saving")
+    : t("action.saveProducerCaptureWhitelist");
   updateAiRuntimeConfirmButtons();
 }
 
@@ -3536,41 +4552,100 @@ function handleAdminUsersShowMore() {
 }
 
 function handleTrackedUsersShowLess() {
-  if (state.overviewBusy || state.overviewUserLimit <= DEFAULT_OVERVIEW_USERS_LIMIT) {
+  if (
+    state.homeSectionLoading.users
+    || state.overviewUserLimit <= DEFAULT_OVERVIEW_USERS_LIMIT
+  ) {
     return;
   }
   state.overviewUserLimit = DEFAULT_OVERVIEW_USERS_LIMIT;
-  void refreshOverview();
+  void refreshOverviewSections({
+    include_ai_usage: true,
+    include_users: true,
+    loadingKeys: ["users"],
+  });
 }
 
 function handleTrackedUsersShowMore() {
-  if (state.overviewBusy || state.overviewUserLimit >= RESULT_LIMIT_MAX) {
+  if (state.homeSectionLoading.users) {
+    return;
+  }
+  if (state.overviewUserLimit >= RESULT_LIMIT_MAX) {
     return;
   }
   state.overviewUserLimit = Math.min(
-    state.overviewUserLimit + RESULT_LIMIT_STEP,
+    state.overviewUserLimit + OVERVIEW_RESULT_LIMIT_STEP,
     RESULT_LIMIT_MAX,
   );
-  void refreshOverview();
+  void refreshOverviewSections({
+    include_ai_usage: true,
+    include_users: true,
+    loadingKeys: ["users"],
+  });
 }
 
 function handleProjectsShowLess() {
-  if (state.overviewBusy || state.overviewProjectLimit <= DEFAULT_OVERVIEW_PROJECTS_LIMIT) {
+  if (
+    state.homeSectionLoading.projects
+    || state.overviewProjectLimit <= DEFAULT_OVERVIEW_PROJECTS_LIMIT
+  ) {
     return;
   }
   state.overviewProjectLimit = DEFAULT_OVERVIEW_PROJECTS_LIMIT;
-  void refreshOverview();
+  void refreshOverviewSections({
+    include_projects: true,
+    loadingKeys: ["projects"],
+  });
 }
 
 function handleProjectsShowMore() {
-  if (state.overviewBusy || state.overviewProjectLimit >= RESULT_LIMIT_MAX) {
+  if (state.homeSectionLoading.projects) {
+    return;
+  }
+  if (state.overviewProjectLimit >= RESULT_LIMIT_MAX) {
     return;
   }
   state.overviewProjectLimit = Math.min(
-    state.overviewProjectLimit + RESULT_LIMIT_STEP,
+    state.overviewProjectLimit + OVERVIEW_RESULT_LIMIT_STEP,
     RESULT_LIMIT_MAX,
   );
-  void refreshOverview();
+  void refreshOverviewSections({
+    include_projects: true,
+    loadingKeys: ["projects"],
+  });
+}
+
+function handleAiObservabilityTracesShowLess() {
+  if (
+    state.homeSectionLoading.observability
+    || state.overviewTraceLimit <= DEFAULT_OVERVIEW_TRACE_LIMIT
+  ) {
+    return;
+  }
+  state.overviewTraceLimit = DEFAULT_OVERVIEW_TRACE_LIMIT;
+  void refreshOverviewSections({
+    include_ai_usage: true,
+    include_ai_observability: true,
+    loadingKeys: ["usage", "observability"],
+  });
+}
+
+function handleAiObservabilityTracesShowMore() {
+  if (state.homeSectionLoading.observability) {
+    return;
+  }
+  if (state.overviewTraceLimit >= 24) {
+    return;
+  }
+  state.overviewTraceLimit = Math.min(
+    state.overviewTraceLimit + OVERVIEW_RESULT_LIMIT_STEP,
+    24,
+  );
+  void refreshOverviewSections({
+    include_ai_usage: true,
+    include_ai_observability: true,
+    loadingKeys: ["usage", "observability"],
+  });
 }
 
 function handleFeedbackShowLess() {
@@ -3808,6 +4883,54 @@ async function handleAiPromptLimitsSubmit(event) {
   }
 }
 
+async function handleProducerCaptureWhitelistSubmit(event) {
+  event.preventDefault();
+  if (
+    !tokens?.idToken
+    || !canEditProducerCaptureWhitelist()
+    || !producerCaptureWhitelistConfirmationMatches()
+  ) {
+    return;
+  }
+
+  const usernames = `${elements.producerCaptureWhitelistInput.value || ""}`
+    .split(/[\s,]+/g)
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  state.producerCaptureWhitelistBusy = true;
+  state.producerCaptureWhitelistFeedback = null;
+  updateBusyState();
+  setStatus(t("status.savingProducerCaptureWhitelist"), "info");
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_PRODUCER_CAPTURE_WHITELIST_PATH, {
+      method: "PUT",
+      body: JSON.stringify({
+        usernames,
+      }),
+    });
+    state.producerCaptureWhitelist = payload.settings || null;
+    state.producerCaptureWhitelistFeedback = {
+      tone: "success",
+      message: t("status.producerCaptureWhitelistSaved"),
+    };
+    elements.producerCaptureWhitelistConfirmInput.value = "";
+    renderProducerCaptureWhitelistSettings();
+    setStatus(t("status.producerCaptureWhitelistSaved"), "success");
+  } catch (error) {
+    handleAdminRequestError(error, t("status.saveProducerCaptureWhitelistFailed"));
+    state.producerCaptureWhitelistFeedback = {
+      tone: "error",
+      message: error.message || t("status.saveProducerCaptureWhitelistFailed"),
+    };
+    renderProducerCaptureWhitelistSettings();
+  } finally {
+    state.producerCaptureWhitelistBusy = false;
+    updateBusyState();
+  }
+}
+
 async function handleAiRuntimeSubmit(event) {
   event.preventDefault();
   const form = event.target.closest(".ai-runtime-form");
@@ -3921,13 +5044,17 @@ function resetAdminState() {
   state.userSearchBusy = false;
   state.feedbackBusy = false;
   state.aiPromptLimitsBusy = false;
+  state.producerCaptureWhitelistBusy = false;
   state.aiRuntimeBusy = false;
   state.deleteBusy = false;
   state.grantBusy = false;
   state.currentSearchQuery = "";
   state.overview = null;
+  state.overviewIncludes = buildOverviewIncludes();
+  state.homeSectionLoading = buildHomeSectionLoading();
   state.overviewUserLimit = DEFAULT_OVERVIEW_USERS_LIMIT;
   state.overviewProjectLimit = DEFAULT_OVERVIEW_PROJECTS_LIMIT;
+  state.overviewTraceLimit = DEFAULT_OVERVIEW_TRACE_LIMIT;
   state.lastUserSearchPayload = null;
   state.userSearchLimit = DEFAULT_ADMIN_USERS_LIMIT;
   state.adminUsers = [];
@@ -3939,18 +5066,29 @@ function resetAdminState() {
   state.selectedFeedback = null;
   state.aiPromptLimits = null;
   state.aiPromptLimitsFeedback = null;
+  state.producerCaptureWhitelist = null;
+  state.producerCaptureWhitelistFeedback = null;
   state.aiRuntimeSettings = null;
   state.aiRuntimeFeedbackByFeature = {};
   state.analyticsRange = "30d";
+  state.aiToolUsageRange = "30d";
   state.feedbackRequestId = 0;
   state.deleteFeedback = null;
   state.grantFeedback = null;
   state.searchRequestId = 0;
+  state.overviewRequestId = 0;
   state.activeTab = DEFAULT_TAB;
   state.loadedTabs = buildLoadedTabs();
 
+  setHomeSectionLoading(
+    ["analytics", "usage", "observability", "users", "projects"],
+    false,
+  );
+
   elements.userSearchInput.value = "";
   elements.aiPromptLimitsConfirmInput.value = "";
+  elements.producerCaptureWhitelistInput.value = "";
+  elements.producerCaptureWhitelistConfirmInput.value = "";
   elements.adminUsersTableBody.innerHTML = `
     <tr>
       <td colspan="5" class="table-empty">${escapeHtml(t("empty.signInSearchUsers"))}</td>
@@ -3968,9 +5106,11 @@ function resetAdminState() {
   elements.adminUsersPageMeta.textContent = "";
   elements.trackedUsersPageMeta.textContent = "";
   elements.projectsPageMeta.textContent = "";
+  elements.aiObservabilityTracePageMeta.textContent = "";
   elements.feedbackPageMeta.textContent = "";
   updateTabView();
   renderAiPromptLimitSettings();
+  renderProducerCaptureWhitelistSettings();
   renderAiRuntimeSettings();
 }
 
@@ -4084,6 +5224,10 @@ function formatDecimal(value) {
   }).format(Number(value || 0));
 }
 
+function formatMilliseconds(value) {
+  return `${formatDecimal(value || 0)} ms`;
+}
+
 function formatWholeNumber(value) {
   return new Intl.NumberFormat(state.locale).format(Number(value || 0));
 }
@@ -4116,6 +5260,17 @@ function formatDate(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(parsed);
+}
+
+function shortenIdentifier(value, lead = 8, tail = 4) {
+  const normalized = `${value || ""}`.trim();
+  if (!normalized) {
+    return "unknown";
+  }
+  if (normalized.length <= lead + tail + 3) {
+    return normalized;
+  }
+  return `${normalized.slice(0, lead)}...${normalized.slice(-tail)}`;
 }
 
 function escapeHtml(value) {

@@ -122,7 +122,9 @@ extern "C"
 
     // Offline analysis
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_decodeAudioMono16kJNI(JNIEnv *, jclass, jstring);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_decodeAudioMono16kForAnalysisJNI(JNIEnv *, jclass, jstring, jint);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioStereo16kJNI(JNIEnv *, jclass, jstring);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioForPromptJNI(JNIEnv *, jclass, jstring, jint, jint);
 
     // Input devices and recording
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getInputDevicesJNI(JNIEnv *, jclass);
@@ -157,6 +159,7 @@ extern "C"
 
     // Export and plugin discovery
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *, jclass, jstring, jstring, jint, jint, jboolean, jint);
+    JNIEXPORT jdouble JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getExportProgressJNI(JNIEnv *, jclass);
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportTrackJNI(JNIEnv *, jclass, jint, jstring, jstring, jint, jint, jboolean, jint);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getAvailablePluginsJNI(JNIEnv *, jclass);
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_renderInstrumentClipJNI(JNIEnv *, jclass, jstring, jstring, jstring, jdouble, jobject, jobject);

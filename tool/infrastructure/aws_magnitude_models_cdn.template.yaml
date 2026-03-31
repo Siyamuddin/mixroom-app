@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Mixroom magnitude model hosting (private S3 + public CloudFront)
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: ''
+  Prefix:
+    Type: String
+    Default: magnitude
+  PriceClass:
+    Type: String
+    Default: PriceClass_100
+    AllowedValues:
+      - PriceClass_100
+      - PriceClass_200
+      - PriceClass_All
+
+Conditions:
+  HasCustomBucketName: !Not [!Equals [!Ref BucketName, '']]
+
+Resources:
+  MagnitudeModelsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - HasCustomBucketName
+        - !Ref BucketName
+        - !Ref AWS::NoValue
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  MagnitudeModelsOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-magnitude-models-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  MagnitudeModelsResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub ${AWS::StackName}-magnitude-models-security
+        SecurityHeadersConfig:
+          ContentTypeOptions:
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: no-referrer
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Preload: true
+            Override: true
+
+  MagnitudeModelsDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        HttpVersion: http2and3
+        PriceClass: !Ref PriceClass
+        Origins:
+          - Id: MagnitudeModelsS3Origin
+            DomainName: !GetAtt MagnitudeModelsBucket.RegionalDomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !GetAtt MagnitudeModelsOriginAccessControl.Id
+        DefaultCacheBehavior:
+          TargetOriginId: MagnitudeModelsS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: !Ref MagnitudeModelsResponseHeadersPolicy
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  MagnitudeModelsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MagnitudeModelsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource: !Sub ${MagnitudeModelsBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${MagnitudeModelsDistribution}
+
+Outputs:
+  BucketName:
+    Value: !Ref MagnitudeModelsBucket
+  DistributionId:
+    Value: !Ref MagnitudeModelsDistribution
+  DistributionDomainName:
+    Value: !GetAtt MagnitudeModelsDistribution.DomainName
+  PublicBaseUrl:
+    Value: !Sub https://${MagnitudeModelsDistribution.DomainName}/${Prefix}
+  ManifestUrl:
+    Value: !Sub https://${MagnitudeModelsDistribution.DomainName}/${Prefix}/manifest.json

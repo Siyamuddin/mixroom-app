@@ -91,7 +91,6 @@ Parameter values for the first deploy:
 - `StageName`: `staging`
 - `CognitoUserPoolId`: your Cognito user pool id
 - `CognitoAppClientId`: your Cognito app client id
-- `EnforceSubscriptions`: `false`
 - `AllowStudioTier`: `false`
 - `AppleBundleId`: leave blank if not ready
 - `AppleAppId`: `0` if not ready

@@ -5,7 +5,9 @@
 #include <array>
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstddef>
 #include <deque>
 #include <limits>
@@ -723,7 +725,12 @@ private:
     static juce::File resolveFlutterAssetFile(const juce::String &assetPathRaw)
     {
         const juce::String raw = assetPathRaw.trim();
-        if (raw.isNotEmpty())
+        const bool allowDirectPath =
+            juce::File::isAbsolutePath(raw) ||
+            raw.startsWith("./") ||
+            raw.startsWith("../") ||
+            raw.startsWithChar('~');
+        if (raw.isNotEmpty() && allowDirectPath)
         {
             const juce::File direct(raw);
             if (direct.existsAsFile())
@@ -842,6 +849,74 @@ private:
         return {};
     }
 
+    static double parseSfzNumberOrNote(const juce::String &raw)
+    {
+        juce::String token = raw.trim();
+        if (token.length() >= 2)
+        {
+            const juce::juce_wchar first = token[0];
+            const juce::juce_wchar last = token[token.length() - 1];
+            const bool doubleQuoted = first == '"' && last == '"';
+            const bool singleQuoted = first == '\'' && last == '\'';
+            if (doubleQuoted || singleQuoted)
+                token = token.substring(1, token.length() - 1).trim();
+        }
+        if (token.isEmpty())
+            return std::numeric_limits<double>::quiet_NaN();
+
+        const std::string utf8 = token.toStdString();
+        char *endPtr = nullptr;
+        const double parsed = std::strtod(utf8.c_str(), &endPtr);
+        if (endPtr != utf8.c_str() && endPtr != nullptr && *endPtr == '\0')
+            return parsed;
+
+        static const std::regex notePattern("^([A-Ga-g])([#b]?)(-?[0-9]+)$");
+        std::smatch match;
+        if (!std::regex_match(utf8, match, notePattern))
+            return std::numeric_limits<double>::quiet_NaN();
+
+        if (match.size() < 4)
+            return std::numeric_limits<double>::quiet_NaN();
+        const char step = (char)std::toupper(match[1].str()[0]);
+        const std::string accidental = match[2].str();
+        const int octave = std::atoi(match[3].str().c_str());
+
+        int semitone = 0;
+        switch (step)
+        {
+        case 'C':
+            semitone = 0;
+            break;
+        case 'D':
+            semitone = 2;
+            break;
+        case 'E':
+            semitone = 4;
+            break;
+        case 'F':
+            semitone = 5;
+            break;
+        case 'G':
+            semitone = 7;
+            break;
+        case 'A':
+            semitone = 9;
+            break;
+        case 'B':
+            semitone = 11;
+            break;
+        default:
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
+        if (accidental == "#")
+            semitone += 1;
+        else if (accidental == "b")
+            semitone -= 1;
+        const int midi = ((octave + 1) * 12) + semitone;
+        return (double)midi;
+    }
+
     static double readSfzNumeric(const SfzOpcodeMap &values,
                                  const char *key,
                                  double fallback)
@@ -849,7 +924,7 @@ private:
         const juce::String raw = opcodeValue(values, key).trim();
         if (raw.isEmpty())
             return fallback;
-        const double parsed = raw.getDoubleValue();
+        const double parsed = parseSfzNumberOrNote(raw);
         if (!std::isfinite(parsed))
             return fallback;
         return parsed;
@@ -992,6 +1067,7 @@ private:
 
         SfzOpcodeMap control;
         SfzOpcodeMap global;
+        SfzOpcodeMap master;
         SfzOpcodeMap group;
         SfzOpcodeMap *region = nullptr;
         std::vector<SfzOpcodeMap> rawRegions;
@@ -1006,15 +1082,30 @@ private:
             if (line.isEmpty())
                 continue;
 
-            if (line.startsWithChar('<') && line.endsWithChar('>') &&
-                line.length() >= 3)
+            juce::String blockTag;
+            juce::String remainder = line;
+            if (line.startsWithChar('<'))
             {
-                const juce::String tag =
-                    line.substring(1, line.length() - 1).trim().toLowerCase();
+                const int closeIdx = line.indexOfChar('>');
+                if (closeIdx > 1)
+                {
+                    blockTag = line.substring(1, closeIdx).trim().toLowerCase();
+                    remainder = line.substring(closeIdx + 1).trim();
+                }
+            }
+
+            if (blockTag.isNotEmpty())
+            {
+                const juce::String tag = blockTag;
                 currentBlock = tag;
+                region = nullptr;
                 if (tag == "group")
                 {
                     group.clear();
+                }
+                else if (tag == "master")
+                {
+                    master.clear();
                 }
                 else if (tag == "region")
                 {
@@ -1022,12 +1113,12 @@ private:
                     region = &rawRegions.back();
                     mergeOpcodeMap(*region, control);
                     mergeOpcodeMap(*region, global);
+                    mergeOpcodeMap(*region, master);
                     mergeOpcodeMap(*region, group);
                 }
-                continue;
             }
 
-            const auto opcodes = parseSfzOpcodes(line);
+            const auto opcodes = parseSfzOpcodes(remainder);
             if (opcodes.empty())
                 continue;
 
@@ -1035,6 +1126,8 @@ private:
                 mergeOpcodeMap(control, opcodes);
             else if (currentBlock == "global")
                 mergeOpcodeMap(global, opcodes);
+            else if (currentBlock == "master")
+                mergeOpcodeMap(master, opcodes);
             else if (currentBlock == "group")
                 mergeOpcodeMap(group, opcodes);
             else if (currentBlock == "region")
@@ -1045,6 +1138,7 @@ private:
                     region = &rawRegions.back();
                     mergeOpcodeMap(*region, control);
                     mergeOpcodeMap(*region, global);
+                    mergeOpcodeMap(*region, master);
                     mergeOpcodeMap(*region, group);
                 }
                 mergeOpcodeMap(*region, opcodes);
