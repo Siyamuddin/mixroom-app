@@ -18,8 +18,7 @@ class RemoteWelcomeOnboardingScreen extends StatefulWidget {
 
 class _RemoteWelcomeOnboardingScreenState
     extends State<RemoteWelcomeOnboardingScreen> with TickerProviderStateMixin {
-  static const Size _designSize = Size(402, 871);
-  static const Color _surface = Color(0xFF090909);
+  static const Size _contentSize = Size(402, 720);
   static const Color _foreground = Color(0xFFF4F4F4);
 
   final PageController _pageController = PageController();
@@ -68,67 +67,75 @@ class _RemoteWelcomeOnboardingScreenState
     return PopScope(
       canPop: false,
       child: Scaffold(
-        backgroundColor: _surface,
-        body: ColoredBox(
-          color: _surface,
-          child: SizedBox.expand(
-            child: FittedBox(
-              fit: BoxFit.cover,
-              alignment: Alignment.center,
-              child: SizedBox(
-                width: _designSize.width,
-                height: _designSize.height,
-                child: Stack(
+        backgroundColor: Colors.black,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: Image.asset(
+                _OnboardingAssets.bgNoise,
+                fit: BoxFit.cover,
+                alignment: Alignment.center,
+              ),
+            ),
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                child: Column(
                   children: [
-                    Positioned.fill(
-                      child: Image.asset(
-                        _OnboardingAssets.bgNoise,
-                        fit: BoxFit.cover,
-                      ),
+                    Expanded(
+                      child: _buildPageViewport(copy),
                     ),
-                    PageView(
-                      controller: _pageController,
-                      onPageChanged: (value) {
-                        if (!mounted) return;
-                        setState(() => _currentPage = value);
-                      },
-                      children: [
-                        _buildPageOne(copy),
-                        _buildPageTwo(copy),
-                        _buildPageThree(copy),
-                        _buildPageFour(copy),
-                      ],
-                    ),
-                    _buildHomeIndicator(),
+                    const SizedBox(height: 16),
+                    _buildPageIndicators(),
+                    const SizedBox(height: 18),
                     _buildPrimaryButton(copy),
                   ],
                 ),
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildHomeIndicator() {
-    return IgnorePointer(
-      child: Stack(
-        children: [
-          Positioned(
-            left: 129,
-            top: 858,
-            width: 144,
-            height: 5,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: _foreground,
-                borderRadius: BorderRadius.circular(100),
-              ),
+  Widget _buildPageViewport(_OnboardingCopy copy) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: PageView(
+          controller: _pageController,
+          onPageChanged: (value) {
+            if (!mounted) return;
+            setState(() => _currentPage = value);
+          },
+          children: [
+            _buildScaledPage(_buildPageOne(copy)),
+            _buildScaledPage(_buildPageTwo(copy)),
+            _buildScaledPage(_buildPageThree(copy)),
+            _buildScaledPage(_buildPageFour(copy)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScaledPage(Widget child) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Center(
+          child: FittedBox(
+            fit: BoxFit.contain,
+            alignment: Alignment.center,
+            child: SizedBox(
+              width: _contentSize.width,
+              height: _contentSize.height,
+              child: child,
             ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -136,9 +143,7 @@ class _RemoteWelcomeOnboardingScreenState
     final isFinalPage = _currentPage == 3;
     final String label = isFinalPage ? copy.startButton : copy.nextButton;
 
-    return Positioned(
-      left: 119,
-      top: 729.08,
+    return SizedBox(
       width: 164,
       height: 48,
       child: DecoratedBox(
@@ -147,8 +152,6 @@ class _RemoteWelcomeOnboardingScreenState
           gradient: isFinalPage
               ? const LinearGradient(
                   begin: Alignment.topCenter,
-                  // Figma node 138:1105 uses stops at 56.25% and 112.5%.
-                  // Extend the gradient endpoint beyond bounds to match that.
                   end: Alignment(0, 1.25),
                   colors: [
                     Color.fromRGBO(244, 244, 244, 0.5),
@@ -187,6 +190,28 @@ class _RemoteWelcomeOnboardingScreenState
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPageIndicators() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(4, (index) {
+        final isActive = index == _currentPage;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          margin: EdgeInsets.only(right: index == 3 ? 0 : 8),
+          width: isActive ? 22 : 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: isActive
+                ? _foreground
+                : const Color.fromRGBO(244, 244, 244, 0.24),
+            borderRadius: BorderRadius.circular(999),
+          ),
+        );
+      }),
     );
   }
 

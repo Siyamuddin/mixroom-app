@@ -272,7 +272,7 @@ class AppUserService extends ChangeNotifier {
                 if (safeUsername.isNotEmpty) 'username': safeUsername,
                 if (safeGivenName.isNotEmpty) 'given_name': safeGivenName,
                 if (safeFamilyName.isNotEmpty) 'family_name': safeFamilyName,
-                if (safeBirthdate.isNotEmpty) 'birthdate': safeBirthdate,
+                'birthdate': safeBirthdate.isEmpty ? null : safeBirthdate,
                 'music_profile':
                     safeMusicProfile.isEmpty ? null : safeMusicProfile,
                 'accepted_terms_version': LegalConfig.termsVersion,
@@ -818,7 +818,7 @@ class AppUserService extends ChangeNotifier {
                 if (username.isNotEmpty) 'username': username,
                 if (givenName.isNotEmpty) 'given_name': givenName,
                 if (familyName.isNotEmpty) 'family_name': familyName,
-                if (birthdate.isNotEmpty) 'birthdate': birthdate,
+                'birthdate': birthdate.isEmpty ? null : birthdate,
                 'music_profile': musicProfile.isEmpty ? null : musicProfile,
                 'accepted_terms_version': acceptedTermsVersion,
                 'accepted_privacy_version': acceptedPrivacyVersion,

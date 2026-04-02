@@ -128,6 +128,9 @@ const Set<String> kDefaultProducerCaptureUsernameAllowlist = <String>{
   'lavitababy1004',
   'andrewtest',
 };
+const String kBundledSamplePackAssetPrefix = 'assets/sample_packs/';
+const String kBundledSamplePackManifestFileName =
+    '.mixroom_sample_pack_manifest.json';
 
 const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
   {
@@ -6591,6 +6594,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _sampleDragActive = false;
       _reopenSampleBrowserAfterDrag = false;
       _reopenSampleBrowserExpanded = false;
+      await _ensureDefaultSampleBrowserRoots();
       final json = await ProjectManager.readProjectJson(_projectDir);
       await _restoreChatHistoryFromProjectJson(json);
       _projectId = ProjectManager.ensureProjectIdInJson(json);
@@ -7553,7 +7557,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _meterTimer?.cancel();
     _meterDecayTimer?.cancel();
 
-    _meterTimer = Timer.periodic(const Duration(milliseconds: 40), (_) async {
+    _meterTimer = Timer.periodic(const Duration(milliseconds: 33), (_) async {
       // prevent overlapping async ticks (super important)
       if (!_meterPolling) return; // stopped mid-flight
       if (_meterPollingBusy) return; // prevent overlap
@@ -7632,7 +7636,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _meterDecayTimer?.cancel();
 
     // ~30fps-ish but cheap
-    _meterDecayTimer = Timer.periodic(const Duration(milliseconds: 40), (_) {
+    _meterDecayTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
       // if we started polling again, stop decaying
       if (_meterPolling) {
         _meterDecayTimer?.cancel();
@@ -13920,6 +13924,188 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return '';
   }
 
+  Future<void> _ensureDefaultSampleBrowserRoots() async {
+    final bundledRoots = await _mountBundledSamplePacks();
+    if (bundledRoots.isEmpty) return;
+    final existing = _sampleBrowserRoots.map(p.normalize).toSet();
+    final newRoots = bundledRoots
+        .map(p.normalize)
+        .where((root) => !existing.contains(root))
+        .toList(growable: false);
+    if (newRoots.isEmpty) return;
+    _sampleBrowserRoots.insertAll(0, newRoots);
+  }
+
+  Future<List<String>> _mountBundledSamplePacks() async {
+    final assetGroups = await _discoverBundledSamplePackAssetGroups();
+    if (assetGroups.isEmpty) return const <String>[];
+
+    final supportDir = await getApplicationSupportDirectory();
+    final samplePacksDir = Directory(p.join(supportDir.path, 'sample_packs'));
+    if (!await samplePacksDir.exists()) {
+      await samplePacksDir.create(recursive: true);
+    }
+
+    final mountedRoots = <String>[];
+    final packSlugs = assetGroups.keys.toList()..sort();
+    for (final packSlug in packSlugs) {
+      final assetPaths = assetGroups[packSlug];
+      if (assetPaths == null || assetPaths.isEmpty) continue;
+      final packDir = await _extractBundledSamplePack(
+        samplePacksDir: samplePacksDir,
+        packSlug: packSlug,
+        assetPaths: assetPaths,
+      );
+      if (packDir != null) {
+        mountedRoots.add(p.normalize(packDir.path));
+      }
+    }
+    return mountedRoots;
+  }
+
+  Future<Map<String, List<String>>>
+      _discoverBundledSamplePackAssetGroups() async {
+    final discovered = <String>{};
+
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      discovered.addAll(
+        manifest
+            .listAssets()
+            .where((path) => path.startsWith(kBundledSamplePackAssetPrefix)),
+      );
+    } catch (_) {
+      try {
+        final manifestRaw = await rootBundle.loadString('AssetManifest.json');
+        final decoded = jsonDecode(manifestRaw);
+        if (decoded is Map) {
+          discovered.addAll(
+            decoded.keys.whereType<String>().where(
+                (path) => path.startsWith(kBundledSamplePackAssetPrefix)),
+          );
+        }
+      } catch (_) {
+        return const <String, List<String>>{};
+      }
+    }
+
+    final grouped = <String, List<String>>{};
+    for (final assetPath in discovered) {
+      final relative = p.posix.relative(
+        assetPath,
+        from: kBundledSamplePackAssetPrefix.replaceAll('\\', '/'),
+      );
+      if (relative.isEmpty || relative.startsWith('..')) continue;
+      final parts = p.posix
+          .split(relative)
+          .where((part) => part.isNotEmpty)
+          .toList(growable: false);
+      // Ignore top-level helper files like assets/sample_packs/README.md.
+      if (parts.length < 2) continue;
+      final packSlug = parts.first;
+      grouped.putIfAbsent(packSlug, () => <String>[]).add(assetPath);
+    }
+
+    for (final entry in grouped.values) {
+      entry.sort();
+    }
+    return grouped;
+  }
+
+  Future<Directory?> _extractBundledSamplePack({
+    required Directory samplePacksDir,
+    required String packSlug,
+    required List<String> assetPaths,
+  }) async {
+    final displayName = _displayNameForBundledSamplePack(packSlug);
+    final packDir = Directory(p.join(samplePacksDir.path, displayName));
+    final manifestFile =
+        File(p.join(packDir.path, kBundledSamplePackManifestFileName));
+    final assetSignature = jsonEncode(assetPaths);
+
+    bool needsRefresh = true;
+    if (await manifestFile.exists()) {
+      try {
+        final decoded = jsonDecode(await manifestFile.readAsString())
+            as Map<String, dynamic>;
+        if (decoded['assetSignature'] == assetSignature) {
+          needsRefresh = false;
+          for (final assetPath in assetPaths) {
+            final relative = p.posix.relative(
+              assetPath,
+              from: '$kBundledSamplePackAssetPrefix$packSlug',
+            );
+            if (relative.isEmpty || relative.startsWith('..')) continue;
+            final outPath =
+                p.joinAll(<String>[packDir.path, ...p.posix.split(relative)]);
+            if (!File(outPath).existsSync()) {
+              needsRefresh = true;
+              break;
+            }
+          }
+        }
+      } catch (_) {
+        needsRefresh = true;
+      }
+    }
+
+    if (!needsRefresh) {
+      return packDir;
+    }
+
+    if (await packDir.exists()) {
+      await packDir.delete(recursive: true);
+    }
+    await packDir.create(recursive: true);
+
+    for (final assetPath in assetPaths) {
+      final relative = p.posix.relative(
+        assetPath,
+        from: '$kBundledSamplePackAssetPrefix$packSlug',
+      );
+      if (relative.isEmpty || relative.startsWith('..')) continue;
+      final outPath =
+          p.joinAll(<String>[packDir.path, ...p.posix.split(relative)]);
+      final outFile = File(outPath);
+      await outFile.parent.create(recursive: true);
+      final data = await rootBundle.load(assetPath);
+      final bytes = data.buffer.asUint8List(
+        data.offsetInBytes,
+        data.lengthInBytes,
+      );
+      await outFile.writeAsBytes(bytes, flush: true);
+    }
+
+    await manifestFile.writeAsString(
+      jsonEncode(<String, dynamic>{
+        'packSlug': packSlug,
+        'displayName': displayName,
+        'assetSignature': assetSignature,
+        'updatedAt': DateTime.now().toIso8601String(),
+      }),
+    );
+    return packDir;
+  }
+
+  String _displayNameForBundledSamplePack(String packSlug) {
+    final normalized = packSlug.trim().replaceAll('-', '_');
+    final parts = normalized
+        .split('_')
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList(growable: false);
+    if (parts.isEmpty) return 'Sample Pack';
+    return parts.map((part) {
+      final lower = part.toLowerCase();
+      if (RegExp(r'^v\d+$').hasMatch(lower) ||
+          RegExp(r'^\d+$').hasMatch(lower)) {
+        return lower;
+      }
+      if (lower == 'cc0') return 'CC0';
+      return '${lower[0].toUpperCase()}${lower.substring(1)}';
+    }).join(' ');
+  }
+
   void _removeSampleBrowserRoot(String rootPath) {
     final normalizedRoot = p.normalize(rootPath);
     final rootPrefix =
@@ -13975,6 +14161,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _openSampleBrowser({bool promptFolderIfEmpty = false}) async {
+    await _ensureDefaultSampleBrowserRoots();
     if (promptFolderIfEmpty && _sampleBrowserRoots.isEmpty) {
       await _addSampleBrowserRootFolder();
       if (_sampleBrowserRoots.isEmpty) {
@@ -14868,7 +15055,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     if (action == 'sample_browser') {
-      await _openSampleBrowser(promptFolderIfEmpty: true);
+      await _openSampleBrowser(
+          promptFolderIfEmpty: _sampleBrowserRoots.isEmpty);
       return;
     }
     if (action == 'instrument') {

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import secrets
-
 from typing import Any, Dict
 
 from common import config
@@ -26,8 +24,6 @@ from common.users import (
 repo = BillingRepository()
 rate_limiter = RequestRateLimiter()
 producer_capture_whitelist_repo = ProducerCaptureWhitelistRepository()
-_AUTO_USERNAME_PREFIX = "mixroom-user"
-_AUTO_USERNAME_MAX_ATTEMPTS = 10
 
 
 def _path(event: Dict[str, Any]) -> str:
@@ -39,24 +35,6 @@ def _method(event: Dict[str, Any]) -> str:
     http = (request_context.get("http") or {}) if isinstance(request_context, dict) else {}
     method = http.get("method") or event.get("httpMethod") or ""
     return str(method).upper()
-
-
-def _profile_needs_generated_username(profile: Dict[str, Any]) -> bool:
-    return bool(
-        str(profile.get("accepted_terms_version") or "").strip()
-        and str(profile.get("accepted_privacy_version") or "").strip()
-        and str(profile.get("birthdate") or "").strip()
-        and not str(profile.get("username") or "").strip()
-    )
-
-
-def _generate_default_username() -> str:
-    return f"{_AUTO_USERNAME_PREFIX}{secrets.randbelow(1_000_000_000):09d}"
-
-
-def _assign_generated_username(profile: Dict[str, Any]) -> Dict[str, Any]:
-    generated = _generate_default_username()
-    return apply_user_profile_patch(profile, {"username": generated})
 
 
 def _get_username_availability(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -184,35 +162,15 @@ def _patch_me(event: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         profile = apply_user_profile_patch(base_profile, body)
-        if not _profile_needs_generated_username(profile):
-            repo.upsert_user_profile(
-                profile,
-                previous_username_lc=previous_username_lc,
-            )
-            return json_response(200, profile)
-
-        last_conflict: UsernameClaimConflictError | None = None
-        for _ in range(_AUTO_USERNAME_MAX_ATTEMPTS):
-            generated_profile = _assign_generated_username(profile)
-            try:
-                repo.upsert_user_profile(
-                    generated_profile,
-                    previous_username_lc=previous_username_lc,
-                )
-                return json_response(200, generated_profile)
-            except UsernameClaimConflictError as exc:
-                last_conflict = exc
-                continue
-        if last_conflict is not None:
-            raise last_conflict
+        repo.upsert_user_profile(
+            profile,
+            previous_username_lc=previous_username_lc,
+        )
+        return json_response(200, profile)
     except ValueError as exc:
         return json_response(400, {"error": str(exc)})
     except UsernameClaimConflictError as exc:
         return json_response(409, {"error": str(exc)})
-    return json_response(
-        503,
-        {"error": "We couldn't reserve a default username. Please try again."},
-    )
 
 
 def _delete_me(event: Dict[str, Any]) -> Dict[str, Any]:

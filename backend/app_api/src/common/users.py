@@ -251,7 +251,6 @@ def _default_onboarding_state(record: Dict[str, Any]) -> str:
         return existing
     has_required_signup_profile = bool(
         record.get("username")
-        and record.get("birthdate")
         and record.get("accepted_terms_version")
         and record.get("accepted_privacy_version")
     )
@@ -466,10 +465,7 @@ def apply_user_profile_patch(
         )
 
     if "birthdate" in patch:
-        birthdate = _normalize_birthdate(patch.get("birthdate"))
-        if birthdate is None:
-            raise ValueError("Birthdate is required.")
-        record["birthdate"] = birthdate
+        record["birthdate"] = _normalize_birthdate(patch.get("birthdate"))
 
     if "music_profile" in patch:
         record["music_profile"] = normalize_music_profile(
@@ -519,8 +515,6 @@ def apply_user_profile_patch(
         )
 
     if record.get("accepted_terms_version") and record.get("accepted_privacy_version"):
-        if not record.get("birthdate"):
-            raise ValueError("Birthdate is required to finish creating your account.")
         record["accepted_at"] = record.get("accepted_at") or now
 
     if record.get("newsletter_opt_in"):

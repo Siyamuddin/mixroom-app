@@ -38,7 +38,8 @@ class _AuthGateState extends State<AuthGate> {
     if (!appUser.supportsRemoteProfileEdits || profile == null) {
       return false;
     }
-    return !profile.isSignupComplete;
+    final username = (profile.username ?? '').trim();
+    return !profile.isSignupComplete || username.isEmpty;
   }
 
   Future<void> _handleRequiredProfileBack(AuthUserProfile user) async {
@@ -673,6 +674,14 @@ class _RequiredProfileCompletionGateState
     });
   }
 
+  void _clearBirthdate() {
+    setState(() {
+      _selectedBirthdateUtc = null;
+      _birthdateController.clear();
+      _inlineError = null;
+    });
+  }
+
   Future<String?> _checkUsernameAvailability(String username) async {
     final currentUsername =
         (widget.profile.username ?? '').trim().toLowerCase();
@@ -724,8 +733,12 @@ class _RequiredProfileCompletionGateState
       return;
     }
     final birthdate = _selectedBirthdateUtc;
-    if (birthdate == null) {
-      setState(() => _inlineError = 'Please select your birthday.');
+    final latestAllowedBirthdate = _latestAllowedBirthdateUtc();
+    if (birthdate != null && birthdate.isAfter(latestAllowedBirthdate)) {
+      setState(() {
+        _inlineError =
+            'You must be at least ${LegalConfig.minimumSignupAgeYears} years old to use Mixroom.';
+      });
       return;
     }
 
@@ -752,7 +765,7 @@ class _RequiredProfileCompletionGateState
             : widget.user.displayName,
         givenName: widget.profile.givenName,
         familyName: widget.profile.familyName,
-        birthdate: _formatBirthdate(birthdate),
+        birthdate: birthdate == null ? null : _formatBirthdate(birthdate),
         musicProfile: _musicProfileValue,
         newsletterOptIn: _newsletterOptIn,
         syncImmediately: false,
@@ -765,27 +778,20 @@ class _RequiredProfileCompletionGateState
             : widget.user.displayName,
         givenName: widget.profile.givenName,
         familyName: widget.profile.familyName,
-        birthdate: _formatBirthdate(birthdate),
+        birthdate: birthdate == null ? null : _formatBirthdate(birthdate),
         musicProfile: _musicProfileValue,
         newsletterOptIn: _newsletterOptIn,
       );
       if (!mounted) return;
       final nextProfile = appUser.current;
-      final expectedMusicProfile =
-          (_musicProfileValue ?? '').trim().toLowerCase();
-      final persistedMusicProfile =
-          (nextProfile?.musicProfile ?? '').trim().toLowerCase();
-      final missingExpectedMusicProfile = expectedMusicProfile.isNotEmpty &&
-          persistedMusicProfile != expectedMusicProfile;
+      final persistedUsername = (nextProfile?.username ?? '').trim();
       if (nextProfile == null ||
           !nextProfile.isSignupComplete ||
-          missingExpectedMusicProfile) {
+          persistedUsername.isEmpty) {
         setState(() {
-          _inlineError = missingExpectedMusicProfile
-              ? 'Mixroom could not save your music profile. Please try again.'
-              : (appUser.lastError ?? '').trim().isNotEmpty
-                  ? appUser.lastError
-                  : 'Mixroom could not finish creating your account. Please try again.';
+          _inlineError = (appUser.lastError ?? '').trim().isNotEmpty
+              ? appUser.lastError
+              : 'Mixroom could not finish creating your account. Please try again.';
         });
       }
     } catch (e) {
@@ -905,12 +911,49 @@ class _RequiredProfileCompletionGateState
                                       context,
                                       'Birthday (yyyy.mm.dd)',
                                     ),
+                                    hintText: L10n.translate(
+                                      context,
+                                      'Birthday (optional)',
+                                    ),
                                     readOnly: true,
                                     onTap: busy ? null : _pickBirthdate,
-                                    suffix: SvgPicture.asset(
-                                      kMixroomCalendarIconAsset,
-                                      width: 18,
-                                      height: 20,
+                                    suffix: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (_birthdateController.text
+                                            .trim()
+                                            .isNotEmpty)
+                                          IconButton(
+                                            onPressed:
+                                                busy ? null : _clearBirthdate,
+                                            icon: const Icon(
+                                              Icons.close_rounded,
+                                              color: Color(0xFFF4F4F4),
+                                              size: 18,
+                                            ),
+                                            splashRadius: 18,
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 28,
+                                              minHeight: 28,
+                                            ),
+                                          ),
+                                        GestureDetector(
+                                          onTap: busy ? null : _pickBirthdate,
+                                          behavior:
+                                              HitTestBehavior.translucent,
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(
+                                              right: 4,
+                                            ),
+                                            child: SvgPicture.asset(
+                                              kMixroomCalendarIconAsset,
+                                              width: 18,
+                                              height: 20,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],

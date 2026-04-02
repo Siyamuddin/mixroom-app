@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Last updated: 2026-03-08
+Last updated: 2026-04-02
 
 This document tracks third-party software and content used by Mixroom. It is
 intended as a central index for license and attribution obligations.
@@ -50,6 +50,15 @@ Mixroom provides an in-app open-source license viewer through Flutter's
    - Release status: treat as blocked for public release until provenance,
      redistribution rights, and required attribution are documented in-repo.
    - Usage: bundled SFZ presets + WAV one-shots for electronic drum kits.
+
+3. Mixroom Starter Kit v1
+   - Local path: `assets/sample_packs/starter_kit_v1/`
+   - Source record: `assets/sample_packs/starter_kit_v1/LICENSES.md`
+   - Declared license basis: curated CC0 / public-domain sample bundle for beta
+   - Usage: default bundled sample pack mounted into the in-app File Browser
+   - Release requirement: keep exact upstream source URLs and downloaded archive
+     records for every included file; remove any file whose redistribution basis
+     is not clearly supportable on review
 
 ## Release Checklist
 

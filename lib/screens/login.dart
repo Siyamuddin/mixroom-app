@@ -304,9 +304,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   String? _validateBirthdate(DateTime? birthdateUtc) {
-    if (birthdateUtc == null) {
-      return 'Please select your birthday.';
-    }
+    if (birthdateUtc == null) return null;
     final latestAllowed = _latestAllowedBirthdateUtc();
     if (birthdateUtc.isAfter(latestAllowed)) {
       return 'You must be at least ${LegalConfig.minimumSignupAgeYears} years old to use Mixroom.';
@@ -361,6 +359,16 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _selectedBirthdateUtc = normalized;
       _birthdateController.text = _formatBirthdate(normalized);
+      _registerBirthdateError = null;
+      _registerInlineError = null;
+      _registerInlineInfo = null;
+    });
+  }
+
+  void _clearBirthdate() {
+    setState(() {
+      _selectedBirthdateUtc = null;
+      _birthdateController.clear();
       _registerBirthdateError = null;
       _registerInlineError = null;
       _registerInlineInfo = null;
@@ -1916,20 +1924,33 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             const SizedBox(height: 8),
             _Field(
-              label: 'Birthday',
+              label: 'Birthday (optional)',
               hint: 'Select birthday',
               controller: _birthdateController,
               readOnly: true,
               errorText: _registerBirthdateError,
               helperText:
-                  'Required. You must be at least ${LegalConfig.minimumSignupAgeYears} years old to use Mixroom.',
+                  'Optional. If you add it, you must be at least ${LegalConfig.minimumSignupAgeYears} years old to use Mixroom.',
               onTap: _pickBirthdate,
-              suffix: IconButton(
-                onPressed: _pickBirthdate,
-                icon: const Icon(
-                  Icons.calendar_month_rounded,
-                  color: Colors.white70,
-                ),
+              suffix: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_birthdateController.text.trim().isNotEmpty)
+                    IconButton(
+                      onPressed: _clearBirthdate,
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  IconButton(
+                    onPressed: _pickBirthdate,
+                    icon: const Icon(
+                      Icons.calendar_month_rounded,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 8),

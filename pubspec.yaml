@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.0+18
+version: 1.1.0+20
 
 environment:
   sdk: ^3.6.0
@@ -193,6 +193,12 @@ flutter:
     - assets/demo_projects/
     - assets/magnet-solid-full.svg
     - assets/instruments/
+    - assets/sample_packs/
+    - assets/sample_packs/starter_kit_v1/Drumset/
+    - assets/sample_packs/starter_kit_v1/FX/
+    - assets/sample_packs/starter_kit_v1/Instrument Samples/
+    - assets/sample_packs/starter_kit_v1/Loops/
+    - assets/sample_packs/starter_kit_v1/Processed Drums/
     - assets/models/
     # Enable after exporting trained models:
     # - assets/models/phi3-mini.gguf (don't use)

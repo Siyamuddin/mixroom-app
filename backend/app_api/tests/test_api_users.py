@@ -626,7 +626,7 @@ class UsersApiHandlerTests(unittest.TestCase):
         self.assertEqual(repo.upsert_calls[-1]["profile"]["music_profile"], "producer")
         self.assertIn('"music_profile": "producer"', result["body"])
 
-    def test_patch_me_generates_default_username_when_signup_completion_has_no_username(self):
+    def test_patch_me_does_not_generate_username_when_signup_completion_has_no_username(self):
         repo = _FakeRepo()
         repo._profile = {
             "user_id": "user-1",
@@ -659,28 +659,75 @@ class UsersApiHandlerTests(unittest.TestCase):
             "cognito:username": "user@example.com",
         }
 
-        with mock.patch.object(
-            users_module,
-            "_generate_default_username",
-            return_value="mixroom-user000000123",
-        ):
-            result = users_module.handler(
-                {
-                    "rawPath": "/v1/users/me",
-                    "requestContext": {"http": {"method": "PATCH"}},
-                    "body": (
-                        '{"birthdate":"1998-08-09",'
-                        '"accepted_terms_version":"2026-03-10",'
-                        '"accepted_privacy_version":"2026-03-10"}'
-                    ),
-                },
-                object(),
-            )
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me",
+                "requestContext": {"http": {"method": "PATCH"}},
+                "body": (
+                    '{"birthdate":"1998-08-09",'
+                    '"accepted_terms_version":"2026-03-10",'
+                    '"accepted_privacy_version":"2026-03-10"}'
+                ),
+            },
+            object(),
+        )
 
         self.assertEqual(result["statusCode"], 200)
         payload = json.loads(result["body"])
-        self.assertEqual(payload.get("username"), "mixroom-user000000123")
-        self.assertEqual(payload.get("onboarding_state"), "signup_complete")
+        self.assertEqual(payload.get("username"), None)
+        self.assertEqual(payload.get("onboarding_state"), "profile_ready")
+
+    def test_patch_me_does_not_generate_username_without_birthdate(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-1",
+            "email": "user@example.com",
+            "email_lc": "user@example.com",
+            "display_name": "User",
+            "email_verified": True,
+            "cognito_username": "user@example.com",
+            "auth_provider": "email",
+            "username": None,
+            "username_lc": None,
+            "music_profile": None,
+            "profile_status": "active",
+            "onboarding_state": "bootstrap_only",
+            "accepted_terms_version": None,
+            "accepted_privacy_version": None,
+            "accepted_at": None,
+            "newsletter_opt_in": False,
+            "newsletter_opt_in_at": None,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "last_seen_at": "2026-01-01T00:00:00+00:00",
+            "schema_version": 4,
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {
+            "sub": "user-1",
+            "email": "user@example.com",
+            "email_verified": "true",
+            "cognito:username": "user@example.com",
+        }
+
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me",
+                "requestContext": {"http": {"method": "PATCH"}},
+                "body": (
+                    '{"birthdate":null,'
+                    '"accepted_terms_version":"2026-03-10",'
+                    '"accepted_privacy_version":"2026-03-10"}'
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        self.assertEqual(payload.get("birthdate"), None)
+        self.assertEqual(payload.get("username"), None)
+        self.assertEqual(payload.get("onboarding_state"), "bootstrap_only")
 
     def test_delete_me_removes_account_for_free_user(self):
         repo = _FakeRepo()

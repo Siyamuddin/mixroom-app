@@ -1,0 +1,26 @@
+{
+  "id": "starter_kit_v1",
+  "name": "Starter Kit v1",
+  "version": 1,
+  "releasedAt": "2026-04-02",
+  "license": "Curated third-party CC0/public-domain sample bundle. See LICENSES.md.",
+  "formats": {
+    "flac": 117,
+    "mp3": 18
+  },
+  "audioFileCount": 135,
+  "categories": [
+    "Drumset",
+    "Processed Drums",
+    "Loops",
+    "FX",
+    "Instrument Samples"
+  ],
+  "sources": [
+    "SignatureSounds.org",
+    "SM Drums",
+    "Andrew Wainwright / ccMixter",
+    "Virtuosity Drums",
+    "VSCO 2 Community Edition"
+  ]
+}
