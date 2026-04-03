@@ -1442,7 +1442,6 @@ double JuceEngine::getExportProgress() const
 
 juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOptions &rawOptions)
 {
-    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     const auto options = sanitiseExportOptions(rawOptions);
     exportInProgressAtomic.store(true, std::memory_order_relaxed);
     exportProgressAtomic.store(0.0, std::memory_order_relaxed);
@@ -1456,6 +1455,24 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
         }
         std::atomic<bool> &active;
     } exportProgressGuard(exportInProgressAtomic);
+
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
+    const bool hadLiveCallback = (metronomeCallback != nullptr);
+    if (hadLiveCallback)
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+
+    struct LiveCallbackRestoreGuard
+    {
+        JuceEngine &engine;
+        bool shouldRestore = false;
+
+        ~LiveCallbackRestoreGuard()
+        {
+            if (shouldRestore && engine.metronomeCallback != nullptr)
+                engine.deviceManager.addAudioCallback(engine.metronomeCallback.get());
+        }
+    } liveCallbackRestoreGuard{*this, hadLiveCallback};
 
     if (options.format == "mp3")
     {
@@ -1574,7 +1591,6 @@ juce::String JuceEngine::exportTrack(int trackIndex,
                                      const juce::File &outFile,
                                      const ExportOptions &rawOptions)
 {
-    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     const auto options = sanitiseExportOptions(rawOptions);
     exportInProgressAtomic.store(true, std::memory_order_relaxed);
     exportProgressAtomic.store(0.0, std::memory_order_relaxed);
@@ -1588,6 +1604,24 @@ juce::String JuceEngine::exportTrack(int trackIndex,
         }
         std::atomic<bool> &active;
     } exportProgressGuard(exportInProgressAtomic);
+
+    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
+
+    const bool hadLiveCallback = (metronomeCallback != nullptr);
+    if (hadLiveCallback)
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+
+    struct LiveCallbackRestoreGuard
+    {
+        JuceEngine &engine;
+        bool shouldRestore = false;
+
+        ~LiveCallbackRestoreGuard()
+        {
+            if (shouldRestore && engine.metronomeCallback != nullptr)
+                engine.deviceManager.addAudioCallback(engine.metronomeCallback.get());
+        }
+    } liveCallbackRestoreGuard{*this, hadLiveCallback};
 
     if (options.format == "mp3")
     {
@@ -2930,6 +2964,7 @@ void JuceEngine::setRowGainAutomationPoints(
     auto safePoints = points;
     sanitiseAutomationPoints(safePoints, 1.0f);
     rows[(size_t)row].gainAutomationPoints = std::move(safePoints);
+    rows[(size_t)row].lastAppliedGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 void JuceEngine::setRowPanAutomationPoints(
@@ -2944,6 +2979,7 @@ void JuceEngine::setRowPanAutomationPoints(
     auto safePoints = points;
     sanitiseAutomationPoints(safePoints, 1.0f);
     rows[(size_t)row].panAutomationPoints = std::move(safePoints);
+    rows[(size_t)row].lastAppliedPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 void JuceEngine::setMasterEffectAutomationPoints(
@@ -3018,6 +3054,7 @@ void JuceEngine::setMasterGainAutomationPoints(
     auto safePoints = points;
     sanitiseAutomationPoints(safePoints, 1.0f);
     masterGainAutomationPoints = std::move(safePoints);
+    lastAppliedMasterGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 void JuceEngine::setMasterPanAutomationPoints(
@@ -3028,6 +3065,7 @@ void JuceEngine::setMasterPanAutomationPoints(
     auto safePoints = points;
     sanitiseAutomationPoints(safePoints, 1.0f);
     masterPanAutomationPoints = std::move(safePoints);
+    lastAppliedMasterPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 void JuceEngine::applyTrackEffectAutomationAtCurrentBlockStart()
@@ -3043,6 +3081,7 @@ void JuceEngine::setAutomationTransport(double timeSeconds)
 
 void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
 {
+    constexpr float kAutomationEpsilon = 1.0e-4f;
     const double timeMs = juce::jmax(0.0, timeSeconds) * 1000.0;
 
     for (int rowIndex = 0; rowIndex < (int)rows.size(); ++rowIndex)
@@ -3055,8 +3094,13 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 0.0f,
                 1.0f,
                 (float)evaluateAutomationValueAtMs(rowState.gainAutomationPoints, timeMs, 0.0));
-            const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
-            setRowGain(rowIndex, gain);
+            if (!std::isfinite(rowState.lastAppliedGainAutomationNormalized) ||
+                std::abs(normalized - rowState.lastAppliedGainAutomationNormalized) > kAutomationEpsilon)
+            {
+                const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
+                setRowGain(rowIndex, gain);
+                rowState.lastAppliedGainAutomationNormalized = normalized;
+            }
         }
 
         if (!rowState.panAutomationPoints.empty())
@@ -3065,13 +3109,17 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 0.0f,
                 1.0f,
                 (float)evaluateAutomationValueAtMs(rowState.panAutomationPoints, timeMs, 0.5));
-            setRowPan(rowIndex, pan);
+            if (!std::isfinite(rowState.lastAppliedPanAutomationNormalized) ||
+                std::abs(pan - rowState.lastAppliedPanAutomationNormalized) > kAutomationEpsilon)
+            {
+                setRowPan(rowIndex, pan);
+                rowState.lastAppliedPanAutomationNormalized = pan;
+            }
         }
 
         if (rowState.effectAutomationLanes.empty())
             continue;
 
-        compactRowFxChain(rowIndex);
         for (auto &lane : rowState.effectAutomationLanes)
         {
             if (lane.effectIndex < 0 || lane.effectIndex >= rowState.fxChain.size())
@@ -3085,6 +3133,9 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 0.0f,
                 1.0f,
                 (float)evaluateAutomationValueAtMs(lane.points, timeMs, 0.0));
+            if (std::isfinite(lane.lastAppliedNormalized) &&
+                std::abs(normalized - lane.lastAppliedNormalized) <= kAutomationEpsilon)
+                continue;
 
             const float value = lane.minValue + (lane.maxValue - lane.minValue) * normalized;
             setTrackEffectParameter(
@@ -3092,6 +3143,7 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 lane.effectIndex,
                 lane.paramId,
                 juce::var((double)value));
+            lane.lastAppliedNormalized = normalized;
         }
     }
 
@@ -3101,8 +3153,13 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
             0.0f,
             1.0f,
             (float)evaluateAutomationValueAtMs(masterGainAutomationPoints, timeMs, 0.0));
-        const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
-        setMasterGain(gain);
+        if (!std::isfinite(lastAppliedMasterGainAutomationNormalized) ||
+            std::abs(normalized - lastAppliedMasterGainAutomationNormalized) > kAutomationEpsilon)
+        {
+            const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
+            setMasterGain(gain);
+            lastAppliedMasterGainAutomationNormalized = normalized;
+        }
     }
 
     if (!masterPanAutomationPoints.empty())
@@ -3111,13 +3168,17 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
             0.0f,
             1.0f,
             (float)evaluateAutomationValueAtMs(masterPanAutomationPoints, timeMs, 0.5));
-        setMasterPan(pan);
+        if (!std::isfinite(lastAppliedMasterPanAutomationNormalized) ||
+            std::abs(pan - lastAppliedMasterPanAutomationNormalized) > kAutomationEpsilon)
+        {
+            setMasterPan(pan);
+            lastAppliedMasterPanAutomationNormalized = pan;
+        }
     }
 
     if (masterEffectAutomationLanes.empty())
         return;
 
-    compactMasterFxChain();
     for (auto &lane : masterEffectAutomationLanes)
     {
         if (lane.effectIndex < 0 || masterEffectChain == nullptr ||
@@ -3132,11 +3193,15 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
             0.0f,
             1.0f,
             (float)evaluateAutomationValueAtMs(lane.points, timeMs, 0.0));
+        if (std::isfinite(lane.lastAppliedNormalized) &&
+            std::abs(normalized - lane.lastAppliedNormalized) <= kAutomationEpsilon)
+            continue;
         const float value = lane.minValue + (lane.maxValue - lane.minValue) * normalized;
         setMasterEffectParameter(
             lane.effectIndex,
             lane.paramId,
             juce::var((double)value));
+        lane.lastAppliedNormalized = normalized;
     }
 }
 
@@ -3144,6 +3209,10 @@ void JuceEngine::resetTrackEffectAutomationLatches()
 {
     for (int row = 0; row < (int)rows.size(); ++row)
         resetTrackEffectAutomationLatchesForRow(row);
+    for (auto &lane : masterEffectAutomationLanes)
+        lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+    lastAppliedMasterGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+    lastAppliedMasterPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 void JuceEngine::resetTrackEffectAutomationLatchesForRow(int row)
@@ -3154,6 +3223,8 @@ void JuceEngine::resetTrackEffectAutomationLatchesForRow(int row)
     auto &lanes = rows[(size_t)row].effectAutomationLanes;
     for (auto &lane : lanes)
         lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+    rows[(size_t)row].lastAppliedGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+    rows[(size_t)row].lastAppliedPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 // ============================================================

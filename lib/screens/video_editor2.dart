@@ -3671,24 +3671,46 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
     );
 
     if (savedPath != null) {
+      String? resolvedSavedDisplayName;
       if (Platform.isAndroid) {
-        final savedDisplayName =
+        resolvedSavedDisplayName =
             await ExportSaveDialog.resolveSavedDisplayNameFromPlatform(
           savedPath,
         );
-        if (savedDisplayName != null &&
-            savedDisplayName.isNotEmpty &&
-            savedDisplayName.toLowerCase() !=
+        if (mounted &&
+            resolvedSavedDisplayName != null &&
+            resolvedSavedDisplayName.isNotEmpty &&
+            resolvedSavedDisplayName.toLowerCase() !=
                 suggestedFileName.trim().toLowerCase()) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Name already existed. Saved as "$savedDisplayName".',
+                'Name already existed. Saved as "$resolvedSavedDisplayName".',
+              ),
+            ),
+          );
+        }
+
+        final canAccessSavedMedia = await _ensureAndroidMediaLibraryAccess(
+          rationale:
+              'Mixroom needs access to media files so the exported file can be previewed, shared, or opened from the success screen on Android.',
+        );
+        if (!canAccessSavedMedia && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                L10n.translate(
+                  context,
+                  'Media access is required to preview or open the saved export.',
+                ),
               ),
             ),
           );
         }
       }
+
+      if (!mounted) return;
+
       // final success_str = L10n.translate(context, 'Exported file saved!');
       // ScaffoldMessenger.of(context).showSnackBar(
       //   SnackBar(content: Text(success_str)),// at: $savedPath')),
@@ -3699,7 +3721,7 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
           builder: (context) => ExportSuccessScreen(
             filePath: exportPath,
             savedFilePath: savedPath,
-            savedFileName: suggestedFileName,
+            savedFileName: resolvedSavedDisplayName ?? suggestedFileName,
             isVideo: !_audioOnly,
           ),
         ),
@@ -3749,10 +3771,63 @@ class _VideoEditorScreenState2 extends State<VideoEditorScreen2>
         );
       }
     } else {
+      if (!mounted) return;
       final fail_str = L10n.translate(context, 'Export canceled or failed.');
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(fail_str)));
     }
+  }
+
+  Future<bool> _ensureAndroidMediaLibraryAccess({
+    String? rationale,
+  }) async {
+    if (!Platform.isAndroid) return true;
+
+    final audioStatus = await Permission.audio.request();
+    if (audioStatus.isGranted || audioStatus.isLimited) {
+      return true;
+    }
+    PermissionStatus storageStatus = PermissionStatus.denied;
+    try {
+      storageStatus = await Permission.storage.request();
+    } catch (_) {}
+    if (storageStatus.isGranted || storageStatus.isLimited) {
+      return true;
+    }
+
+    if (!mounted) return false;
+    final openSettingsRequested = await showDialog<bool>(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: Text(L10n.translate(ctx, 'Allow media access')),
+              content: Text(
+                L10n.translate(
+                  ctx,
+                  rationale ??
+                      'Mixroom needs access to media files to preview and open saved exports on Android.',
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(L10n.translate(ctx, 'Not now')),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text(L10n.translate(ctx, 'Open settings')),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+    if (!openSettingsRequested) {
+      return false;
+    }
+
+    await openAppSettings();
+    return false;
   }
 
   Widget _buildFloatingTransportBar() {
@@ -6990,12 +7065,38 @@ class ExportSuccessScreen extends StatelessWidget {
     return normalizedFilePath;
   }
 
-  String _resolvedPreviewPath() {
+  String? _resolvedSavedPathForDisplay() {
+    final saved = savedFilePath?.trim();
+    if (saved == null || saved.isEmpty) return null;
+
     final savedLocal = _resolveSavedLocalPath();
     if (savedLocal != null && savedLocal.isNotEmpty) {
       return savedLocal;
     }
-    return _normalizedCandidatePath(filePath);
+
+    final normalized = _normalizedCandidatePath(saved);
+    if (normalized.isNotEmpty) {
+      return normalized;
+    }
+    return null;
+  }
+
+  String _resolvedPreviewPath() {
+    // Keep the in-app preview pinned to the temp export when it still exists.
+    // On Android, saved exports may resolve to Downloads/document-provider
+    // locations that are openable via intents but not directly readable by
+    // ExoPlayer/FFmpeg through a raw file path.
+    final normalizedFilePath = _normalizedCandidatePath(filePath);
+    if (!_isUriLikePath(normalizedFilePath) &&
+        File(normalizedFilePath).existsSync()) {
+      return normalizedFilePath;
+    }
+
+    final savedLocal = _resolveSavedLocalPath();
+    if (savedLocal != null && savedLocal.isNotEmpty) {
+      return savedLocal;
+    }
+    return normalizedFilePath;
   }
 
   Future<void> _shareFile(BuildContext context) async {
@@ -7028,8 +7129,8 @@ class ExportSuccessScreen extends StatelessWidget {
     final savedLocalPath = _resolveSavedLocalPath();
     final hasSavedTarget = saved != null && saved.isNotEmpty;
     final candidates = <String>[
-      if (savedLocalPath != null && savedLocalPath.isNotEmpty) savedLocalPath,
       if (saved != null && saved.isNotEmpty) _normalizedCandidatePath(saved),
+      if (savedLocalPath != null && savedLocalPath.isNotEmpty) savedLocalPath,
       if (!hasSavedTarget) _normalizedCandidatePath(filePath),
     ];
 
@@ -7339,6 +7440,43 @@ class ExportSuccessScreen extends StatelessWidget {
                         displayName: _resolvedFileName(),
                         isVideo: isVideo,
                       ),
+                      if (_resolvedSavedPathForDisplay() != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                L10n.translate(context, 'Saved file'),
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              SelectableText(
+                                _resolvedSavedPathForDisplay()!,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       Row(
                         children: [

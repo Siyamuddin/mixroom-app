@@ -37,39 +37,40 @@ class ExportSaveDialog {
   }) async {
     if (kIsWeb) return null;
 
-    if (Platform.isAndroid || Platform.isIOS) {
+    if (Platform.isAndroid) {
+      final expectedExtension = _resolveExpectedExtension(
+        suggestedFileName: suggestedFileName,
+        sourceFilePath: sourceFilePath,
+      );
+      final mimeType = _resolveMimeType(expectedExtension);
+      try {
+        final savedPath = await _savedExportsChannel.invokeMethod<String>(
+          'saveExportedFile',
+          <String, dynamic>{
+            'sourceFilePath': sourceFilePath,
+            'suggestedFileName': suggestedFileName,
+            'mimeType': mimeType,
+          },
+        );
+        final trimmed = savedPath?.trim();
+        if (trimmed != null && trimmed.isNotEmpty) {
+          return trimmed;
+        }
+      } catch (_) {
+        return null;
+      }
+      return null;
+    }
+
+    if (Platform.isIOS) {
       final params = SaveFileDialogParams(
         sourceFilePath: sourceFilePath,
         fileName: suggestedFileName,
       );
       final savedPath = await FlutterFileDialog.saveFile(params: params);
-      if (!Platform.isAndroid || savedPath == null || savedPath.isEmpty) {
+      if (savedPath == null || savedPath.isEmpty) {
         return savedPath;
       }
-
-      final expectedExtension = _resolveExpectedExtension(
-        suggestedFileName: suggestedFileName,
-        sourceFilePath: sourceFilePath,
-      );
-      if (expectedExtension.isEmpty) {
-        return savedPath;
-      }
-
-      try {
-        final normalizedPath = await _savedExportsChannel.invokeMethod<String>(
-          'normalizeSavedExportName',
-          <String, dynamic>{
-            'path': savedPath,
-            'expectedExtension': expectedExtension,
-          },
-        );
-        if (normalizedPath != null && normalizedPath.trim().isNotEmpty) {
-          return normalizedPath;
-        }
-      } catch (_) {
-        // Keep the original saved path if rename normalization is unsupported.
-      }
-
       return savedPath;
     }
 
@@ -112,6 +113,25 @@ class ExportSaveDialog {
       return fromSuggested;
     }
     return extensionFrom(sourceFilePath);
+  }
+
+  static String _resolveMimeType(String extension) {
+    switch (extension.trim().toLowerCase()) {
+      case 'mp3':
+        return 'audio/mpeg';
+      case 'wav':
+        return 'audio/x-wav';
+      case 'm4a':
+        return 'audio/mp4';
+      case 'aac':
+        return 'audio/aac';
+      case 'flac':
+        return 'audio/flac';
+      case 'ogg':
+        return 'audio/ogg';
+      default:
+        return '*/*';
+    }
   }
 
   static String? resolveSavedDisplayName(String? rawPath) {
@@ -180,5 +200,46 @@ class ExportSaveDialog {
       // Fall back to parsing if native lookup is unavailable.
     }
     return fallback;
+  }
+
+  static Future<String?> materializeSavedPreviewPathFromPlatform(
+    String? rawPath,
+  ) async {
+    final input = rawPath?.trim();
+    if (input == null || input.isEmpty) {
+      return null;
+    }
+    if (kIsWeb || !Platform.isAndroid) {
+      return input;
+    }
+    try {
+      final resolved = await _savedExportsChannel.invokeMethod<String>(
+        'materializeSavedExportForPreview',
+        <String, dynamic>{'path': input},
+      );
+      final normalized = resolved?.trim();
+      if (normalized != null && normalized.isNotEmpty) {
+        return normalized;
+      }
+    } catch (_) {
+      // Fall back to the raw path if native preview materialization is unavailable.
+    }
+    return null;
+  }
+
+  static Future<bool> shareSavedExportFromPlatform(String? rawPath) async {
+    final input = rawPath?.trim();
+    if (input == null || input.isEmpty || kIsWeb || !Platform.isAndroid) {
+      return false;
+    }
+    try {
+      final shared = await _savedExportsChannel.invokeMethod<bool>(
+        'shareSavedExport',
+        <String, dynamic>{'path': input},
+      );
+      return shared == true;
+    } catch (_) {
+      return false;
+    }
   }
 }

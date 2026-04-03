@@ -260,7 +260,12 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         setup.outputDeviceName = defaultOutputName.isNotEmpty() ? defaultOutputName
                                                                 : availableOutputNames[0];
     }
-    if (!setup.useDefaultOutputChannels && setup.outputChannels.isZero())
+    if (desiredInputChannels <= 0)
+    {
+        setup.useDefaultOutputChannels = true;
+        setup.outputChannels.clear();
+    }
+    else if (!setup.useDefaultOutputChannels && setup.outputChannels.isZero())
         setup.useDefaultOutputChannels = true;
 
 #if JUCE_ANDROID
@@ -402,7 +407,7 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
 
     desiredInputOpenChannels.store(desiredInputChannels, std::memory_order_relaxed);
-    armOutputSafetyForCurrentRoute();
+    armOutputSafetyForCurrentRoute(true);
     logCurrentAudioDeviceState(reason);
     return true;
 }
@@ -420,8 +425,8 @@ void JuceEngine::captureRecordingRestorePlaybackSetupIfNeeded(
         return;
 
     auto setup = currentSetup;
-    if (!setup.useDefaultOutputChannels && setup.outputChannels.isZero())
-        setup.useDefaultOutputChannels = true;
+    setup.useDefaultOutputChannels = true;
+    setup.outputChannels.clear();
     setup.useDefaultInputChannels = false;
     setup.inputChannels.clear();
 
@@ -443,8 +448,8 @@ bool JuceEngine::restoreRecordingPlaybackSetup(const juce::String &reason)
         setup.outputDeviceName = defaultOutputName.isNotEmpty() ? defaultOutputName
                                                                 : availableOutputNames[0];
     }
-    if (!setup.useDefaultOutputChannels && setup.outputChannels.isZero())
-        setup.useDefaultOutputChannels = true;
+    setup.useDefaultOutputChannels = true;
+    setup.outputChannels.clear();
 
     setup.useDefaultInputChannels = false;
     setup.inputChannels.clear();
@@ -480,22 +485,31 @@ bool JuceEngine::restoreRecordingPlaybackSetup(const juce::String &reason)
     desiredInputOpenChannels.store(0, std::memory_order_relaxed);
     recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
     hasRecordingRestorePlaybackSetup = false;
-    armOutputSafetyForCurrentRoute();
+    armOutputSafetyForCurrentRoute(true);
     logCurrentAudioDeviceState(reason);
     return true;
 }
 
 void JuceEngine::requestAudioDeviceRefreshAsync(const juce::String &reason)
 {
-    bool expected = false;
-    if (!audioRouteRefreshPending.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-        return;
+    audioRouteRefreshPending.store(true, std::memory_order_release);
+    flushDeferredAudioRouteRefreshAsync(reason);
+}
 
+void JuceEngine::flushDeferredAudioRouteRefreshAsync(const juce::String &reason)
+{
     juce::MessageManager::callAsync([this, reason]
                                     {
-        audioRouteRefreshPending.store(false, std::memory_order_release);
-
         if (!engineInitialized)
+        {
+            audioRouteRefreshPending.store(false, std::memory_order_release);
+            return;
+        }
+
+        if (exportInProgressAtomic.load(std::memory_order_relaxed))
+            return;
+
+        if (!audioRouteRefreshPending.exchange(false, std::memory_order_acq_rel))
             return;
 
         const int requestedInputs = desiredInputOpenChannels.load(std::memory_order_relaxed);
@@ -554,8 +568,8 @@ bool JuceEngine::hardResetPlaybackOnlyRoute(const juce::String &reason)
         setup.outputDeviceName = defaultOutputName.isNotEmpty() ? defaultOutputName
                                                                 : availableOutputNames[0];
     }
-    if (!setup.useDefaultOutputChannels && setup.outputChannels.isZero())
-        setup.useDefaultOutputChannels = true;
+    setup.useDefaultOutputChannels = true;
+    setup.outputChannels.clear();
 
     setup.useDefaultInputChannels = false;
     setup.inputChannels.clear();
@@ -577,7 +591,7 @@ bool JuceEngine::hardResetPlaybackOnlyRoute(const juce::String &reason)
     if (sr > 1000.0)
         hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
 
-    armOutputSafetyForCurrentRoute();
+    armOutputSafetyForCurrentRoute(true);
     logCurrentAudioDeviceState(reason);
     return true;
 }
@@ -604,7 +618,7 @@ void JuceEngine::changeListenerCallback(juce::ChangeBroadcaster *source)
         hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
 
     logCurrentAudioDeviceState("device-change");
-    armOutputSafetyForCurrentRoute();
+    armOutputSafetyForCurrentRoute(true);
 
     auto *device = deviceManager.getCurrentAudioDevice();
     const int desiredInputs = desiredInputOpenChannels.load(std::memory_order_relaxed);
@@ -634,12 +648,21 @@ void JuceEngine::changeListenerCallback(juce::ChangeBroadcaster *source)
         requestAudioDeviceRefreshAsync("device-change");
 }
 
-void JuceEngine::armOutputSafetyForCurrentRoute() noexcept
+void JuceEngine::armOutputSafetyForCurrentRoute(bool fadeIn) noexcept
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
-    armOutputSafetyFadeIn(getKnownDeviceSampleRate(
-        deviceManager,
-        hostSampleRateAtomic.load(std::memory_order_relaxed)));
+    outputSafetyLastSample = {0.0f, 0.0f};
+    outputSafetyMuteSamplesRemaining = 0;
+    if (fadeIn)
+    {
+        armOutputSafetyFadeIn(getKnownDeviceSampleRate(
+            deviceManager,
+            hostSampleRateAtomic.load(std::memory_order_relaxed)));
+        return;
+    }
+
+    outputSafetyFadeSamplesTotal = 0;
+    outputSafetyFadeSamplesRemaining = 0;
 }
 
 void JuceEngine::refreshMidiInputCallbacks()
@@ -1115,7 +1138,7 @@ bool JuceEngine::loadClip(int clipId, int rowId, const juce::File &file,
         file,
         &blockTransportStartSec,
         &hostSampleRateAtomic,
-        &isPlayingAtomic);
+        &blockIsPlayingAtomic);
 
     player->setTimeline(safeStartSec, resolvedLengthSec, safeOffsetSec);
     player->setStretchOptions(1.0, false);
@@ -1202,7 +1225,7 @@ bool JuceEngine::loadMidiClip(int clipId,
     auto player = std::make_unique<TimelineMidiClipProcessor>(
         &blockTransportStartSec,
         &hostSampleRateAtomic,
-        &isPlayingAtomic);
+        &blockIsPlayingAtomic);
     player->setTimeline(safeStartSec, resolvedLengthSec, safeOffsetSec);
     player->setStretchOptions(1.0, true);
     player->setMidiData(notes, instrumentId, instrumentName, params, safeSourceTempo);
@@ -1290,6 +1313,56 @@ bool JuceEngine::setLiveMidiInputTargetClip(int clipId)
     const std::lock_guard<std::mutex> lock(liveMidiInputQueueMutex);
     liveMidiInputPendingForAudio.clear();
     liveMidiInputPendingForFlutter.clear();
+    return true;
+}
+
+bool JuceEngine::playPreviewMidiNote(int clipId,
+                                     int pitch,
+                                     float velocity,
+                                     int durationMs)
+{
+    if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
+        return false;
+
+    auto &c = clips[(size_t)clipId];
+    if (!c.alive || !c.isMidi || c.playerNode == nullptr)
+        return false;
+
+    auto *proc = dynamic_cast<TimelineMidiClipProcessor *>(c.playerNode->getProcessor());
+    if (proc == nullptr)
+        return false;
+
+    const int safePitch = juce::jlimit(0, 127, pitch);
+    const float safeVelocity = juce::jlimit(0.0f, 1.0f, velocity);
+    const int safeDurationMs = juce::jlimit(60, 4000, durationMs);
+
+    proc->enqueueLiveMidiEvent(false, 1, safePitch, 0.0f);
+    proc->enqueueLiveMidiEvent(true, 1, safePitch, safeVelocity);
+    juce::Timer::callAfterDelay(
+        safeDurationMs,
+        [clipId, safePitch]
+        {
+            juce::MessageManager::callAsync(
+                [clipId, safePitch]
+                {
+                    auto &engine = JuceEngine::get();
+                    if (engine.clips.empty() ||
+                        clipId < 0 ||
+                        clipId >= (int)engine.clips.size())
+                        return;
+
+                    auto &clip = engine.clips[(size_t)clipId];
+                    if (!clip.alive || !clip.isMidi || clip.playerNode == nullptr)
+                        return;
+
+                    auto *activeProc = dynamic_cast<TimelineMidiClipProcessor *>(
+                        clip.playerNode->getProcessor());
+                    if (activeProc == nullptr)
+                        return;
+
+                    activeProc->enqueueLiveMidiEvent(false, 1, safePitch, 0.0f);
+                });
+        });
     return true;
 }
 
@@ -1677,6 +1750,15 @@ double getGraphTailLengthSeconds(juce::AudioProcessorGraph &graph)
     return juce::jlimit(0.0, 20.0, tailSeconds);
 }
 
+void prepareGraphForOfflineRender(juce::AudioProcessorGraph &graph,
+                                  double sampleRate,
+                                  int blockSize)
+{
+    graph.releaseResources();
+    graph.prepareToPlay(sampleRate, blockSize);
+    graph.reset();
+}
+
 void applyTpdfDither(juce::AudioBuffer<float> &buffer, int bitDepth)
 {
     if (bitDepth >= 32)
@@ -1756,20 +1838,38 @@ double JuceEngine::getExportProgress() const
 
 juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOptions &rawOptions)
 {
-    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     const auto options = sanitiseExportOptions(rawOptions);
     exportInProgressAtomic.store(true, std::memory_order_relaxed);
     exportProgressAtomic.store(0.0, std::memory_order_relaxed);
 
     struct ExportProgressGuard
     {
-        explicit ExportProgressGuard(std::atomic<bool> &activeRef) : active(activeRef) {}
+        explicit ExportProgressGuard(JuceEngine &engineRef) : engine(engineRef) {}
         ~ExportProgressGuard()
         {
-            active.store(false, std::memory_order_relaxed);
+            engine.exportInProgressAtomic.store(false, std::memory_order_relaxed);
+            engine.flushDeferredAudioRouteRefreshAsync("exportMix:complete");
         }
-        std::atomic<bool> &active;
-    } exportProgressGuard(exportInProgressAtomic);
+        JuceEngine &engine;
+    } exportProgressGuard(*this);
+
+    const bool hadLiveCallback = (metronomeCallback != nullptr);
+    struct LiveCallbackRestoreGuard
+    {
+        JuceEngine &engine;
+        bool shouldRestore = false;
+
+        ~LiveCallbackRestoreGuard()
+        {
+            if (shouldRestore && engine.metronomeCallback != nullptr)
+                engine.deviceManager.addAudioCallback(engine.metronomeCallback.get());
+        }
+    } liveCallbackRestoreGuard{*this, hadLiveCallback};
+
+    if (hadLiveCallback)
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (options.format == "mp3")
     {
@@ -1813,10 +1913,12 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
     const double previousHostRate = hostSampleRateAtomic.load(std::memory_order_relaxed);
     const double previousTransport = transportSec.load(std::memory_order_relaxed);
     const bool wasPlaying = isPlayingAtomic.exchange(true, std::memory_order_relaxed);
+    const bool previousBlockPlaying = blockIsPlayingAtomic.exchange(true, std::memory_order_relaxed);
 
     // Prepare graph for offline SR/BS
     hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
-    graph.prepareToPlay(sr, bs);
+    blockTransportStartSec.store(0.0, std::memory_order_relaxed);
+    prepareGraphForOfflineRender(graph, sr, bs);
 
     // set transport to 0 for offline render
     transportSec.store(0.0, std::memory_order_relaxed);
@@ -1826,17 +1928,20 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
     if (totalSamples <= 0)
     {
         exportProgressAtomic.store(1.0, std::memory_order_relaxed);
-        graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
-                            liveBlockSize > 0 ? liveBlockSize : 512);
+        prepareGraphForOfflineRender(graph,
+                                     liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
+                                     liveBlockSize > 0 ? liveBlockSize : 512);
         hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
         transportSec.store(previousTransport, std::memory_order_relaxed);
         isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
+        blockIsPlayingAtomic.store(previousBlockPlaying, std::memory_order_relaxed);
         return outFile.getFullPathName();
     }
 
     auto runOfflinePass = [&]()
     {
-        graph.prepareToPlay(sr, bs);
+        blockTransportStartSec.store(0.0, std::memory_order_relaxed);
+        prepareGraphForOfflineRender(graph, sr, bs);
         transportSec.store(0.0, std::memory_order_relaxed);
         resetTrackEffectAutomationLatches();
 
@@ -1869,11 +1974,13 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
     runOfflinePass();
 
     // Restore live graph timing + transport state.
-    graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
-                        liveBlockSize > 0 ? liveBlockSize : 512);
+    prepareGraphForOfflineRender(graph,
+                                 liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
+                                 liveBlockSize > 0 ? liveBlockSize : 512);
     hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
     transportSec.store(previousTransport, std::memory_order_relaxed);
     isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
+    blockIsPlayingAtomic.store(previousBlockPlaying, std::memory_order_relaxed);
     exportProgressAtomic.store(1.0, std::memory_order_relaxed);
     return outFile.getFullPathName();
 }
@@ -1888,20 +1995,38 @@ juce::String JuceEngine::exportTrack(int trackIndex,
                                      const juce::File &outFile,
                                      const ExportOptions &rawOptions)
 {
-    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     const auto options = sanitiseExportOptions(rawOptions);
     exportInProgressAtomic.store(true, std::memory_order_relaxed);
     exportProgressAtomic.store(0.0, std::memory_order_relaxed);
 
     struct ExportProgressGuard
     {
-        explicit ExportProgressGuard(std::atomic<bool> &activeRef) : active(activeRef) {}
+        explicit ExportProgressGuard(JuceEngine &engineRef) : engine(engineRef) {}
         ~ExportProgressGuard()
         {
-            active.store(false, std::memory_order_relaxed);
+            engine.exportInProgressAtomic.store(false, std::memory_order_relaxed);
+            engine.flushDeferredAudioRouteRefreshAsync("exportTrack:complete");
         }
-        std::atomic<bool> &active;
-    } exportProgressGuard(exportInProgressAtomic);
+        JuceEngine &engine;
+    } exportProgressGuard(*this);
+
+    const bool hadLiveCallback = (metronomeCallback != nullptr);
+    struct LiveCallbackRestoreGuard
+    {
+        JuceEngine &engine;
+        bool shouldRestore = false;
+
+        ~LiveCallbackRestoreGuard()
+        {
+            if (shouldRestore && engine.metronomeCallback != nullptr)
+                engine.deviceManager.addAudioCallback(engine.metronomeCallback.get());
+        }
+    } liveCallbackRestoreGuard{*this, hadLiveCallback};
+
+    if (hadLiveCallback)
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
     if (options.format == "mp3")
     {
@@ -1999,9 +2124,11 @@ juce::String JuceEngine::exportTrack(int trackIndex,
     const double previousHostRate = hostSampleRateAtomic.load(std::memory_order_relaxed);
     const double previousTransport = transportSec.load(std::memory_order_relaxed);
     const bool wasPlaying = isPlayingAtomic.exchange(true, std::memory_order_relaxed);
+    const bool previousBlockPlaying = blockIsPlayingAtomic.exchange(true, std::memory_order_relaxed);
 
     hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
-    graph.prepareToPlay(sr, bs);
+    blockTransportStartSec.store(0.0, std::memory_order_relaxed);
+    prepareGraphForOfflineRender(graph, sr, bs);
     transportSec.store(0.0, std::memory_order_relaxed);
 
     const double tailSeconds = getGraphTailLengthSeconds(graph);
@@ -2011,15 +2138,18 @@ juce::String JuceEngine::exportTrack(int trackIndex,
     {
         exportProgressAtomic.store(1.0, std::memory_order_relaxed);
         restoreClips();
-        graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
-                            liveBlockSize > 0 ? liveBlockSize : 512);
+        prepareGraphForOfflineRender(graph,
+                                     liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
+                                     liveBlockSize > 0 ? liveBlockSize : 512);
         hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
         transportSec.store(previousTransport, std::memory_order_relaxed);
         isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
+        blockIsPlayingAtomic.store(previousBlockPlaying, std::memory_order_relaxed);
         return outFile.getFullPathName();
     }
 
-    graph.prepareToPlay(sr, bs);
+    blockTransportStartSec.store(0.0, std::memory_order_relaxed);
+    prepareGraphForOfflineRender(graph, sr, bs);
     transportSec.store(0.0, std::memory_order_relaxed);
     resetTrackEffectAutomationLatches();
 
@@ -2053,11 +2183,13 @@ juce::String JuceEngine::exportTrack(int trackIndex,
     }
 
     restoreClips();
-    graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
-                        liveBlockSize > 0 ? liveBlockSize : 512);
+    prepareGraphForOfflineRender(graph,
+                                 liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
+                                 liveBlockSize > 0 ? liveBlockSize : 512);
     hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
     transportSec.store(previousTransport, std::memory_order_relaxed);
     isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
+    blockIsPlayingAtomic.store(previousBlockPlaying, std::memory_order_relaxed);
     exportProgressAtomic.store(1.0, std::memory_order_relaxed);
     return outFile.getFullPathName();
 }
@@ -3203,6 +3335,7 @@ void JuceEngine::setRowGainAutomationPoints(
     auto safePoints = points;
     sanitiseAutomationPoints(safePoints, 1.0f);
     rows[(size_t)row].gainAutomationPoints = std::move(safePoints);
+    rows[(size_t)row].lastAppliedGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 void JuceEngine::setRowPanAutomationPoints(
@@ -3217,6 +3350,7 @@ void JuceEngine::setRowPanAutomationPoints(
     auto safePoints = points;
     sanitiseAutomationPoints(safePoints, 1.0f);
     rows[(size_t)row].panAutomationPoints = std::move(safePoints);
+    rows[(size_t)row].lastAppliedPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 void JuceEngine::setMasterEffectAutomationPoints(
@@ -3291,6 +3425,7 @@ void JuceEngine::setMasterGainAutomationPoints(
     auto safePoints = points;
     sanitiseAutomationPoints(safePoints, 1.0f);
     masterGainAutomationPoints = std::move(safePoints);
+    lastAppliedMasterGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 void JuceEngine::setMasterPanAutomationPoints(
@@ -3301,6 +3436,7 @@ void JuceEngine::setMasterPanAutomationPoints(
     auto safePoints = points;
     sanitiseAutomationPoints(safePoints, 1.0f);
     masterPanAutomationPoints = std::move(safePoints);
+    lastAppliedMasterPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 void JuceEngine::applyTrackEffectAutomationAtCurrentBlockStart()
@@ -3316,6 +3452,7 @@ void JuceEngine::setAutomationTransport(double timeSeconds)
 
 void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
 {
+    constexpr float kAutomationEpsilon = 1.0e-4f;
     const double timeMs = juce::jmax(0.0, timeSeconds) * 1000.0;
 
     for (int rowIndex = 0; rowIndex < (int)rows.size(); ++rowIndex)
@@ -3328,8 +3465,13 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 0.0f,
                 1.0f,
                 (float)evaluateAutomationValueAtMs(rowState.gainAutomationPoints, timeMs, 0.0));
-            const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
-            setRowGain(rowIndex, gain);
+            if (!std::isfinite(rowState.lastAppliedGainAutomationNormalized) ||
+                std::abs(normalized - rowState.lastAppliedGainAutomationNormalized) > kAutomationEpsilon)
+            {
+                const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
+                setRowGain(rowIndex, gain);
+                rowState.lastAppliedGainAutomationNormalized = normalized;
+            }
         }
 
         if (!rowState.panAutomationPoints.empty())
@@ -3338,13 +3480,17 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 0.0f,
                 1.0f,
                 (float)evaluateAutomationValueAtMs(rowState.panAutomationPoints, timeMs, 0.5));
-            setRowPan(rowIndex, pan);
+            if (!std::isfinite(rowState.lastAppliedPanAutomationNormalized) ||
+                std::abs(pan - rowState.lastAppliedPanAutomationNormalized) > kAutomationEpsilon)
+            {
+                setRowPan(rowIndex, pan);
+                rowState.lastAppliedPanAutomationNormalized = pan;
+            }
         }
 
         if (rowState.effectAutomationLanes.empty())
             continue;
 
-        compactRowFxChain(rowIndex);
         for (auto &lane : rowState.effectAutomationLanes)
         {
             if (lane.effectIndex < 0 || lane.effectIndex >= rowState.fxChain.size())
@@ -3358,6 +3504,9 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 0.0f,
                 1.0f,
                 (float)evaluateAutomationValueAtMs(lane.points, timeMs, 0.0));
+            if (std::isfinite(lane.lastAppliedNormalized) &&
+                std::abs(normalized - lane.lastAppliedNormalized) <= kAutomationEpsilon)
+                continue;
 
             const float value = lane.minValue + (lane.maxValue - lane.minValue) * normalized;
             setTrackEffectParameter(
@@ -3365,6 +3514,7 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 lane.effectIndex,
                 lane.paramId,
                 juce::var((double)value));
+            lane.lastAppliedNormalized = normalized;
         }
     }
 
@@ -3374,8 +3524,13 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
             0.0f,
             1.0f,
             (float)evaluateAutomationValueAtMs(masterGainAutomationPoints, timeMs, 0.0));
-        const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
-        setMasterGain(gain);
+        if (!std::isfinite(lastAppliedMasterGainAutomationNormalized) ||
+            std::abs(normalized - lastAppliedMasterGainAutomationNormalized) > kAutomationEpsilon)
+        {
+            const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
+            setMasterGain(gain);
+            lastAppliedMasterGainAutomationNormalized = normalized;
+        }
     }
 
     if (!masterPanAutomationPoints.empty())
@@ -3384,13 +3539,17 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
             0.0f,
             1.0f,
             (float)evaluateAutomationValueAtMs(masterPanAutomationPoints, timeMs, 0.5));
-        setMasterPan(pan);
+        if (!std::isfinite(lastAppliedMasterPanAutomationNormalized) ||
+            std::abs(pan - lastAppliedMasterPanAutomationNormalized) > kAutomationEpsilon)
+        {
+            setMasterPan(pan);
+            lastAppliedMasterPanAutomationNormalized = pan;
+        }
     }
 
     if (masterEffectAutomationLanes.empty())
         return;
 
-    compactMasterFxChain();
     for (auto &lane : masterEffectAutomationLanes)
     {
         if (lane.effectIndex < 0 || masterEffectChain == nullptr ||
@@ -3405,11 +3564,15 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
             0.0f,
             1.0f,
             (float)evaluateAutomationValueAtMs(lane.points, timeMs, 0.0));
+        if (std::isfinite(lane.lastAppliedNormalized) &&
+            std::abs(normalized - lane.lastAppliedNormalized) <= kAutomationEpsilon)
+            continue;
         const float value = lane.minValue + (lane.maxValue - lane.minValue) * normalized;
         setMasterEffectParameter(
             lane.effectIndex,
             lane.paramId,
             juce::var((double)value));
+        lane.lastAppliedNormalized = normalized;
     }
 }
 
@@ -3417,6 +3580,10 @@ void JuceEngine::resetTrackEffectAutomationLatches()
 {
     for (int row = 0; row < (int)rows.size(); ++row)
         resetTrackEffectAutomationLatchesForRow(row);
+    for (auto &lane : masterEffectAutomationLanes)
+        lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+    lastAppliedMasterGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+    lastAppliedMasterPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 void JuceEngine::resetTrackEffectAutomationLatchesForRow(int row)
@@ -3427,6 +3594,8 @@ void JuceEngine::resetTrackEffectAutomationLatchesForRow(int row)
     auto &lanes = rows[(size_t)row].effectAutomationLanes;
     for (auto &lane : lanes)
         lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+    rows[(size_t)row].lastAppliedGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+    rows[(size_t)row].lastAppliedPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 }
 
 // ============================================================
@@ -5087,6 +5256,13 @@ int JuceEngine::getNumInputChannels() const
     return 0;
 }
 
+int JuceEngine::getActiveInputChannelCount() const
+{
+    if (auto *dev = deviceManager.getCurrentAudioDevice())
+        return dev->getActiveInputChannels().countNumberOfSetBits();
+    return 0;
+}
+
 void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
@@ -5360,6 +5536,14 @@ void JuceEngine::armOutputSafetyFadeIn(double sampleRate) noexcept
         9600,
         (int)std::lround(juce::jmax(8000.0, sampleRate) * 0.05));
     outputSafetyFadeSamplesRemaining = outputSafetyFadeSamplesTotal;
+}
+
+void JuceEngine::clearOutputSafetyState() noexcept
+{
+    outputSafetyLastSample = {0.0f, 0.0f};
+    outputSafetyMuteSamplesRemaining = 0;
+    outputSafetyFadeSamplesTotal = 0;
+    outputSafetyFadeSamplesRemaining = 0;
 }
 
 void JuceEngine::applyOutputSafetyGuard(float *const *output,

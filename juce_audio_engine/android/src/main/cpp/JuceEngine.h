@@ -509,6 +509,15 @@ public:
             resampler->releaseResources();
     }
 
+    void reset() override
+    {
+        if (readerSource)
+            readerSource->setNextReadPosition(0);
+
+        if (resampler)
+            resampler->flushBuffers();
+    }
+
     void processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &) override
     {
         buffer.clear();
@@ -690,6 +699,30 @@ public:
             resampler->releaseResources();
         if (pitchCompensator)
             pitchCompensator->releaseResources();
+    }
+
+    void reset() override
+    {
+        const double inFile = juce::jmax(
+            0.0,
+            fileOffsetSec.load(std::memory_order_relaxed));
+
+        if (readerSource)
+            readerSource->setNextReadPosition(
+                (juce::int64)std::llround(inFile * fileSampleRate));
+
+        if (resampler)
+            resampler->flushBuffers();
+
+        if (pitchCompensator)
+            pitchCompensator->reset();
+
+        sourcePrimed = false;
+        lastReadTimelineEndSec = std::numeric_limits<double>::quiet_NaN();
+        lastFileOffsetSec = inFile;
+        lastClipStartSec = clipStartSec.load(std::memory_order_relaxed);
+        lastReverseState = reversed.load(std::memory_order_relaxed);
+        lastTimelineSpeedRatio = getTempoPlaybackRatio();
     }
 
     void processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &) override
@@ -1188,9 +1221,14 @@ public:
                     std::vector<const SampledRegion *> timelineRegions;
                     if (sampledMode)
                     {
-                        timelineRegions.reserve(cachedNotes.size());
-                        for (const auto &note : cachedNotes)
+                            timelineRegions.reserve(cachedNotes.size());
+                        for (size_t noteIndex = 0; noteIndex < cachedNotes.size(); ++noteIndex)
                         {
+                            const auto &note = cachedNotes[noteIndex];
+                            const int sampledPitch =
+                                sampledMidiPitchForInstrument(
+                                    cachedInstrumentId,
+                                    note.pitch);
                             const int midiVelocity = juce::jlimit(
                                 0,
                                 127,
@@ -1199,8 +1237,9 @@ public:
                             timelineRegions.push_back(
                                 pickSampledRegion(
                                     *cachedSampledDefinition,
-                                    juce::jlimit(0, 127, note.pitch),
-                                    midiVelocity));
+                                    sampledPitch,
+                                    midiVelocity,
+                                    (int)noteIndex));
                         }
                     }
 
@@ -1218,6 +1257,12 @@ public:
                                 sampledMode ? timelineRegions[noteIndex] : nullptr;
                             if (sampledMode && sampledRegion == nullptr)
                                 continue;
+                            const int sampledPitch =
+                                sampledMode
+                                    ? sampledMidiPitchForInstrument(
+                                          cachedInstrumentId,
+                                          note.pitch)
+                                    : juce::jlimit(0, 127, note.pitch);
 
                             double noteAttackSec = attackSec;
                             double noteReleaseSec = releaseSec;
@@ -1231,9 +1276,23 @@ public:
                                         juce::jmax(0.02, sampledRegion->releaseSec);
                             }
                             const double releaseSourceSec = noteReleaseSec * safeRatio;
+                            double notePitch = (double)sampledPitch + (double)pitchSemitones.load(std::memory_order_relaxed);
+                            if (!preserveTempoPitch.load(std::memory_order_relaxed) && safeRatio > 0.0)
+                                notePitch += 12.0 * (std::log(safeRatio) / std::log(2.0));
 
                             const double noteStartSourceSec = note.startBeat * sourceSecPerBeat;
-                            const double noteLengthSourceSec = juce::jmax(0.001, note.lengthBeats * sourceSecPerBeat);
+                            double noteLengthSourceSec = juce::jmax(0.001, note.lengthBeats * sourceSecPerBeat);
+                            if (sampledRegion != nullptr && sampledRegion->oneShot)
+                            {
+                                const double oneShotDurationSec =
+                                    sampledPlayableDurationSec(
+                                        *sampledRegion,
+                                        notePitch,
+                                        sr);
+                                noteLengthSourceSec = juce::jmax(
+                                    noteLengthSourceSec,
+                                    oneShotDurationSec * safeRatio);
+                            }
                             const double noteEndSourceSec = noteStartSourceSec + noteLengthSourceSec + releaseSourceSec;
                             if (sourceSec < noteStartSourceSec || sourceSec >= noteEndSourceSec)
                                 continue;
@@ -1245,6 +1304,9 @@ public:
                             double env = 0.0;
                             if (ageRealSec < noteAttackSec)
                                 env = ageRealSec / noteAttackSec;
+                            else if (sampledRegion != nullptr &&
+                                     sampledRegion->oneShot)
+                                env = 1.0;
                             else if (ageRealSec < noteLengthRealSec)
                                 env = 1.0;
                             else
@@ -1256,10 +1318,6 @@ public:
                             const double totalRealSec = juce::jmax(
                                 0.001, noteLengthRealSec + noteReleaseSec);
                             const double noteProgress = juce::jlimit(0.0, 1.0, ageRealSec / totalRealSec);
-
-                            double notePitch = (double)note.pitch + (double)pitchSemitones.load(std::memory_order_relaxed);
-                            if (!preserveTempoPitch.load(std::memory_order_relaxed) && safeRatio > 0.0)
-                                notePitch += 12.0 * (std::log(safeRatio) / std::log(2.0));
 
                             const float velocityGain =
                                 (float)juce::jlimit(0.0, 1.0, note.velocity);
@@ -1382,12 +1440,24 @@ public:
 
                 if (voiceSampled)
                 {
+                    SampledRegion liveRegion;
+                    liveRegion.sample = voice.sampledSource;
+                    liveRegion.keyCenter = voice.sampledKeyCenter;
+                    liveRegion.pitchKeytrack = voice.sampledPitchKeytrack;
+                    liveRegion.pitchOffsetSemitones =
+                        voice.sampledPitchOffsetSemitones;
+                    liveRegion.sampleStartFrame = voice.sampledStartFrame;
+                    liveRegion.sampleEndFrameExclusive =
+                        voice.sampledEndFrameExclusive;
+                    liveRegion.oneShot = voice.sampledOneShot;
                     float sampleL = 0.0f;
                     float sampleR = 0.0f;
+                    const double sampledNotePitch =
+                        (double)voice.sampledMidiPitch +
+                        (double)pitchSemitones.load(std::memory_order_relaxed);
                     if (!renderSampledStereo(
-                            voice.sampledSource,
-                            voice.sampledKeyCenter,
-                            notePitch,
+                            liveRegion,
+                            sampledNotePitch,
                             voice.ageSec,
                             sr,
                             sampleL,
@@ -1540,6 +1610,15 @@ private:
         double gainLinear = 1.0;
         double attackSec = 0.005;
         double releaseSec = 0.35;
+        double pitchKeytrack = 100.0;
+        double pitchOffsetSemitones = 0.0;
+        int sampleStartFrame = 0;
+        int sampleEndFrameExclusive = 0;
+        bool oneShot = false;
+        int seqLength = 1;
+        int seqPosition = 1;
+        double loRand = 0.0;
+        double hiRand = 1.0;
     };
 
     struct SampledDefinition
@@ -1574,6 +1653,7 @@ private:
     {
         int channel = 1;
         int pitch = 60;
+        int sampledMidiPitch = 60;
         double velocity = 1.0;
         double ageSec = 0.0;
         bool releasing = false;
@@ -1585,6 +1665,11 @@ private:
         double sampledGainLinear = 1.0;
         double sampledAttackSec = 0.005;
         double sampledReleaseSec = 0.35;
+        double sampledPitchKeytrack = 100.0;
+        double sampledPitchOffsetSemitones = 0.0;
+        int sampledStartFrame = 0;
+        int sampledEndFrameExclusive = 0;
+        bool sampledOneShot = false;
     };
 
     static double readParam(const juce::NamedValueSet &params, const char *key, double fallback)
@@ -1617,6 +1702,51 @@ private:
         if (phase < 0.0)
             phase += 1.0;
         return phase;
+    }
+
+    static int sampledMidiPitchForInstrument(const juce::String &instrumentId,
+                                             int pitch)
+    {
+        const juce::String id = instrumentId.trim().toLowerCase();
+        const int safePitch = juce::jlimit(0, 127, pitch);
+        const bool drumKit =
+            id == "mixroom.drum_808_starter" ||
+            id == "mixroom.drum_house" ||
+            id == "mixroom.drum_breakbeat" ||
+            id == "mixroom.drum_trap" ||
+            id == "sfz.vsco.mixroom_drum_starter" ||
+            id == "sfz.vsco.mixroom_dry_drum_kit" ||
+            id == "sfz.vsco.mixroom_acoustic_drum_kit" ||
+            id == "sfz.vsco.mixroom_electro_punch_kit" ||
+            id == "sfz.vsco_2_ce_1_1_0_mixroomdrumstarter" ||
+            id == "sfz.vsco_2_ce_1_1_0_mixroomdrydrumkit" ||
+            id == "sfz.vsco_2_ce_1_1_0_mixroomacousticdrumkit" ||
+            id == "sfz.vsco_2_ce_1_1_0_mixroomelectropunchkit";
+        if (!drumKit)
+            return safePitch;
+
+        switch (safePitch)
+        {
+        case 35:
+            return 36;
+        case 37:
+        case 39:
+            return 38;
+        case 41:
+        case 43:
+            return 45;
+        case 48:
+            return 47;
+        case 52:
+        case 53:
+            return 42;
+        case 55:
+        case 57:
+        case 59:
+            return 49;
+        default:
+            return safePitch;
+        }
     }
 
     static float waveFromType(int type, double phase)
@@ -2179,6 +2309,38 @@ private:
                 0.02,
                 12.0,
                 readSfzNumeric(r, "ampeg_release", globalReleaseSec));
+            regionDef.pitchKeytrack = juce::jlimit(
+                -1200.0,
+                1200.0,
+                readSfzNumeric(r, "pitch_keytrack", 100.0));
+            regionDef.pitchOffsetSemitones = juce::jlimit(
+                -48.0,
+                48.0,
+                readSfzNumeric(r, "transpose", 0.0) +
+                    (readSfzNumeric(r, "tune", 0.0) / 100.0));
+            regionDef.sampleStartFrame = juce::jmax(
+                0,
+                (int)std::lround(readSfzNumeric(r, "offset", 0.0)));
+            regionDef.sampleEndFrameExclusive = juce::jmax(
+                0,
+                (int)std::lround(readSfzNumeric(r, "end", -1.0)) + 1);
+            regionDef.oneShot =
+                opcodeValue(r, "loop_mode").trim().toLowerCase() == "one_shot";
+            regionDef.seqLength = juce::jmax(
+                1,
+                (int)std::lround(readSfzNumeric(r, "seq_length", 1.0)));
+            regionDef.seqPosition = juce::jlimit(
+                1,
+                regionDef.seqLength,
+                (int)std::lround(readSfzNumeric(r, "seq_position", 1.0)));
+            regionDef.loRand = juce::jlimit(
+                0.0,
+                1.0,
+                readSfzNumeric(r, "lorand", 0.0));
+            regionDef.hiRand = juce::jlimit(
+                regionDef.loRand,
+                1.0,
+                readSfzNumeric(r, "hirand", 1.0));
             definition->regions.push_back(regionDef);
         }
 
@@ -2207,6 +2369,11 @@ private:
             {"sfz.vsco.mixroom_synthwave_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomSynthwaveKit.sfz"},
             {"sfz.vsco.tictokmen_moogdrums1", "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenMoogdrums1.sfz"},
             {"sfz.vsco.tictokmen_retrodrums1", "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenRetroDrums1.sfz"},
+            {"mixroom.drum_808_starter", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz"},
+            {"mixroom.drum_house", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz"},
+            {"mixroom.drum_breakbeat", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz"},
+            {"mixroom.drum_trap", "assets/instruments/VSCO-2-CE-1.1.0/MixroomElectroPunchKit.sfz"},
+            {"mixroom.horn_stack", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
             // IDs generated from assets/instruments/index.json.
             {"sfz.vsco_2_ce_1_1_0_mixroomdrumstarter", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz"},
             {"sfz.vsco_2_ce_1_1_0_mixroomacousticdrumkit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz"},
@@ -2309,45 +2476,125 @@ private:
 
     static const SampledRegion *pickSampledRegion(const SampledDefinition &definition,
                                                   int pitch,
-                                                  int velocity)
+                                                  int velocity,
+                                                  int sequenceStep = 0)
     {
-        const SampledRegion *best = nullptr;
-        int bestKeyDistance = std::numeric_limits<int>::max();
-        int bestVelDistance = std::numeric_limits<int>::max();
-
-        auto consider = [&](const SampledRegion &region, bool enforceVelocity)
+        auto random01For = [&](const SampledRegion &region)
         {
-            if (pitch < region.loKey || pitch > region.hiKey)
-                return;
-            if (enforceVelocity && (velocity < region.loVel || velocity > region.hiVel))
-                return;
-
-            const int keyDistance = std::abs(pitch - region.keyCenter);
-            const int velDistance =
-                velocity < region.loVel ? (region.loVel - velocity)
-                                        : velocity > region.hiVel ? (velocity - region.hiVel)
-                                                                  : 0;
-            if (best == nullptr || keyDistance < bestKeyDistance ||
-                (keyDistance == bestKeyDistance && velDistance < bestVelDistance))
-            {
-                best = &region;
-                bestKeyDistance = keyDistance;
-                bestVelDistance = velDistance;
-            }
+            uint32_t seed = 0x45d9f3bu;
+            seed ^= (uint32_t)(pitch * 1009);
+            seed ^= (uint32_t)(velocity * 9176);
+            seed ^= (uint32_t)(sequenceStep * 6151);
+            seed ^= (uint32_t)(region.keyCenter * 313);
+            seed ^= (uint32_t)(region.loKey * 137);
+            seed ^= (uint32_t)(region.hiKey * 271);
+            seed ^= seed >> 16;
+            seed &= 0x7fffffffu;
+            return (double)seed / (double)0x7fffffffu;
         };
 
-        for (const auto &region : definition.regions)
-            consider(region, true);
-        if (best != nullptr)
+        auto pickBest =
+            [&](bool enforceVelocity, bool enforceSequence) -> const SampledRegion *
+        {
+            const SampledRegion *best = nullptr;
+            int bestKeyDistance = std::numeric_limits<int>::max();
+            int bestVelDistance = std::numeric_limits<int>::max();
+
+            for (const auto &region : definition.regions)
+            {
+                if (pitch < region.loKey || pitch > region.hiKey)
+                    continue;
+                if (enforceVelocity &&
+                    (velocity < region.loVel || velocity > region.hiVel))
+                    continue;
+                if (enforceSequence && region.seqLength > 1)
+                {
+                    const int expected = (sequenceStep % region.seqLength) + 1;
+                    if (region.seqPosition != expected)
+                        continue;
+                }
+                const double randomValue = random01For(region);
+                if (randomValue < region.loRand || randomValue >= region.hiRand)
+                    continue;
+
+                const int keyDistance = std::abs(pitch - region.keyCenter);
+                const int velDistance =
+                    velocity < region.loVel ? (region.loVel - velocity)
+                                            : velocity > region.hiVel ? (velocity - region.hiVel)
+                                                                      : 0;
+                if (best == nullptr || keyDistance < bestKeyDistance ||
+                    (keyDistance == bestKeyDistance &&
+                     velDistance < bestVelDistance))
+                {
+                    best = &region;
+                    bestKeyDistance = keyDistance;
+                    bestVelDistance = velDistance;
+                }
+            }
             return best;
-        for (const auto &region : definition.regions)
-            consider(region, false);
-        return best;
+        };
+
+        if (auto *best = pickBest(true, true))
+            return best;
+        if (auto *best = pickBest(false, true))
+            return best;
+        if (auto *best = pickBest(true, false))
+            return best;
+        return pickBest(false, false);
+    }
+
+    static int sampledRegionFrameLimit(const SampledRegion &region,
+                                       const DecodedSamplePcm &pcm)
+    {
+        const int requestedEnd =
+            region.sampleEndFrameExclusive > 0
+                ? region.sampleEndFrameExclusive
+                : pcm.frameCount();
+        return juce::jlimit(
+            juce::jmin(region.sampleStartFrame + 1, pcm.frameCount()),
+            pcm.frameCount(),
+            requestedEnd);
+    }
+
+    static double sampledPlaybackRate(const DecodedSamplePcm &pcm,
+                                      const SampledRegion &region,
+                                      double notePitch,
+                                      double outputSampleRate)
+    {
+        const double semitoneOffset =
+            ((notePitch - (double)region.keyCenter) *
+             (region.pitchKeytrack / 100.0)) +
+            region.pitchOffsetSemitones;
+        return std::pow(2.0, semitoneOffset / 12.0) *
+               ((double)pcm.sampleRate / outputSampleRate);
+    }
+
+    static double sampledPlayableDurationSec(const SampledRegion &region,
+                                             double notePitch,
+                                             double outputSampleRate)
+    {
+        if (region.sample == nullptr || outputSampleRate <= 0.0)
+            return 0.0;
+        const auto &pcm = *region.sample;
+        const int frameCount = pcm.frameCount();
+        if (frameCount < 2)
+            return 0.0;
+        const int startFrame = juce::jlimit(0, frameCount - 1, region.sampleStartFrame);
+        const int endFrame = sampledRegionFrameLimit(region, pcm);
+        const int usableFrames = endFrame - startFrame;
+        if (usableFrames < 2)
+            return 0.0;
+        const double playbackRate =
+            sampledPlaybackRate(pcm, region, notePitch, outputSampleRate);
+        if (!std::isfinite(playbackRate) || playbackRate <= 0.0)
+            return 0.0;
+        return juce::jmax(0.0, ((double)(usableFrames - 1)) /
+                                   (outputSampleRate * playbackRate));
     }
 
     static bool renderSampledStereo(
         const std::shared_ptr<const DecodedSamplePcm> &sample,
-        int keyCenter,
+        const SampledRegion &region,
         double notePitch,
         double ageSec,
         double outputSampleRate,
@@ -2364,19 +2611,26 @@ private:
         if (frameCount < 2)
             return false;
 
-        const double semitoneOffset = notePitch - (double)keyCenter;
+        const int startFrame =
+            juce::jlimit(0, frameCount - 1, region.sampleStartFrame);
+        const int endFrame = sampledRegionFrameLimit(region, pcm);
+        const int usableFrames = endFrame - startFrame;
+        if (usableFrames < 2)
+            return false;
+
         const double playbackRate =
-            std::pow(2.0, semitoneOffset / 12.0) *
-            ((double)pcm.sampleRate / outputSampleRate);
+            sampledPlaybackRate(pcm, region, notePitch, outputSampleRate);
         if (!std::isfinite(playbackRate) || playbackRate <= 0.0)
             return false;
 
-        const double samplePos = ageSec * outputSampleRate * playbackRate;
-        if (samplePos < 0.0 || samplePos >= (double)(frameCount - 1))
+        const double samplePos =
+            (double)startFrame + (ageSec * outputSampleRate * playbackRate);
+        if (samplePos < (double)startFrame ||
+            samplePos >= (double)(endFrame - 1))
             return false;
 
         const int index = (int)std::floor(samplePos);
-        const int nextIndex = juce::jmin(index + 1, frameCount - 1);
+        const int nextIndex = juce::jmin(index + 1, endFrame - 1);
         const double frac = samplePos - (double)index;
 
         const float l0 = pcm.left[(size_t)index];
@@ -2397,7 +2651,7 @@ private:
     {
         return renderSampledStereo(
             region.sample,
-            region.keyCenter,
+            region,
             notePitch,
             ageSec,
             outputSampleRate,
@@ -2409,38 +2663,38 @@ private:
     {
         static const std::unordered_map<std::string, InstrumentPreset> map = {
             {"mixroom.basic_synth", {InstrumentFamily::basic, 1, 3200.0, 18.0, 180.0, 0.08, 0.36, 0.002, 0.12, 0.56, 0.08, 0.0, 0.02}},
-            {"mixroom.bass_mono", {InstrumentFamily::bass, 2, 1200.0, 8.0, 220.0, 0.28, 0.34, 0.001, 0.04, 0.52, 0.18, 4.0, 0.04}},
-            {"mixroom.soft_pad", {InstrumentFamily::pad, 3, 2100.0, 80.0, 620.0, 0.02, 0.31, 0.012, 0.28, 0.47, 0.04, 0.0, 0.03}},
+            {"mixroom.bass_mono", {InstrumentFamily::bass, 2, 900.0, 8.0, 220.0, 0.14, 0.31, 0.0, 0.0, 0.38, 0.10, 4.0, 0.01}},
+            {"mixroom.soft_pad", {InstrumentFamily::pad, 3, 1800.0, 80.0, 620.0, 0.02, 0.31, 0.004, 0.10, 0.40, 0.04, 0.0, 0.01}},
             {"mixroom.figbug_wavetable", {InstrumentFamily::wavetable, 1, 5200.0, 6.0, 240.0, 0.18, 0.33, 0.006, 0.16, 0.72, 0.14, 0.0, 0.03}},
             {"mixroom.sarah_harmonic", {InstrumentFamily::harmonic, 3, 2800.0, 34.0, 540.0, 0.1, 0.32, 0.008, 0.20, 0.54, 0.08, 0.0, 0.03}},
             {"mixroom.vanilla_poly", {InstrumentFamily::keys, 0, 3600.0, 12.0, 260.0, 0.05, 0.33, 0.004, 0.13, 0.58, 0.10, 0.0, 0.02}},
             {"mixroom.duck_synth", {InstrumentFamily::bass, 2, 1600.0, 2.0, 140.0, 0.26, 0.35, 0.002, 0.06, 0.62, 0.20, 8.0, 0.03}},
-            {"mixroom.chow_kick", {InstrumentFamily::drum, 0, 900.0, 0.0, 90.0, 0.42, 0.42, 0.0, 0.0, 0.52, 0.40, 16.0, 0.14}},
+            {"mixroom.chow_kick", {InstrumentFamily::drum, 0, 900.0, 0.0, 90.0, 0.24, 0.38, 0.0, 0.0, 0.44, 0.24, 16.0, 0.04}},
             {"mixroom.warm_keys", {InstrumentFamily::keys, 0, 3000.0, 14.0, 320.0, 0.06, 0.32, 0.005, 0.12, 0.52, 0.12, 0.0, 0.02}},
             {"mixroom.super_saw", {InstrumentFamily::lead, 1, 6200.0, 4.0, 180.0, 0.22, 0.34, 0.01, 0.20, 0.75, 0.11, 0.0, 0.03}},
             {"mixroom.gentle_pluck", {InstrumentFamily::pluck, 3, 4800.0, 2.0, 130.0, 0.08, 0.33, 0.004, 0.11, 0.68, 0.24, 0.0, 0.03}},
-            {"mixroom.sub_bass", {InstrumentFamily::bass, 2, 900.0, 3.0, 200.0, 0.24, 0.35, 0.001, 0.03, 0.46, 0.12, 5.0, 0.03}},
+            {"mixroom.sub_bass", {InstrumentFamily::bass, 2, 760.0, 3.0, 200.0, 0.10, 0.31, 0.0, 0.0, 0.34, 0.06, 5.0, 0.0}},
             {"mixroom.analog_brass", {InstrumentFamily::brass, 1, 2600.0, 25.0, 300.0, 0.14, 0.33, 0.003, 0.12, 0.55, 0.08, 0.0, 0.02}},
             {"mixroom.drum_acoustic_easy", {InstrumentFamily::drum, 1, 2300.0, 0.0, 120.0, 0.18, 0.41, 0.0, 0.0, 0.52, 0.26, 10.0, 0.15}},
             {"mixroom.drum_808_starter", {InstrumentFamily::drum, 0, 1100.0, 0.0, 190.0, 0.36, 0.44, 0.0, 0.0, 0.60, 0.35, 24.0, 0.18}},
             {"mixroom.drum_lofi", {InstrumentFamily::drum, 3, 1700.0, 1.0, 150.0, 0.28, 0.41, 0.0, 0.0, 0.45, 0.20, 12.0, 0.20}},
-            {"mixroom.drum_house", {InstrumentFamily::drum, 1, 2600.0, 0.0, 95.0, 0.24, 0.42, 0.0, 0.0, 0.58, 0.28, 14.0, 0.17}},
+            {"mixroom.drum_house", {InstrumentFamily::drum, 1, 2600.0, 0.0, 95.0, 0.16, 0.42, 0.0, 0.0, 0.46, 0.18, 14.0, 0.08}},
             {"mixroom.night_bell", {InstrumentFamily::harmonic, 0, 5600.0, 1.0, 540.0, 0.06, 0.30, 0.002, 0.22, 0.76, 0.16, 0.0, 0.01}},
             {"mixroom.fm_keys", {InstrumentFamily::harmonic, 0, 4100.0, 5.0, 340.0, 0.07, 0.32, 0.004, 0.14, 0.66, 0.14, 0.0, 0.02}},
-            {"mixroom.vintage_strings", {InstrumentFamily::pad, 1, 2400.0, 32.0, 640.0, 0.08, 0.31, 0.015, 0.24, 0.50, 0.07, 0.0, 0.02}},
+            {"mixroom.vintage_strings", {InstrumentFamily::pad, 1, 1850.0, 32.0, 640.0, 0.04, 0.31, 0.005, 0.10, 0.42, 0.07, 0.0, 0.01}},
             {"mixroom.neo_brass", {InstrumentFamily::brass, 1, 3100.0, 16.0, 250.0, 0.15, 0.33, 0.004, 0.14, 0.61, 0.08, 0.0, 0.02}},
-            {"mixroom.reese_bass", {InstrumentFamily::bass, 1, 1300.0, 4.0, 200.0, 0.26, 0.35, 0.015, 0.08, 0.57, 0.16, 5.0, 0.05}},
+            {"mixroom.reese_bass", {InstrumentFamily::bass, 1, 1050.0, 4.0, 200.0, 0.16, 0.32, 0.006, 0.02, 0.40, 0.10, 5.0, 0.02}},
             {"mixroom.air_pluck", {InstrumentFamily::pluck, 3, 5200.0, 1.0, 210.0, 0.08, 0.33, 0.008, 0.14, 0.72, 0.20, 0.0, 0.05}},
-            {"mixroom.cinematic_pad", {InstrumentFamily::pad, 3, 1900.0, 95.0, 760.0, 0.05, 0.30, 0.018, 0.30, 0.44, 0.05, 0.0, 0.03}},
+            {"mixroom.cinematic_pad", {InstrumentFamily::pad, 3, 1650.0, 95.0, 760.0, 0.05, 0.30, 0.005, 0.12, 0.36, 0.05, 0.0, 0.01}},
             {"mixroom.velvet_ep", {InstrumentFamily::keys, 0, 3700.0, 7.0, 380.0, 0.07, 0.32, 0.005, 0.16, 0.66, 0.18, 0.0, 0.02}},
             {"mixroom.house_organ", {InstrumentFamily::keys, 2, 3400.0, 0.0, 210.0, 0.11, 0.33, 0.003, 0.10, 0.62, 0.12, 0.0, 0.02}},
             {"mixroom.glass_pluck", {InstrumentFamily::pluck, 3, 5600.0, 1.0, 170.0, 0.09, 0.33, 0.007, 0.14, 0.74, 0.24, 0.0, 0.03}},
             {"mixroom.neon_lead", {InstrumentFamily::lead, 1, 6400.0, 3.0, 210.0, 0.24, 0.34, 0.012, 0.18, 0.78, 0.13, 0.0, 0.03}},
-            {"mixroom.mellow_sub", {InstrumentFamily::bass, 2, 980.0, 4.0, 260.0, 0.19, 0.35, 0.001, 0.04, 0.42, 0.10, 3.0, 0.02}},
-            {"mixroom.wide_air_pad", {InstrumentFamily::pad, 3, 2300.0, 74.0, 700.0, 0.04, 0.30, 0.020, 0.30, 0.50, 0.05, 0.0, 0.02}},
-            {"mixroom.horn_stack", {InstrumentFamily::brass, 1, 2900.0, 20.0, 280.0, 0.16, 0.33, 0.004, 0.12, 0.58, 0.09, 0.0, 0.02}},
-            {"mixroom.drum_trap", {InstrumentFamily::drum, 0, 2100.0, 0.0, 110.0, 0.32, 0.42, 0.0, 0.0, 0.62, 0.32, 18.0, 0.20}},
-            {"mixroom.drum_breakbeat", {InstrumentFamily::drum, 2, 2400.0, 0.0, 130.0, 0.26, 0.42, 0.0, 0.0, 0.55, 0.25, 12.0, 0.18}},
+            {"mixroom.mellow_sub", {InstrumentFamily::bass, 2, 760.0, 4.0, 260.0, 0.08, 0.35, 0.0, 0.0, 0.30, 0.05, 3.0, 0.0}},
+            {"mixroom.wide_air_pad", {InstrumentFamily::pad, 3, 1850.0, 74.0, 700.0, 0.04, 0.30, 0.006, 0.14, 0.42, 0.05, 0.0, 0.01}},
+            {"mixroom.horn_stack", {InstrumentFamily::brass, 0, 2100.0, 20.0, 280.0, 0.06, 0.33, 0.001, 0.02, 0.44, 0.05, 0.0, 0.01}},
+            {"mixroom.drum_trap", {InstrumentFamily::drum, 0, 2100.0, 0.0, 110.0, 0.18, 0.42, 0.0, 0.0, 0.48, 0.18, 18.0, 0.08}},
+            {"mixroom.drum_breakbeat", {InstrumentFamily::drum, 2, 2400.0, 0.0, 130.0, 0.16, 0.42, 0.0, 0.0, 0.46, 0.16, 12.0, 0.08}},
             {"mixroom.drum_dnb", {InstrumentFamily::drum, 2, 2600.0, 0.0, 105.0, 0.33, 0.43, 0.0, 0.0, 0.67, 0.34, 20.0, 0.22}},
         };
         return map;
@@ -2536,22 +2790,21 @@ private:
         {
         case InstrumentFamily::bass:
         {
-            const float sub = waveFromType(0, phaseFor(frequencyHz * 0.5)) * 0.66f;
-            const float body = waveFromType(2, phaseA) * 0.52f;
-            const float growl = waveFromType(1, phaseA * 1.01) * 0.20f;
-            const float transient = (float)((0.05 + preset.transient * 0.22) * std::exp(-24.0 * noteProgress) * noise(17));
-            return (sub + body + growl + transient) * (float)(brightness * (1.25 - noteProgress * 0.45));
+            const float sub = waveFromType(0, phaseA) * 0.86f;
+            const float body = waveFromType(3, phaseB) * 0.18f;
+            const float overtone = waveFromType(0, phaseFor(frequencyHz * 2.0)) * 0.06f;
+            const float transient = (float)((0.004 + preset.transient * 0.025) * std::exp(-36.0 * noteProgress) * noise(17));
+            return (sub + body + overtone + transient) * (float)(brightness * juce::jlimit(0.34, 0.92, 0.88 - noteProgress * 0.30));
         }
         case InstrumentFamily::pad:
         {
-            const double det = juce::jlimit(0.001, 0.03, preset.detune + 0.008);
-            const double lfo = std::sin(juce::MathConstants<double>::twoPi * ageSec * 0.23);
-            const float left = waveFromType(0, phaseFor(frequencyHz * (1.0 - det)));
-            const float right = waveFromType(3, phaseFor(frequencyHz * (1.0 + det)));
-            const float shimmer = waveFromType(1, phaseA + 0.25) * 0.18f;
-            const float airy = (float)(preset.noise * 0.55 * noise(29));
-            return (left * 0.48f + right * 0.40f + shimmer + airy) *
-                   (float)(brightness * juce::jlimit(0.6, 1.35, 0.85 + lfo * 0.2 + (1.0 - noteProgress) * 0.3));
+            const double det = juce::jlimit(0.0002, 0.004, preset.detune + 0.0008);
+            const float foundation = waveFromType(0, phaseFor(frequencyHz * (1.0 - det))) * 0.54f;
+            const float bloom = waveFromType(0, phaseFor(frequencyHz * (1.0 + det))) * 0.26f;
+            const float octave = waveFromType(3, phaseFor(frequencyHz * 0.5) + 0.125) * 0.08f;
+            const float airy = (float)(preset.noise * 0.06 * noise(29));
+            return (foundation + bloom + octave + airy) *
+                   (float)(brightness * juce::jlimit(0.58, 0.92, 0.70 + (1.0 - noteProgress) * 0.14));
         }
         case InstrumentFamily::lead:
         {
@@ -2596,16 +2849,18 @@ private:
         case InstrumentFamily::brass:
         {
             const int style = juce::jlimit(0, 3, preset.oscillator);
-            const double vibDepth = 0.0011 + envelope * (0.001 + style * 0.0003);
-            const double vibRate = 4.8 + style * 0.5;
+            const double vibDepth = 0.0002 + envelope * (0.00025 + style * 0.00008);
+            const double vibRate = 4.2 + style * 0.35;
             const double vibrato = 1.0 + std::sin(juce::MathConstants<double>::twoPi * ageSec * vibRate) * vibDepth;
-            const float saw = waveFromType(1, phaseFor(frequencyHz * vibrato)) * 0.48f;
-            const float pulse = waveFromType(2, phaseFor(frequencyHz * 0.995 * vibrato)) * 0.35f;
-            const float upper = waveFromType(style >= 2 ? 1 : 0, phaseFor(frequencyHz * 2.0 * vibrato)) * (0.15f + 0.03f * (float)style);
-            const float breath = (float)((0.02 + preset.noise * 0.55) * std::exp(-7.0 * noteProgress) * noise(101));
-            const float formantA = waveFromType(0, phaseFor(760.0 + style * 110.0)) * 0.07f;
-            const float formantB = waveFromType(0, phaseFor(1320.0 + style * 140.0)) * 0.05f;
-            return (saw + pulse + upper + breath + formantA + formantB) * (float)(brightness * (0.9 + envelope * 0.45));
+            const float body = waveFromType(0, phaseFor(frequencyHz * vibrato)) * 0.34f;
+            const float saw = waveFromType(1, phaseFor(frequencyHz * vibrato)) * 0.22f;
+            const float pulse = waveFromType(2, phaseFor(frequencyHz * 0.995 * vibrato)) * 0.10f;
+            const float upper = waveFromType(style >= 2 ? 0 : 3, phaseFor(frequencyHz * 2.0 * vibrato)) * (0.08f + 0.02f * (float)style);
+            const float breath = (float)((0.01 + preset.noise * 0.22) * std::exp(-7.0 * noteProgress) * noise(101));
+            const float formantA = waveFromType(0, phaseFor(520.0 + style * 90.0)) * 0.11f;
+            const float formantB = waveFromType(0, phaseFor(980.0 + style * 120.0)) * 0.08f;
+            return (body + saw + pulse + upper + breath + formantA + formantB) *
+                   (float)(brightness * juce::jlimit(0.55, 1.18, 0.72 + envelope * 0.42 - noteProgress * 0.10));
         }
         case InstrumentFamily::wavetable:
         {
@@ -2772,22 +3027,33 @@ private:
 
                 if (sampledMode)
                 {
+                    const int sampledPitch =
+                        sampledMidiPitchForInstrument(cachedInstrumentId, voice.pitch);
                     const int midiVelocity = juce::jlimit(
                         0,
                         127,
                         (int)std::lround(voice.velocity * 127.0));
                     const SampledRegion *region = pickSampledRegion(
                         *cachedSampledDefinition,
-                        voice.pitch,
-                        midiVelocity);
+                        sampledPitch,
+                        midiVelocity,
+                        liveSampleSequenceCounter++);
                     if (region == nullptr || region->sample == nullptr)
                         continue;
 
+                    voice.sampledMidiPitch = sampledPitch;
                     voice.sampledSource = region->sample;
                     voice.sampledKeyCenter = region->keyCenter;
                     voice.sampledGainLinear = region->gainLinear;
                     voice.sampledAttackSec = region->attackSec;
                     voice.sampledReleaseSec = region->releaseSec;
+                    voice.sampledPitchKeytrack = region->pitchKeytrack;
+                    voice.sampledPitchOffsetSemitones =
+                        region->pitchOffsetSemitones;
+                    voice.sampledStartFrame = region->sampleStartFrame;
+                    voice.sampledEndFrameExclusive =
+                        region->sampleEndFrameExclusive;
+                    voice.sampledOneShot = region->oneShot;
                 }
 
                 activeLiveNotes.push_back(voice);
@@ -2805,6 +3071,8 @@ private:
             {
                 if (it->channel != event.channel || it->pitch != event.pitch || it->releasing)
                     continue;
+                if (it->sampledOneShot)
+                    break;
 
                 it->releasing = true;
                 it->releaseAgeSec = 0.0;
@@ -2840,10 +3108,12 @@ private:
         }
 
         cachedPreset = local.preset;
+        cachedInstrumentId = local.instrumentId;
         cachedSampledDefinition = local.sampledDefinition;
         cachedSampledAttackOverride = local.sampledAttackOverride;
         cachedSampledReleaseOverride = local.sampledReleaseOverride;
         cachedSourceTempoBpm = local.sourceTempoBpm;
+        liveSampleSequenceCounter = 0;
     }
 
     static juce::CriticalSection &flutterAssetRootLock()
@@ -2877,9 +3147,11 @@ private:
     int cachedVersion = 0;
     std::vector<LiveMidiEvent> pendingLiveMidiEvents;
     std::vector<ActiveLiveNote> activeLiveNotes;
+    int liveSampleSequenceCounter = 0;
 
     std::vector<TimelineMidiNote> cachedNotes;
     InstrumentPreset cachedPreset;
+    juce::String cachedInstrumentId;
     std::shared_ptr<const SampledDefinition> cachedSampledDefinition;
     bool cachedSampledAttackOverride = false;
     bool cachedSampledReleaseOverride = false;
@@ -2961,6 +3233,10 @@ public:
                               const juce::NamedValueSet &params,
                               double sourceTempoBpm);
     bool supportsLiveMidiClipPlayback() const { return true; }
+    bool playPreviewMidiNote(int clipId,
+                             int pitch,
+                             float velocity,
+                             int durationMs);
     struct LiveMidiInputEvent
     {
         int clipId = -1;
@@ -2981,17 +3257,25 @@ public:
     void pause();
     void setTransportSeconds(double t);
     double getTransportSeconds() const;
+    bool isTransportPlaying() const
+    {
+        return isPlayingAtomic.load(std::memory_order_relaxed);
+    }
     void setBlockTransportStartFromCurrent()
     {
         blockTransportStartSec.store(
             transportSec.load(std::memory_order_relaxed),
             std::memory_order_relaxed);
     }
+    void setBlockPlayingState(bool playing)
+    {
+        blockIsPlayingAtomic.store(playing, std::memory_order_relaxed);
+    }
     // Audio thread only; routes queued MIDI input events into clip processors.
     void dispatchQueuedLiveMidiInputEventsForAudioThread();
     void advanceTransportBySamples(int numSamples)
     {
-        if (!isPlayingAtomic.load(std::memory_order_relaxed))
+        if (!blockIsPlayingAtomic.load(std::memory_order_relaxed))
             return;
 
         const double sr = hostSampleRateAtomic.load(std::memory_order_relaxed);
@@ -3097,6 +3381,7 @@ public:
     juce::String getCurrentInputDeviceName() const;
     juce::String getCurrentOutputDeviceName() const;
     int getNumInputChannels() const;
+    int getActiveInputChannelCount() const;
     void setLiveInputMonitoringEnabled(bool enabled);
     bool isLiveInputMonitoringEnabled() const noexcept;
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
@@ -3107,6 +3392,7 @@ public:
     void refreshAudioRouteAsync(const juce::String &reason);
     bool hardResetPlaybackOnlyRoute(const juce::String &reason);
     void requestAudioDeviceRefreshAsync(const juce::String &reason);
+    void flushDeferredAudioRouteRefreshAsync(const juce::String &reason);
     void captureRecordingRestorePlaybackSetupIfNeeded(
         int desiredInputChannels,
         const juce::AudioDeviceManager::AudioDeviceSetup &currentSetup);
@@ -3131,6 +3417,7 @@ public:
                                 int numOutputChannels,
                                 int numSamples) noexcept;
     void armOutputSafetyFadeIn(double sampleRate) noexcept;
+    void clearOutputSafetyState() noexcept;
     void setMasterMeterEnabled(bool enabled);
     const std::array<float, 4> getMasterMeterValues();
     void updateMasterMeterFromOutput(const float *const *out,
@@ -3163,7 +3450,7 @@ private:
     void rewireTrackChain(int trackIdx,
                           juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync); // clip-level FX+gain+pan → row
     void rewireMasterFxChain();                  // master FX chain
-    void armOutputSafetyForCurrentRoute() noexcept;
+    void armOutputSafetyForCurrentRoute(bool fadeIn = false) noexcept;
     void ensureBusGraphInitialised();            // rows + master
     void rewireTrackBusFxChain(int trackRow);    // row-level FX between input and automation
     int getTrackIndexForClip(int clipIdx) const; // clip → row mapping
@@ -3209,6 +3496,7 @@ private:
     std::atomic<double> blockTransportStartSec{0.0}; // set each audio callback block
     std::atomic<double> hostSampleRateAtomic{44100.0};
     std::atomic<bool> isPlayingAtomic{false};
+    std::atomic<bool> blockIsPlayingAtomic{false};
     std::atomic<double> exportProgressAtomic{0.0};
     std::atomic<bool> exportInProgressAtomic{false};
     std::atomic<int> liveMidiInputTargetClip{-1};
@@ -3365,6 +3653,8 @@ private:
         std::vector<AutomationPoint> gainAutomationPoints;
         std::vector<AutomationPoint> panAutomationPoints;
         std::vector<TrackEffectAutomationLane> effectAutomationLanes;
+        float lastAppliedGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+        float lastAppliedPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 
         // processors
         TrackInputProcessor *inputProc = nullptr;
@@ -3398,6 +3688,8 @@ private:
     std::vector<RowState::TrackEffectAutomationLane> masterEffectAutomationLanes;
     std::vector<AutomationPoint> masterGainAutomationPoints;
     std::vector<AutomationPoint> masterPanAutomationPoints;
+    float lastAppliedMasterGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+    float lastAppliedMasterPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 
     SimpleGainProcessor *masterGainProcessor = nullptr;
     juce::AudioProcessorGraph::Node::Ptr masterGainNode;
@@ -3503,7 +3795,8 @@ public:
         sampleRate = device->getCurrentSampleRate();
         msPerBeat = 60000.0 / bpm;
         clickPhaseInc = juce::MathConstants<double>::twoPi * clickFrequency / sampleRate;
-        engine.armOutputSafetyFadeIn(sampleRate);
+        engine.clearOutputSafetyState();
+        engine.setBlockPlayingState(false);
         player.audioDeviceAboutToStart(device);
         alignToTransport();
     }
@@ -3531,6 +3824,9 @@ public:
             if (outputChannelData[ch] != nullptr)
                 juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
         }
+
+        const bool blockWasPlaying = engine.isTransportPlaying();
+        engine.setBlockPlayingState(blockWasPlaying);
 
         // set block transport start time for all processors (clips, automation)
         engine.setBlockTransportStartFromCurrent();

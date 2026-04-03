@@ -14,6 +14,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -110,8 +111,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   }
 
   private fun extractInstrumentAssets(context: Context) {
-    val marker = File(context.filesDir, ".mixroom_instruments_extracted_v2")
-    if (marker.exists()) return
+    val marker = File(context.filesDir, ".mixroom_instruments_extracted_v3")
+    val packageInfo =
+      context.packageManager.getPackageInfo(context.packageName, 0)
+    val extractionVersion = packageInfo.lastUpdateTime.toString()
+    if (marker.exists() && marker.readText().trim() == extractionVersion) return
 
     val targetRoot = File(context.filesDir, "flutter_assets")
     val sourceCandidates =
@@ -150,11 +154,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       if (entries.isEmpty()) {
         val outFile = File(targetRoot, outputRelativePath(path))
         outFile.parentFile?.mkdirs()
-        if (!outFile.exists() || outFile.length() == 0L) {
-          context.assets.open(path).use { input ->
-            FileOutputStream(outFile).use { output ->
-              input.copyTo(output)
-            }
+        context.assets.open(path).use { input ->
+          FileOutputStream(outFile, false).use { output ->
+            input.copyTo(output)
           }
         }
         return
@@ -168,7 +170,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     try {
       copyAssetTree(sourceRoot)
-      marker.writeText("ok")
+      marker.writeText(extractionVersion)
+    } catch (e: IOException) {
+      Log.e("JuceAudioEngine", "Failed extracting instrument assets", e)
     } catch (e: Exception) {
       Log.e("JuceAudioEngine", "Failed extracting instrument assets", e)
     }
@@ -349,8 +353,8 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           routeType == AudioDeviceInfo.TYPE_BLE_SPEAKER ||
           routeType == AudioDeviceInfo.TYPE_BLE_BROADCAST -> "bluetoothOutput"
       routeType == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ||
-          routeType == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE ||
-          routeType == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "speaker"
+          routeType == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE -> "speaker"
+      routeType == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "earpiece"
       else -> "unknown"
     }
   }
@@ -427,6 +431,64 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     )
   }
 
+  private fun hasPlaybackRoutingAnomaly(audioManager: AudioManager): Boolean {
+    if (audioManager.mode != AudioManager.MODE_NORMAL) {
+      return true
+    }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val communicationDevice =
+        try {
+          audioManager.communicationDevice
+        } catch (_: SecurityException) {
+          null
+        } catch (_: IllegalStateException) {
+          null
+        }
+      if (communicationDevice != null) {
+        return true
+      }
+    } else if (audioManager.isBluetoothScoOn) {
+      return true
+    }
+
+    return false
+  }
+
+  private fun preparePlaybackRoute(reason: String): Boolean {
+    val audioManager =
+      applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val hadRoutingAnomaly = hasPlaybackRoutingAnomaly(audioManager)
+    val hasLingeringInputRoute =
+      !JuceBridge.isRecordingJNI() && JuceBridge.getActiveInputChannelCountJNI() > 0
+    if (hadRoutingAnomaly) {
+      Log.w("JuceAudioEngine", "Recovering Android playback route: $reason")
+      normalizeAudioModeAfterRecordingStop()
+    }
+
+    if (JuceBridge.isRecordingJNI()) {
+      return !hadRoutingAnomaly
+    }
+
+    val outputName = JuceBridge.getCurrentOutputDeviceNameJNI().trim()
+    val shouldReopenPlaybackRoute =
+      hadRoutingAnomaly || outputName.isEmpty() || hasLingeringInputRoute
+    if (!shouldReopenPlaybackRoute) {
+      return true
+    }
+
+    if (hasLingeringInputRoute) {
+      Log.w(
+        "JuceAudioEngine",
+        "Recovering playback-only route with active inputs still open: $reason",
+      )
+    }
+
+    val resetOk = JuceBridge.hardResetPlaybackOnlyRouteJNI("preparePlaybackRoute:$reason")
+    normalizeAudioModeAfterRecordingStop()
+    return resetOk
+  }
+
   private fun restoreBluetoothPlaybackAfterRecordingStop() {
     normalizeAudioModeAfterRecordingStop()
     JuceBridge.hardResetPlaybackOnlyRouteJNI("postRecordBluetoothReset")
@@ -442,7 +504,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success("Android ${android.os.Build.VERSION.RELEASE}")
         }
         "initialise" -> {
+          normalizeAudioModeAfterRecordingStop()
           JuceBridge.initialiseEngineJNI()
+          preparePlaybackRoute("initialise")
           result.success(null)
         }
         "shutdown" -> {
@@ -488,6 +552,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(JuceBridge.getTrackDurationJNI(args.intValue("track")))
         }
         "play" -> {
+          preparePlaybackRoute("play")
           JuceBridge.playJNI()
           result.success(null)
         }
@@ -677,6 +742,16 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "setLiveMidiInputTargetClip" -> {
           result.success(JuceBridge.setLiveMidiInputTargetClipJNI(args.intValue("clip")))
+        }
+        "playPreviewMidiNote" -> {
+          result.success(
+            JuceBridge.playPreviewMidiNoteJNI(
+              args.intValue("clip"),
+              args.intValue("pitch", 60),
+              args.floatValue("velocity", 0.9f),
+              args.intValue("durationMs", 900),
+            ),
+          )
         }
         "consumeLiveMidiInputEvents" -> {
           result.success(JuceBridge.consumeLiveMidiInputEventsJNI())
@@ -1143,8 +1218,16 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           )
         }
         "refreshAudioRoute" -> {
-          JuceBridge.refreshAudioRouteJNI(args.stringValue("reason"))
+          val reason = args.stringValue("reason")
+          if (JuceBridge.isRecordingJNI()) {
+            JuceBridge.refreshAudioRouteJNI(reason)
+          } else {
+            preparePlaybackRoute("refreshAudioRoute:$reason")
+          }
           result.success(null)
+        }
+        "preparePlaybackRoute" -> {
+          result.success(preparePlaybackRoute(args.stringValue("reason")))
         }
         "getRecordingPeak" -> {
           result.success(JuceBridge.getRecordingPeakJNI())

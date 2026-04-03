@@ -110,7 +110,20 @@ public:
         wetBuffer.setSize(numOutputs, bufferSize);
         lastHpfFreq = -1.0f;
         lastLpfFreq = -1.0f;
+        lastDelaySamples = -1.0f;
+        lastModDepth = -1.0f;
+        lastModRate = -1.0f;
+        lastRoomSize = -1.0f;
+        lastDamping = -1.0f;
         prepareProcessChain();
+        reset();
+    }
+
+    void reset()
+    {
+        processChain.reset();
+        dryBuffer.clear();
+        wetBuffer.clear();
     }
 
     void process(juce::AudioBuffer<float> &inputBuffer)
@@ -135,6 +148,11 @@ public:
     }
 
 private:
+    static bool nearlyEqual(float a, float b, float epsilon = 1.0e-4f)
+    {
+        return std::abs(a - b) <= epsilon;
+    }
+
     void prepareProcessChain()
     {
         juce::dsp::ProcessSpec spec;
@@ -159,8 +177,13 @@ private:
 
     void setupDelay()
     {
-        processChain.get<ChainIndex::Delay>().setDelay(
-            static_cast<float>(parameters.predelay * sampleRate * 0.001f));
+        const float delaySamples =
+            static_cast<float>(parameters.predelay * sampleRate * 0.001f);
+        if (nearlyEqual(delaySamples, lastDelaySamples, 0.25f))
+            return;
+
+        processChain.get<ChainIndex::Delay>().setDelay(delaySamples);
+        lastDelaySamples = delaySamples;
     }
 
     void setupFilters()
@@ -180,15 +203,25 @@ private:
 
     void setupModulation()
     {
+        if (nearlyEqual(parameters.modDepth, lastModDepth) &&
+            nearlyEqual(parameters.modRate, lastModRate))
+            return;
+
         processChain.get<ChainIndex::Chorus>().setCentreDelay(1.0f);
         processChain.get<ChainIndex::Chorus>().setFeedback(0.0f);
         processChain.get<ChainIndex::Chorus>().setMix(1.0f);
         processChain.get<ChainIndex::Chorus>().setDepth(parameters.modDepth);
         processChain.get<ChainIndex::Chorus>().setRate(parameters.modRate);
+        lastModDepth = parameters.modDepth;
+        lastModRate = parameters.modRate;
     }
 
     void setupReverb()
     {
+        if (nearlyEqual(parameters.roomSize, lastRoomSize) &&
+            nearlyEqual(parameters.damping, lastDamping))
+            return;
+
         reverbParameters.roomSize = parameters.roomSize;
         reverbParameters.damping = parameters.damping;
         reverbParameters.width = 1.0f;
@@ -196,6 +229,8 @@ private:
         reverbParameters.wetLevel = 1.0f;
         reverbParameters.dryLevel = 0.0f;
         processChain.get<ChainIndex::Verb>().setParameters(reverbParameters);
+        lastRoomSize = parameters.roomSize;
+        lastDamping = parameters.damping;
     }
 
     void mixToOutput(juce::AudioBuffer<float> &buffer, int blockSamples)
@@ -223,6 +258,11 @@ private:
     int bufferSize{0};
     float lastHpfFreq{-1.0f};
     float lastLpfFreq{-1.0f};
+    float lastDelaySamples{-1.0f};
+    float lastModDepth{-1.0f};
+    float lastModRate{-1.0f};
+    float lastRoomSize{-1.0f};
+    float lastDamping{-1.0f};
     juce::AudioBuffer<float> dryBuffer, wetBuffer;
     ReverbParams parameters;
     juce::Reverb::Parameters reverbParameters;
@@ -245,6 +285,7 @@ class ReverbAudioProcessor : public juce::AudioProcessor
 public:
     ReverbAudioProcessor();
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
 #ifndef JucePlugin_PreferredChannelConfigurations
     bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
 #endif
@@ -542,6 +583,17 @@ public:
         delayBuffer.setSize(numOutputs, delayBufferSize);
         delayBuffer.clear();
         prepareDspChains();
+        reset();
+    }
+
+    void reset()
+    {
+        writePosition = 0;
+        dryBuffer.clear();
+        wetBuffer.clear();
+        delayBuffer.clear();
+        modChain.reset();
+        filterChain.reset();
     }
 
     void process(juce::AudioBuffer<float> &inputBuffer)
@@ -790,6 +842,7 @@ class DelayAudioProcessor : public juce::AudioProcessor
 public:
     DelayAudioProcessor();
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
 #ifndef JucePlugin_PreferredChannelConfigurations
     bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
 #endif
@@ -1226,6 +1279,7 @@ class DistortionAudioProcessor : public juce::AudioProcessor
 public:
     DistortionAudioProcessor();
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
 #ifndef JucePlugin_PreferredChannelConfigurations
     bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
 #endif
@@ -1299,6 +1353,19 @@ public:
         spec.numChannels = numOutputs;
         lowChain.prepare(spec);
         highChain.prepare(spec);
+        reset();
+    }
+
+    void reset()
+    {
+        compressionLevel = {0.0f, 0.0f};
+        outputGainReduction = {0.0f, 0.0f};
+        lowBuffer.clear();
+        highBuffer.clear();
+        compressionBuffer.clear();
+        envelopeBuffer.clear();
+        lowChain.reset();
+        highChain.reset();
     }
 
     void process(juce::AudioBuffer<float> &inputBuffer)
@@ -1463,6 +1530,7 @@ class DeesserAudioProcessor : public juce::AudioProcessor
 public:
     DeesserAudioProcessor();
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
 #ifndef JucePlugin_PreferredChannelConfigurations
     bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
 #endif
@@ -1665,6 +1733,19 @@ public:
 
         compressionLevel.fill(0.0f);
         gainReduction.fill(0.0f);
+        lastSidechainFreq = 20.0f;
+        reset();
+    }
+
+    void reset()
+    {
+        compressionLevel.fill(0.0f);
+        gainReduction.fill(0.0f);
+        dryBuffer.clear();
+        wetBuffer.clear();
+        envelopeBuffer.clear();
+        for (auto &f : sidechainFilters)
+            f.reset();
     }
 
     void setParameters(const juce::AudioProcessorValueTreeState &apvts)
@@ -1690,9 +1771,13 @@ public:
         params.stereo = apvts.getRawParameterValue("stereo")->load();
         params.mix = apvts.getRawParameterValue("mix")->load() * 0.01f;
 
-        for (auto &f : sidechainFilters)
-            f.setCoefficients(
-                juce::IIRCoefficients::makeHighPass(sampleRate, params.sidechainFreq));
+        if (!nearlyEqual(params.sidechainFreq, lastSidechainFreq, 0.01f))
+        {
+            for (auto &f : sidechainFilters)
+                f.setCoefficients(
+                    juce::IIRCoefficients::makeHighPass(sampleRate, params.sidechainFreq));
+            lastSidechainFreq = params.sidechainFreq;
+        }
     }
 
     void process(juce::AudioBuffer<float> &buffer)
@@ -1727,6 +1812,11 @@ public:
     }
 
 private:
+    static bool nearlyEqual(float a, float b, float epsilon = 1.0e-4f)
+    {
+        return std::abs(a - b) <= epsilon;
+    }
+
     void applySidechainFilter()
     {
         for (int ch = 0; ch < numOutputs; ++ch)
@@ -1829,6 +1919,7 @@ private:
     int currentBlockSize = 0;
 
     CompressorParameters params;
+    float lastSidechainFreq = -1.0f;
 
     std::array<float, numOutputs> compressionLevel{};
     std::array<float, numOutputs> gainReduction{};
@@ -1843,6 +1934,7 @@ public:
     CompressorAudioProcessor();
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
     void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -1911,14 +2003,35 @@ class LimiterModule
 public:
     void setParameters(const juce::AudioProcessorValueTreeState &apvts)
     {
-        parameters.threshold = apvts.getRawParameterValue("threshold")->load();
-        parameters.ceiling = apvts.getRawParameterValue("ceiling")->load();
-
+        const float threshold = apvts.getRawParameterValue("threshold")->load();
+        const float ceiling = apvts.getRawParameterValue("ceiling")->load();
         const float releaseInput = apvts.getRawParameterValue("release")->load();
-        parameters.releaseTime = static_cast<float>(
-            std::exp(-1.0f / (releaseInput * sampleRate / 1000.0)));
+        const bool stereo = apvts.getRawParameterValue("stereo")->load();
 
-        parameters.stereo = apvts.getRawParameterValue("stereo")->load();
+        if (!std::isfinite(lastThreshold) || !nearlyEqual(threshold, lastThreshold))
+        {
+            parameters.threshold = threshold;
+            lastThreshold = threshold;
+        }
+
+        if (!std::isfinite(lastCeiling) || !nearlyEqual(ceiling, lastCeiling))
+        {
+            parameters.ceiling = ceiling;
+            lastCeiling = ceiling;
+        }
+
+        if (!std::isfinite(lastReleaseInput) || !nearlyEqual(releaseInput, lastReleaseInput, 0.01f))
+        {
+            parameters.releaseTime = static_cast<float>(
+                std::exp(-1.0f / (releaseInput * sampleRate / 1000.0)));
+            lastReleaseInput = releaseInput;
+        }
+
+        if (stereo != lastStereo)
+        {
+            parameters.stereo = stereo;
+            lastStereo = stereo;
+        }
     }
 
     void prepare(double inputSampleRate, int maxBlockSize)
@@ -1928,6 +2041,19 @@ public:
         currentBlockSize = bufferSize;
         compressionBuffer.setSize(numOutputs, bufferSize);
         envelopeBuffer.setSize(numOutputs, bufferSize);
+        lastThreshold = std::numeric_limits<float>::quiet_NaN();
+        lastCeiling = std::numeric_limits<float>::quiet_NaN();
+        lastReleaseInput = std::numeric_limits<float>::quiet_NaN();
+        lastStereo = false;
+        reset();
+    }
+
+    void reset()
+    {
+        compressionLevel = {0.0f, 0.0f};
+        outputGainReduction = {0.0f, 0.0f};
+        compressionBuffer.clear();
+        envelopeBuffer.clear();
     }
 
     void process(juce::AudioBuffer<float> &inputBuffer)
@@ -1955,6 +2081,11 @@ public:
     }
 
 private:
+    static bool nearlyEqual(float a, float b, float epsilon = 1.0e-4f)
+    {
+        return std::abs(a - b) <= epsilon;
+    }
+
     void applyHysteresis(float &compLevel, float inputSample)
     {
         const float releaseLevel =
@@ -2042,6 +2173,10 @@ private:
     LimiterParameters parameters;
     std::array<float, numOutputs> compressionLevel{0.0f, 0.0f};
     std::array<float, numOutputs> outputGainReduction{0.0f, 0.0f};
+    float lastThreshold = std::numeric_limits<float>::quiet_NaN();
+    float lastCeiling = std::numeric_limits<float>::quiet_NaN();
+    float lastReleaseInput = std::numeric_limits<float>::quiet_NaN();
+    bool lastStereo = false;
 
     juce::AudioBuffer<float> compressionBuffer, envelopeBuffer;
 };
@@ -2052,6 +2187,7 @@ public:
     LimiterAudioProcessor();
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
     void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -2212,6 +2348,7 @@ public:
     ClipperAudioProcessor();
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
     void processBlockBypassed(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
     void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
 
@@ -2278,8 +2415,19 @@ public:
 
     void prepare(double inputSampleRate, int maxBlockSize)
     {
-        juce::ignoreUnused(inputSampleRate);
+        sampleRate = inputSampleRate > 0.0 ? inputSampleRate : 44100.0;
         ensureCapacity(maxBlockSize);
+        reset();
+    }
+
+    void reset()
+    {
+        for (int ch = 0; ch < numOutputs; ++ch)
+        {
+            std::fill(ringBuffers[ch].begin(), ringBuffers[ch].end(), 0.0f);
+            writePos[ch] = 0;
+            phase[ch] = 0.0f;
+        }
     }
 
     void process(juce::AudioBuffer<float> &buffer)
@@ -2294,9 +2442,10 @@ public:
         const float phaseInc = (1.0f - ratio) / (float)(ringSize - 2);
         const float ringSpan = (float)(ringSize - 2);
         const float halfSpan = 0.5f * ringSpan;
-
-        const float dryMix = std::pow(std::sin(0.5f * juce::float_Pi * (1.0f - params.mix)), 2.0f);
-        const float wetMix = std::pow(std::sin(0.5f * juce::float_Pi * params.mix), 2.0f);
+        const float dryMix =
+            std::pow(std::sin(0.5f * juce::float_Pi * (1.0f - params.mix)), 2.0f);
+        const float wetMix =
+            std::pow(std::sin(0.5f * juce::float_Pi * params.mix), 2.0f);
 
         for (int ch = 0; ch < channels; ++ch)
         {
@@ -2348,18 +2497,24 @@ public:
 private:
     void ensureCapacity(int blockSize)
     {
-        const int minDelay = juce::jmax(512, juce::jmax(1, blockSize) * 4);
+        juce::ignoreUnused(blockSize);
+        // Android hardware callbacks can arrive in very large chunks
+        // (for example 1920 frames at 48 kHz). Basing the shifter window on
+        // callback size turns the wet path into an audible echo. Keep the
+        // pitch window sample-rate based instead so Android matches the much
+        // shorter iOS live path.
+        const int minDelay = juce::jlimit(
+            512,
+            1024,
+            (int)std::lround(sampleRate * 0.02));
         const int requiredRingSize = minDelay + 2;
         if (requiredRingSize <= ringSize)
             return;
 
         ringSize = requiredRingSize;
         for (int ch = 0; ch < numOutputs; ++ch)
-        {
             ringBuffers[ch].assign((size_t)ringSize, 0.0f);
-            writePos[ch] = 0;
-            phase[ch] = 0.0f;
-        }
+        reset();
     }
 
     static float readDelayedSample(const std::vector<float> &ring,
@@ -2383,6 +2538,7 @@ private:
     }
 
     PitchShiftParameters params{0.0f, 1.0f};
+    double sampleRate{44100.0};
     int ringSize{0};
     std::array<std::vector<float>, numOutputs> ringBuffers;
     std::array<int, numOutputs> writePos{0, 0};
@@ -2396,6 +2552,7 @@ public:
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    void reset() override { pitchShift.reset(); }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
     bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
@@ -2463,6 +2620,14 @@ public:
         lastDepth = -1.0f;
         lastCentreDelayMs = -1.0f;
         lastFeedback = -2.0f;
+        reset();
+    }
+
+    void reset()
+    {
+        dryBuffer.clear();
+        wetBuffer.clear();
+        chorus.reset();
     }
 
     void process(juce::AudioBuffer<float> &buffer)
@@ -2554,6 +2719,7 @@ public:
     ChorusAudioProcessor();
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
     void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -2619,6 +2785,14 @@ public:
         lastRateHz = -1.0f;
         lastDepth = -1.0f;
         lastCentreDelayMs = -1.0f;
+        reset();
+    }
+
+    void reset()
+    {
+        dryBuffer.clear();
+        wetBuffer.clear();
+        vibrato.reset();
     }
 
     void process(juce::AudioBuffer<float> &buffer)
@@ -2706,6 +2880,7 @@ public:
     VibratoAudioProcessor();
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
     void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
 
 #ifndef JucePlugin_PreferredChannelConfigurations

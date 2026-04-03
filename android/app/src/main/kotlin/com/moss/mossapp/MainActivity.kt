@@ -3,6 +3,7 @@ package com.mixroom.mixroomapp
 import android.content.Context
 import android.content.Intent
 import android.content.ContentValues
+import android.content.ClipData
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -28,6 +29,7 @@ import java.io.FileOutputStream
 class MainActivity : FlutterFragmentActivity() {
   companion object {
     private const val MAX_INCOMING_MIXROOM_BYTES = 512L * 1024L * 1024L
+    private const val REQUEST_CODE_SAVE_EXPORTED_FILE = 40171
   }
 
   private val openFileChannelName = "mixroom/open_file"
@@ -39,6 +41,9 @@ class MainActivity : FlutterFragmentActivity() {
   private var producerExportsChannel: MethodChannel? = null
   private var savedExportsChannel: MethodChannel? = null
   private var initialMixroomPath: String? = null
+  private var pendingSavedExportResult: MethodChannel.Result? = null
+  private var pendingSavedExportSourcePath: String? = null
+  private var pendingSavedExportSuggestedFileName: String? = null
 
   override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -109,6 +114,22 @@ class MainActivity : FlutterFragmentActivity() {
             result.success(openSavedExport(path))
           }
         }
+        "saveExportedFile" -> {
+          val args = call.arguments as? Map<*, *>
+          val sourceFilePath = args?.get("sourceFilePath") as? String
+          val suggestedFileName = args?.get("suggestedFileName") as? String
+          val mimeType = (args?.get("mimeType") as? String)?.trim().orEmpty()
+          if (sourceFilePath.isNullOrBlank() || suggestedFileName.isNullOrBlank()) {
+            result.error("bad_args", "Missing sourceFilePath or suggestedFileName", null)
+          } else {
+            launchSavedExportDocument(
+              sourceFilePath = sourceFilePath,
+              suggestedFileName = suggestedFileName,
+              mimeType = if (mimeType.isNotEmpty()) mimeType else "*/*",
+              result = result,
+            )
+          }
+        }
         "normalizeSavedExportName" -> {
           val args = call.arguments as? Map<*, *>
           val path = args?.get("path") as? String
@@ -116,9 +137,7 @@ class MainActivity : FlutterFragmentActivity() {
           if (path.isNullOrBlank() || expectedExtension.isNullOrBlank()) {
             result.success(path)
           } else {
-            result.success(
-              normalizeSavedExportName(path = path, expectedExtension = expectedExtension)
-            )
+            result.success(normalizeSavedExportName(path, expectedExtension))
           }
         }
         "resolveSavedExportDisplayName" -> {
@@ -128,6 +147,24 @@ class MainActivity : FlutterFragmentActivity() {
             result.success(null)
           } else {
             result.success(resolveSavedExportDisplayName(path))
+          }
+        }
+        "materializeSavedExportForPreview" -> {
+          val args = call.arguments as? Map<*, *>
+          val path = args?.get("path") as? String
+          if (path.isNullOrBlank()) {
+            result.success(null)
+          } else {
+            result.success(materializeSavedExportForPreview(path))
+          }
+        }
+        "shareSavedExport" -> {
+          val args = call.arguments as? Map<*, *>
+          val path = args?.get("path") as? String
+          if (path.isNullOrBlank()) {
+            result.success(false)
+          } else {
+            result.success(shareSavedExport(path))
           }
         }
         else -> result.notImplemented()
@@ -145,6 +182,14 @@ class MainActivity : FlutterFragmentActivity() {
     super.onNewIntent(intent)
     setIntent(intent)
     handleIntent(intent, isInitial = false)
+  }
+
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    if (requestCode == REQUEST_CODE_SAVE_EXPORTED_FILE) {
+      handleSavedExportDocumentResult(resultCode, data)
+      return
+    }
+    super.onActivityResult(requestCode, resultCode, data)
   }
 
   private fun handleIntent(intent: Intent?, isInitial: Boolean) {
@@ -165,6 +210,100 @@ class MainActivity : FlutterFragmentActivity() {
     } else {
       deliverPath(path)
     }
+  }
+
+  private fun launchSavedExportDocument(
+    sourceFilePath: String,
+    suggestedFileName: String,
+    mimeType: String,
+    result: MethodChannel.Result,
+  ) {
+    if (pendingSavedExportResult != null) {
+      result.error("save_in_progress", "Another export save is already in progress", null)
+      return
+    }
+
+    val sourceFile = File(sourceFilePath)
+    if (!sourceFile.exists() || !sourceFile.isFile) {
+      result.error("source_missing", "Export source file is missing", null)
+      return
+    }
+
+    pendingSavedExportResult = result
+    pendingSavedExportSourcePath = sourceFile.absolutePath
+    pendingSavedExportSuggestedFileName = suggestedFileName
+
+    try {
+      val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE)
+        type = mimeType.ifBlank { "*/*" }
+        putExtra(Intent.EXTRA_TITLE, suggestedFileName)
+      }
+      startActivityForResult(intent, REQUEST_CODE_SAVE_EXPORTED_FILE)
+    } catch (e: Exception) {
+      clearPendingSavedExport()
+      result.error("save_launch_failed", e.message, null)
+    }
+  }
+
+  private fun handleSavedExportDocumentResult(resultCode: Int, data: Intent?) {
+    val result = pendingSavedExportResult
+    val sourceFilePath = pendingSavedExportSourcePath
+    val suggestedFileName = pendingSavedExportSuggestedFileName
+
+    if (result == null) {
+      clearPendingSavedExport()
+      return
+    }
+
+    if (resultCode != RESULT_OK || data?.data == null) {
+      clearPendingSavedExport()
+      result.success(null)
+      return
+    }
+
+    if (sourceFilePath.isNullOrBlank() || suggestedFileName.isNullOrBlank()) {
+      clearPendingSavedExport()
+      result.error("save_state_missing", "Missing pending export save state", null)
+      return
+    }
+
+    val destinationUri = data.data!!
+    try {
+      val persistFlags =
+        data.flags and
+          (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+      if (persistFlags != 0) {
+        contentResolver.takePersistableUriPermission(destinationUri, persistFlags)
+      }
+    } catch (_: Exception) {
+      // Persisting the URI permission is best-effort only.
+    }
+
+    Thread {
+      try {
+        val finalUri = saveExportedFileToDocument(
+          sourceFile = File(sourceFilePath),
+          destinationUri = destinationUri,
+          suggestedFileName = suggestedFileName,
+        )
+        runOnUiThread {
+          clearPendingSavedExport()
+          result.success(finalUri.toString())
+        }
+      } catch (e: Exception) {
+        runOnUiThread {
+          clearPendingSavedExport()
+          result.error("save_failed", e.message, null)
+        }
+      }
+    }.start()
+  }
+
+  private fun clearPendingSavedExport() {
+    pendingSavedExportResult = null
+    pendingSavedExportSourcePath = null
+    pendingSavedExportSuggestedFileName = null
   }
 
   private fun deliverPath(path: String) {
@@ -293,149 +432,47 @@ class MainActivity : FlutterFragmentActivity() {
     val expectedExt = expectedExtension.trim().removePrefix(".").lowercase()
     if (expectedExt.isEmpty()) return path
 
-    val uriCandidates = buildSavedExportUriCandidates(normalizedPath)
-
-    for (uri in uriCandidates) {
-      val currentDisplayName = queryDisplayName(uri) ?: displayNameFromDocumentUri(uri) ?: continue
-      val correctedDisplayName = correctedDisplayNameForExtension(
-        currentDisplayName,
-        expectedExt,
-      ) ?: continue
-
-      if (currentDisplayName.equals(correctedDisplayName, ignoreCase = true)) {
-        return uri.toString()
-      }
-
-      try {
-        val renamedUri = DocumentsContract.renameDocument(
-          contentResolver,
-          uri,
-          correctedDisplayName,
-        )
-        if (renamedUri != null) {
-          return renamedUri.toString()
-        }
-      } catch (_: Exception) {
-        // Try URI-derived local fallback below.
-      }
-
-      val localFromUri = localFileFromDocumentUri(uri)
-      if (localFromUri != null && localFromUri.exists()) {
-        val normalizedLocalPath = normalizeLocalSavedExportFile(
-          localFile = localFromUri,
-          expectedExtension = expectedExt,
-          fallbackPath = path,
-          preferredReturnedPath = path,
-        )
-        if (normalizedLocalPath != path) {
-          return normalizedLocalPath
-        }
-      }
-    }
-
-    val localFile = File(normalizedPath)
-    if (localFile.exists()) {
-      return normalizeLocalSavedExportFile(
-        localFile = localFile,
-        expectedExtension = expectedExt,
-        fallbackPath = path,
-        preferredReturnedPath = normalizedPath,
-      )
-    }
-
-    for (documentId in extractDocumentIdsFromPath(normalizedPath)) {
-      val documentLocalFile = localFileFromDocumentId(documentId) ?: continue
-      if (!documentLocalFile.exists()) continue
-      return normalizeLocalSavedExportFile(
-        localFile = documentLocalFile,
-        expectedExtension = expectedExt,
-        fallbackPath = path,
-        preferredReturnedPath = path,
-      )
+    for (uri in buildSavedExportUriCandidates(normalizedPath)) {
+      return normalizeSavedExportUri(uri, expectedExt).toString()
     }
 
     return path
   }
 
-  private fun normalizeLocalSavedExportFile(
-    localFile: File,
-    expectedExtension: String,
-    fallbackPath: String,
-    preferredReturnedPath: String? = null,
-  ): String {
-    fun preferredPathForName(fileName: String): String? {
-      val preferred = preferredReturnedPath?.trim()
-      if (preferred.isNullOrEmpty()) return null
-      return replaceFileNameInSavedPath(preferred, fileName)
+  private fun saveExportedFileToDocument(
+    sourceFile: File,
+    destinationUri: Uri,
+    suggestedFileName: String,
+  ): Uri {
+    sourceFile.inputStream().use { input ->
+      contentResolver.openOutputStream(destinationUri, "rwt")?.use { output ->
+        input.copyTo(output)
+        output.flush()
+      } ?: throw IllegalStateException("Unable to open destination output stream")
     }
 
-    val correctedLocalName = correctedDisplayNameForExtension(
-      localFile.name,
-      expectedExtension,
-    ) ?: return preferredPathForName(localFile.name) ?: localFile.absolutePath
-
-    if (localFile.name.equals(correctedLocalName, ignoreCase = true)) {
-      return preferredPathForName(localFile.name) ?: localFile.absolutePath
+    val expectedExtension =
+      suggestedFileName.substringAfterLast('.', "").trim().removePrefix(".").lowercase()
+    if (expectedExtension.isEmpty()) {
+      return destinationUri
     }
-    val parent = localFile.parentFile ?: return fallbackPath
-    var target = File(parent, correctedLocalName)
-    if (target.exists()) {
-      target = uniqueCollisionSafeSibling(
-        parent = parent,
-        candidateName = correctedLocalName,
-        expectedExtension = expectedExtension,
-      )
-    }
-    return try {
-      if (localFile.renameTo(target)) {
-        preferredPathForName(target.name) ?: target.absolutePath
-      } else {
-        fallbackPath
-      }
-    } catch (_: Exception) {
-      fallbackPath
-    }
+    return normalizeSavedExportUri(destinationUri, expectedExtension)
   }
 
-  private fun replaceFileNameInSavedPath(path: String, fileName: String): String {
-    val trimmedPath = path.trim()
-    if (trimmedPath.isEmpty()) return path
+  private fun normalizeSavedExportUri(uri: Uri, expectedExtension: String): Uri {
+    val currentDisplayName = queryDisplayName(uri) ?: displayNameFromDocumentUri(uri) ?: return uri
+    val correctedDisplayName =
+      correctedDisplayNameForExtension(currentDisplayName, expectedExtension) ?: return uri
 
-    val normalized = if (trimmedPath.startsWith("/")) trimmedPath else "/$trimmedPath"
-    val documentMarker = "/document/"
-    val treeMarker = "/tree/"
-
-    fun updatedDocumentId(documentId: String): String {
-      val cleanId = documentId.trim().trim('/')
-      if (cleanId.contains('/')) {
-        val prefix = cleanId.substringBeforeLast('/')
-        return "$prefix/$fileName"
-      }
-      if (cleanId.contains(':')) {
-        val volumePrefix = cleanId.substringBeforeLast(':')
-        return "$volumePrefix:$fileName"
-      }
-      return fileName
+    if (currentDisplayName.equals(correctedDisplayName, ignoreCase = true)) {
+      return uri
     }
 
-    if (normalized.startsWith(documentMarker)) {
-      val existingDocumentId = normalized.substringAfter(documentMarker).trim('/').trim()
-      if (existingDocumentId.isNotEmpty()) {
-        return "$documentMarker${updatedDocumentId(existingDocumentId)}"
-      }
+    return try {
+      DocumentsContract.renameDocument(contentResolver, uri, correctedDisplayName) ?: uri
+    } catch (_: Exception) {
+      uri
     }
-
-    if (normalized.startsWith(treeMarker) && normalized.contains(documentMarker)) {
-      val treeId = normalized.substringAfter(treeMarker).substringBefore(documentMarker).trim('/').trim()
-      val existingDocumentId = normalized.substringAfter(documentMarker).trim('/').trim()
-      if (treeId.isNotEmpty() && existingDocumentId.isNotEmpty()) {
-        return "$treeMarker$treeId$documentMarker${updatedDocumentId(existingDocumentId)}"
-      }
-    }
-
-    val file = File(trimmedPath)
-    val parent = file.parentFile
-    return if (parent != null) File(parent, fileName).absolutePath else fileName
   }
 
   private fun resolveSavedExportDisplayName(path: String): String? {
@@ -467,6 +504,52 @@ class MainActivity : FlutterFragmentActivity() {
       if (documentLocalFile != null && documentLocalFile.exists()) {
         return documentLocalFile.name
       }
+    }
+
+    return null
+  }
+
+  private fun materializeSavedExportForPreview(path: String): String? {
+    val normalizedPath = path.trim()
+    if (normalizedPath.isEmpty()) return null
+
+    val directFile = File(normalizedPath)
+    if (directFile.exists() && directFile.isFile) {
+      return directFile.absolutePath
+    }
+
+    for (documentId in extractDocumentIdsFromPath(normalizedPath)) {
+      val localFile = localFileFromDocumentId(documentId)
+      if (localFile != null && localFile.exists() && localFile.isFile) {
+        return localFile.absolutePath
+      }
+    }
+
+    for (uri in buildSavedExportUriCandidates(normalizedPath)) {
+      try {
+        val displayName =
+          queryDisplayName(uri)
+            ?: displayNameFromDocumentUri(uri)
+            ?: "mixroom_export_preview"
+        val safeName = sanitizeFileName(displayName)
+        val cacheFile = File(
+          cacheDir,
+          "saved_export_preview_${System.currentTimeMillis()}_$safeName",
+        )
+
+        contentResolver.openInputStream(uri)?.use { input ->
+          FileOutputStream(cacheFile).use { output ->
+            input.copyTo(output)
+            output.flush()
+          }
+        } ?: continue
+
+        if (cacheFile.exists() && cacheFile.length() > 0L) {
+          return cacheFile.absolutePath
+        }
+
+        cacheFile.delete()
+      } catch (_: Exception) {}
     }
 
     return null
@@ -507,6 +590,15 @@ class MainActivity : FlutterFragmentActivity() {
       }
     }
 
+    val localDocumentId = localPathToDocumentId(path)
+    if (!localDocumentId.isNullOrBlank()) {
+      for (authority in authorities) {
+        try {
+          addCandidate(DocumentsContract.buildDocumentUri(authority, localDocumentId))
+        } catch (_: Exception) {}
+      }
+    }
+
     for ((treeId, documentId) in extractTreeAndDocumentIdsFromPath(path)) {
       for (authority in authorities) {
         try {
@@ -519,6 +611,83 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     return candidates
+  }
+
+  private fun shareSavedExport(path: String): Boolean {
+    val normalized = path.trim()
+    if (normalized.isEmpty()) return false
+
+    val uriCandidates = buildSavedExportUriCandidates(normalized)
+    for (uri in uriCandidates) {
+      try {
+        val mimeType = contentResolver.getType(uri) ?: "*/*"
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+          type = mimeType
+          putExtra(Intent.EXTRA_STREAM, uri)
+          clipData = ClipData.newUri(contentResolver, "Mixroom export", uri)
+          addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+              Intent.FLAG_GRANT_READ_URI_PERMISSION or
+              Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+          )
+        }
+
+        val resolveInfoList =
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.queryIntentActivities(
+              shareIntent,
+              PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong()),
+            )
+          } else {
+            @Suppress("DEPRECATION")
+            packageManager.queryIntentActivities(shareIntent, PackageManager.MATCH_DEFAULT_ONLY)
+          }
+
+        if (resolveInfoList.isEmpty()) {
+          continue
+        }
+
+        for (resolveInfo in resolveInfoList) {
+          val packageName = resolveInfo.activityInfo.packageName
+          grantUriPermission(
+            packageName,
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+          )
+        }
+
+        val chooser = Intent.createChooser(shareIntent, null).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(chooser)
+        return true
+      } catch (_: Exception) {}
+    }
+
+    return false
+  }
+
+  private fun localPathToDocumentId(path: String): String? {
+    val raw = path.trim()
+    if (raw.isEmpty()) return null
+    val absolutePath = try {
+      File(raw).absolutePath
+    } catch (_: Exception) {
+      raw
+    }
+
+    @Suppress("DEPRECATION")
+    val primaryRoot = Environment.getExternalStorageDirectory()?.absolutePath?.trimEnd('/')
+    if (!primaryRoot.isNullOrEmpty() &&
+      absolutePath.startsWith("$primaryRoot/", ignoreCase = true)
+    ) {
+      val relative = absolutePath.removePrefix("$primaryRoot/").trimStart('/')
+      if (relative.isNotEmpty()) {
+        return "primary:$relative"
+      }
+    }
+
+    return null
   }
 
   private fun extractDocumentIdsFromPath(path: String): Set<String> {
@@ -678,89 +847,50 @@ class MainActivity : FlutterFragmentActivity() {
   ): String? {
     val trimmedName = displayName.trim()
     if (trimmedName.isEmpty()) return null
+
     val expectedExtWithDot = ".$expectedExtension"
-    if (trimmedName.lowercase().endsWith(expectedExtWithDot)) {
+    val collisionSuffixPattern = Regex("\\s*\\((\\d+)\\)$")
+    val collisionSuffixMatch = collisionSuffixPattern.find(trimmedName)
+    val suffix =
+      collisionSuffixMatch?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }?.let {
+        " ($it)"
+      } ?: ""
+
+    var stem = if (collisionSuffixMatch != null) {
+      trimmedName.substring(0, collisionSuffixMatch.range.first).trimEnd()
+    } else {
+      trimmedName
+    }
+
+    var removedExpectedExtension = false
+    while (stem.lowercase().endsWith(expectedExtWithDot)) {
+      stem = stem.dropLast(expectedExtWithDot.length).trimEnd()
+      removedExpectedExtension = true
+    }
+
+    val canonicalStem = stem.ifBlank { "Mixroom Export" }
+    val canonicalName = "$canonicalStem$suffix.$expectedExtension"
+    if (trimmedName.equals(canonicalName, ignoreCase = true)) {
       return null
     }
 
-    val escapedExt = Regex.escape(expectedExtension)
-    val extThenCollisionPattern = Regex(
-      pattern = "^(.*)\\.${escapedExt}(\\s*\\(\\d+\\))$",
-      option = RegexOption.IGNORE_CASE,
-    )
-    val extThenCollisionMatch = extThenCollisionPattern.matchEntire(trimmedName)
-    if (extThenCollisionMatch != null) {
-      val stem = extThenCollisionMatch.groupValues[1].trim().ifBlank { "Mixroom Export" }
-      val suffix = extThenCollisionMatch.groupValues[2].replace(Regex("\\s+"), " ")
-      return "$stem$suffix.$expectedExtension"
-    }
-
-    val collisionSuffixPattern = Regex("^(.*?)(\\s*\\(\\d+\\))$")
-    val collisionSuffixMatch = collisionSuffixPattern.matchEntire(trimmedName)
-    if (collisionSuffixMatch != null) {
-      val stemRaw = collisionSuffixMatch.groupValues[1].trim()
-      val suffix = collisionSuffixMatch.groupValues[2].replace(Regex("\\s+"), " ")
-      val stemLower = stemRaw.lowercase()
-      if (stemLower.endsWith(expectedExtWithDot)) {
-        return stemRaw
+    if (!removedExpectedExtension && suffix.isEmpty() && trimmedName.contains('.')) {
+      val lastDot = trimmedName.lastIndexOf('.')
+      if (lastDot > 0) {
+        val trailingExt = trimmedName.substring(lastDot + 1).trim().lowercase()
+        if (trailingExt == expectedExtension.lowercase()) {
+          return null
+        }
       }
-      return "${stemRaw.ifBlank { "Mixroom Export" }}$suffix.$expectedExtension"
     }
 
-    return "$trimmedName.$expectedExtension"
-  }
-
-  private fun uniqueCollisionSafeSibling(
-    parent: File,
-    candidateName: String,
-    expectedExtension: String,
-  ): File {
-    val extSuffix = ".$expectedExtension"
-    val stem = if (candidateName.lowercase().endsWith(extSuffix)) {
-      candidateName.dropLast(extSuffix.length)
-    } else {
-      candidateName
-    }
-    var index = 1
-    while (index < 1000) {
-      val next = File(parent, "$stem ($index)$extSuffix")
-      if (!next.exists()) return next
-      index++
-    }
-    return File(parent, candidateName)
+    return canonicalName
   }
 
   private fun openSavedExport(path: String): Boolean {
     val normalized = path.trim()
     if (normalized.isEmpty()) return false
-
-    val uriCandidates = mutableListOf<Uri>()
-
-    fun addCandidate(uri: Uri?) {
-      if (uri == null) return
-      if (uriCandidates.any { it.toString() == uri.toString() }) return
-      uriCandidates.add(uri)
-    }
-
-    if (normalized.contains("://")) {
-      try {
-        addCandidate(Uri.parse(normalized))
-      } catch (_: Exception) {}
-    }
-
-    if (normalized.startsWith("/document/") || normalized.startsWith("/tree/")) {
-      val pathValue = if (normalized.startsWith("/")) normalized else "/$normalized"
-      val authorities = listOf(
-        "com.android.externalstorage.documents",
-        "com.android.providers.downloads.documents",
-        "com.android.providers.media.documents",
-      )
-      for (authority in authorities) {
-        try {
-          addCandidate(Uri.parse("content://$authority$pathValue"))
-        } catch (_: Exception) {}
-      }
-    }
+    val uriCandidates = buildSavedExportUriCandidates(normalized)
 
     for (uri in uriCandidates) {
       try {

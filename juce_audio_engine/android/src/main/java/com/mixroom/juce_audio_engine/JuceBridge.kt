@@ -80,6 +80,12 @@ object JuceBridge {
     ): Boolean
 
     @JvmStatic external fun setLiveMidiInputTargetClipJNI(clipIndex: Int): Boolean
+    @JvmStatic external fun playPreviewMidiNoteJNI(
+        clipIndex: Int,
+        pitch: Int,
+        velocity: Float,
+        durationMs: Int,
+    ): Boolean
     @JvmStatic external fun consumeLiveMidiInputEventsJNI(): ArrayList<HashMap<String, Any>>
     @JvmStatic external fun getConnectedMidiInputDevicesJNI(): ArrayList<HashMap<String, String>>
 
@@ -192,6 +198,7 @@ object JuceBridge {
     @JvmStatic external fun getInputDevicesJNI(): ArrayList<String>
     @JvmStatic external fun selectInputDeviceJNI(name: String): Boolean
     @JvmStatic external fun getNumInputChannelsJNI(): Int
+    @JvmStatic external fun getActiveInputChannelCountJNI(): Int
     @JvmStatic external fun prepareRecordingInputsJNI(desiredInputChannels: Int, reason: String): Boolean
     @JvmStatic external fun refreshAudioRouteJNI(reason: String)
     @JvmStatic external fun hardResetPlaybackOnlyRouteJNI(reason: String): Boolean

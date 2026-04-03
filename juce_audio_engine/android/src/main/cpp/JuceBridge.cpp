@@ -11,6 +11,12 @@
 
 namespace
 {
+void flushPendingMessageThreadTasks()
+{
+    if (auto *mm = juce::MessageManager::getInstanceWithoutCreating())
+        mm->callSync([] {});
+}
+
 juce::String juceStringFromJString(JNIEnv *env, jstring value)
 {
     if (value == nullptr)
@@ -931,6 +937,25 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLiveMidiInputTargetClipJNI(JN
     return ok.load() ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_playPreviewMidiNoteJNI(JNIEnv *,
+                                                                        jclass,
+                                                                        jint clipIndex,
+                                                                        jint pitch,
+                                                                        jfloat velocity,
+                                                                        jint durationMs)
+{
+    std::atomic<bool> ok{false};
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  {
+        ok = JuceEngine::get().playPreviewMidiNote(
+            (int)clipIndex,
+            (int)pitch,
+            (float)velocity,
+            (int)durationMs); });
+    return ok.load() ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_consumeLiveMidiInputEventsJNI(JNIEnv *env, jclass)
 {
@@ -1211,9 +1236,8 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *env,
     options.wavDithering = (wavDithering == JNI_TRUE);
     options.mp3BitrateKbps = (int)mp3BitrateKbps;
 
-    juce::String result;
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { result = JuceEngine::get().exportMix(juce::File(jucePath), options); });
+    flushPendingMessageThreadTasks();
+    juce::String result = JuceEngine::get().exportMix(juce::File(jucePath), options);
     return env->NewStringUTF(result.toRawUTF8());
 }
 
@@ -1250,9 +1274,8 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportTrackJNI(JNIEnv *env,
     options.wavDithering = (wavDithering == JNI_TRUE);
     options.mp3BitrateKbps = (int)mp3BitrateKbps;
 
-    juce::String result;
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { result = JuceEngine::get().exportTrack(trackIdx, juce::File(jucePath), options); });
+    flushPendingMessageThreadTasks();
+    juce::String result = JuceEngine::get().exportTrack(trackIdx, juce::File(jucePath), options);
     return env->NewStringUTF(result.toRawUTF8());
 }
 
@@ -2016,6 +2039,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getNumInputChannelsJNI(JNIEnv *,
     std::atomic<int> channels{0};
     juce::MessageManager::getInstance()->callSync([&]
                                                   { channels = JuceEngine::get().getNumInputChannels(); });
+    return (jint)channels.load();
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getActiveInputChannelCountJNI(JNIEnv *, jclass)
+{
+    std::atomic<int> channels{0};
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { channels = JuceEngine::get().getActiveInputChannelCount(); });
     return (jint)channels.load();
 }
 

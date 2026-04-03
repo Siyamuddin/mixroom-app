@@ -46,6 +46,7 @@ class JuceEngineCapabilities {
 enum AudioRouteKind {
   unknown,
   speaker,
+  earpiece,
   wired,
   usb,
   bluetoothOutput,
@@ -56,6 +57,8 @@ AudioRouteKind _audioRouteKindFromString(String value) {
   switch (value) {
     case 'speaker':
       return AudioRouteKind.speaker;
+    case 'earpiece':
+      return AudioRouteKind.earpiece;
     case 'wired':
       return AudioRouteKind.wired;
     case 'usb':
@@ -744,6 +747,26 @@ class JuceAudioEngine {
       return ok ?? false;
     } on PlatformException catch (e) {
       _logError('setLiveMidiInputTargetClip', e);
+      return false;
+    }
+  }
+
+  static Future<bool> playPreviewMidiNote(
+    int clipIndex, {
+    required int pitch,
+    required double velocity,
+    int durationMs = 900,
+  }) async {
+    try {
+      final ok = await _ch.invokeMethod<bool>('playPreviewMidiNote', {
+        'clip': clipIndex,
+        'pitch': pitch,
+        'velocity': velocity.clamp(0.0, 1.0),
+        'durationMs': durationMs,
+      });
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      _logError('playPreviewMidiNote', e);
       return false;
     }
   }

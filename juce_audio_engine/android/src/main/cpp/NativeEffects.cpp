@@ -40,6 +40,11 @@ void ReverbAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     reverb.setParameters(parameters);
 }
 
+void ReverbAudioProcessor::reset()
+{
+    reverb.reset();
+}
+
 void ReverbAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -353,6 +358,11 @@ void DelayAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     delay.setParameters(parameters, 120.0);
 }
 
+void DelayAudioProcessor::reset()
+{
+    delay.reset();
+}
+
 void DelayAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -494,6 +504,11 @@ void DistortionAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBl
     setLatencySamples(distortion.getOversamplerLatency());
 }
 
+void DistortionAudioProcessor::reset()
+{
+    distortion.reset();
+}
+
 void DistortionAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -626,6 +641,11 @@ void DeesserAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock
 {
     deesser.prepare(sampleRate, samplesPerBlock);
     deesser.setParameters(parameters, listen);
+}
+
+void DeesserAudioProcessor::reset()
+{
+    deesser.reset();
 }
 
 void DeesserAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
@@ -902,6 +922,17 @@ void CompressorAudioProcessor::prepareToPlay(double sr, int bs)
     compressor.setParameters(parameters);
 }
 
+void CompressorAudioProcessor::reset()
+{
+    compressor.reset();
+    gainReduction = {0.0f, 0.0f};
+    inRmsL.store(0.0f, std::memory_order_relaxed);
+    inRmsR.store(0.0f, std::memory_order_relaxed);
+    outRmsL.store(0.0f, std::memory_order_relaxed);
+    outRmsR.store(0.0f, std::memory_order_relaxed);
+    grDb.store(0.0f, std::memory_order_relaxed);
+}
+
 void CompressorAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -1038,6 +1069,13 @@ void LimiterAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock
     grDb.store(0.0f, std::memory_order_relaxed);
 }
 
+void LimiterAudioProcessor::reset()
+{
+    limiter.reset();
+    gainReduction = {0.0f, 0.0f};
+    grDb.store(0.0f, std::memory_order_relaxed);
+}
+
 void LimiterAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -1119,6 +1157,13 @@ void ClipperAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock
     clipper.prepare(sampleRate, samplesPerBlock);
     clipper.setParameters(parameters);
     setLatencySamples(clipper.getOversamplerLatency());
+    grDb.store(0.0f, std::memory_order_relaxed);
+}
+
+void ClipperAudioProcessor::reset()
+{
+    clipper.reset();
+    gainReduction = {0.0f, 0.0f};
     grDb.store(0.0f, std::memory_order_relaxed);
 }
 
@@ -1315,6 +1360,11 @@ void ChorusAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     chorusFx.setParameters(parameters);
 }
 
+void ChorusAudioProcessor::reset()
+{
+    chorusFx.reset();
+}
+
 void ChorusAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -1402,6 +1452,11 @@ void VibratoAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock
 {
     vibratoFx.prepare(sampleRate, samplesPerBlock);
     vibratoFx.setParameters(parameters);
+}
+
+void VibratoAudioProcessor::reset()
+{
+    vibratoFx.reset();
 }
 
 void VibratoAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)

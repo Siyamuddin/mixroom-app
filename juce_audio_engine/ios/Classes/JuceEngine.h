@@ -3342,6 +3342,8 @@ private:
         std::vector<AutomationPoint> gainAutomationPoints;
         std::vector<AutomationPoint> panAutomationPoints;
         std::vector<TrackEffectAutomationLane> effectAutomationLanes;
+        float lastAppliedGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+        float lastAppliedPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 
         // processors
         TrackInputProcessor *inputProc = nullptr;
@@ -3375,6 +3377,8 @@ private:
     std::vector<RowState::TrackEffectAutomationLane> masterEffectAutomationLanes;
     std::vector<AutomationPoint> masterGainAutomationPoints;
     std::vector<AutomationPoint> masterPanAutomationPoints;
+    float lastAppliedMasterGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+    float lastAppliedMasterPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 
     SimpleGainProcessor *masterGainProcessor = nullptr;
     juce::AudioProcessorGraph::Node::Ptr masterGainNode;

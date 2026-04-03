@@ -328,7 +328,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     double oldOffset, {
     double? newStartMs,
   }) onTrimClipCommit;
-  final double playheadMs;
+  final ValueListenable<Duration> transportClockListenable;
   final void Function(double ms) onScrubRequested;
   final bool isPlaying;
   final Duration maxDuration;
@@ -410,6 +410,8 @@ class AudioCanvasTimeline extends StatefulWidget {
       onSnapSettingsChanged;
   final VoidCallback? onTutorialTimelineScrolled;
   final VoidCallback? onTutorialTimelineZoomed;
+  final void Function(int row, bool expanded)? onRowExpansionChanged;
+  final void Function(int row, int tab)? onRowTabSelected;
   final void Function(int row, bool expanded)? onTutorialRowExpansionChanged;
   final void Function(int row, int tab)? onTutorialRowTabSelected;
   final void Function(int row, int effectIndex, String effectName)?
@@ -472,7 +474,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.onMoveClipCommit,
     required this.onTrimClip,
     required this.onTrimClipCommit,
-    required this.playheadMs,
+    required this.transportClockListenable,
     required this.onScrubRequested,
     required this.isPlaying,
     required this.maxDuration,
@@ -534,6 +536,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onSnapSettingsChanged,
     this.onTutorialTimelineScrolled,
     this.onTutorialTimelineZoomed,
+    this.onRowExpansionChanged,
+    this.onRowTabSelected,
     this.onTutorialRowExpansionChanged,
     this.onTutorialRowTabSelected,
     this.onTutorialRowEffectAdded,
@@ -1824,6 +1828,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }) {
     if (row < 0 || row >= _rowCount) return;
     final resolvedTargetId = _resolveAutomationTabTargetId(row, targetId);
+    final oldExpanded = List<bool>.from(_rowExpanded);
     setState(() {
       _clearAutomationClipMenu();
       _selectedRowIndex = row;
@@ -1836,6 +1841,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _automationEditorRow = row;
       _automationEditorTargetId = resolvedTargetId;
     });
+    for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
+      if (oldExpanded[i] != _rowExpanded[i]) {
+        widget.onRowExpansionChanged?.call(i, _rowExpanded[i]);
+        widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
+      }
+    }
+    widget.onRowTabSelected?.call(row, 2);
+    widget.onTutorialRowTabSelected?.call(row, 2);
     _triggerTimelineHalos(
       <String>[
         'row:$row:automation_tab',
@@ -1898,6 +1911,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
       _applyExpandedTabStateForRow(row, normalizedTab);
     });
+    widget.onRowTabSelected?.call(row, normalizedTab);
     widget.onTutorialRowTabSelected?.call(row, normalizedTab);
   }
 
@@ -2634,6 +2648,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   double get _maxDurationMs => widget.maxDuration.inMilliseconds.toDouble();
   int get _rowCount => widget.rows.length;
+  double get _currentPlayheadMs =>
+      widget.transportClockListenable.value.inMilliseconds.toDouble();
 
   @override
   void initState() {
@@ -2929,6 +2945,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
       if (oldExpanded[i] != _rowExpanded[i]) {
         widget.onToggleExpanded(i);
+        widget.onRowExpansionChanged?.call(i, _rowExpanded[i]);
         widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
       }
     }
@@ -2937,6 +2954,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void ensureRowExpanded(int row, {int tab = 0}) {
     if (row < 0 || row >= _rowCount) return;
     final normalizedTab = _normalizeExpandedTab(tab);
+    final oldExpanded = List<bool>.from(_rowExpanded);
     setState(() {
       _selectedRowIndex = row;
       widget.onSelectRow(row);
@@ -2949,10 +2967,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _automationEditorTargetId = null;
       }
     });
+    for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
+      if (oldExpanded[i] != _rowExpanded[i]) {
+        widget.onRowExpansionChanged?.call(i, _rowExpanded[i]);
+        widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
+      }
+    }
+    widget.onRowTabSelected?.call(row, normalizedTab);
+    widget.onTutorialRowTabSelected?.call(row, normalizedTab);
   }
 
   void collapseExpandedRows() {
     if (_rowExpanded.every((expanded) => !expanded)) return;
+    final oldExpanded = List<bool>.from(_rowExpanded);
     setState(() {
       for (int i = 0; i < _rowExpanded.length; i++) {
         _rowExpanded[i] = false;
@@ -2960,6 +2987,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _automationEditorRow = null;
       _automationEditorTargetId = null;
     });
+    for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
+      if (oldExpanded[i] != _rowExpanded[i]) {
+        widget.onRowExpansionChanged?.call(i, _rowExpanded[i]);
+        widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
+      }
+    }
   }
 
   void _syncRowUiState() {
@@ -3092,6 +3125,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   void _refreshRowFxPlayback(int row) {
     if (row < 0 || row >= _rowCount) return;
+    if (!_rowExpanded[row]) return;
+    if (_normalizeExpandedTab(_expandedTab[row]) != 1) return;
     final rowId = widget.rows[row].rowId;
     final refresh = _rowEffectPlaybackRefreshers[rowId];
     if (refresh != null) {
@@ -3564,8 +3599,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       widget.getAutomationClipsForTarget(row, targetId),
     );
     final startRaw = _magnetEnabled
-        ? _segmentStartMsForTap(widget.playheadMs)
-        : widget.playheadMs;
+        ? _segmentStartMsForTap(_currentPlayheadMs)
+        : _currentPlayheadMs;
     final startMs = startRaw.clamp(0.0, _maxDurationMs).toDouble();
     final lengthMs = _defaultAutomationClipLengthMs();
     final resolvedLane =
@@ -5590,47 +5625,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   @override
   Widget build(BuildContext context) {
     _editorLayoutSpec = _EditorLayoutSpec.fromSize(MediaQuery.of(context).size);
-    // Calculate viewport
     final viewportWidth = _getViewportWidth(context);
+    final timelineUnderlayWidth =
+        math.max(0.0, kHeaderWidth - kTimelineUnderlayLeft);
     final playheadPx = _getPlayheadPx(context);
     _recalculateRowYPositions();
     _timelineAutomationClipVisualCache = _timelineAutomationClipVisuals();
-
-    // --- Center measure 1 (time = 0) on playhead initially ---
-    if (_scrollOffsetMs == 0.0 && widget.playheadMs == 0.0) {
-      // === FIX ===: Use new playheadPx
-      _scrollOffsetMs = -(playheadPx) / _pixelsPerMs;
-    }
-
-    // case for Restart to beginning button (must only execute once)
-    int expectedRestartMs =
-        (_loopEnabled && _loopStartMs != null) ? _loopStartMs! : 0;
-
-    final bool isRestart = (!widget.isPlaying) &&
-        (widget.playheadMs - expectedRestartMs).abs() <
-            0.01; // tiny epsilon, irrelevant cuz comparing with int
-
-    if (isRestart) {
-      final targetScrollMs = expectedRestartMs - (playheadPx) / _pixelsPerMs;
-      if ((_scrollOffsetMs - targetScrollMs).abs() > 0.5) {
-        _scrollOffsetMs = targetScrollMs;
-        _clampScroll();
-      }
-    }
-
-    // --- During playback, keep playhead centered dynamically ---
-    // if ((widget.isPlaying && !_isUserInteracting) || widget.playheadMs == 0.0) {
-    if (widget.isPlaying) {
-      // || widget.playheadMs == 0.0) {
-      // === FIX ===: Use new playheadPx
-      final targetScrollMs = widget.playheadMs - (playheadPx) / _pixelsPerMs;
-
-      // Keep playhead centered without scheduling extra frame callbacks.
-      if ((_scrollOffsetMs - targetScrollMs).abs() > 0.5) {
-        _scrollOffsetMs = targetScrollMs;
-        _clampScroll(); // Apply clamping
-      }
-    }
     final List<double> expandedHeights = List.generate(_rowCount, (i) {
       if (!_rowExpanded[i]) return 0.0;
       return _expandedPanelHeightForRow(i);
@@ -5640,6 +5640,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       (i) => _automationTimelineLaneHeightForRow(i),
     );
     final timelineAutomationClipVisuals = _timelineAutomationClipVisualCache;
+    final staticTrackHeaders = Positioned(
+      left: 0,
+      top: 0,
+      bottom: 0,
+      child: SizedBox(
+        width: _AudioCanvasTimelineState.kHeaderWidth,
+        child: RepaintBoundary(
+          child: SizedBox(
+            height: _scrollContentHeight,
+            child: _buildTrackHeadersContent(
+              _AudioCanvasTimelineState.kHeaderWidth,
+            ),
+          ),
+        ),
+      ),
+    );
 
     return Container(
       constraints: const BoxConstraints(),
@@ -5647,9 +5663,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Time ruler
-          _buildTimeRuler(viewportWidth),
-          // Timeline + headers stacked
+          ValueListenableBuilder<Duration>(
+            valueListenable: widget.transportClockListenable,
+            builder: (context, _, __) {
+              _syncPlaybackViewport(playheadPx);
+              return _buildTimeRuler(viewportWidth);
+            },
+          ),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -5673,347 +5693,26 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
-                            if (kTimelineUnderlayLeft < kHeaderWidth)
-                              Positioned(
-                                left: kTimelineUnderlayLeft,
-                                top: 0,
-                                bottom: 0,
-                                width: kHeaderWidth - kTimelineUnderlayLeft,
-                                child: IgnorePointer(
-                                  child: ClipRect(
-                                    child: Align(
-                                      alignment: Alignment.topLeft,
-                                      child: ColoredBox(
-                                        color: _kTimelineCanvas,
-                                        child: RepaintBoundary(
-                                          child: CustomPaint(
-                                            painter: _TimelinePainter(
-                                              clips: widget.clips,
-                                              getStartMs: widget.getStartMs,
-                                              getDurationMs:
-                                                  widget.getDurationMs,
-                                              getTimelineDurationMs:
-                                                  widget.getTimelineDurationMs,
-                                              getTrimStartMs:
-                                                  widget.getTrimStartMs,
-                                              getTrimEndMs: widget.getTrimEndMs,
-                                              getFullDurationMs:
-                                                  widget.getFullDurationMs,
-                                              getPeaks: widget.getPeaks,
-                                              pixelsPerMs: _pixelsPerMs,
-                                              // Keep M/S strip synced to true
-                                              // timeline world-position.
-                                              scrollOffsetMs: _scrollOffsetMs -
-                                                  ((kHeaderWidth -
-                                                          kTimelineUnderlayLeft) /
-                                                      _pixelsPerMs),
-                                              viewportWidth: viewportWidth,
-                                              playheadPx: playheadPx,
-                                              selectedClipIndex:
-                                                  _selectedClipIndex,
-                                              selectedClipIndices:
-                                                  _selectedClipIndices.toList(
-                                                      growable: false),
-                                              stretchToolActive: _activeTool ==
-                                                  _TimelineTool.stretch,
-                                              trimClipIndex: _trimClipIndex,
-                                              draggedClipIndex:
-                                                  _interactionMode == 'drag'
-                                                      ? _draggedClipIndex
-                                                      : null,
-                                              draggedClipStartMs:
-                                                  _interactionMode == 'drag'
-                                                      ? _dragStartClipMs
-                                                      : null,
-                                              draggedClipRowIndex:
-                                                  _interactionMode == 'drag'
-                                                      ? _dragStartRow
-                                                      : null,
-                                              rowExpanded: _rowExpanded,
-                                              kExpandedRowHeight:
-                                                  kExpandedRowHeight,
-                                              verticalScrollOffset:
-                                                  _verticalScrollOffset,
-                                              expandedTab: _expandedTab,
-                                              effectsPanelHeights:
-                                                  _effectsPanelHeights,
-                                              expandedHeights: expandedHeights,
-                                              automationLaneHeights:
-                                                  automationLaneHeights,
-                                              isRecording: widget.isRecording,
-                                              recordingRowIndex:
-                                                  widget.recordingRowIndex,
-                                              recordingStartMs:
-                                                  widget.recordingStartMs,
-                                              recordingPeaks:
-                                                  widget.recordingPeaks,
-                                              bpm: widget.bpm,
-                                              beatsPerBar: widget.beatsPerBar,
-                                              quantizeDivisions:
-                                                  _quantizeDivisionsPerBar,
-                                              highlightedSegmentRow:
-                                                  _highlightedSegmentRow,
-                                              highlightedSegmentStartMs:
-                                                  _highlightedSegmentStartMs,
-                                              highlightedSegmentEndMs:
-                                                  _highlightedSegmentEndMs,
-                                              sampleDropPreviewRow:
-                                                  _externalSampleDropRow,
-                                              sampleDropPreviewStartMs:
-                                                  _externalSampleDropStartMs,
-                                              sampleDropPreviewEndMs:
-                                                  _externalSampleDropEndMs,
-                                              cutPreviewClipIndex:
-                                                  _cutPreviewClipIndex,
-                                              cutPreviewMs: _cutPreviewMs,
-                                              automationClipVisuals:
-                                                  timelineAutomationClipVisuals,
-                                              leftVisibleExtensionPx:
-                                                  kHeaderWidth -
-                                                      kTimelineUnderlayLeft,
-                                            ),
-                                            size: Size(
-                                              viewportWidth,
-                                              _timelinePaintHeight,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            // === Timeline background (waveforms, clips, playhead) ===
-                            Positioned.fill(
-                              left:
-                                  kHeaderWidth, // 👈 ensures waveform starts after header
-                              child: Builder(
-                                builder: (context) {
-                                  Widget timelineContent = Listener(
-                                    behavior: HitTestBehavior.opaque,
-                                    onPointerDown: _onTimelinePointerDown,
-                                    onPointerMove: _onTimelinePointerMove,
-                                    onPointerHover: _onTimelinePointerHover,
-                                    onPointerSignal: _onTimelinePointerSignal,
-                                    onPointerUp: _onTimelinePointerUp,
-                                    onPointerCancel: _onTimelinePointerCancel,
-                                    child: GestureDetector(
-                                      // dragStartBehavior: DragStartBehavior.start,
-                                      // === FIX ===: Added all gesture handlers
-                                      onScaleStart: _onScaleStart,
-                                      onScaleUpdate: _onScaleUpdate,
-                                      onScaleEnd: _onScaleEnd,
-                                      onLongPressStart:
-                                          _onTimelineLongPressStart,
-                                      onLongPressMoveUpdate:
-                                          _onTimelineLongPressMoveUpdate,
-                                      onLongPressEnd: _onTimelineLongPressEnd,
-                                      onDoubleTapDown: _onTimelineDoubleTapDown,
-                                      onTapUp: _onTimelineTap,
-                                      child: Align(
-                                        alignment: Alignment.topLeft,
-                                        child: ClipRect(
-                                          child: RepaintBoundary(
-                                            child: CustomPaint(
-                                              painter: _TimelinePainter(
-                                                clips: widget.clips,
-                                                getStartMs: widget.getStartMs,
-                                                getDurationMs:
-                                                    widget.getDurationMs,
-                                                getTimelineDurationMs: widget
-                                                    .getTimelineDurationMs,
-                                                getTrimStartMs:
-                                                    widget.getTrimStartMs,
-                                                getTrimEndMs:
-                                                    widget.getTrimEndMs,
-                                                getFullDurationMs:
-                                                    widget.getFullDurationMs,
-                                                getPeaks: widget.getPeaks,
-                                                pixelsPerMs: _pixelsPerMs,
-                                                scrollOffsetMs: _scrollOffsetMs,
-                                                viewportWidth: viewportWidth,
-                                                playheadPx:
-                                                    playheadPx, // === FIX ===
-                                                selectedClipIndex:
-                                                    _selectedClipIndex,
-                                                selectedClipIndices:
-                                                    _selectedClipIndices.toList(
-                                                        growable: false),
-                                                stretchToolActive:
-                                                    _activeTool ==
-                                                        _TimelineTool.stretch,
-                                                trimClipIndex:
-                                                    _trimClipIndex, // === FIX ===: Pass the active trim index
-                                                // === FIX ===: Pass drag state to painter
-                                                draggedClipIndex:
-                                                    _interactionMode == 'drag'
-                                                        ? _draggedClipIndex
-                                                        : null,
-                                                draggedClipStartMs:
-                                                    _interactionMode == 'drag'
-                                                        ? _dragStartClipMs
-                                                        : null,
-                                                draggedClipRowIndex:
-                                                    _interactionMode == 'drag'
-                                                        ? _dragStartRow
-                                                        : null,
-                                                rowExpanded: _rowExpanded,
-                                                kExpandedRowHeight:
-                                                    kExpandedRowHeight,
-                                                verticalScrollOffset:
-                                                    _verticalScrollOffset,
-                                                expandedTab: _expandedTab,
-                                                effectsPanelHeights:
-                                                    _effectsPanelHeights,
-                                                expandedHeights:
-                                                    expandedHeights,
-                                                automationLaneHeights:
-                                                    automationLaneHeights,
-                                                isRecording: widget.isRecording,
-                                                recordingRowIndex:
-                                                    widget.recordingRowIndex,
-                                                recordingStartMs:
-                                                    widget.recordingStartMs,
-                                                recordingPeaks:
-                                                    widget.recordingPeaks,
-                                                bpm: widget.bpm,
-                                                beatsPerBar: widget.beatsPerBar,
-                                                quantizeDivisions:
-                                                    _quantizeDivisionsPerBar,
-                                                highlightedSegmentRow:
-                                                    _highlightedSegmentRow,
-                                                highlightedSegmentStartMs:
-                                                    _highlightedSegmentStartMs,
-                                                highlightedSegmentEndMs:
-                                                    _highlightedSegmentEndMs,
-                                                sampleDropPreviewRow:
-                                                    _externalSampleDropRow,
-                                                sampleDropPreviewStartMs:
-                                                    _externalSampleDropStartMs,
-                                                sampleDropPreviewEndMs:
-                                                    _externalSampleDropEndMs,
-                                                cutPreviewClipIndex:
-                                                    _cutPreviewClipIndex,
-                                                cutPreviewMs: _cutPreviewMs,
-                                                automationClipVisuals:
-                                                    timelineAutomationClipVisuals,
-                                                leftVisibleExtensionPx: 0.0,
-                                              ),
-                                              size: Size(
-                                                viewportWidth,
-                                                _timelinePaintHeight,
-                                              ), //size: Size(viewportWidth, kNumRows * kRowHeight),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  );
-
-                                  if (widget.onExternalSampleDrop == null) {
-                                    return timelineContent;
-                                  }
-
-                                  return DragTarget<SampleDragData>(
-                                    key: _externalSampleDropTargetKey,
-                                    onWillAcceptWithDetails: (details) {
-                                      return _updateExternalSampleDropPreview(
-                                        details.offset,
-                                        data: details.data,
-                                        notifyEntered: true,
-                                      );
-                                    },
-                                    onMove: (details) {
-                                      _updateExternalSampleDropPreview(
-                                        details.offset,
-                                        data: details.data,
-                                      );
-                                    },
-                                    onLeave: (_) {
-                                      _clearExternalSampleDropPreview();
-                                    },
-                                    onAcceptWithDetails: (details) async {
-                                      final placement =
-                                          _sampleDropPlacementForGlobalOffset(
-                                        details.offset,
-                                        data: details.data,
-                                      );
-                                      _clearExternalSampleDropPreview();
-                                      if (placement == null) return;
-                                      await widget.onExternalSampleDrop!(
-                                        details.data,
-                                        placement.row,
-                                        placement.startMs,
-                                      );
-                                    },
-                                    builder: (_, __, ___) => timelineContent,
-                                  );
-                                },
-                              ),
+                            ValueListenableBuilder<Duration>(
+                              valueListenable: widget.transportClockListenable,
+                              builder: (context, _, __) {
+                                _syncPlaybackViewport(playheadPx);
+                                return _buildPlaybackDrivenTimelineLayers(
+                                  viewportWidth: viewportWidth,
+                                  visibleTimelineHeight:
+                                      visibleTimelineHeight,
+                                  playheadPx: playheadPx,
+                                  timelineUnderlayWidth:
+                                      timelineUnderlayWidth,
+                                  expandedHeights: expandedHeights,
+                                  automationLaneHeights:
+                                      automationLaneHeights,
+                                  timelineAutomationClipVisuals:
+                                      timelineAutomationClipVisuals,
+                                );
+                              },
                             ),
-                            if (_currentSelectionRect() != null)
-                              _buildSelectionBoxOverlay(),
-                            // Expanded row panels (Volume/Effects)
-                            ..._buildExpandedRows(viewportWidth),
-
-                            // if (_selectedClipIndex != -1) _buildSelectedClipPopup(viewportWidth),
-                            _buildSelectedClipPopup(
-                              viewportWidth,
-                              visibleTimelineHeight,
-                            ),
-                            // if (_showPastePopup && _pasteRow != null && _pasteMs != null) _buildPastePopup(viewportWidth),
-                            _buildPastePopup(viewportWidth),
-                            _buildAutomationClipMenuOverlay(
-                              viewportWidth,
-                              visibleTimelineHeight,
-                              timelineAutomationClipVisuals,
-                            ),
-                            _buildAutomationClipTestOverlay(
-                              viewportWidth,
-                              visibleTimelineHeight,
-                              timelineAutomationClipVisuals,
-                            ),
-                            _buildDeadZoneRowNames(viewportWidth),
-
-                            // === Track headers (always on top) ===
-                            Positioned(
-                              left: 0,
-                              top: 0, // _verticalScrollOffset,
-                              bottom: 0,
-                              // child: Builder(builder: (context) {
-                              //   // (Your dynamic header width logic, left as-is)
-                              //   double dynamicWidth = _AudioCanvasTimelineState.kHeaderWidth;
-                              //   return Container(
-                              //     height: _totalTimelineHeight,
-                              //     width: dynamicWidth,
-                              //     color: const Color(0xFF252B3A),
-                              //     child: _buildTrackHeaders(dynamicWidth),
-                              //   );
-                              // }),
-                              child: SizedBox(
-                                width: _AudioCanvasTimelineState.kHeaderWidth,
-                                child: SizedBox(
-                                  height: _scrollContentHeight,
-                                  child: _buildTrackHeadersContent(
-                                      _AudioCanvasTimelineState.kHeaderWidth),
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: widget.bottomDockInset + 20.0,
-                              child: IgnorePointer(
-                                ignoring: false,
-                                child: Center(
-                                  child: _buildAddRowPill(),
-                                ),
-                              ),
-                            ),
-                            _buildInlineClipControlOverlay(
-                              viewportWidth,
-                              visibleTimelineHeight,
-                            ),
+                            staticTrackHeaders,
                           ],
                         ),
                       ),
@@ -6025,6 +5724,282 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           ),
         ],
       ),
+    );
+  }
+
+  void _syncPlaybackViewport(double playheadPx) {
+    if (_scrollOffsetMs == 0.0 && _currentPlayheadMs == 0.0) {
+      _scrollOffsetMs = -(playheadPx) / _pixelsPerMs;
+    }
+
+    final int expectedRestartMs =
+        (_loopEnabled && _loopStartMs != null) ? _loopStartMs! : 0;
+    final bool isRestart =
+        (!widget.isPlaying) && (_currentPlayheadMs - expectedRestartMs).abs() < 0.01;
+
+    if (isRestart) {
+      final targetScrollMs = expectedRestartMs - (playheadPx) / _pixelsPerMs;
+      if ((_scrollOffsetMs - targetScrollMs).abs() > 0.5) {
+        _scrollOffsetMs = targetScrollMs;
+        _clampScroll();
+      }
+    }
+
+    if (widget.isPlaying) {
+      final targetScrollMs = _currentPlayheadMs - (playheadPx) / _pixelsPerMs;
+      if ((_scrollOffsetMs - targetScrollMs).abs() > 0.5) {
+        _scrollOffsetMs = targetScrollMs;
+        _clampScroll();
+      }
+    }
+  }
+
+  Widget _buildPlaybackDrivenTimelineLayers({
+    required double viewportWidth,
+    required double visibleTimelineHeight,
+    required double playheadPx,
+    required double timelineUnderlayWidth,
+    required List<double> expandedHeights,
+    required List<double> automationLaneHeights,
+    required List<_TimelineAutomationClipVisual> timelineAutomationClipVisuals,
+  }) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (timelineUnderlayWidth > 0.0)
+          Positioned(
+            left: kTimelineUnderlayLeft,
+            top: 0,
+            bottom: 0,
+            width: timelineUnderlayWidth,
+            child: IgnorePointer(
+              child: ClipRect(
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: ColoredBox(
+                    color: _kTimelineCanvas,
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        painter: _TimelinePainter(
+                          clips: widget.clips,
+                          getStartMs: widget.getStartMs,
+                          getDurationMs: widget.getDurationMs,
+                          getTimelineDurationMs: widget.getTimelineDurationMs,
+                          getTrimStartMs: widget.getTrimStartMs,
+                          getTrimEndMs: widget.getTrimEndMs,
+                          getFullDurationMs: widget.getFullDurationMs,
+                          getPeaks: widget.getPeaks,
+                          pixelsPerMs: _pixelsPerMs,
+                          scrollOffsetMs:
+                              _scrollOffsetMs - (timelineUnderlayWidth / _pixelsPerMs),
+                          viewportWidth: timelineUnderlayWidth,
+                          playheadPx: playheadPx,
+                          selectedClipIndex: _selectedClipIndex,
+                          selectedClipIndices:
+                              _selectedClipIndices.toList(growable: false),
+                          stretchToolActive:
+                              _activeTool == _TimelineTool.stretch,
+                          trimClipIndex: _trimClipIndex,
+                          draggedClipIndex: _interactionMode == 'drag'
+                              ? _draggedClipIndex
+                              : null,
+                          draggedClipStartMs: _interactionMode == 'drag'
+                              ? _dragStartClipMs
+                              : null,
+                          draggedClipRowIndex:
+                              _interactionMode == 'drag' ? _dragStartRow : null,
+                          rowExpanded: _rowExpanded,
+                          kExpandedRowHeight: kExpandedRowHeight,
+                          verticalScrollOffset: _verticalScrollOffset,
+                          expandedTab: _expandedTab,
+                          effectsPanelHeights: _effectsPanelHeights,
+                          expandedHeights: expandedHeights,
+                          automationLaneHeights: automationLaneHeights,
+                          isRecording: widget.isRecording,
+                          recordingRowIndex: widget.recordingRowIndex,
+                          recordingStartMs: widget.recordingStartMs,
+                          recordingPeaks: widget.recordingPeaks,
+                          bpm: widget.bpm,
+                          beatsPerBar: widget.beatsPerBar,
+                          quantizeDivisions: _quantizeDivisionsPerBar,
+                          highlightedSegmentRow: _highlightedSegmentRow,
+                          highlightedSegmentStartMs: _highlightedSegmentStartMs,
+                          highlightedSegmentEndMs: _highlightedSegmentEndMs,
+                          sampleDropPreviewRow: _externalSampleDropRow,
+                          sampleDropPreviewStartMs: _externalSampleDropStartMs,
+                          sampleDropPreviewEndMs: _externalSampleDropEndMs,
+                          cutPreviewClipIndex: _cutPreviewClipIndex,
+                          cutPreviewMs: _cutPreviewMs,
+                          automationClipVisuals: timelineAutomationClipVisuals,
+                          leftVisibleExtensionPx:
+                              kHeaderWidth - kTimelineUnderlayLeft,
+                        ),
+                        size: Size(
+                          timelineUnderlayWidth,
+                          _timelinePaintHeight,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        Positioned.fill(
+          left: kHeaderWidth,
+          child: Builder(
+            builder: (context) {
+              Widget timelineContent = Listener(
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: _onTimelinePointerDown,
+                onPointerMove: _onTimelinePointerMove,
+                onPointerHover: _onTimelinePointerHover,
+                onPointerSignal: _onTimelinePointerSignal,
+                onPointerUp: _onTimelinePointerUp,
+                onPointerCancel: _onTimelinePointerCancel,
+                child: GestureDetector(
+                  onScaleStart: _onScaleStart,
+                  onScaleUpdate: _onScaleUpdate,
+                  onScaleEnd: _onScaleEnd,
+                  onLongPressStart: _onTimelineLongPressStart,
+                  onLongPressMoveUpdate: _onTimelineLongPressMoveUpdate,
+                  onLongPressEnd: _onTimelineLongPressEnd,
+                  onDoubleTapDown: _onTimelineDoubleTapDown,
+                  onTapUp: _onTimelineTap,
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: ClipRect(
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          painter: _TimelinePainter(
+                            clips: widget.clips,
+                            getStartMs: widget.getStartMs,
+                            getDurationMs: widget.getDurationMs,
+                            getTimelineDurationMs:
+                                widget.getTimelineDurationMs,
+                            getTrimStartMs: widget.getTrimStartMs,
+                            getTrimEndMs: widget.getTrimEndMs,
+                            getFullDurationMs: widget.getFullDurationMs,
+                            getPeaks: widget.getPeaks,
+                            pixelsPerMs: _pixelsPerMs,
+                            scrollOffsetMs: _scrollOffsetMs,
+                            viewportWidth: viewportWidth,
+                            playheadPx: playheadPx,
+                            selectedClipIndex: _selectedClipIndex,
+                            selectedClipIndices:
+                                _selectedClipIndices.toList(growable: false),
+                            stretchToolActive:
+                                _activeTool == _TimelineTool.stretch,
+                            trimClipIndex: _trimClipIndex,
+                            draggedClipIndex: _interactionMode == 'drag'
+                                ? _draggedClipIndex
+                                : null,
+                            draggedClipStartMs: _interactionMode == 'drag'
+                                ? _dragStartClipMs
+                                : null,
+                            draggedClipRowIndex:
+                                _interactionMode == 'drag' ? _dragStartRow : null,
+                            rowExpanded: _rowExpanded,
+                            kExpandedRowHeight: kExpandedRowHeight,
+                            verticalScrollOffset: _verticalScrollOffset,
+                            expandedTab: _expandedTab,
+                            effectsPanelHeights: _effectsPanelHeights,
+                            expandedHeights: expandedHeights,
+                            automationLaneHeights: automationLaneHeights,
+                            isRecording: widget.isRecording,
+                            recordingRowIndex: widget.recordingRowIndex,
+                            recordingStartMs: widget.recordingStartMs,
+                            recordingPeaks: widget.recordingPeaks,
+                            bpm: widget.bpm,
+                            beatsPerBar: widget.beatsPerBar,
+                            quantizeDivisions: _quantizeDivisionsPerBar,
+                            highlightedSegmentRow: _highlightedSegmentRow,
+                            highlightedSegmentStartMs: _highlightedSegmentStartMs,
+                            highlightedSegmentEndMs: _highlightedSegmentEndMs,
+                            sampleDropPreviewRow: _externalSampleDropRow,
+                            sampleDropPreviewStartMs: _externalSampleDropStartMs,
+                            sampleDropPreviewEndMs: _externalSampleDropEndMs,
+                            cutPreviewClipIndex: _cutPreviewClipIndex,
+                            cutPreviewMs: _cutPreviewMs,
+                            automationClipVisuals: timelineAutomationClipVisuals,
+                            leftVisibleExtensionPx: 0.0,
+                          ),
+                          size: Size(viewportWidth, _timelinePaintHeight),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+
+              if (widget.onExternalSampleDrop == null) {
+                return timelineContent;
+              }
+
+              return DragTarget<SampleDragData>(
+                key: _externalSampleDropTargetKey,
+                onWillAcceptWithDetails: (details) {
+                  return _updateExternalSampleDropPreview(
+                    details.offset,
+                    data: details.data,
+                    notifyEntered: true,
+                  );
+                },
+                onMove: (details) {
+                  _updateExternalSampleDropPreview(
+                    details.offset,
+                    data: details.data,
+                  );
+                },
+                onLeave: (_) {
+                  _clearExternalSampleDropPreview();
+                },
+                onAcceptWithDetails: (details) async {
+                  final placement = _sampleDropPlacementForGlobalOffset(
+                    details.offset,
+                    data: details.data,
+                  );
+                  _clearExternalSampleDropPreview();
+                  if (placement == null) return;
+                  await widget.onExternalSampleDrop!(
+                    details.data,
+                    placement.row,
+                    placement.startMs,
+                  );
+                },
+                builder: (_, __, ___) => timelineContent,
+              );
+            },
+          ),
+        ),
+        if (_currentSelectionRect() != null) _buildSelectionBoxOverlay(),
+        ..._buildExpandedRows(viewportWidth),
+        _buildSelectedClipPopup(viewportWidth, visibleTimelineHeight),
+        _buildPastePopup(viewportWidth),
+        _buildAutomationClipMenuOverlay(
+          viewportWidth,
+          visibleTimelineHeight,
+          timelineAutomationClipVisuals,
+        ),
+        _buildAutomationClipTestOverlay(
+          viewportWidth,
+          visibleTimelineHeight,
+          timelineAutomationClipVisuals,
+        ),
+        _buildDeadZoneRowNames(viewportWidth),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: widget.bottomDockInset + 20.0,
+          child: IgnorePointer(
+            ignoring: false,
+            child: Center(
+              child: _buildAddRowPill(),
+            ),
+          ),
+        ),
+        _buildInlineClipControlOverlay(viewportWidth, visibleTimelineHeight),
+      ],
     );
   }
 
@@ -6871,8 +6846,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         return;
       }
       final playheadStart = _magnetEnabled
-          ? _segmentStartMsForTap(widget.playheadMs)
-          : widget.playheadMs;
+          ? _segmentStartMsForTap(_currentPlayheadMs)
+          : _currentPlayheadMs;
       final startMs = playheadStart.clamp(0.0, _maxDurationMs).toDouble();
       final availableDuration = _maxDurationMs - startMs;
       if (availableDuration <= 1.0) return;
@@ -11265,7 +11240,6 @@ class _TimelinePainter extends CustomPainter {
         _effectsPanelHeightsHash != old._effectsPanelHeightsHash ||
         _expandedHeightsHash != old._expandedHeightsHash ||
         _automationLaneHeightsHash != old._automationLaneHeightsHash ||
-        verticalScrollOffset != old.verticalScrollOffset ||
         stretchToolActive != old.stretchToolActive ||
         trimClipIndex != old.trimClipIndex ||
         _clipDataHash != old._clipDataHash ||
@@ -12087,15 +12061,12 @@ class _AutomationPainter extends CustomPainter {
 
   double _volToDb(double v) {
     if (v <= 0.0001) return double.negativeInfinity;
-
-    // Standard amplitude → dB
-    final rawDb = 20 * math.log(v) / math.log(10);
-
-    // Apply scaling so:
-    // v=1.00 → +6 dB
-    // v=0.75 →  0 dB
-    // v=0.00 → -∞ dB
-    return 2.401921537 * rawDb + 6.0;
+    final clamped = v.clamp(0.0, 1.0).toDouble();
+    final gain = clamped >= 0.75
+        ? (1.0 + ((clamped - 0.75) / 0.25))
+        : (clamped / 0.75);
+    if (gain <= 0.0001) return double.negativeInfinity;
+    return 20 * math.log(gain) / math.log(10);
   }
 
   String _formatValueLabel(double normalized) {
@@ -12575,14 +12546,21 @@ class _AutomationValueFormatter {
 
   double _volToDb(double value) {
     if (value <= 0.0001) return double.negativeInfinity;
-    final rawDb = 20 * math.log(value) / math.log(10);
-    return 2.401921537 * rawDb + 6.0;
+    final clamped = value.clamp(0.0, 1.0).toDouble();
+    final gain = clamped >= 0.75
+        ? (1.0 + ((clamped - 0.75) / 0.25))
+        : (clamped / 0.75);
+    if (gain <= 0.0001) return double.negativeInfinity;
+    return 20 * math.log(gain) / math.log(10);
   }
 
   double _dbToVol(double db) {
     if (!db.isFinite && db.isNegative) return 0.0;
-    final rawDb = (db - 6.0) / 2.401921537;
-    return math.pow(10.0, rawDb / 20.0).toDouble().clamp(0.0, 1.0);
+    final gain = math.pow(10.0, db / 20.0).toDouble();
+    if (gain <= 1.0) {
+      return (gain * 0.75).clamp(0.0, 0.75);
+    }
+    return (0.75 + ((gain - 1.0) * 0.25)).clamp(0.75, 1.0);
   }
 
   double rawValueForNormalized(double normalized) {
@@ -12934,8 +12912,64 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
     return 0.0 + ((dbMax - 0.0) * t);
   }
 
+  double _dbToGainUi(double dbValue) {
+    const dbMin = -60.0;
+    const dbMax = 6.0;
+    const uiUnity = 2.0;
+    final unity = math.min(uiUnity, widget.maxValue);
+    final clampedDb = dbValue.clamp(dbMin, dbMax).toDouble();
+
+    if (clampedDb <= 0.0) {
+      final t = ((clampedDb - dbMin) / (0.0 - dbMin)).clamp(0.0, 1.0);
+      return unity * t;
+    }
+
+    final t = (dbMax <= 0.0) ? 0.0 : (clampedDb / dbMax).clamp(0.0, 1.0);
+    return unity + ((widget.maxValue - unity) * t);
+  }
+
+  double _gainUiToVisualValue(double gainUi) {
+    const dbMin = -60.0;
+    const uiUnity = 2.0;
+    final unity = math.min(uiUnity, widget.maxValue);
+    final db = _gainToDb(gainUi);
+
+    if (db <= 0.0) {
+      final ampMin = math.pow(10.0, dbMin / 20.0).toDouble();
+      final amp = math.pow(10.0, db / 20.0).toDouble();
+      final normalizedAmp =
+          ((amp - ampMin) / (1.0 - ampMin)).clamp(0.0, 1.0).toDouble();
+      final curved = math.sqrt(normalizedAmp);
+      return unity * curved;
+    }
+
+    final positiveRange = widget.maxValue - unity;
+    if (positiveRange <= 0.0) return unity;
+    return unity + (positiveRange * (gainUi - unity) / positiveRange);
+  }
+
+  double _visualValueToGainUi(double visualValue) {
+    const dbMin = -60.0;
+    const uiUnity = 2.0;
+    final unity = math.min(uiUnity, widget.maxValue);
+    final clamped = visualValue.clamp(0.0, widget.maxValue).toDouble();
+
+    if (clamped <= unity) {
+      final ampMin = math.pow(10.0, dbMin / 20.0).toDouble();
+      final curved = (unity <= 0.0) ? 0.0 : (clamped / unity).clamp(0.0, 1.0);
+      final normalizedAmp = curved * curved;
+      final amp = ampMin + ((1.0 - ampMin) * normalizedAmp);
+      final db = 20.0 * math.log(amp) / math.ln10;
+      return _dbToGainUi(db);
+    }
+
+    return clamped;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final visualValue = _gainUiToVisualValue(widget.value);
+
     return Row(
       children: [
         if (widget.showLabel)
@@ -12965,7 +12999,7 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
                 thumbColor: widget.thumbColor,
               ),
               child: Slider(
-                value: widget.value.clamp(0.0, widget.maxValue),
+                value: visualValue.clamp(0.0, widget.maxValue),
                 min: 0.0,
                 max: widget.maxValue,
                 // divisions: 60,
@@ -12975,14 +13009,14 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
                 //   return "${db.toStringAsFixed(1)} dB";
                 // }(),
                 onChangeStart: (v) {
-                  widget.onChangeStart(v);
+                  widget.onChangeStart(_visualValueToGainUi(v));
                 },
                 onChanged: (v) {
                   setState(() {});
-                  widget.onChanged(v);
+                  widget.onChanged(_visualValueToGainUi(v));
                 },
                 onChangeEnd: (v) {
-                  widget.onChangeEnd(v);
+                  widget.onChangeEnd(_visualValueToGainUi(v));
                 },
               ),
             ),

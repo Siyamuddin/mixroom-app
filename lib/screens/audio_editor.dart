@@ -292,33 +292,6 @@ const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
   },
 ];
 
-const Set<String> kReleaseEssentialInstrumentIds = <String>{
-  // Beta-safe subset: only sampled presets with deterministic SFZ-backed init.
-  'mixroom.drum_808_starter',
-  // Re-enabled plucks that were reported usable in beta testing.
-  'mixroom.gentle_pluck',
-  'mixroom.air_pluck',
-  'mixroom.glass_pluck',
-  'sfz.vsco.mixroom_acoustic_drum_kit',
-  'sfz.vsco.mixroom_dry_drum_kit',
-  'sfz.vsco.piccolo_sus',
-  'sfz.vsco.organ_quiet',
-  'sfz.vsco.organ_loud',
-  'sfz.vsco.violin_ens_pizz',
-  'sfz.vsco.trumpet_stac',
-  'sfz.vsco.tuba_stac',
-  'sfz.vsco.flute_stac',
-  'sfz.vsco.clarinet_stac',
-  'sfz.vsco.marimba',
-  'sfz.vsco.glockenspiel',
-};
-
-const Set<String> kEmergencyBetaInstrumentIds = <String>{
-  'mixroom.gentle_pluck',
-  'mixroom.air_pluck',
-  'mixroom.glass_pluck',
-};
-
 const Map<String, String> kLegacySfzInstrumentAliases = {
   'sfz.vsco.violin_ens_sus_vib': 'sfz.vsco.violin_ens_pizz',
   'sfz.vsco.cello_ens_sus_vib': 'sfz.vsco.violin_ens_pizz',
@@ -328,12 +301,71 @@ const Map<String, String> kLegacySfzInstrumentAliases = {
   'sfz.vsco.clarinet_sus': 'sfz.vsco.clarinet_stac',
 };
 
-const List<String> kReleaseBlockedInstrumentTokens = <String>[
-  // Upstream provenance for TicTokMen mirrors is incomplete for public release.
-  'tictokmen',
-  // Hide auto-generated duplicate IDs from index.json and prefer curated aliases.
-  'sfz.vsco_2_ce_1_1_0_',
-];
+const Set<String> kBlockedInstrumentIds = <String>{
+  'mixroom.bass_mono',
+  'mixroom.soft_pad',
+  'mixroom.chow_kick',
+  'mixroom.sub_bass',
+  'mixroom.drum_acoustic_easy',
+  'mixroom.drum_808_starter',
+  'mixroom.drum_house',
+  'mixroom.drum_lofi',
+  'mixroom.vintage_strings',
+  'mixroom.reese_bass',
+  'mixroom.cinematic_pad',
+  'mixroom.wide_air_pad',
+  'mixroom.horn_stack',
+  'mixroom.drum_trap',
+  'mixroom.drum_breakbeat',
+  'mixroom.drum_dnb',
+  'sfz.vsco.trumpet_stac',
+  'sfz.vsco.flute_stac',
+  'sfz.vsco.clarinet_stac',
+  'sfz.vsco.bassoon_stac',
+  'sfz.vsco.xylophone',
+  'sfz.vsco_2_ce_1_1_0_trumpetstac',
+  'sfz.vsco_2_ce_1_1_0_flutestac',
+  'sfz.vsco_2_ce_1_1_0_clarinetstac',
+  'sfz.vsco_2_ce_1_1_0_bassoonstac',
+  'sfz.vsco_2_ce_1_1_0_xylophone',
+};
+
+const Set<String> kBlockedInstrumentNames = <String>{
+  'bass mono',
+  'breakbeat kit',
+  'dnb starter kit',
+  'cinematic pad',
+  'easy acoustic kit',
+  'horn stack',
+  'house beat kit',
+  'lofi beat kit',
+  'punch kick',
+  'reese bass',
+  'soft pad',
+  'sub bass',
+  'trap starter kit',
+  'vintage strings',
+  'wide air pad',
+  '808 starter kit',
+  'bassoon staccato',
+  'clarinet staccato',
+  'flute staccato',
+  'xylophone',
+  'trumpet staccato',
+};
+
+const Set<String> kBlockedInstrumentPickerCategories = <String>{
+  'drums',
+  'strings',
+  'woodwinds',
+};
+
+const Set<String> kBlockedInstrumentNameFragments = <String>{
+  'drum kit',
+  'drumset',
+  'glockenspiel',
+  'marimba',
+};
 
 class _SfzRegion {
   const _SfzRegion({
@@ -346,6 +378,15 @@ class _SfzRegion {
     required this.gainLinear,
     required this.attackSec,
     required this.releaseSec,
+    required this.pitchKeytrack,
+    required this.pitchOffsetSemitones,
+    required this.sampleStartFrame,
+    required this.sampleEndFrameExclusive,
+    required this.oneShot,
+    required this.seqLength,
+    required this.seqPosition,
+    required this.loRand,
+    required this.hiRand,
   });
 
   final String sampleAssetPath;
@@ -357,6 +398,15 @@ class _SfzRegion {
   final double gainLinear;
   final double attackSec;
   final double releaseSec;
+  final double pitchKeytrack;
+  final double pitchOffsetSemitones;
+  final int sampleStartFrame;
+  final int sampleEndFrameExclusive;
+  final bool oneShot;
+  final int seqLength;
+  final int seqPosition;
+  final double loRand;
+  final double hiRand;
 }
 
 class _SfzDefinition {
@@ -971,32 +1021,32 @@ const Map<String, _FallbackInstrumentPreset> _kFallbackInstrumentPresets = {
   'mixroom.bass_mono': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.bass,
     oscillator: 2,
-    cutoffHz: 1200.0,
+    cutoffHz: 900.0,
     attackMs: 8.0,
     releaseMs: 220.0,
-    drive: 0.28,
-    outputGain: 0.34,
-    detune: 0.001,
-    stereoWidth: 0.04,
-    tone: 0.52,
-    transient: 0.18,
+    drive: 0.14,
+    outputGain: 0.31,
+    detune: 0.0,
+    stereoWidth: 0.0,
+    tone: 0.38,
+    transient: 0.10,
     pitchDropSemitones: 4.0,
-    noise: 0.04,
+    noise: 0.01,
   ),
   'mixroom.soft_pad': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.pad,
     oscillator: 3,
-    cutoffHz: 2100.0,
+    cutoffHz: 1800.0,
     attackMs: 80.0,
     releaseMs: 620.0,
     drive: 0.02,
     outputGain: 0.31,
-    detune: 0.012,
-    stereoWidth: 0.28,
-    tone: 0.47,
+    detune: 0.004,
+    stereoWidth: 0.10,
+    tone: 0.40,
     transient: 0.04,
     pitchDropSemitones: 0.0,
-    noise: 0.03,
+    noise: 0.01,
   ),
   'mixroom.figbug_wavetable': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.wavetable,
@@ -1064,14 +1114,14 @@ const Map<String, _FallbackInstrumentPreset> _kFallbackInstrumentPresets = {
     cutoffHz: 900.0,
     attackMs: 0.0,
     releaseMs: 90.0,
-    drive: 0.42,
-    outputGain: 0.42,
+    drive: 0.24,
+    outputGain: 0.38,
     detune: 0.0,
     stereoWidth: 0.0,
-    tone: 0.52,
-    transient: 0.40,
+    tone: 0.44,
+    transient: 0.24,
     pitchDropSemitones: 16.0,
-    noise: 0.14,
+    noise: 0.04,
   ),
   'mixroom.warm_keys': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.keys,
@@ -1121,17 +1171,17 @@ const Map<String, _FallbackInstrumentPreset> _kFallbackInstrumentPresets = {
   'mixroom.sub_bass': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.bass,
     oscillator: 2,
-    cutoffHz: 900.0,
+    cutoffHz: 760.0,
     attackMs: 3.0,
     releaseMs: 200.0,
-    drive: 0.24,
-    outputGain: 0.35,
-    detune: 0.001,
-    stereoWidth: 0.03,
-    tone: 0.46,
-    transient: 0.12,
+    drive: 0.10,
+    outputGain: 0.31,
+    detune: 0.0,
+    stereoWidth: 0.0,
+    tone: 0.34,
+    transient: 0.06,
     pitchDropSemitones: 5.0,
-    noise: 0.03,
+    noise: 0.0,
   ),
   'mixroom.analog_brass': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.brass,
@@ -1199,14 +1249,14 @@ const Map<String, _FallbackInstrumentPreset> _kFallbackInstrumentPresets = {
     cutoffHz: 2600.0,
     attackMs: 0.0,
     releaseMs: 95.0,
-    drive: 0.24,
+    drive: 0.16,
     outputGain: 0.42,
     detune: 0.0,
     stereoWidth: 0.0,
-    tone: 0.58,
-    transient: 0.28,
+    tone: 0.46,
+    transient: 0.18,
     pitchDropSemitones: 14.0,
-    noise: 0.17,
+    noise: 0.08,
   ),
   'mixroom.night_bell': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.harmonic,
@@ -1241,17 +1291,17 @@ const Map<String, _FallbackInstrumentPreset> _kFallbackInstrumentPresets = {
   'mixroom.vintage_strings': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.pad,
     oscillator: 1,
-    cutoffHz: 2400.0,
+    cutoffHz: 1850.0,
     attackMs: 32.0,
     releaseMs: 640.0,
-    drive: 0.08,
+    drive: 0.04,
     outputGain: 0.31,
-    detune: 0.015,
-    stereoWidth: 0.24,
-    tone: 0.50,
+    detune: 0.005,
+    stereoWidth: 0.10,
+    tone: 0.42,
     transient: 0.07,
     pitchDropSemitones: 0.0,
-    noise: 0.02,
+    noise: 0.01,
   ),
   'mixroom.neo_brass': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.brass,
@@ -1271,17 +1321,17 @@ const Map<String, _FallbackInstrumentPreset> _kFallbackInstrumentPresets = {
   'mixroom.reese_bass': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.bass,
     oscillator: 1,
-    cutoffHz: 1300.0,
+    cutoffHz: 1050.0,
     attackMs: 4.0,
     releaseMs: 200.0,
-    drive: 0.26,
-    outputGain: 0.35,
-    detune: 0.015,
-    stereoWidth: 0.08,
-    tone: 0.57,
-    transient: 0.16,
+    drive: 0.16,
+    outputGain: 0.32,
+    detune: 0.006,
+    stereoWidth: 0.02,
+    tone: 0.40,
+    transient: 0.10,
     pitchDropSemitones: 5.0,
-    noise: 0.05,
+    noise: 0.02,
   ),
   'mixroom.air_pluck': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.pluck,
@@ -1301,17 +1351,17 @@ const Map<String, _FallbackInstrumentPreset> _kFallbackInstrumentPresets = {
   'mixroom.cinematic_pad': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.pad,
     oscillator: 3,
-    cutoffHz: 1900.0,
+    cutoffHz: 1650.0,
     attackMs: 95.0,
     releaseMs: 760.0,
     drive: 0.05,
     outputGain: 0.30,
-    detune: 0.018,
-    stereoWidth: 0.30,
-    tone: 0.44,
+    detune: 0.005,
+    stereoWidth: 0.12,
+    tone: 0.36,
     transient: 0.05,
     pitchDropSemitones: 0.0,
-    noise: 0.03,
+    noise: 0.01,
   ),
   'mixroom.velvet_ep': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.keys,
@@ -1376,47 +1426,47 @@ const Map<String, _FallbackInstrumentPreset> _kFallbackInstrumentPresets = {
   'mixroom.mellow_sub': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.bass,
     oscillator: 2,
-    cutoffHz: 980.0,
+    cutoffHz: 760.0,
     attackMs: 4.0,
     releaseMs: 260.0,
-    drive: 0.19,
+    drive: 0.08,
     outputGain: 0.35,
-    detune: 0.001,
-    stereoWidth: 0.04,
-    tone: 0.42,
-    transient: 0.10,
+    detune: 0.0,
+    stereoWidth: 0.0,
+    tone: 0.30,
+    transient: 0.05,
     pitchDropSemitones: 3.0,
-    noise: 0.02,
+    noise: 0.0,
   ),
   'mixroom.wide_air_pad': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.pad,
     oscillator: 3,
-    cutoffHz: 2300.0,
+    cutoffHz: 1850.0,
     attackMs: 74.0,
     releaseMs: 700.0,
     drive: 0.04,
     outputGain: 0.30,
-    detune: 0.020,
-    stereoWidth: 0.30,
-    tone: 0.50,
+    detune: 0.006,
+    stereoWidth: 0.14,
+    tone: 0.42,
     transient: 0.05,
     pitchDropSemitones: 0.0,
-    noise: 0.02,
+    noise: 0.01,
   ),
   'mixroom.horn_stack': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.brass,
-    oscillator: 1,
-    cutoffHz: 2900.0,
+    oscillator: 0,
+    cutoffHz: 2100.0,
     attackMs: 20.0,
     releaseMs: 280.0,
-    drive: 0.16,
+    drive: 0.06,
     outputGain: 0.33,
-    detune: 0.004,
-    stereoWidth: 0.12,
-    tone: 0.58,
-    transient: 0.09,
+    detune: 0.001,
+    stereoWidth: 0.02,
+    tone: 0.44,
+    transient: 0.05,
     pitchDropSemitones: 0.0,
-    noise: 0.02,
+    noise: 0.01,
   ),
   'mixroom.drum_trap': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.drum,
@@ -1424,14 +1474,14 @@ const Map<String, _FallbackInstrumentPreset> _kFallbackInstrumentPresets = {
     cutoffHz: 2100.0,
     attackMs: 0.0,
     releaseMs: 110.0,
-    drive: 0.32,
+    drive: 0.18,
     outputGain: 0.42,
     detune: 0.0,
     stereoWidth: 0.0,
-    tone: 0.62,
-    transient: 0.32,
+    tone: 0.48,
+    transient: 0.18,
     pitchDropSemitones: 18.0,
-    noise: 0.20,
+    noise: 0.08,
   ),
   'mixroom.drum_breakbeat': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.drum,
@@ -1439,14 +1489,14 @@ const Map<String, _FallbackInstrumentPreset> _kFallbackInstrumentPresets = {
     cutoffHz: 2400.0,
     attackMs: 0.0,
     releaseMs: 130.0,
-    drive: 0.26,
+    drive: 0.16,
     outputGain: 0.42,
     detune: 0.0,
     stereoWidth: 0.0,
-    tone: 0.55,
-    transient: 0.25,
+    tone: 0.46,
+    transient: 0.16,
     pitchDropSemitones: 12.0,
-    noise: 0.18,
+    noise: 0.08,
   ),
   'mixroom.drum_dnb': _FallbackInstrumentPreset(
     family: _FallbackInstrumentFamily.drum,
@@ -1764,18 +1814,18 @@ double _renderFallbackRawSample({
   switch (preset.family) {
     case _FallbackInstrumentFamily.bass:
       {
-        final body = _waveFromType(2, state.phaseA) * 0.52;
-        final sub = _waveFromType(0, state.phaseB) * 0.66;
-        final growl = _waveFromType(1, state.phaseA) * 0.20;
-        final transient = (0.04 + preset.transient * 0.22) *
-            math.exp(-22.0 * noteProgress) *
+        final sub = _waveFromType(0, state.phaseA) * 0.86;
+        final body = _waveFromType(3, state.phaseB) * 0.18;
+        final overtone = _waveFromType(0, state.phaseA * 2.0) * 0.06;
+        final transient = (0.004 + preset.transient * 0.025) *
+            math.exp(-36.0 * noteProgress) *
             _noiseForSample(state.seed, noteSampleIndex);
         final dynamicCutoff = preset.cutoffHz *
-            _clampDouble(1.0 - noteProgress * 0.55, 0.45, 1.05);
+            _clampDouble(0.88 - noteProgress * 0.30, 0.34, 0.92);
         final raw = _lowPassSample(
           state: state,
           auxiliaryState: false,
-          input: body + sub + growl + transient,
+          input: sub + body + overtone + transient,
           cutoffHz: dynamicCutoff,
           sampleRate: sampleRate,
         );
@@ -1789,30 +1839,29 @@ double _renderFallbackRawSample({
         _advancePhase(
           state: state,
           primary: false,
-          frequencyHz: frequencyHz * 0.5,
+          frequencyHz:
+              frequencyHz * (1.0 + _clampDouble(preset.detune, 0.0, 0.004)),
           sampleRate: sampleRate,
         );
         return raw;
       }
     case _FallbackInstrumentFamily.pad:
       {
-        final det = _clampDouble(preset.detune + 0.008, 0.001, 0.03);
-        final lfo =
-            math.sin(2.0 * math.pi * noteSampleIndex / sampleRate * 0.23);
-        final left = _waveFromType(0, state.phaseA);
-        final right = _waveFromType(3, state.phaseB);
-        final shimmer = _waveFromType(1, state.phaseA + 0.25) * 0.18;
-        final noise =
-            preset.noise * 0.5 * _noiseForSample(state.seed, noteSampleIndex);
+        final det = _clampDouble(preset.detune + 0.0008, 0.0002, 0.004);
+        final foundation = _waveFromType(0, state.phaseA) * 0.54;
+        final bloom = _waveFromType(0, state.phaseB) * 0.26;
+        final octave = _waveFromType(3, state.phaseA * 0.5 + 0.125) * 0.08;
+        final air =
+            preset.noise * 0.06 * _noiseForSample(state.seed, noteSampleIndex);
         final openAmount = _clampDouble(
-          0.7 + (1.0 - noteProgress) * 0.5 + lfo * 0.15,
-          0.5,
-          1.35,
+          0.70 + (1.0 - noteProgress) * 0.14,
+          0.58,
+          0.92,
         );
         final raw = _lowPassSample(
           state: state,
           auxiliaryState: false,
-          input: left * 0.48 + right * 0.4 + shimmer + noise,
+          input: foundation + bloom + octave + air,
           cutoffHz: preset.cutoffHz * openAmount,
           sampleRate: sampleRate,
         );
@@ -1973,8 +2022,8 @@ double _renderFallbackRawSample({
     case _FallbackInstrumentFamily.brass:
       {
         final style = preset.oscillator.clamp(0, 3).toInt();
-        final vibratoDepth = 0.0011 + envelope * (0.001 + style * 0.0003);
-        final vibratoRate = 4.8 + style * 0.5;
+        final vibratoDepth = 0.0002 + envelope * (0.00025 + style * 0.00008);
+        final vibratoRate = 4.2 + style * 0.35;
         final vibrato = 1.0 +
             math.sin(2.0 *
                     math.pi *
@@ -1982,25 +2031,26 @@ double _renderFallbackRawSample({
                     sampleRate *
                     vibratoRate) *
                 vibratoDepth;
-        final saw = _waveFromType(1, state.phaseA) * 0.48;
-        final pulse = _waveFromType(2, state.phaseB) * 0.35;
-        final upper = _waveFromType(style >= 2 ? 1 : 0, state.phaseA * 2.0) *
-            (0.15 + 0.03 * style);
-        final breath = (0.02 + preset.noise * 0.55) *
+        final body = _waveFromType(0, state.phaseA) * 0.34;
+        final saw = _waveFromType(1, state.phaseA) * 0.22;
+        final pulse = _waveFromType(2, state.phaseB) * 0.10;
+        final upper = _waveFromType(style >= 2 ? 0 : 3, state.phaseA * 2.0) *
+            (0.08 + 0.02 * style);
+        final breath = (0.01 + preset.noise * 0.22) *
             math.exp(-7.0 * noteProgress) *
             _noiseForSample(state.seed + 41, noteSampleIndex);
         final t = noteSampleIndex / sampleRate;
         final formantA =
-            math.sin(2.0 * math.pi * (760.0 + style * 110.0) * t) * 0.07;
+            math.sin(2.0 * math.pi * (520.0 + style * 90.0) * t) * 0.11;
         final formantB =
-            math.sin(2.0 * math.pi * (1320.0 + style * 140.0) * t) * 0.05;
+            math.sin(2.0 * math.pi * (980.0 + style * 120.0) * t) * 0.08;
         final dynamicCutoff = preset.cutoffHz *
             _clampDouble(
-                0.85 + envelope * 0.65 - noteProgress * 0.12, 0.65, 1.6);
+                0.72 + envelope * 0.42 - noteProgress * 0.10, 0.55, 1.18);
         final raw = _lowPassSample(
           state: state,
           auxiliaryState: false,
-          input: saw + pulse + upper + breath + formantA + formantB,
+          input: body + saw + pulse + upper + breath + formantA + formantB,
           cutoffHz: dynamicCutoff,
           sampleRate: sampleRate,
         );
@@ -3524,7 +3574,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const Duration _kTransportPlayStartSyncGrace =
       Duration(milliseconds: 180);
   static const Duration _kTransportUiNotifyInterval =
-      Duration(milliseconds: 10);
+      Duration(milliseconds: 16);
   static const Duration _kTransportMaxExtrapolation =
       Duration(milliseconds: 120);
   static const Duration _kFxPlaybackRefreshInterval =
@@ -3734,11 +3784,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  int _normalizedExpandedTab(int row) {
+    if (row < 0 || row >= _rowExpandedTab.length) return 0;
+    final tab = _rowExpandedTab[row];
+    return (tab == 1 || tab == 2) ? tab : 0;
+  }
+
+  bool _isRowMixUiVisible(int row) {
+    if (row < 0 || row >= _rowCount) return false;
+    if (row >= _rowExpanded.length || !_rowExpanded[row]) return false;
+    return _normalizedExpandedTab(row) == 0;
+  }
+
+  bool get _isMasterMixUiVisible =>
+      _showMasterRack &&
+      (_masterRackContentKey.currentState?.isVolumeTabVisible ?? true);
+
   void _refreshMixAutomationUiForPlaybackTick(double timeMs) {
     if (_rowCount <= 0) return;
     bool changed = false;
 
     for (int row = 0; row < _rowCount; row++) {
+      if (!_isRowMixUiVisible(row)) continue;
+
       final rowGainTargetId = _rowMixAutomationTargetId('gain');
       if (_hasExplicitAutomationForTarget(row, rowGainTargetId)) {
         final target = _rowAutomationTargets[row]?[rowGainTargetId] ??
@@ -3776,39 +3844,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
 
-    final masterGainTargetId = _masterMixAutomationTargetId('gain');
-    if (_hasExplicitAutomationForTarget(0, masterGainTargetId)) {
-      final target = _automationTargetMetaFromAnyRow(masterGainTargetId) ??
-          _fallbackAutomationTargetMeta(masterGainTargetId);
-      final normalized = _resolvedAutomationValueAtMs(
-        0,
-        masterGainTargetId,
-        timeMs,
-      ).clamp(0.0, 1.0);
-      final value = _denormalizeAutomationValue(normalized, target)
-          .clamp(_kGainUiMin, _kGainUiMax)
-          .toDouble();
-      if ((value - _masterGain).abs() > 0.0005) {
-        _masterGain = value;
-        changed = true;
+    if (_isMasterMixUiVisible) {
+      final masterGainTargetId = _masterMixAutomationTargetId('gain');
+      if (_hasExplicitAutomationForTarget(0, masterGainTargetId)) {
+        final target = _automationTargetMetaFromAnyRow(masterGainTargetId) ??
+            _fallbackAutomationTargetMeta(masterGainTargetId);
+        final normalized = _resolvedAutomationValueAtMs(
+          0,
+          masterGainTargetId,
+          timeMs,
+        ).clamp(0.0, 1.0);
+        final value = _denormalizeAutomationValue(normalized, target)
+            .clamp(_kGainUiMin, _kGainUiMax)
+            .toDouble();
+        if ((value - _masterGain).abs() > 0.0005) {
+          _masterGain = value;
+          changed = true;
+        }
       }
-    }
 
-    final masterPanTargetId = _masterMixAutomationTargetId('pan');
-    if (_hasExplicitAutomationForTarget(0, masterPanTargetId)) {
-      final target = _automationTargetMetaFromAnyRow(masterPanTargetId) ??
-          _fallbackAutomationTargetMeta(masterPanTargetId);
-      final normalized = _resolvedAutomationValueAtMs(
-        0,
-        masterPanTargetId,
-        timeMs,
-      ).clamp(0.0, 1.0);
-      final value = _denormalizeAutomationValue(normalized, target)
-          .clamp(0.0, 1.0)
-          .toDouble();
-      if ((value - _masterPan).abs() > 0.0005) {
-        _masterPan = value;
-        changed = true;
+      final masterPanTargetId = _masterMixAutomationTargetId('pan');
+      if (_hasExplicitAutomationForTarget(0, masterPanTargetId)) {
+        final target = _automationTargetMetaFromAnyRow(masterPanTargetId) ??
+            _fallbackAutomationTargetMeta(masterPanTargetId);
+        final normalized = _resolvedAutomationValueAtMs(
+          0,
+          masterPanTargetId,
+          timeMs,
+        ).clamp(0.0, 1.0);
+        final value = _denormalizeAutomationValue(normalized, target)
+            .clamp(0.0, 1.0)
+            .toDouble();
+        if ((value - _masterPan).abs() > 0.0005) {
+          _masterPan = value;
+          changed = true;
+        }
       }
     }
 
@@ -3863,6 +3933,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final List<bool> _rowSoloed = [];
   final List<bool?> _rowMuteApplied = [];
   final List<bool> _rowExpanded = [];
+  final List<int> _rowExpandedTab = [];
 
   // for copy/paste logic
   AudioTrack? _copiedClip;
@@ -4051,8 +4122,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<Map<String, dynamic>> _instrumentCatalog =
       _cloneInstrumentCatalog(kInstrumentCatalog);
   bool _instrumentCatalogReady = false;
-  Set<String>? _instrumentQualityApprovedIds;
-  Future<void>? _instrumentQualityVettingFuture;
   final Map<String, _SfzDefinition> _sfzDefinitionCache =
       <String, _SfzDefinition>{};
   final LinkedHashMap<String, _DecodedStereoPcm> _sfzSampleCache =
@@ -4643,6 +4712,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _rowSoloed.add(false);
       _rowMuteApplied.add(null);
       _rowExpanded.add(false);
+      _rowExpandedTab.add(0);
       _rowGainSnapshot.add(_kGainUiUnity);
       _rowPanSnapshot.add(0.5);
       _rowAutomationSnapshot.add([]);
@@ -4655,6 +4725,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _rowSoloed.removeRange(_rowCount, _rowSoloed.length);
       _rowMuteApplied.removeRange(_rowCount, _rowMuteApplied.length);
       _rowExpanded.removeRange(_rowCount, _rowExpanded.length);
+      _rowExpandedTab.removeRange(_rowCount, _rowExpandedTab.length);
       _rowGainSnapshot.removeRange(_rowCount, _rowGainSnapshot.length);
       _rowPanSnapshot.removeRange(_rowCount, _rowPanSnapshot.length);
       _rowAutomationSnapshot.removeRange(
@@ -4868,7 +4939,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _loadInputDevicesFromJuce();
       await _refreshAudioRouteInfo();
       await _loadBundledInstrumentCatalog();
-      unawaited(_ensureInstrumentQualityVetting());
       final engineSupportsLiveMidi =
           await JuceAudioEngine.supportsLiveMidiClipPlayback();
       _liveMidiEventPlaybackSupported =
@@ -6023,7 +6093,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  void _handleTimelineRowExpansionChanged(int row, bool expanded) {
+    if (row >= 0 && row < _rowExpanded.length) {
+      if (expanded) {
+        for (int i = 0; i < _rowExpanded.length; i++) {
+          _rowExpanded[i] = i == row;
+        }
+      } else {
+        _rowExpanded[row] = false;
+      }
+    }
+  }
+
+  void _handleTimelineRowTabSelected(int row, int tab) {
+    if (row >= 0 && row < _rowExpandedTab.length) {
+      _rowExpandedTab[row] = (tab == 1 || tab == 2) ? tab : 0;
+    }
+  }
+
   void _handleDawOnboardingRowExpansionChanged(int row, bool expanded) {
+    _handleTimelineRowExpansionChanged(row, expanded);
     if (!_showDawOnboarding || !expanded) return;
     _dawTutorialRowIndex = row;
     if (_currentDawOnboardingStepId == _DawTutorialStepId.rowExpand) {
@@ -6032,6 +6121,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _handleDawOnboardingRowTabSelected(int row, int tab) {
+    _handleTimelineRowTabSelected(row, tab);
     if (!_showDawOnboarding) return;
     _dawTutorialRowIndex = row;
     if (_currentDawOnboardingStepId == _DawTutorialStepId.rowEffectsTab &&
@@ -6143,6 +6233,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final oldAutomationTargetsById =
         <int, Map<String, _AutomationTargetMeta>>{};
     final oldSelectedAutomationTargetById = <int, String>{};
+    final oldExpandedTabById = <int, int>{};
     for (int i = 0; i < oldRows.length; i++) {
       final id = oldRows[i].rowId;
       if (i < _rowPan.length) oldPanById[id] = _rowPan[i];
@@ -6150,6 +6241,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (i < _rowMuted.length) oldMutedById[id] = _rowMuted[i];
       if (i < _rowSoloed.length) oldSoloById[id] = _rowSoloed[i];
       if (i < _rowExpanded.length) oldExpandedById[id] = _rowExpanded[i];
+      if (i < _rowExpandedTab.length)
+        oldExpandedTabById[id] = _rowExpandedTab[i];
       if (i < _rowMuteApplied.length)
         oldMuteAppliedById[id] = _rowMuteApplied[i];
       if (i < _rowVolumeAutomation.length) {
@@ -6201,6 +6294,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _rowMuted[i] = oldMutedById[id] ?? _rowMuted[i];
       _rowSoloed[i] = oldSoloById[id] ?? _rowSoloed[i];
       _rowExpanded[i] = oldExpandedById[id] ?? _rowExpanded[i];
+      _rowExpandedTab[i] = oldExpandedTabById[id] ?? _rowExpandedTab[i];
       _rowMuteApplied[i] = oldMuteAppliedById[id];
       _rowVolumeAutomation[i] =
           oldAutomationById[id] ?? _rowVolumeAutomation[i];
@@ -7548,6 +7642,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _startMeterPolling() {
+    if (!_shouldPollMetersDuringPlayback) return;
     if (_meterPolling) return;
     _meterPolling = true;
 
@@ -7653,6 +7748,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
   }
 
+  bool get _shouldPollMetersDuringPlayback =>
+      _isPlaying && !(_showPianoRoll && _pianoRollFullscreen);
+
+  void _syncMeterPollingForVisibility() {
+    if (_shouldPollMetersDuringPlayback) {
+      _startMeterPolling();
+    } else {
+      _stopMeterPolling();
+    }
+  }
+
   Future<void> _setNativeMeteringEnabled(bool enabled) async {
     try {
       await JuceAudioEngine.setMasterMeterEnabled(enabled);
@@ -7723,7 +7829,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _transportTicker?.start();
     }
 
-    _startMeterPolling();
+    _syncMeterPollingForVisibility();
 
     // Android can occasionally miss the first transport start edge.
     await Future<void>.delayed(const Duration(milliseconds: 90));
@@ -8959,112 +9065,161 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<String> _exportAudioOnly(ValueChanged<double> onProgress) async {
-    if (_audioTracks.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(L10n.translate(context,
-                'No audio tracks selected'))), // TODO: FIX THIS WORDING
+    return _runWithAndroidEngineCriticalSection(() async {
+      if (_audioTracks.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(L10n.translate(context,
+                  'No audio tracks selected'))), // TODO: FIX THIS WORDING
+        );
+        return "";
+      }
+
+      var reportedProgress = 0.0;
+      void reportProgress(double value) {
+        final clamped = value.clamp(0.0, 1.0).toDouble();
+        if (clamped <= reportedProgress) return;
+        reportedProgress = clamped;
+        onProgress(clamped);
+      }
+
+      reportProgress(0.02);
+      final settings = _normalizeAudioExportSettings(
+        _activeAudioExportSettings ?? _audioExportSettings,
       );
-      return "";
-    }
+      reportProgress(0.06);
 
-    var reportedProgress = 0.0;
-    void reportProgress(double value) {
-      final clamped = value.clamp(0.0, 1.0).toDouble();
-      if (clamped <= reportedProgress) return;
-      reportedProgress = clamped;
-      onProgress(clamped);
-    }
+      if (_desktopNativeWavOnlyExport) {
+        reportProgress(0.12);
+        final tempDir = await getTemporaryDirectory();
+        reportProgress(0.18);
+        await _syncNativePluginAutomationForAllRows();
+        reportProgress(0.24);
+        final nativeOutPath =
+            '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.wav';
 
-    reportProgress(0.02);
-    final settings = _normalizeAudioExportSettings(
-      _activeAudioExportSettings ?? _audioExportSettings,
-    );
-    reportProgress(0.06);
+        try {
+          final exportedPath = await _runNativeExportMixWithProgress(
+            outPath: nativeOutPath,
+            sampleRate: settings.sampleRate,
+            wavBitDepth: settings.wavBitDepth,
+            wavDithering: settings.wavDithering,
+            mp3BitrateKbps: settings.mp3BitrateKbps,
+            onProgress: reportProgress,
+            from: 0.24,
+            to: 0.88,
+          );
+          reportProgress(0.96);
+          if (exportedPath.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(L10n.translate(context, "Export failed"))),
+            );
+            return "";
+          }
+          final outFile = File(exportedPath);
+          if (!await outFile.exists() || (await outFile.length()) < 1000) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  L10n.translate(context,
+                      'Export failed: Output file missing or too small.'),
+                ),
+              ),
+            );
+            return "";
+          }
+          reportProgress(1.0);
+          return exportedPath;
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
+              duration: const Duration(seconds: 5),
+            ),
+          );
+          return "";
+        }
+      }
 
-    if (_desktopNativeWavOnlyExport) {
-      reportProgress(0.12);
+      reportProgress(0.10);
+      final rawRenderSampleRate = await _resolveRawRenderSampleRate(settings);
+      reportProgress(0.16);
       final tempDir = await getTemporaryDirectory();
-      reportProgress(0.18);
+      reportProgress(0.20);
       await _syncNativePluginAutomationForAllRows();
       reportProgress(0.24);
-      final nativeOutPath =
-          '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.wav';
 
-      try {
-        final exportedPath = await _runNativeExportMixWithProgress(
-          outPath: nativeOutPath,
-          sampleRate: settings.sampleRate,
-          wavBitDepth: settings.wavBitDepth,
-          wavDithering: settings.wavDithering,
-          mp3BitrateKbps: settings.mp3BitrateKbps,
-          onProgress: reportProgress,
-          from: 0.24,
-          to: 0.88,
-        );
-        reportProgress(0.96);
-        if (exportedPath.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(L10n.translate(context, "Export failed"))),
+      final useNativeWavDirect = _canUseNativeWavExport(settings) &&
+          settings.sampleRate == rawRenderSampleRate;
+      if (useNativeWavDirect) {
+        final nativeOutPath =
+            '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.wav';
+        try {
+          final exportedPath = await _runNativeExportMixWithProgress(
+            outPath: nativeOutPath,
+            sampleRate: settings.sampleRate,
+            wavBitDepth: settings.wavBitDepth,
+            wavDithering: settings.wavDithering,
+            mp3BitrateKbps: settings.mp3BitrateKbps,
+            onProgress: reportProgress,
+            from: 0.24,
+            to: 0.88,
           );
-          return "";
-        }
-        final outFile = File(exportedPath);
-        if (!await outFile.exists() || (await outFile.length()) < 1000) {
+          reportProgress(0.96);
+
+          if (exportedPath.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(L10n.translate(context, "Export failed"))),
+            );
+            return "";
+          }
+
+          final outFile = File(exportedPath);
+          if (!await outFile.exists() || (await outFile.length()) < 1000) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  L10n.translate(context,
+                      'Export failed: Output file missing or too small.'),
+                ),
+              ),
+            );
+            return "";
+          }
+          reportProgress(1.0);
+          return exportedPath;
+        } catch (e) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                L10n.translate(context,
-                    'Export failed: Output file missing or too small.'),
-              ),
+                  '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
+              duration: const Duration(seconds: 5),
             ),
           );
           return "";
         }
-        reportProgress(1.0);
-        return exportedPath;
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
-            duration: const Duration(seconds: 5),
-          ),
-        );
-        return "";
       }
-    }
 
-    reportProgress(0.10);
-    final rawRenderSampleRate = await _resolveRawRenderSampleRate(settings);
-    reportProgress(0.16);
-    final tempDir = await getTemporaryDirectory();
-    reportProgress(0.20);
-    await _syncNativePluginAutomationForAllRows();
-    reportProgress(0.24);
+      final rawOutPath =
+          '${tempDir.path}/audio_export_raw_${DateTime.now().millisecondsSinceEpoch}.wav';
 
-    final useNativeWavDirect = _canUseNativeWavExport(settings) &&
-        settings.sampleRate == rawRenderSampleRate;
-    if (useNativeWavDirect) {
-      final nativeOutPath =
-          '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.wav';
       try {
         final exportedPath = await _runNativeExportMixWithProgress(
-          outPath: nativeOutPath,
-          sampleRate: settings.sampleRate,
-          wavBitDepth: settings.wavBitDepth,
-          wavDithering: settings.wavDithering,
+          outPath: rawOutPath,
+          sampleRate: rawRenderSampleRate,
+          wavBitDepth: 32,
+          wavDithering: false,
           mp3BitrateKbps: settings.mp3BitrateKbps,
           onProgress: reportProgress,
           from: 0.24,
-          to: 0.88,
+          to: 0.72,
         );
-        reportProgress(0.96);
+        reportProgress(0.80);
 
         if (exportedPath.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(L10n.translate(context, "Export failed"))),
-          );
+              SnackBar(content: Text(L10n.translate(context, "Export failed"))));
           return "";
         }
 
@@ -9072,83 +9227,36 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (!await outFile.exists() || (await outFile.length()) < 1000) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                L10n.translate(context,
-                    'Export failed: Output file missing or too small.'),
-              ),
+              content: Text(L10n.translate(
+                  context, 'Export failed: Output file missing or too small.')),
             ),
           );
           return "";
         }
+
+        final convertedPath = await _runProgressPulse<String>(
+          onProgress: reportProgress,
+          from: 0.84,
+          to: 0.97,
+          task: () => _convertMixWithExportSettings(
+            inputPath: exportedPath,
+            settings: settings,
+          ),
+        );
         reportProgress(1.0);
-        return exportedPath;
+        return convertedPath;
       } catch (e) {
+        print("Full export error: $e");
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
                 '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
-            duration: const Duration(seconds: 5),
+            duration: Duration(seconds: 5),
           ),
         );
-        return "";
       }
-    }
-
-    final rawOutPath =
-        '${tempDir.path}/audio_export_raw_${DateTime.now().millisecondsSinceEpoch}.wav';
-
-    try {
-      final exportedPath = await _runNativeExportMixWithProgress(
-        outPath: rawOutPath,
-        sampleRate: rawRenderSampleRate,
-        wavBitDepth: 32,
-        wavDithering: false,
-        mp3BitrateKbps: settings.mp3BitrateKbps,
-        onProgress: reportProgress,
-        from: 0.24,
-        to: 0.72,
-      );
-      reportProgress(0.80);
-
-      if (exportedPath.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(L10n.translate(context, "Export failed"))));
-        return "";
-      }
-
-      final outFile = File(exportedPath);
-      if (!await outFile.exists() || (await outFile.length()) < 1000) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(L10n.translate(
-                context, 'Export failed: Output file missing or too small.')),
-          ),
-        );
-        return "";
-      }
-
-      final convertedPath = await _runProgressPulse<String>(
-        onProgress: reportProgress,
-        from: 0.84,
-        to: 0.97,
-        task: () => _convertMixWithExportSettings(
-          inputPath: exportedPath,
-          settings: settings,
-        ),
-      );
-      reportProgress(1.0);
-      return convertedPath;
-    } catch (e) {
-      print("Full export error: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
-          duration: Duration(seconds: 5),
-        ),
-      );
-    }
-    return "";
+      return "";
+    });
   }
 
   // THINGS FOR AI SYNC---------
@@ -10075,7 +10183,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       clipSourceFile = File(candidatePath);
     }
 
-    final startSec = timeMs / 1000.0;
+    final safeTimeMs = math.max(0.0, timeMs);
+    final startSec = safeTimeMs / 1000.0;
     final requestedTrimStart = trimStartRequested ?? Duration.zero;
     final requestedInFileOffsetSec = requestedTrimStart.inMilliseconds / 1000.0;
     final requestedLengthSec = trimEndRequested != null
@@ -10150,6 +10259,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _ensureRowIndexExists(row);
     await _ensureRowExistsForClipInsertion();
     final safeRow = _rowCount == 0 ? 0 : row.clamp(0, _rowCount - 1);
+    final safeTimeMs = math.max(0.0, timeMs);
     final rowId = _rowIdAt(safeRow);
     final engineClipId = _allocateEngineClipId();
     if (engineClipId < 0) {
@@ -10170,7 +10280,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         engineClipId,
         rowId,
         clip.file.path,
-        startSec: timeMs / 1000.0,
+        startSec: safeTimeMs / 1000.0,
         lengthSec: requestedLengthSec,
         inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
       );
@@ -10196,7 +10306,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     newTrack.normWaveformData = clip.normWaveformData;
 
     setState(() {
-      newTrack.offset = timeMs / 1000.0;
+      newTrack.offset = safeTimeMs / 1000.0;
       newTrack.trimStart = trimStartRequested ?? Duration.zero;
       newTrack.trimEnd = trimEndRequested ?? dur;
       newTrack.gain = clip.gain;
@@ -10232,6 +10342,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _ensureRowIndexExists(row);
     await _ensureRowExistsForClipInsertion();
     final safeRow = _rowCount == 0 ? 0 : row.clamp(0, _rowCount - 1);
+    final safeTimeMs = math.max(0.0, timeMs);
     final rowId = _rowIdAt(safeRow);
     final engineClipId = _allocateEngineClipId();
     if (engineClipId < 0) return;
@@ -10248,7 +10359,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         engineClipId,
         rowId,
         projectAudioFile.path,
-        startSec: timeMs / 1000.0,
+        startSec: safeTimeMs / 1000.0,
         lengthSec: requestedLengthSec,
         inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
       );
@@ -10276,7 +10387,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       isReversed: false,
     );
 
-    newTrack.offset = timeMs / 1000.0;
+    newTrack.offset = safeTimeMs / 1000.0;
     newTrack.trimStart = trimStartRequested ?? Duration.zero;
     newTrack.trimEnd = trimEndRequested ?? dur;
 
@@ -10758,28 +10869,40 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return <MidiNote>[
         MidiNote(
             id: '${now}_0',
-            pitch: 57,
+            pitch: 48,
             startBeat: 0.0,
             lengthBeats: 2.0,
-            velocity: 0.72),
+            velocity: 0.7),
         MidiNote(
             id: '${now}_1',
+            pitch: 55,
+            startBeat: 0.0,
+            lengthBeats: 2.0,
+            velocity: 0.64),
+        MidiNote(
+            id: '${now}_2',
             pitch: 60,
             startBeat: 0.0,
             lengthBeats: 2.0,
-            velocity: 0.7),
-        MidiNote(
-            id: '${now}_2',
-            pitch: 64,
-            startBeat: 2.0,
-            lengthBeats: 2.0,
-            velocity: 0.74),
+            velocity: 0.66),
         MidiNote(
             id: '${now}_3',
-            pitch: 67,
+            pitch: 50,
             startBeat: 2.0,
             lengthBeats: 2.0,
-            velocity: 0.7),
+            velocity: 0.72),
+        MidiNote(
+            id: '${now}_4',
+            pitch: 57,
+            startBeat: 2.0,
+            lengthBeats: 2.0,
+            velocity: 0.66),
+        MidiNote(
+            id: '${now}_5',
+            pitch: 62,
+            startBeat: 2.0,
+            lengthBeats: 2.0,
+            velocity: 0.68),
       ];
     }
     if (instrumentId == 'mixroom.vanilla_poly') {
@@ -11615,6 +11738,63 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  String? _sampledAliasAssetPathForInstrumentId(String instrumentId) {
+    switch (instrumentId.trim().toLowerCase()) {
+      case 'mixroom.drum_808_starter':
+        return 'assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz';
+      case 'mixroom.drum_house':
+      case 'mixroom.drum_breakbeat':
+        return 'assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz';
+      case 'mixroom.drum_trap':
+        return 'assets/instruments/VSCO-2-CE-1.1.0/MixroomElectroPunchKit.sfz';
+      case 'mixroom.horn_stack':
+        return 'assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz';
+      default:
+        return null;
+    }
+  }
+
+  int _remapSampledMidiPitch(String instrumentId, int pitch) {
+    final normalized = instrumentId.trim().toLowerCase();
+    switch (normalized) {
+      case 'mixroom.drum_808_starter':
+      case 'mixroom.drum_house':
+      case 'mixroom.drum_breakbeat':
+      case 'mixroom.drum_trap':
+      case 'sfz.vsco.mixroom_drum_starter':
+      case 'sfz.vsco.mixroom_dry_drum_kit':
+      case 'sfz.vsco.mixroom_acoustic_drum_kit':
+      case 'sfz.vsco.mixroom_electro_punch_kit':
+      case 'sfz.vsco_2_ce_1_1_0_mixroomdrumstarter':
+      case 'sfz.vsco_2_ce_1_1_0_mixroomdrydrumkit':
+      case 'sfz.vsco_2_ce_1_1_0_mixroomacousticdrumkit':
+      case 'sfz.vsco_2_ce_1_1_0_mixroomelectropunchkit':
+        switch (pitch.clamp(0, 127)) {
+          case 35:
+            return 36;
+          case 37:
+          case 39:
+            return 38;
+          case 41:
+          case 43:
+            return 45;
+          case 48:
+            return 47;
+          case 52:
+          case 53:
+            return 42;
+          case 55:
+          case 57:
+          case 59:
+            return 49;
+          default:
+            return pitch.clamp(0, 127);
+        }
+      default:
+        return pitch.clamp(0, 127);
+    }
+  }
+
   double _readSfzNumeric(
       Map<String, String> values, String key, double fallback) {
     final raw = values[key];
@@ -11726,6 +11906,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final releaseSec = _readSfzNumeric(r, 'ampeg_release', globalReleaseSec)
             .clamp(0.02, 12.0)
             .toDouble();
+        final pitchKeytrack = _readSfzNumeric(r, 'pitch_keytrack', 100.0)
+            .clamp(-1200.0, 1200.0)
+            .toDouble();
+        final pitchOffsetSemitones = (_readSfzNumeric(r, 'transpose', 0.0) +
+                (_readSfzNumeric(r, 'tune', 0.0) / 100.0))
+            .clamp(-48.0, 48.0)
+            .toDouble();
+        final sampleStartFrame = math.max(
+          0,
+          _readSfzNumeric(r, 'offset', 0.0).round(),
+        );
+        final sampleEndFrameExclusive =
+            math.max(0, _readSfzNumeric(r, 'end', -1.0).round() + 1);
+        final loopMode = (r['loop_mode'] ?? '').trim().toLowerCase();
+        final oneShot = loopMode == 'one_shot';
+        final seqLength =
+            math.max(1, _readSfzNumeric(r, 'seq_length', 1.0).round());
+        final rawSeqPosition = _readSfzNumeric(r, 'seq_position', 1.0).round();
+        final seqPosition = rawSeqPosition.clamp(1, seqLength);
+        final loRand =
+            _readSfzNumeric(r, 'lorand', 0.0).clamp(0.0, 1.0).toDouble();
+        final hiRand =
+            _readSfzNumeric(r, 'hirand', 1.0).clamp(loRand, 1.0).toDouble();
         parsedRegions.add(
           _SfzRegion(
             sampleAssetPath: sampleAssetPath,
@@ -11737,6 +11940,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             gainLinear: gainLinear,
             attackSec: attackSec,
             releaseSec: releaseSec,
+            pitchKeytrack: pitchKeytrack,
+            pitchOffsetSemitones: pitchOffsetSemitones,
+            sampleStartFrame: sampleStartFrame,
+            sampleEndFrameExclusive: sampleEndFrameExclusive,
+            oneShot: oneShot,
+            seqLength: seqLength,
+            seqPosition: seqPosition,
+            loRand: loRand,
+            hiRand: hiRand,
           ),
         );
       }
@@ -11756,7 +11968,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   _SfzRegion? _pickSfzRegion(
-      _SfzDefinition definition, int pitch, int velocity) {
+    _SfzDefinition definition,
+    int pitch,
+    int velocity, {
+    int sequenceStep = 0,
+  }) {
+    double random01For(_SfzRegion region) {
+      var seed = 0x45d9f3b;
+      seed ^= pitch * 1009;
+      seed ^= velocity * 9176;
+      seed ^= sequenceStep * 6151;
+      seed ^= region.keyCenter * 313;
+      seed ^= region.loKey * 137;
+      seed ^= region.hiKey * 271;
+      seed = (seed ^ (seed >> 16)) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    }
+
     var candidates = definition.regions.where((region) {
       return pitch >= region.loKey &&
           pitch <= region.hiKey &&
@@ -11770,6 +11998,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }).toList(growable: false);
     }
     if (candidates.isEmpty) return null;
+
+    final sequenced = candidates.where((region) {
+      if (region.seqLength <= 1) return true;
+      final expected = (sequenceStep % region.seqLength) + 1;
+      return region.seqPosition == expected;
+    }).toList(growable: false);
+    if (sequenced.isNotEmpty) {
+      candidates = sequenced;
+    }
+
+    final randomMatched = candidates.where((region) {
+      final randomValue = random01For(region);
+      return randomValue >= region.loRand && randomValue < region.hiRand;
+    }).toList(growable: false);
+    if (randomMatched.isNotEmpty) {
+      candidates = randomMatched;
+    }
 
     candidates.sort((a, b) {
       final keyA = (pitch - a.keyCenter).abs();
@@ -11894,6 +12139,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  double _sfzPlaybackRate({
+    required _DecodedStereoPcm sample,
+    required _SfzRegion region,
+    required int notePitch,
+    required double outputSampleRate,
+  }) {
+    final semitoneOffset =
+        ((notePitch - region.keyCenter) * (region.pitchKeytrack / 100.0)) +
+            region.pitchOffsetSemitones;
+    return math.pow(2.0, semitoneOffset / 12.0).toDouble() *
+        (sample.sampleRate / outputSampleRate);
+  }
+
+  int _sfzRegionFrameLimit(_SfzRegion region, _DecodedStereoPcm sample) {
+    final requestedEnd = region.sampleEndFrameExclusive > 0
+        ? region.sampleEndFrameExclusive
+        : sample.frameCount;
+    return requestedEnd.clamp(region.sampleStartFrame + 1, sample.frameCount);
+  }
+
   Future<bool> _renderInstrumentClipWithSfz({
     required File outFile,
     required String instrumentId,
@@ -11918,22 +12183,67 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final tailSec = releaseOverrideSec > 0
         ? releaseOverrideSec
         : definition.defaultReleaseSec;
-    final totalMs = math.max(
+    var totalMs = math.max(
       minimumDurationMs,
       endBeat * msPerBeat + tailSec * 1000.0 + 180.0,
     );
+    for (int noteIndex = 0; noteIndex < notes.length; noteIndex++) {
+      final note = notes[noteIndex];
+      final safePitch = _remapSampledMidiPitch(instrumentId, note.pitch);
+      final safeVelocity = note.velocity.clamp(0.0, 1.0);
+      final velocityMidi = (safeVelocity * 127.0).round().clamp(0, 127);
+      final region = _pickSfzRegion(
+        definition,
+        safePitch,
+        velocityMidi,
+        sequenceStep: noteIndex,
+      );
+      if (region == null || !region.oneShot) continue;
+      final sample = await _decodedSfzSample(region.sampleAssetPath);
+      if (sample == null || sample.frameCount < 2) continue;
+      final playbackRate = _sfzPlaybackRate(
+        sample: sample,
+        region: region,
+        notePitch: safePitch,
+        outputSampleRate: sampleRate,
+      );
+      if (!playbackRate.isFinite || playbackRate <= 0.0) continue;
+      final usableFrames =
+          _sfzRegionFrameLimit(region, sample) - region.sampleStartFrame;
+      if (usableFrames < 2) continue;
+      final sampleMs =
+          ((usableFrames - 1) / playbackRate) * 1000.0 / sampleRate;
+      totalMs = math.max(
+        totalMs,
+        note.startBeat * msPerBeat + sampleMs + 180.0,
+      );
+    }
     final totalSamples = math.max(2048, (totalMs * sampleRate / 1000.0).ceil());
     final left = Float32List(totalSamples);
     final right = Float32List(totalSamples);
 
-    for (final note in notes) {
-      final safePitch = note.pitch.clamp(0, 127);
+    for (int noteIndex = 0; noteIndex < notes.length; noteIndex++) {
+      final note = notes[noteIndex];
+      final safePitch = _remapSampledMidiPitch(instrumentId, note.pitch);
       final safeVelocity = note.velocity.clamp(0.0, 1.0);
       final velocityMidi = (safeVelocity * 127.0).round().clamp(0, 127);
-      final region = _pickSfzRegion(definition, safePitch, velocityMidi);
+      final region = _pickSfzRegion(
+        definition,
+        safePitch,
+        velocityMidi,
+        sequenceStep: noteIndex,
+      );
       if (region == null) continue;
       final sample = await _decodedSfzSample(region.sampleAssetPath);
       if (sample == null || sample.frameCount < 2) continue;
+
+      final sampleStartFrame = region.sampleStartFrame.clamp(
+        0,
+        math.max(0, sample.frameCount - 1),
+      );
+      final sampleEndFrameExclusive = _sfzRegionFrameLimit(region, sample);
+      final usableFrames = sampleEndFrameExclusive - sampleStartFrame;
+      if (usableFrames < 2) continue;
 
       final noteStart =
           (note.startBeat * msPerBeat * sampleRate / 1000.0).round();
@@ -11949,23 +12259,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           : region.releaseSec.clamp(0.02, 12.0);
       final attackSamples = math.max(1, (attackSec * sampleRate).round());
       final releaseSamples = math.max(1, (releaseSec * sampleRate).round());
-      final totalNoteSamples = sustainSamples + releaseSamples;
+      final playbackRate = _sfzPlaybackRate(
+        sample: sample,
+        region: region,
+        notePitch: safePitch,
+        outputSampleRate: sampleRate,
+      );
+      if (!playbackRate.isFinite || playbackRate <= 0.0) continue;
+      final sampleLimitedDurationSamples =
+          math.max(1, ((usableFrames - 1) / playbackRate).ceil());
+      final totalNoteSamples = region.oneShot
+          ? sampleLimitedDurationSamples
+          : sustainSamples + releaseSamples;
 
-      final semitoneOffset = safePitch - region.keyCenter;
-      final playbackRate = math.pow(2.0, semitoneOffset / 12.0).toDouble() *
-          (sample.sampleRate / sampleRate);
-
-      double samplePos = 0.0;
+      double samplePos = sampleStartFrame.toDouble();
       final noteGain = safeVelocity * region.gainLinear * outputGain;
       for (int i = 0; i < totalNoteSamples; i++) {
         final idx = noteStart + i;
         if (idx < 0 || idx >= totalSamples) break;
-        if (samplePos >= sample.frameCount - 1) break;
+        if (samplePos >= sampleEndFrameExclusive - 1) break;
 
         double env;
         if (i < attackSamples) {
           env = i / attackSamples;
-        } else if (i < sustainSamples) {
+        } else if (region.oneShot || i < sustainSamples) {
           env = 1.0;
         } else {
           env = 1.0 - ((i - sustainSamples) / releaseSamples);
@@ -12022,6 +12339,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (_isSampledInstrumentId(instrumentId)) {
+      if (Platform.isAndroid) {
+        final engineInstrumentId = _liveMidiEngineInstrumentId(instrumentId);
+        final renderedPath = await JuceAudioEngine.renderInstrumentClip(
+          outPath: outFile.path,
+          instrumentId: engineInstrumentId,
+          instrumentName: instrumentName,
+          bpm: _tempo,
+          notes: notes
+              .map((n) => {
+                    'id': n.id,
+                    'pitch': n.pitch,
+                    'startBeat': n.startBeat,
+                    'lengthBeats': n.lengthBeats,
+                    'velocity': n.velocity,
+                  })
+              .toList(),
+          params: params,
+        );
+        if (renderedPath.isNotEmpty && File(renderedPath).existsSync()) {
+          return true;
+        }
+      }
+
       final renderedWithSfz = await _renderInstrumentClipWithSfz(
         outFile: outFile,
         instrumentId: instrumentId,
@@ -12278,6 +12618,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (id.toLowerCase().startsWith('sfz_asset:')) {
       return id;
     }
+    final aliasAssetPath = _sampledAliasAssetPathForInstrumentId(id);
+    if (aliasAssetPath != null && aliasAssetPath.isNotEmpty) {
+      return 'sfz_asset:$aliasAssetPath';
+    }
     final spec = _findInstrumentSpecById(id);
     if (spec != null && _isSampledInstrumentSpec(spec)) {
       final sfzAssetPath = (spec['sfzAssetPath'] as String?)?.trim() ?? '';
@@ -12419,6 +12763,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _ensureRowIndexExists(row);
     await _ensureRowExistsForClipInsertion();
     final safeRow = _rowCount == 0 ? 0 : row.clamp(0, _rowCount - 1);
+    final safeTimeMs = math.max(0.0, timeMs);
     final rowId = _rowIdAt(safeRow);
     final engineClipId = _allocateEngineClipId();
     if (engineClipId < 0) {
@@ -12478,7 +12823,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             : _tempo;
     final resolvedStretchToProjectTempo = stretchToProjectTempo ?? true;
     final resolvedTempoStretchPreservePitch = tempoStretchPreservePitch ?? true;
-    final startSec = timeMs / 1000.0;
+    final startSec = safeTimeMs / 1000.0;
 
     final loadedLiveMidi = await _runWithAndroidEngineCriticalSection(
       () => _loadMidiClipIntoEngineLive(
@@ -13004,12 +13349,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  void _setProjectTempoFromUi(double bpm) {
+  Future<void> _applyProjectTempoChange(double bpm) async {
     final next = _clampTempo(bpm);
-    if (next == _tempo) return;
-    _setStateAndRefreshProjectSettings(() => _tempo = next);
+    final previous = _clampTempo(_tempo);
+    if ((next - previous).abs() < 0.0001) return;
+    final midiOffsetScale = previous / next;
+    _setStateAndRefreshProjectSettings(() {
+      _tempo = next;
+      for (final clip in _audioTracks) {
+        if (!clip.isMidi) continue;
+        clip.offset = math.max(0.0, clip.offset * midiOffsetScale);
+      }
+    });
     _syncTempoPickerSelection();
-    unawaited(_queueTempoEngineSync());
+    await _queueTempoEngineSync();
+    await _syncAllTempoStretchToEngine();
+    _updateOverallDurationIfNeeded();
+  }
+
+  void _setProjectTempoFromUi(double bpm) {
+    unawaited(_applyProjectTempoChange(bpm));
   }
 
   Future<void> _setTempoStretchUiMode({
@@ -13038,9 +13397,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _syncAllTempoStretchToEngine();
   }
 
-  Future<void> _rerenderMidiTrack(AudioTrack clip) async {
-    if (!clip.isMidi || clip.engineClipId < 0) return;
-    if (clip.file.path.isEmpty) return;
+  Future<bool> _rerenderMidiTrack(AudioTrack clip) async {
+    if (!clip.isMidi || clip.engineClipId < 0) return false;
+    if (clip.file.path.isEmpty) return false;
     clip.sourceTempoBpm = _clampTempo(_tempo);
     clip.stretchToProjectTempo = true;
     clip.tempoStretchPreservePitch = true;
@@ -13052,39 +13411,56 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       notes: clip.midiNotes,
       params: clip.instrumentParams,
     );
-    if (!rendered || !clip.file.existsSync()) return;
+    if (!rendered || !clip.file.existsSync()) return false;
 
     final rowId = clip.rowId >= 0 ? clip.rowId : _rowIdAt(clip.rowIndex);
-    if (rowId < 0) return;
+    if (rowId < 0) return false;
     final startSec = clip.offset;
     final lengthSec = _clipTimelineDurationSec(clip);
     final inFileOffsetSec = clip.trimStart.inMilliseconds.toDouble() / 1000.0;
 
-    await _runWithAndroidEngineCriticalSection(() async {
-      await JuceAudioEngine.unloadClip(clip.engineClipId);
-      await JuceAudioEngine.loadClip(
-        clip.engineClipId,
-        rowId,
-        clip.file.path,
+    bool reloaded = false;
+    if (_liveMidiEventPlaybackSupported) {
+      reloaded = await _loadMidiClipIntoEngineLive(
+        engineClipId: clip.engineClipId,
+        rowId: rowId,
+        instrumentId: clip.instrumentId,
+        instrumentName: clip.instrumentName,
+        midiNotes: clip.midiNotes,
+        instrumentParams: clip.instrumentParams,
+        sourceTempoBpm: _resolvedClipSourceTempoBpm(clip),
         startSec: startSec,
-        lengthSec: math.max(0.0, lengthSec),
-        inFileOffsetSec: math.max(0.0, inFileOffsetSec),
+        lengthSec: lengthSec,
+        inFileOffsetSec: inFileOffsetSec,
       );
-    });
+    } else {
+      await _runWithAndroidEngineCriticalSection(() async {
+        await JuceAudioEngine.unloadClip(clip.engineClipId);
+        await JuceAudioEngine.loadClip(
+          clip.engineClipId,
+          rowId,
+          clip.file.path,
+          startSec: startSec,
+          lengthSec: math.max(0.0, lengthSec),
+          inFileOffsetSec: math.max(0.0, inFileOffsetSec),
+        );
+      });
+      reloaded = true;
+    }
+    if (!reloaded) return false;
     await _syncClipMixToEngine(clip);
 
-    clip.audioDuration = await _runWithAndroidEngineCriticalSection(
-      () => _resolveClipSourceDuration(
-        filePath: clip.file.path,
-        engineClipId: clip.engineClipId,
-      ),
-    );
+    final resolvedDuration = await _resolveSampleDuration(clip.file.path);
+    if (resolvedDuration != null) {
+      clip.audioDuration = resolvedDuration;
+    }
 
     _startWaveformExtraction(clip);
     if (mounted) {
       setState(() {});
     }
     _updateOverallDurationIfNeeded();
+    return true;
   }
 
   Future<void> _syncClipTimingToEngine(int clipIndex,
@@ -13378,24 +13754,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
 
     if (savedPath != null) {
+      String? resolvedSavedDisplayName;
+      String? resolvedPreviewPath;
       if (Platform.isAndroid) {
-        final savedDisplayName =
+        resolvedSavedDisplayName =
             await ExportSaveDialog.resolveSavedDisplayNameFromPlatform(
           savedPath,
         );
-        if (savedDisplayName != null &&
-            savedDisplayName.isNotEmpty &&
-            savedDisplayName.toLowerCase() !=
-                suggestedFileName.trim().toLowerCase()) {
+        resolvedPreviewPath =
+            await ExportSaveDialog.materializeSavedPreviewPathFromPlatform(
+          savedPath,
+        );
+
+        final canAccessSavedMedia = await _ensureAndroidMediaLibraryAccess(
+          rationale:
+              'Mixroom needs access to audio files so the exported track can be previewed, shared, or opened from the success screen on Android.',
+        );
+        if (!canAccessSavedMedia) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Name already existed. Saved as "$savedDisplayName".',
+                L10n.translate(
+                  context,
+                  'Media access is required to preview or open the saved export.',
+                ),
               ),
             ),
           );
         }
       }
+
+      if (!mounted) return;
+
       // final success_str = L10n.translate(context, 'Exported file saved!');
       // ScaffoldMessenger.of(context).showSnackBar(
       //   SnackBar(content: Text(success_str)),// at: $savedPath')),
@@ -13406,12 +13796,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         MaterialPageRoute(
           builder: (context) => ExportSuccessScreen(
             filePath: exportPath,
+            previewFilePath: resolvedPreviewPath,
             savedFilePath: savedPath,
-            savedFileName: suggestedFileName,
+            savedFileName: resolvedSavedDisplayName ?? suggestedFileName,
             isVideo: false,
           ),
         ),
       );
+
+      final shouldDeleteResolvedPreview = resolvedPreviewPath != null &&
+          resolvedPreviewPath.isNotEmpty &&
+          resolvedPreviewPath != exportPath &&
+          resolvedPreviewPath != savedPath;
+      if (shouldDeleteResolvedPreview) {
+        try {
+          final previewFile = File(resolvedPreviewPath);
+          if (await previewFile.exists()) {
+            await previewFile.delete();
+          }
+        } catch (_) {}
+      }
 
       try {
         final tempExport = File(exportPath);
@@ -13425,6 +13829,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
     } else {
+      if (!mounted) return;
       final fail_str = L10n.translate(context, 'Export canceled or failed.');
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(fail_str)));
@@ -13538,7 +13943,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Future<bool> _ensureAndroidMediaLibraryAccess() async {
+  Future<bool> _ensureAndroidMediaLibraryAccess({
+    String? rationale,
+  }) async {
     if (!Platform.isAndroid) return true;
 
     final audioStatus = await Permission.audio.request();
@@ -13562,7 +13969,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               content: Text(
                 L10n.translate(
                   ctx,
-                  'Mixroom needs access to audio files to browse sample folders and import local media on Android.',
+                  rationale ??
+                      'Mixroom needs access to audio files to browse sample folders and import local media on Android.',
                 ),
               ),
               actions: [
@@ -14319,6 +14727,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _auditioningSamplePath = filePath;
         _samplePreviewPlaying = true;
       });
+      await JuceAudioEngine.preparePlaybackRoute(reason: 'samplePreview');
       await _samplePreviewPlayer.stop();
       await _samplePreviewPlayer.setFilePath(filePath);
       await _samplePreviewPlayer.seek(Duration.zero);
@@ -14429,145 +14838,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool _passesInstrumentRuntimeQualityGate(Map<String, dynamic> spec) {
-    final approved = _instrumentQualityApprovedIds;
-    if (approved == null) return true;
     final id = (spec['id'] as String? ?? '').trim().toLowerCase();
-    if (id.isEmpty) return false;
-    return approved.contains(id);
-  }
-
-  Future<void> _ensureInstrumentQualityVetting() async {
-    if (_instrumentQualityApprovedIds != null) return;
-    if (_instrumentQualityVettingFuture != null) {
-      await _instrumentQualityVettingFuture;
-      return;
-    }
-    final future = _runInstrumentQualityVetting();
-    _instrumentQualityVettingFuture = future;
-    try {
-      await future;
-    } finally {
-      if (identical(_instrumentQualityVettingFuture, future)) {
-        _instrumentQualityVettingFuture = null;
-      }
-    }
-  }
-
-  Future<void> _runInstrumentQualityVetting() async {
-    final available = _instrumentCatalog.isNotEmpty
-        ? _instrumentCatalog
-        : _mergeInstrumentCatalogs([
-            kInstrumentCatalog,
-            kBundledSfzFallbackCatalog,
-          ]);
-    final candidates = available
-        .where(_isReleaseAllowedInstrumentSpec)
-        .map((spec) => Map<String, dynamic>.from(spec))
-        .toList(growable: false);
-    final approved = <String>{};
-
-    for (final spec in candidates) {
-      final id = (spec['id'] as String? ?? '').trim().toLowerCase();
-      if (id.isEmpty) continue;
-      final ok = await _passesInstrumentRenderSanity(spec);
-      if (ok) {
-        approved.add(id);
-      } else {
-        debugPrint('⚠️ Instrument quality gate rejected: $id');
-      }
-    }
-
-    if (approved.isEmpty) {
-      // Emergency beta fallback: keep only the known-stable pluck presets.
-      approved.addAll(kEmergencyBetaInstrumentIds);
-    }
-    debugPrint(
-      '🎛️ Instrument quality gate approved ${approved.length}/${candidates.length} instruments.',
-    );
-
-    if (!mounted) {
-      _instrumentQualityApprovedIds = approved;
-      return;
-    }
-    setState(() {
-      _instrumentQualityApprovedIds = approved;
-    });
-  }
-
-  Future<bool> _passesInstrumentRenderSanity(Map<String, dynamic> spec) async {
-    final id = (spec['id'] as String? ?? '').trim();
-    if (id.isEmpty) return false;
-    final name = (spec['name'] as String? ?? id).trim();
-    final params = _instrumentParamsFromSpec(spec);
-    final notes = _defaultMidiNotesForInstrument(id);
-    if (notes.isEmpty) return false;
-
-    Directory tempDir;
-    try {
-      tempDir = await getTemporaryDirectory();
-    } catch (_) {
-      tempDir = Directory.systemTemp;
-    }
-    final safeId =
-        id.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_').trim();
-    final outFile = File(
-      p.join(
-        tempDir.path,
-        'instrument_quality_${safeId.isEmpty ? 'unknown' : safeId}.wav',
-      ),
-    );
-
-    try {
-      final rendered = await _renderInstrumentClipToFile(
-        outFile: outFile,
-        instrumentId: id,
-        instrumentName: name.isEmpty ? id : name,
-        notes: notes,
-        params: params,
-      );
-      if (!rendered || !outFile.existsSync()) return false;
-      final rawBytes = await outFile.readAsBytes();
-      final decoded = _decodePcmWav(ByteData.sublistView(rawBytes));
-      if (decoded == null || decoded.frameCount < 2048) return false;
-
-      double peak = 0.0;
-      double sumSq = 0.0;
-      double sum = 0.0;
-      int clipped = 0;
-      final frames = decoded.frameCount;
-      for (int i = 0; i < frames; i++) {
-        final l = decoded.left[i].toDouble();
-        final r = decoded.right[i].toDouble();
-        final al = l.abs();
-        final ar = r.abs();
-        if (al > peak) peak = al;
-        if (ar > peak) peak = ar;
-        if (al >= 0.995) clipped++;
-        if (ar >= 0.995) clipped++;
-        sumSq += (l * l) + (r * r);
-        sum += l + r;
-      }
-      final sampleCount = (frames * 2).toDouble();
-      final rms = math.sqrt(sumSq / sampleCount);
-      final clipRatio = clipped / sampleCount;
-      final dcOffset = (sum / sampleCount).abs();
-
-      if (peak < 0.018) return false;
-      if (rms < 0.0012) return false;
-      if (clipRatio > 0.08) return false;
-      if (dcOffset > 0.10) return false;
-      return true;
-    } catch (_) {
+    final name = (spec['name'] as String? ?? '').trim().toLowerCase();
+    final pickerCategory =
+        (spec['pickerCategory'] as String? ?? '').trim().toLowerCase();
+    if (id.isEmpty && name.isEmpty) return false;
+    if (kBlockedInstrumentIds.contains(id)) return false;
+    if (kBlockedInstrumentNames.contains(name)) return false;
+    if (kBlockedInstrumentPickerCategories.contains(pickerCategory)) {
       return false;
-    } finally {
-      try {
-        if (outFile.existsSync()) {
-          await outFile.delete();
-        }
-      } catch (_) {
-        // best effort cleanup
-      }
     }
+    for (final fragment in kBlockedInstrumentNameFragments) {
+      if (name.contains(fragment)) return false;
+    }
+    return true;
   }
 
   List<Map<String, dynamic>> _activeInstrumentCatalog() {
@@ -14578,57 +14862,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             kBundledSfzFallbackCatalog,
           ]);
     final filtered = <Map<String, dynamic>>[];
+    final seenDisplayNames = <String>{};
     for (final spec in available) {
-      if (!_isReleaseAllowedInstrumentSpec(spec)) continue;
       if (!_passesInstrumentRuntimeQualityGate(spec)) continue;
-      filtered.add(Map<String, dynamic>.from(spec));
+      final next = Map<String, dynamic>.from(spec);
+      final displayName = (next['name'] as String? ?? '').trim().toLowerCase();
+      if (displayName.isNotEmpty && !seenDisplayNames.add(displayName)) {
+        continue;
+      }
+      filtered.add(next);
     }
     if (filtered.isNotEmpty) return filtered;
-    final curatedFallback = _mergeInstrumentCatalogs([
-      kInstrumentCatalog,
-      kBundledSfzFallbackCatalog,
-    ]).where((spec) {
-      return _isReleaseAllowedInstrumentSpec(spec) &&
-          _passesInstrumentRuntimeQualityGate(spec);
-    }).map((spec) {
-      return Map<String, dynamic>.from(spec);
-    }).toList(growable: false);
-    if (curatedFallback.isNotEmpty) return curatedFallback;
     return available
         .map((spec) => Map<String, dynamic>.from(spec))
         .toList(growable: false);
-  }
-
-  bool _isReleaseAllowedInstrumentSpec(Map<String, dynamic> spec) {
-    final id = (spec['id'] as String? ?? '').trim().toLowerCase();
-    if (id.isEmpty) return false;
-    if (!kReleaseEssentialInstrumentIds.contains(id)) {
-      return false;
-    }
-    final sfzAssetPath =
-        (spec['sfzAssetPath'] as String? ?? '').trim().toLowerCase();
-    for (final token in kReleaseBlockedInstrumentTokens) {
-      if (token.isEmpty) continue;
-      if (id.contains(token) || sfzAssetPath.contains(token)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  bool _isReleaseEssentialInstrument(Map<String, dynamic> spec) {
-    final id = (spec['id'] as String? ?? '').trim().toLowerCase();
-    return kReleaseEssentialInstrumentIds.contains(id);
   }
 
   int _compareInstrumentSpecsForPicker(
     Map<String, dynamic> a,
     Map<String, dynamic> b,
   ) {
-    final aEssential = _isReleaseEssentialInstrument(a);
-    final bEssential = _isReleaseEssentialInstrument(b);
-    if (aEssential != bEssential) return aEssential ? -1 : 1;
-
     final aSampled = _isSampledInstrumentSpec(a);
     final bSampled = _isSampledInstrumentSpec(b);
     if (aSampled != bSampled) return aSampled ? 1 : -1;
@@ -14798,7 +15051,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (!mounted) return;
-    await _ensureInstrumentQualityVetting();
     if (!mounted) return;
     final catalog = _activeInstrumentCatalog();
     if (catalog.isEmpty) return;
@@ -19563,11 +19815,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     _setStateAndRefreshProjectSettings(() {
       clip.sourceTempoBpm = detected;
-      _tempo = roundedTempo;
       _tempoStretchEnabled = true;
     });
-    _syncTempoPickerSelection();
-    await _queueTempoEngineSync();
+    await _applyProjectTempoChange(roundedTempo);
   }
 
   Future<void> _applyAutoBpmAlignAction(Map<String, dynamic> data) async {
@@ -19591,9 +19841,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (explicitProjectTempo != null && explicitProjectTempo.isFinite) {
       final clampedTempo = _clampTempo(explicitProjectTempo);
       if (clampedTempo != _tempo) {
-        _setStateAndRefreshProjectSettings(() => _tempo = clampedTempo);
-        _syncTempoPickerSelection();
-        await _queueTempoEngineSync();
+        await _applyProjectTempoChange(clampedTempo);
       }
     } else if (setProjectTempo) {
       final sourceIdx = _toActionInt(
@@ -25131,7 +25379,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               _queueMidiRenderCacheRefresh(target);
               _updateOverallDurationIfNeeded();
             } else {
-              await _rerenderMidiTrack(target);
+              final rerendered = await _rerenderMidiTrack(target);
+              if (!rerendered && mounted) {
+                _showSmallNotice('Could not update this MIDI clip.');
+              }
             }
             if (mounted) setState(() {});
           },
@@ -25255,7 +25506,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             _queueMidiRenderCacheRefresh(target);
             _updateOverallDurationIfNeeded();
           } else {
-            await _rerenderMidiTrack(target);
+            final rerendered = await _rerenderMidiTrack(target);
+            if (!rerendered && mounted) {
+              _showSmallNotice('Could not update this MIDI clip.');
+            }
           }
           if (mounted) setState(() {});
         },
@@ -30745,15 +30999,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         clip.stretchToProjectTempo = true;
         clip.tempoStretchPreservePitch = _tempoStretchPreservePitchDefault;
         _tempoStretchEnabled = true;
-        _tempo = rounded.toDouble();
       }
     });
-    if (applyProjectTempo) {
-      _syncTempoPickerSelection();
-    }
 
     if (applyProjectTempo) {
-      await _queueTempoEngineSync();
+      final nextTempo = _clampTempo(rounded.toDouble());
+      if ((nextTempo - _clampTempo(_tempo)).abs() < 0.0001) {
+        await _syncClipTimingToEngine(clipIndex);
+        await _syncClipMixToEngine(clip);
+        _updateOverallDurationIfNeeded();
+      } else {
+        await _applyProjectTempoChange(nextTempo);
+      }
     } else {
       await _syncClipTimingToEngine(clipIndex);
       await _syncClipMixToEngine(clip);
@@ -31036,6 +31293,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _handlePasteClipAt(int row, double timeMs) async {
+    final safePasteTimeMs = math.max(0.0, timeMs);
     final group = _copiedClipGroup;
     if (group != null && group.isNotEmpty) {
       if (_audioTracks.length + group.length > kNumClips) {
@@ -31047,7 +31305,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final actions = <EditorUndoAction>[];
       for (final entry in group) {
         final targetRow = row + entry.rowDelta;
-        final targetTime = timeMs + entry.offsetDeltaMs;
+        final targetTime = math.max(0.0, safePasteTimeMs + entry.offsetDeltaMs);
         actions.add(
           _buildPasteAction(
             clip: entry.clip,
@@ -31078,7 +31336,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _buildPasteAction(
         clip: _copiedClip!,
         row: row,
-        timeMs: timeMs,
+        timeMs: safePasteTimeMs,
         trimStart: _copiedTrimStart,
         trimEnd: _copiedTrimEnd,
       ),
@@ -31101,6 +31359,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _activeMidiClipEngineId = clip.engineClipId;
       _showPianoRoll = true;
     });
+    _syncMeterPollingForVisibility();
     if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
       unawaited(_syncLiveMidiInputTargetClip());
     }
@@ -31112,6 +31371,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _pianoRollFullscreen = false;
       _activeMidiClipEngineId = null;
     });
+    _syncMeterPollingForVisibility();
     if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
       unawaited(_syncLiveMidiInputTargetClip());
     }
@@ -31151,6 +31411,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (idx < 0 || idx >= _audioTracks.length) return;
     final clip = _audioTracks[idx];
     if (!clip.isMidi) return;
+
+    if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
+      final played = await JuceAudioEngine.playPreviewMidiNote(
+        clip.engineClipId,
+        pitch: pitch.clamp(0, 127),
+        velocity: velocity.clamp(0.0, 1.0),
+      );
+      if (played) return;
+    }
 
     final token = ++_pianoPreviewToken;
     try {
@@ -31274,7 +31543,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             _queueMidiRenderCacheRefresh(target);
             _updateOverallDurationIfNeeded();
           } else {
-            await _rerenderMidiTrack(target);
+            final rerendered = await _rerenderMidiTrack(target);
+            if (!rerendered && mounted) {
+              _showSmallNotice(
+                  'Could not switch instrument for this MIDI clip.');
+            }
           }
           if (mounted) {
             setState(() {});
@@ -31880,909 +32153,888 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
                                   Flexible(
                                     fit: FlexFit.loose,
-                                    child: ValueListenableBuilder<Duration>(
-                                      valueListenable: _transportClock,
-                                      builder: (_, clock, __) => Halo(
-                                        highlighter: _mixHighlighter,
-                                        haloKey:
-                                            const HaloKey('tutorial:timeline'),
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: AudioCanvasTimeline(
-                                          controller: _timelineController,
-                                          rows: _rows,
-                                          clips: _audioTracks, // your list
-                                          rowGain: _rowGain,
-                                          rowPan: _rowPan,
-                                          rowVolumeAutomation:
-                                              _rowVolumeAutomation,
-                                          getAutomationTargetsForRow:
-                                              _automationTargetsForRowUi,
-                                          getSelectedAutomationTargetId:
-                                              _selectedAutomationTargetIdForRow,
-                                          setSelectedAutomationTargetId:
-                                              (row, targetId) {
-                                            _setSelectedAutomationTargetIdForRow(
-                                              row,
-                                              targetId,
-                                            );
-                                            unawaited(
-                                                _syncAutomationTargetToCurrentTime(
-                                              row,
-                                              targetId,
-                                            ));
-                                          },
-                                          getAutomationPointsForTarget:
-                                              (row, targetId) =>
-                                                  _pointsForAutomationTarget(
+                                    child: Halo(
+                                      highlighter: _mixHighlighter,
+                                      haloKey:
+                                          const HaloKey('tutorial:timeline'),
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: AudioCanvasTimeline(
+                                        controller: _timelineController,
+                                        transportClockListenable:
+                                            _transportClock,
+                                        rows: _rows,
+                                        clips: _audioTracks, // your list
+                                        rowGain: _rowGain,
+                                        rowPan: _rowPan,
+                                        rowVolumeAutomation:
+                                            _rowVolumeAutomation,
+                                        getAutomationTargetsForRow:
+                                            _automationTargetsForRowUi,
+                                        getSelectedAutomationTargetId:
+                                            _selectedAutomationTargetIdForRow,
+                                        setSelectedAutomationTargetId:
+                                            (row, targetId) {
+                                          _setSelectedAutomationTargetIdForRow(
                                             row,
                                             targetId,
-                                          )
+                                          );
+                                          unawaited(
+                                              _syncAutomationTargetToCurrentTime(
+                                            row,
+                                            targetId,
+                                          ));
+                                        },
+                                        getAutomationPointsForTarget:
+                                            (row, targetId) =>
+                                                _pointsForAutomationTarget(
+                                          row,
+                                          targetId,
+                                        )
+                                                    .map((p) => p.copy())
+                                                    .toList(growable: false),
+                                        setAutomationPointsForTarget:
+                                            (row, targetId, points) {
+                                          if (row < 0 || row >= _rowCount)
+                                            return;
+                                          final safePoints =
+                                              _sanitizeAutomationPointsForTarget(
+                                            row,
+                                            targetId,
+                                            points,
+                                          );
+                                          if (targetId == 'volume') {
+                                            setState(() {
+                                              _rowVolumeAutomation[row] =
+                                                  safePoints
                                                       .map((p) => p.copy())
-                                                      .toList(growable: false),
-                                          setAutomationPointsForTarget:
-                                              (row, targetId, points) {
-                                            if (row < 0 || row >= _rowCount)
-                                              return;
-                                            final safePoints =
-                                                _sanitizeAutomationPointsForTarget(
-                                              row,
-                                              targetId,
-                                              points,
-                                            );
-                                            if (targetId == 'volume') {
-                                              setState(() {
-                                                _rowVolumeAutomation[row] =
-                                                    safePoints
-                                                        .map((p) => p.copy())
-                                                        .toList(
-                                                            growable: false);
-                                              });
-                                              unawaited(
-                                                  _syncNativeAutomationForRow(
-                                                      row));
-                                              return;
-                                            }
-                                            setState(() {
-                                              final rowMap =
-                                                  _rowPluginAutomation
-                                                      .putIfAbsent(
-                                                row,
-                                                () => <String,
-                                                    List<AutomationPoint>>{},
-                                              );
-                                              rowMap[targetId] = safePoints
-                                                  .map((p) => p.copy())
-                                                  .toList(growable: false);
-                                            });
-                                            unawaited(
-                                                _syncNativePluginAutomationForRow(
-                                                    row));
-                                          },
-                                          getAutomationClipsForTarget:
-                                              (row, targetId) =>
-                                                  _copyAutomationClipList(
-                                            _clipsForAutomationTarget(
-                                                row, targetId),
-                                          ),
-                                          setAutomationClipsForTarget:
-                                              (row, targetId, clips) {
-                                            if (row < 0 || row >= _rowCount)
-                                              return;
-                                            final safeClips =
-                                                _sanitizeAutomationClipsForTarget(
-                                              row,
-                                              targetId,
-                                              clips,
-                                            );
-                                            setState(() {
-                                              final rowMap = _rowAutomationClips
-                                                  .putIfAbsent(
-                                                row,
-                                                () => <String,
-                                                    List<
-                                                        AutomationClipSnapshot>>{},
-                                              );
-                                              rowMap[targetId] =
-                                                  _copyAutomationClipList(
-                                                      safeClips);
+                                                      .toList(growable: false);
                                             });
                                             unawaited(
                                                 _syncNativeAutomationForRow(
+                                                    row));
+                                            return;
+                                          }
+                                          setState(() {
+                                            final rowMap = _rowPluginAutomation
+                                                .putIfAbsent(
                                               row,
-                                            ));
-                                          },
-                                          onAutomationClipsCommit: (row,
-                                              targetId, oldClips, newClips) {
-                                            unawaited(
-                                                _setAutomationClipsForTargetWithUndo(
+                                              () => <String,
+                                                  List<AutomationPoint>>{},
+                                            );
+                                            rowMap[targetId] = safePoints
+                                                .map((p) => p.copy())
+                                                .toList(growable: false);
+                                          });
+                                          unawaited(
+                                              _syncNativePluginAutomationForRow(
+                                                  row));
+                                        },
+                                        getAutomationClipsForTarget:
+                                            (row, targetId) =>
+                                                _copyAutomationClipList(
+                                          _clipsForAutomationTarget(
+                                              row, targetId),
+                                        ),
+                                        setAutomationClipsForTarget:
+                                            (row, targetId, clips) {
+                                          if (row < 0 || row >= _rowCount)
+                                            return;
+                                          final safeClips =
+                                              _sanitizeAutomationClipsForTarget(
+                                            row,
+                                            targetId,
+                                            clips,
+                                          );
+                                          setState(() {
+                                            final rowMap =
+                                                _rowAutomationClips.putIfAbsent(
                                               row,
+                                              () => <String,
+                                                  List<
+                                                      AutomationClipSnapshot>>{},
+                                            );
+                                            rowMap[targetId] =
+                                                _copyAutomationClipList(
+                                                    safeClips);
+                                          });
+                                          unawaited(_syncNativeAutomationForRow(
+                                            row,
+                                          ));
+                                        },
+                                        onAutomationClipsCommit: (row, targetId,
+                                            oldClips, newClips) {
+                                          unawaited(
+                                              _setAutomationClipsForTargetWithUndo(
+                                            row,
+                                            targetId,
+                                            newClips,
+                                            oldClipsOverride: oldClips,
+                                          ));
+                                          _recordProducerManualEdit(
+                                              'row_automation_clips', {
+                                            'row': row,
+                                            'target_id': targetId,
+                                            'old_count': oldClips.length,
+                                            'new_count': newClips.length,
+                                          });
+                                        },
+                                        onAutomationTargetCommit: (row,
+                                            targetId, oldPoints, newPoints) {
+                                          unawaited(
+                                              _setAutomationTargetPointsWithUndo(
+                                            row,
+                                            targetId,
+                                            newPoints,
+                                            oldPointsOverride: oldPoints,
+                                          ));
+                                          _recordProducerManualEdit(
+                                              'row_automation_target', {
+                                            'row': row,
+                                            'target_id': targetId,
+                                            'old_count': oldPoints.length,
+                                            'new_count': newPoints.length,
+                                          });
+                                        },
+                                        onRevealAutomationTarget:
+                                            (row, targetId) async {
+                                          if (_parseAutomationTargetId(targetId)
+                                              .isMaster) {
+                                            await _revealMasterAutomationTarget(
                                               targetId,
-                                              newClips,
-                                              oldClipsOverride: oldClips,
-                                            ));
-                                            _recordProducerManualEdit(
-                                                'row_automation_clips', {
-                                              'row': row,
-                                              'target_id': targetId,
-                                              'old_count': oldClips.length,
-                                              'new_count': newClips.length,
-                                            });
-                                          },
-                                          onAutomationTargetCommit: (row,
-                                              targetId, oldPoints, newPoints) {
-                                            unawaited(
-                                                _setAutomationTargetPointsWithUndo(
-                                              row,
-                                              targetId,
-                                              newPoints,
-                                              oldPointsOverride: oldPoints,
-                                            ));
-                                            _recordProducerManualEdit(
-                                                'row_automation_target', {
-                                              'row': row,
-                                              'target_id': targetId,
-                                              'old_count': oldPoints.length,
-                                              'new_count': newPoints.length,
-                                            });
-                                          },
-                                          onRevealAutomationTarget:
-                                              (row, targetId) async {
-                                            if (_parseAutomationTargetId(
-                                                    targetId)
-                                                .isMaster) {
-                                              await _revealMasterAutomationTarget(
-                                                targetId,
-                                              );
-                                            }
-                                          },
-                                          // extractors
-                                          getStartMs: (t) =>
-                                              t.offset *
-                                              1000.0, // adjust to your model
-                                          getDurationMs: (t) =>
-                                              _clipTimelineDurationMs(t),
-                                          getTimelineDurationMs: (t) =>
-                                              _clipTimelineDurationMs(t),
-                                          getTrimStartMs: (t) => t
-                                              .trimStart.inMilliseconds
-                                              .toDouble(),
-                                          getTrimEndMs: (t) => t
-                                              .trimEnd.inMilliseconds
-                                              .toDouble(),
-                                          // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
-                                          getPeaks: (c) {
-                                            return c.displayWaveformData;
-                                          },
-                                          getY: (c) => c
-                                              .y, // store a visual Y in your model
-                                          // commit (persist in your model, then setState)
-                                          onMoveClipCommit: (i, newStartMs,
-                                              newRowIndex) async {
-                                            if (newRowIndex < 0 ||
-                                                newRowIndex >= _rowCount)
-                                              return;
-                                            final clip = _audioTracks[i];
-                                            // clip.offset = newStartMs / 1000.0;
-                                            // clip.rowIndex = newRowIndex; // <-- move across rows
-                                            // setState(() {});
-                                            // JuceAudioEngine.moveClipToRow(i, newRowIndex);
-                                            // _updateOverallDurationIfNeeded();
-                                            await _undoManager.execute(
-                                              MoveClipAction(
-                                                tracks: _audioTracks,
-                                                // clip: clip,
-                                                originalIndex: i,
-                                                oldOffset: clip.offset,
-                                                oldRow: clip.rowIndex,
-                                                newOffset: newStartMs / 1000.0,
-                                                newRow: newRowIndex,
-                                                onChange: () {
-                                                  clip.rowId =
-                                                      _rowIdAt(clip.rowIndex);
-                                                  _syncClipTimingToEngine(i);
-                                                  _updateOverallDurationIfNeeded();
-                                                },
-                                              ),
                                             );
-                                            setState(() {});
-                                          },
-                                          onTrimClip: (i, s, e,
-                                              {double? newStartMs}) async {
-                                            final clip = _audioTracks[i];
+                                          }
+                                        },
+                                        // extractors
+                                        getStartMs: (t) =>
+                                            t.offset *
+                                            1000.0, // adjust to your model
+                                        getDurationMs: (t) =>
+                                            _clipTimelineDurationMs(t),
+                                        getTimelineDurationMs: (t) =>
+                                            _clipTimelineDurationMs(t),
+                                        getTrimStartMs: (t) => t
+                                            .trimStart.inMilliseconds
+                                            .toDouble(),
+                                        getTrimEndMs: (t) =>
+                                            t.trimEnd.inMilliseconds.toDouble(),
+                                        // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
+                                        getPeaks: (c) {
+                                          return c.displayWaveformData;
+                                        },
+                                        getY: (c) => c
+                                            .y, // store a visual Y in your model
+                                        // commit (persist in your model, then setState)
+                                        onMoveClipCommit:
+                                            (i, newStartMs, newRowIndex) async {
+                                          if (newRowIndex < 0 ||
+                                              newRowIndex >= _rowCount) return;
+                                          final clip = _audioTracks[i];
+                                          // clip.offset = newStartMs / 1000.0;
+                                          // clip.rowIndex = newRowIndex; // <-- move across rows
+                                          // setState(() {});
+                                          // JuceAudioEngine.moveClipToRow(i, newRowIndex);
+                                          // _updateOverallDurationIfNeeded();
+                                          await _undoManager.execute(
+                                            MoveClipAction(
+                                              tracks: _audioTracks,
+                                              // clip: clip,
+                                              originalIndex: i,
+                                              oldOffset: clip.offset,
+                                              oldRow: clip.rowIndex,
+                                              newOffset: newStartMs / 1000.0,
+                                              newRow: newRowIndex,
+                                              onChange: () {
+                                                clip.rowId =
+                                                    _rowIdAt(clip.rowIndex);
+                                                _syncClipTimingToEngine(i);
+                                                _updateOverallDurationIfNeeded();
+                                              },
+                                            ),
+                                          );
+                                          setState(() {});
+                                        },
+                                        onTrimClip: (i, s, e,
+                                            {double? newStartMs}) async {
+                                          final clip = _audioTracks[i];
 
-                                            // 1. Update the internal trim values (where in the source file we start/end)
-                                            clip.trimStart = Duration(
-                                                milliseconds: s.round());
-                                            clip.trimEnd = Duration(
-                                                milliseconds: e.round());
+                                          // 1. Update the internal trim values (where in the source file we start/end)
+                                          clip.trimStart =
+                                              Duration(milliseconds: s.round());
+                                          clip.trimEnd =
+                                              Duration(milliseconds: e.round());
 
-                                            // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
-                                            // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
-                                            if (newStartMs != null) {
-                                              // newStartMs is the intended start time in milliseconds.
-                                              // Convert to seconds (assuming clip.offset is in seconds).
-                                              clip.offset = newStartMs / 1000.0;
-                                            }
-                                            // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
-                                            // await _undoManager.execute(
-                                            //   TrimClipAction(
-                                            //     clip: clip,
-                                            //     oldTrimStart: clip.trimStart,
-                                            //     oldTrimEnd: clip.trimEnd,
-                                            //     oldOffset: clip.offset,
-                                            //     newTrimStart: Duration(milliseconds: s.round()),
-                                            //     newTrimEnd: Duration(milliseconds: e.round()),
-                                            //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
-                                            //     onChange: _updateOverallDurationIfNeeded,
-                                            //   ),
-                                            // );
-                                            setState(() {});
-                                            _updateOverallDurationIfNeeded();
-                                            // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
-                                          },
+                                          // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
+                                          // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
+                                          if (newStartMs != null) {
+                                            // newStartMs is the intended start time in milliseconds.
+                                            // Convert to seconds (assuming clip.offset is in seconds).
+                                            clip.offset = newStartMs / 1000.0;
+                                          }
+                                          // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
+                                          // await _undoManager.execute(
+                                          //   TrimClipAction(
+                                          //     clip: clip,
+                                          //     oldTrimStart: clip.trimStart,
+                                          //     oldTrimEnd: clip.trimEnd,
+                                          //     oldOffset: clip.offset,
+                                          //     newTrimStart: Duration(milliseconds: s.round()),
+                                          //     newTrimEnd: Duration(milliseconds: e.round()),
+                                          //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
+                                          //     onChange: _updateOverallDurationIfNeeded,
+                                          //   ),
+                                          // );
+                                          setState(() {});
+                                          _updateOverallDurationIfNeeded();
+                                          // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
+                                        },
 
-                                          // for the undo history
-                                          onTrimClipCommit:
-                                              (i, s, e, os, oe, oo,
-                                                  {double? newStartMs}) async {
-                                            // final clip = _audioTracks[i];
-                                            await _undoManager.execute(
-                                              TrimClipAction(
-                                                // clip: clip,
-                                                tracks: _audioTracks,
-                                                originalIndex: i,
-                                                oldTrimStart: Duration(
-                                                    milliseconds: os.round()),
-                                                oldTrimEnd: Duration(
-                                                    milliseconds: oe.round()),
-                                                oldOffset: oo / 1000.0,
-                                                newTrimStart: Duration(
-                                                    milliseconds: s.round()),
-                                                newTrimEnd: Duration(
-                                                    milliseconds: e.round()),
-                                                newOffset: newStartMs != null
-                                                    ? newStartMs / 1000.0
-                                                    : null,
-                                                onChange: () {
-                                                  _syncClipTimingToEngine(i);
-                                                  _updateOverallDurationIfNeeded();
-                                                },
-                                              ),
-                                            );
-                                          },
+                                        // for the undo history
+                                        onTrimClipCommit: (i, s, e, os, oe, oo,
+                                            {double? newStartMs}) async {
+                                          // final clip = _audioTracks[i];
+                                          await _undoManager.execute(
+                                            TrimClipAction(
+                                              // clip: clip,
+                                              tracks: _audioTracks,
+                                              originalIndex: i,
+                                              oldTrimStart: Duration(
+                                                  milliseconds: os.round()),
+                                              oldTrimEnd: Duration(
+                                                  milliseconds: oe.round()),
+                                              oldOffset: oo / 1000.0,
+                                              newTrimStart: Duration(
+                                                  milliseconds: s.round()),
+                                              newTrimEnd: Duration(
+                                                  milliseconds: e.round()),
+                                              newOffset: newStartMs != null
+                                                  ? newStartMs / 1000.0
+                                                  : null,
+                                              onChange: () {
+                                                _syncClipTimingToEngine(i);
+                                                _updateOverallDurationIfNeeded();
+                                              },
+                                            ),
+                                          );
+                                        },
 
-                                          // selection + headers
-                                          // numRows: kNumRows,
-                                          // selectedRowIndex: _selectedRow,
-                                          onSelectRow: (row) => setState(
-                                              () => _selectedRow = row),
-                                          // rowMuted: _rowMuted,
-                                          // rowExpanded: _rowExpanded,
-                                          recordingInProgress: _isRecording,
-                                          onToggleExpanded: (row) => setState(
-                                              () => _rowExpanded[row] =
-                                                  !_rowExpanded[row]),
-                                          onAddRow: _addRow,
-                                          onInsertRowAbove: _insertRowAbove,
-                                          onInsertRowBelow: _insertRowBelow,
-                                          onDeleteRow: _deleteRow,
-                                          onMoveRow: _moveRow,
-                                          onRenameRow: _renameRow,
-                                          onSetRowIcon: _setRowIcon,
+                                        // selection + headers
+                                        // numRows: kNumRows,
+                                        // selectedRowIndex: _selectedRow,
+                                        onSelectRow: (row) =>
+                                            setState(() => _selectedRow = row),
+                                        // rowMuted: _rowMuted,
+                                        // rowExpanded: _rowExpanded,
+                                        recordingInProgress: _isRecording,
+                                        onToggleExpanded: (row) => setState(
+                                            () => _rowExpanded[row] =
+                                                !_rowExpanded[row]),
+                                        onAddRow: _addRow,
+                                        onInsertRowAbove: _insertRowAbove,
+                                        onInsertRowBelow: _insertRowBelow,
+                                        onDeleteRow: _deleteRow,
+                                        onMoveRow: _moveRow,
+                                        onRenameRow: _renameRow,
+                                        onSetRowIcon: _setRowIcon,
 
-                                          // transport
-                                          playheadMs: clock.inMilliseconds
-                                              .toDouble(), // your existing clock
-                                          // isPlaying: _isPlaying,
-                                          onScrubRequested: (ms) {
-                                            if (_isRecording) {
-                                              return; // do nothing while recording (hopefully no bug where you can still physically scrub but does nothing here)
-                                            }
+                                        // transport
+                                        onScrubRequested: (ms) {
+                                          if (_isRecording) {
+                                            return; // do nothing while recording (hopefully no bug where you can still physically scrub but does nothing here)
+                                          }
 
-                                            final newPosition = Duration(
-                                                milliseconds: ms.toInt());
-                                            _syncTransportClock(
-                                              newPosition,
-                                              playing: _isPlaying,
-                                            );
-                                            // for (int i = 0; i < _audioTracks.length; i++) {
-                                            //   final track = _audioTracks[i];
-                                            //   final effectivePos = _calculateEffectiveAudioPositionForTrack(track, newPosition);
-                                            //   JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
-                                            //   setState(() {
-                                            //     track.currentPosition = effectivePos;
-                                            //   });
-                                            // }
+                                          final newPosition = Duration(
+                                              milliseconds: ms.toInt());
+                                          _syncTransportClock(
+                                            newPosition,
+                                            playing: _isPlaying,
+                                          );
+                                          // for (int i = 0; i < _audioTracks.length; i++) {
+                                          //   final track = _audioTracks[i];
+                                          //   final effectivePos = _calculateEffectiveAudioPositionForTrack(track, newPosition);
+                                          //   JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
+                                          //   setState(() {
+                                          //     track.currentPosition = effectivePos;
+                                          //   });
+                                          // }
+                                          JuceAudioEngine
+                                              .setAutomationTransport(
+                                            ms / 1000.0,
+                                          );
+                                          JuceAudioEngine
+                                              .setMetronomeTransportMs(ms);
+                                        },
+                                        maxDuration: _audioOnlyOverallDuration,
+                                        getFullDurationMs: (t) =>
+                                            _clipFullDurationMsForTrim(t),
+                                        isPlaying: _isPlaying,
+
+                                        // ruler/grid
+                                        bpm: _tempo,
+                                        beatsPerBar: 4,
+
+                                        // layout
+                                        // numRows: kNumRows,
+                                        height:
+                                            520, // THIS VALUE is effectively unused, the height is just natural now
+                                        // ============================
+                                        // NEW: Row FX callbacks
+                                        // ============================
+                                        getRowEffects: (row) => JuceAudioEngine
+                                            .getTrackEffectsForRow(row),
+                                        getRowEffectIds: (row) =>
                                             JuceAudioEngine
-                                                .setAutomationTransport(
-                                              ms / 1000.0,
-                                            );
-                                            JuceAudioEngine
-                                                .setMetronomeTransportMs(ms);
-                                          },
-                                          maxDuration:
-                                              _audioOnlyOverallDuration,
-                                          getFullDurationMs: (t) =>
-                                              _clipFullDurationMsForTrim(t),
-                                          isPlaying: _isPlaying,
+                                                .getTrackEffectIdsForRow(row),
 
-                                          // ruler/grid
-                                          bpm: _tempo,
-                                          beatsPerBar: 4,
+                                        getRowEffectBypassState:
+                                            (row, effectIndex) =>
+                                                JuceAudioEngine
+                                                    .getRowEffectBypassState(
+                                                        row, effectIndex),
 
-                                          // layout
-                                          // numRows: kNumRows,
-                                          height:
-                                              520, // THIS VALUE is effectively unused, the height is just natural now
-                                          // ============================
-                                          // NEW: Row FX callbacks
-                                          // ============================
-                                          getRowEffects: (row) =>
-                                              JuceAudioEngine
-                                                  .getTrackEffectsForRow(row),
-                                          getRowEffectIds: (row) =>
-                                              JuceAudioEngine
-                                                  .getTrackEffectIdsForRow(row),
-
-                                          getRowEffectBypassState:
-                                              (row, effectIndex) =>
-                                                  JuceAudioEngine
-                                                      .getRowEffectBypassState(
-                                                          row, effectIndex),
-
-                                          insertRowEffect:
-                                              (row, pathOrName) async {
-                                            final before = await JuceAudioEngine
-                                                .getTrackEffectsForRow(row);
-                                            await _undoManager.execute(
-                                              InsertEffectAction(
-                                                row: row,
-                                                pathOrName: pathOrName,
-                                                onChange: () {
-                                                  setState(() {});
-                                                  _refreshRowFx(row);
-                                                  unawaited(
-                                                      _refreshAutomationTargetsForRow(
-                                                          row));
-                                                },
-                                              ),
-                                            );
-                                            final after = await JuceAudioEngine
-                                                .getTrackEffectsForRow(row);
-                                            if (after.length <= before.length) {
-                                              _showSmallNotice(
-                                                  'Could not load this effect plugin.');
-                                              return;
-                                            }
-                                            _recordProducerManualEdit(
-                                                'row_fx_insert', {
-                                              'row': row,
-                                              'effect': pathOrName
-                                            });
-                                            await _refreshAutomationTargetsForRow(
-                                              row,
-                                            );
-                                          }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
-                                          // need name of effects so undo action can add it back later
-                                          removeRowEffect: (row, effectIndex,
-                                              name, applyingPreset) async {
-                                            if (applyingPreset) {
-                                              await JuceAudioEngine
-                                                  .removeTrackEffect(
-                                                      row, effectIndex);
-                                              return;
-                                            }
-                                            await _undoManager.execute(
-                                              RemoveEffectAction(
-                                                row: row,
-                                                effectIndex: effectIndex,
-                                                pathOrName: name,
-                                                onChange: () {
-                                                  setState(() {});
-                                                  _refreshRowFx(row);
-                                                  unawaited(
-                                                      _refreshAutomationTargetsForRow(
-                                                          row));
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'row_fx_remove', {
-                                              'row': row,
-                                              'index': effectIndex,
-                                              'effect': name,
-                                            });
-                                            await _refreshAutomationTargetsForRow(
-                                              row,
-                                            );
-                                          }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
-
-                                          reorderRowEffects:
-                                              (row, from, to) async {
-                                            await _undoManager.execute(
-                                              ReorderEffectAction(
-                                                row: row,
-                                                from: from,
-                                                to: to,
-                                                onChange: () {
-                                                  setState(() {});
-                                                  _refreshRowFx(row);
-                                                  unawaited(
-                                                      _refreshAutomationTargetsForRow(
-                                                          row));
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'row_fx_reorder', {
-                                              'row': row,
-                                              'from': from,
-                                              'to': to
-                                            });
-                                            await _refreshAutomationTargetsForRow(
-                                              row,
-                                            );
-                                          }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
-
-                                          setRowEffectBypassed:
-                                              (row, effectIndex, bypass) async {
-                                            await _undoManager.execute(
-                                              BypassEffectAction(
-                                                row: row,
-                                                effectIndex: effectIndex,
-                                                oldState: !bypass,
-                                                newState: bypass,
-                                                onChange: () {
-                                                  setState(() {});
-                                                  _refreshRowFx(row);
-                                                  unawaited(
-                                                      _refreshAutomationTargetsForRow(
-                                                          row));
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'row_fx_bypass', {
-                                              'row': row,
-                                              'index': effectIndex,
-                                              'bypassed': bypass,
-                                            });
-                                          }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
-
-                                          getRowPluginParameters:
-                                              (row, effectIndex) =>
-                                                  JuceAudioEngine
-                                                      .getTrackPluginParameters(
-                                                          row, effectIndex),
-
-                                          setRowEffectParam: (row, effectIndex,
-                                              paramId, value) async {
+                                        insertRowEffect:
+                                            (row, pathOrName) async {
+                                          final before = await JuceAudioEngine
+                                              .getTrackEffectsForRow(row);
+                                          await _undoManager.execute(
+                                            InsertEffectAction(
+                                              row: row,
+                                              pathOrName: pathOrName,
+                                              onChange: () {
+                                                setState(() {});
+                                                _refreshRowFx(row);
+                                                unawaited(
+                                                    _refreshAutomationTargetsForRow(
+                                                        row));
+                                              },
+                                            ),
+                                          );
+                                          final after = await JuceAudioEngine
+                                              .getTrackEffectsForRow(row);
+                                          if (after.length <= before.length) {
+                                            _showSmallNotice(
+                                                'Could not load this effect plugin.');
+                                            return;
+                                          }
+                                          _recordProducerManualEdit(
+                                              'row_fx_insert', {
+                                            'row': row,
+                                            'effect': pathOrName
+                                          });
+                                          await _refreshAutomationTargetsForRow(
+                                            row,
+                                          );
+                                        }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
+                                        // need name of effects so undo action can add it back later
+                                        removeRowEffect: (row, effectIndex,
+                                            name, applyingPreset) async {
+                                          if (applyingPreset) {
                                             await JuceAudioEngine
-                                                .setTrackEffect(
-                                              row,
-                                              effectIndex,
-                                              paramId,
-                                              value,
-                                            );
-                                            _updateAutomationTargetBaselineForEffectParameter(
+                                                .removeTrackEffect(
+                                                    row, effectIndex);
+                                            return;
+                                          }
+                                          await _undoManager.execute(
+                                            RemoveEffectAction(
                                               row: row,
                                               effectIndex: effectIndex,
-                                              paramId: paramId,
-                                              value: value,
-                                              master: false,
-                                            );
-                                          },
-
-                                          // for commiting to undo history
-                                          onPluginParamCommit: (row,
-                                              idx,
-                                              paramId,
-                                              oldValue,
-                                              newValue) async {
-                                            await _undoManager.execute(
-                                              SetEffectParamAction(
-                                                row: row,
-                                                effectIndex: idx,
-                                                paramId: paramId,
-                                                oldValue: oldValue,
-                                                newValue: newValue,
-                                                onChange: () {
-                                                  setState(() {});
-                                                  _refreshRowFx(row);
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'row_fx_param', {
-                                              'row': row,
-                                              'index': idx,
-                                              'param_id': paramId,
-                                              'old_value': oldValue,
-                                              'new_value': newValue,
-                                            });
-                                          },
-
-                                          onPresetCommit:
-                                              (before, after) async {
-                                            await _undoManager.execute(
-                                              TrackPresetChangeAction(
-                                                before: before,
-                                                after: after,
-                                                onChange: () {
-                                                  setState(() {});
-                                                  unawaited(
-                                                      _refreshAutomationTargetsForRow(
-                                                          before.row));
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'row_preset_commit', {
-                                              'row': before.row,
-                                              'before_count':
-                                                  before.effects.length,
-                                              'after_count':
-                                                  after.effects.length,
-                                            });
-                                            await _refreshAutomationTargetsForRow(
-                                              before.row,
-                                            );
-                                          },
-
-                                          scanPlugins: () =>
-                                              JuceAudioEngine.scanPlugins(),
-
-                                          setTrackAutomationPoints: (row,
-                                                  points) =>
-                                              _syncNativeAutomationForRow(row),
-
-                                          onAutomationCommit:
-                                              (row, oldPoints, newPoints) {
-                                            _undoManager.execute(
-                                              SetAutomationPointsAction(
-                                                row: row,
-                                                oldPoints: oldPoints,
-                                                newPoints: newPoints,
-                                                applyToState: (r, points) {
-                                                  setState(() {
-                                                    _rowVolumeAutomation[r] =
-                                                        points
-                                                            .map((p) =>
-                                                                AutomationPoint(
-                                                                    x: p.x,
-                                                                    volume: p
-                                                                        .volume))
-                                                            .toList();
-                                                  });
-                                                },
-                                                onApplied: (r, _) async {
-                                                  await _syncNativeAutomationForRow(
-                                                      r);
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'row_automation', {
-                                              'row': row,
-                                              'old_count': oldPoints.length,
-                                              'new_count': newPoints.length,
-                                            });
-                                          },
-
-                                          setRowGain: (row, gain0to3) =>
-                                              JuceAudioEngine.setRowGain(
-                                                  row, gain0to3),
-                                          onRowGainCommit:
-                                              (row, oldGain, newGain) {
-                                            _undoManager.execute(
-                                              SetRowGainAction(
-                                                row: row,
-                                                oldGain: oldGain,
-                                                newGain: newGain,
-                                                applyToState: (r, g) {
-                                                  setState(() {
-                                                    _rowGain[r] = g;
-                                                  });
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'row_gain', {
-                                              'row': row,
-                                              'old_gain': oldGain,
-                                              'new_gain': newGain,
-                                            });
-                                          },
-
-                                          muteRow: (row, mute) async {
-                                            // await JuceAudioEngine.muteRow(row, mute);
-                                            setState(
-                                                () => _rowMuted[row] = mute);
-                                            await _recomputeAudibleState(); // this handles all mute/solo logic
-
-                                            // mute not counted in the undo history
-                                            // await _undoManager.execute(
-                                            //   MuteRowAction(row, !mute, mute, () => setState(() => _rowMuted[row] = mute)),
-                                            // );
-                                          },
-
-                                          // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
-                                          rowMuted: _rowMuted,
-
-                                          soloRow: (row, solo) async {
-                                            // await JuceAudioEngine.muteRow(row, mute);
-                                            setState(
-                                                () => _rowSoloed[row] = solo);
-                                            await _recomputeAudibleState(); // this handles all mute/solo logic
-                                          },
-
-                                          // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
-                                          rowSoloed: _rowSoloed,
-
-                                          setRowPan: (row, newPan) =>
-                                              JuceAudioEngine.setRowPan(
-                                                  row, newPan),
-                                          onRowPanCommit:
-                                              (row, oldPan, newPan) {
-                                            _undoManager.execute(
-                                              SetRowPanAction(
-                                                row: row,
-                                                oldPan: oldPan,
-                                                newPan: newPan,
-                                                applyToState: (r, p) {
-                                                  setState(() {
-                                                    _rowPan[r] = p;
-                                                  });
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'row_pan', {
-                                              'row': row,
-                                              'old_pan': oldPan,
-                                              'new_pan': newPan,
-                                            });
-                                          },
-
-                                          setClipGain: _setClipGainLive,
-                                          onClipGainCommit:
-                                              (clipIndex, oldGain, newGain) {
-                                            _undoManager.execute(
-                                              SetClipGainAction(
-                                                tracks: _audioTracks,
-                                                originalIndex: clipIndex,
-                                                oldGain: oldGain,
-                                                newGain: newGain,
-                                                applyToState: (clip, gain) {
-                                                  clip.gain = gain;
-                                                  setState(() {});
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'clip_gain', {
-                                              'clip': clipIndex,
-                                              'old_gain': oldGain,
-                                              'new_gain': newGain,
-                                            });
-                                          },
-                                          setClipPitch: _setClipPitchLive,
-                                          onClipPitchCommit:
-                                              (clipIndex, oldPitch, newPitch) {
-                                            _undoManager.execute(
-                                              SetClipPitchAction(
-                                                tracks: _audioTracks,
-                                                originalIndex: clipIndex,
-                                                oldPitch: oldPitch,
-                                                newPitch: newPitch,
-                                                applyToState: (clip, pitch) {
-                                                  clip.pitchSemitones = pitch;
-                                                  setState(() {});
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'clip_pitch', {
-                                              'clip': clipIndex,
-                                              'old_pitch': oldPitch,
-                                              'new_pitch': newPitch,
-                                            });
-                                          },
-                                          onSetClipReversed:
-                                              (clipIndex, reversed) async {
-                                            if (clipIndex < 0 ||
-                                                clipIndex >=
-                                                    _audioTracks.length) {
-                                              return;
-                                            }
-                                            final clip =
-                                                _audioTracks[clipIndex];
-                                            if (clip.isMidi ||
-                                                clip.isReversed == reversed) {
-                                              return;
-                                            }
-                                            await _undoManager.execute(
-                                              SetClipReverseAction(
-                                                tracks: _audioTracks,
-                                                originalIndex: clipIndex,
-                                                oldReversed: clip.isReversed,
-                                                newReversed: reversed,
-                                                applyToState: (target, value) {
-                                                  target.isReversed = value;
-                                                  setState(() {});
-                                                },
-                                              ),
-                                            );
-                                            _recordProducerManualEdit(
-                                                'clip_reverse', {
-                                              'clip': clipIndex,
-                                              'reversed': reversed,
-                                            });
-                                          },
-                                          onAdjustClipToTempo:
-                                              _handleAdjustClipToTempo,
-                                          onStretchClipToTempoPreservePitch:
-                                              _handleStretchClipToTempoPreservePitch,
-                                          onDisableClipTempoFollow:
-                                              _handleDisableClipTempoFollow,
-                                          onDetectClipTempoAndSetProjectTempo:
-                                              _handleDetectClipTempoAndSetProjectTempo,
-                                          onStretchClip:
-                                              _handleStretchClipResize,
-                                          onStretchClipCommit:
-                                              _handleStretchClipResizeCommit,
-                                          onRenameClip:
-                                              (clipIndex, newLabel) async {
-                                            if (clipIndex < 0 ||
-                                                clipIndex >=
-                                                    _audioTracks.length) {
-                                              return;
-                                            }
-                                            final oldLabel =
-                                                _audioTracks[clipIndex].label;
-                                            final nextLabel = newLabel.trim();
-                                            if (nextLabel.isEmpty ||
-                                                oldLabel == nextLabel) {
-                                              return;
-                                            }
-
-                                            await _undoManager.execute(
-                                              SetClipLabelAction(
-                                                tracks: _audioTracks,
-                                                originalIndex: clipIndex,
-                                                oldLabel: oldLabel,
-                                                newLabel: nextLabel,
-                                                applyToState: (clip, label) {
-                                                  clip.label = label;
-                                                  setState(() {});
-                                                },
-                                              ),
-                                            );
-
-                                            _recordProducerManualEdit(
-                                                'clip_rename', {
-                                              'clip': clipIndex,
-                                              'old_label': oldLabel,
-                                              'new_label': nextLabel,
-                                            });
-                                          },
-
-                                          onCopyClip: _handleCopyClip,
-                                          onDeleteClip: _handleDeleteClip,
-                                          onCopyClips: _handleCopyClips,
-                                          onDeleteClips: _handleDeleteClips,
-                                          onCutClipAt: _handleCutClipAt,
-                                          hasCopiedClip: _copiedClip != null ||
-                                              (_copiedClipGroup?.isNotEmpty ??
-                                                  false),
-                                          onPasteClipAt: _handlePasteClipAt,
-                                          onClearCopiedClip: _clearCopiedClip,
-                                          onOpenMidiClip: _openMidiClipEditor,
-                                          onStemSeparation:
-                                              _handleStemSeparationForClip,
-                                          onSelectionChanged:
-                                              (selectedClipIndices,
-                                                  primaryClipIndex) {
-                                            _timelineSelectedClipIndices =
-                                                List<int>.from(
-                                                    selectedClipIndices);
-                                            _timelinePrimarySelectedClipIndex =
-                                                primaryClipIndex;
-                                            unawaited(
-                                              _syncLiveMidiInputTargetClip(),
-                                            );
-                                          },
-                                          onSnapSettingsChanged: (magnetEnabled,
-                                              quantizeDivisionsPerBar) {
-                                            if (_timelineMagnetEnabled ==
-                                                    magnetEnabled &&
-                                                _timelineQuantizeDivisionsPerBar ==
-                                                    quantizeDivisionsPerBar) {
-                                              return;
-                                            }
-                                            setState(() {
-                                              _timelineMagnetEnabled =
-                                                  magnetEnabled;
-                                              _timelineQuantizeDivisionsPerBar =
-                                                  quantizeDivisionsPerBar;
-                                            });
-                                          },
-                                          onLoopToggle: (enabled) {
-                                            setState(
-                                                () => _loopEnabled = enabled);
-                                          },
-
-                                          onLoopRegionChanged: (start, end) {
-                                            setState(() {
-                                              _loopStartMs = start;
-                                              _loopEndMs = end;
-                                            });
-                                          },
-                                          isRecording: _isRecording,
-                                          recordingRowIndex: _selectedRow,
-                                          recordingStartMs: _recordingStartMs,
-                                          recordingPeaks:
-                                              _recordingPeaks, // TODO: FIX TO USE WITH JUCE
-                                          registerRowFxRefresher: (fn) {
-                                            _refreshRowFx = fn;
-                                            WidgetsBinding.instance
-                                                .addPostFrameCallback((_) {
-                                              if (!mounted) return;
-                                              for (int row = 0;
-                                                  row < _rowCount;
-                                                  row++) {
+                                              pathOrName: name,
+                                              onChange: () {
+                                                setState(() {});
                                                 _refreshRowFx(row);
-                                              }
-                                            });
-                                          },
-                                          registerRowFxPlaybackRefresher: (fn) {
-                                            _refreshRowFxPlayback = fn;
-                                          },
-                                          meters: _meters,
-                                          getRowCompressorMeter: (row, fx) =>
-                                              JuceAudioEngine
-                                                  .getRowCompressorMeter(
-                                                      row, fx),
-                                          getRowEqWaveform: (row, fx,
-                                                  sampleCount) =>
-                                              JuceAudioEngine.getRowEqWaveform(
-                                                  row, fx,
-                                                  sampleCount: sampleCount),
-                                          onExternalSampleDrop:
-                                              (data, row, timeMs) async {
-                                            await _insertAudioFileAtTimeline(
-                                              data.filePath,
-                                              row: row,
-                                              timeMs: timeMs,
-                                              uploadMethod: 'dragdrop',
-                                            );
-                                          },
-                                          onExternalSampleDragEntered: () {
-                                            _handleSampleDragExitedBrowserPanel();
-                                          },
-                                          externalSampleDragActive:
-                                              _sampleDragActive,
-                                          onTutorialTimelineScrolled:
-                                              _handleDawOnboardingTimelineScrolled,
-                                          onTutorialTimelineZoomed:
-                                              _handleDawOnboardingTimelineZoomed,
-                                          onTutorialRowExpansionChanged:
-                                              _handleDawOnboardingRowExpansionChanged,
-                                          onTutorialRowTabSelected:
-                                              _handleDawOnboardingRowTabSelected,
-                                          onTutorialRowEffectAdded:
-                                              _handleDawOnboardingEffectAdded,
-                                          onTutorialRowEffectOpened:
-                                              _handleDawOnboardingEffectOpened,
-                                          tutorialHighlighter: _mixHighlighter,
-                                          bottomDockInset: _kChatBarStackHeight +
-                                              _kTransportBarHeight +
-                                              (_isProducerCaptureUiVisible
-                                                  ? _kProducerBannerHeightEstimate
-                                                  : 0.0),
+                                                unawaited(
+                                                    _refreshAutomationTargetsForRow(
+                                                        row));
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_fx_remove', {
+                                            'row': row,
+                                            'index': effectIndex,
+                                            'effect': name,
+                                          });
+                                          await _refreshAutomationTargetsForRow(
+                                            row,
+                                          );
+                                        }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
 
-                                          mode: _resolvedMode,
-                                        ),
+                                        reorderRowEffects:
+                                            (row, from, to) async {
+                                          await _undoManager.execute(
+                                            ReorderEffectAction(
+                                              row: row,
+                                              from: from,
+                                              to: to,
+                                              onChange: () {
+                                                setState(() {});
+                                                _refreshRowFx(row);
+                                                unawaited(
+                                                    _refreshAutomationTargetsForRow(
+                                                        row));
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_fx_reorder', {
+                                            'row': row,
+                                            'from': from,
+                                            'to': to
+                                          });
+                                          await _refreshAutomationTargetsForRow(
+                                            row,
+                                          );
+                                        }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
+
+                                        setRowEffectBypassed:
+                                            (row, effectIndex, bypass) async {
+                                          await _undoManager.execute(
+                                            BypassEffectAction(
+                                              row: row,
+                                              effectIndex: effectIndex,
+                                              oldState: !bypass,
+                                              newState: bypass,
+                                              onChange: () {
+                                                setState(() {});
+                                                _refreshRowFx(row);
+                                                unawaited(
+                                                    _refreshAutomationTargetsForRow(
+                                                        row));
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_fx_bypass', {
+                                            'row': row,
+                                            'index': effectIndex,
+                                            'bypassed': bypass,
+                                          });
+                                        }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
+
+                                        getRowPluginParameters:
+                                            (row, effectIndex) =>
+                                                JuceAudioEngine
+                                                    .getTrackPluginParameters(
+                                                        row, effectIndex),
+
+                                        setRowEffectParam: (row, effectIndex,
+                                            paramId, value) async {
+                                          await JuceAudioEngine.setTrackEffect(
+                                            row,
+                                            effectIndex,
+                                            paramId,
+                                            value,
+                                          );
+                                          _updateAutomationTargetBaselineForEffectParameter(
+                                            row: row,
+                                            effectIndex: effectIndex,
+                                            paramId: paramId,
+                                            value: value,
+                                            master: false,
+                                          );
+                                        },
+
+                                        // for commiting to undo history
+                                        onPluginParamCommit: (row, idx, paramId,
+                                            oldValue, newValue) async {
+                                          await _undoManager.execute(
+                                            SetEffectParamAction(
+                                              row: row,
+                                              effectIndex: idx,
+                                              paramId: paramId,
+                                              oldValue: oldValue,
+                                              newValue: newValue,
+                                              onChange: () {
+                                                setState(() {});
+                                                _refreshRowFx(row);
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_fx_param', {
+                                            'row': row,
+                                            'index': idx,
+                                            'param_id': paramId,
+                                            'old_value': oldValue,
+                                            'new_value': newValue,
+                                          });
+                                        },
+
+                                        onPresetCommit: (before, after) async {
+                                          await _undoManager.execute(
+                                            TrackPresetChangeAction(
+                                              before: before,
+                                              after: after,
+                                              onChange: () {
+                                                setState(() {});
+                                                unawaited(
+                                                    _refreshAutomationTargetsForRow(
+                                                        before.row));
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_preset_commit', {
+                                            'row': before.row,
+                                            'before_count':
+                                                before.effects.length,
+                                            'after_count': after.effects.length,
+                                          });
+                                          await _refreshAutomationTargetsForRow(
+                                            before.row,
+                                          );
+                                        },
+
+                                        scanPlugins: () =>
+                                            JuceAudioEngine.scanPlugins(),
+
+                                        setTrackAutomationPoints: (row,
+                                                points) =>
+                                            _syncNativeAutomationForRow(row),
+
+                                        onAutomationCommit:
+                                            (row, oldPoints, newPoints) {
+                                          _undoManager.execute(
+                                            SetAutomationPointsAction(
+                                              row: row,
+                                              oldPoints: oldPoints,
+                                              newPoints: newPoints,
+                                              applyToState: (r, points) {
+                                                setState(() {
+                                                  _rowVolumeAutomation[r] =
+                                                      points
+                                                          .map((p) =>
+                                                              AutomationPoint(
+                                                                  x: p.x,
+                                                                  volume:
+                                                                      p.volume))
+                                                          .toList();
+                                                });
+                                              },
+                                              onApplied: (r, _) async {
+                                                await _syncNativeAutomationForRow(
+                                                    r);
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_automation', {
+                                            'row': row,
+                                            'old_count': oldPoints.length,
+                                            'new_count': newPoints.length,
+                                          });
+                                        },
+
+                                        setRowGain: (row, gain0to3) =>
+                                            JuceAudioEngine.setRowGain(
+                                                row, gain0to3),
+                                        onRowGainCommit:
+                                            (row, oldGain, newGain) {
+                                          _undoManager.execute(
+                                            SetRowGainAction(
+                                              row: row,
+                                              oldGain: oldGain,
+                                              newGain: newGain,
+                                              applyToState: (r, g) {
+                                                setState(() {
+                                                  _rowGain[r] = g;
+                                                });
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'row_gain', {
+                                            'row': row,
+                                            'old_gain': oldGain,
+                                            'new_gain': newGain,
+                                          });
+                                        },
+
+                                        muteRow: (row, mute) async {
+                                          // await JuceAudioEngine.muteRow(row, mute);
+                                          setState(() => _rowMuted[row] = mute);
+                                          await _recomputeAudibleState(); // this handles all mute/solo logic
+
+                                          // mute not counted in the undo history
+                                          // await _undoManager.execute(
+                                          //   MuteRowAction(row, !mute, mute, () => setState(() => _rowMuted[row] = mute)),
+                                          // );
+                                        },
+
+                                        // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
+                                        rowMuted: _rowMuted,
+
+                                        soloRow: (row, solo) async {
+                                          // await JuceAudioEngine.muteRow(row, mute);
+                                          setState(
+                                              () => _rowSoloed[row] = solo);
+                                          await _recomputeAudibleState(); // this handles all mute/solo logic
+                                        },
+
+                                        // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
+                                        rowSoloed: _rowSoloed,
+
+                                        setRowPan: (row, newPan) =>
+                                            JuceAudioEngine.setRowPan(
+                                                row, newPan),
+                                        onRowPanCommit: (row, oldPan, newPan) {
+                                          _undoManager.execute(
+                                            SetRowPanAction(
+                                              row: row,
+                                              oldPan: oldPan,
+                                              newPan: newPan,
+                                              applyToState: (r, p) {
+                                                setState(() {
+                                                  _rowPan[r] = p;
+                                                });
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit('row_pan', {
+                                            'row': row,
+                                            'old_pan': oldPan,
+                                            'new_pan': newPan,
+                                          });
+                                        },
+
+                                        setClipGain: _setClipGainLive,
+                                        onClipGainCommit:
+                                            (clipIndex, oldGain, newGain) {
+                                          _undoManager.execute(
+                                            SetClipGainAction(
+                                              tracks: _audioTracks,
+                                              originalIndex: clipIndex,
+                                              oldGain: oldGain,
+                                              newGain: newGain,
+                                              applyToState: (clip, gain) {
+                                                clip.gain = gain;
+                                                setState(() {});
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'clip_gain', {
+                                            'clip': clipIndex,
+                                            'old_gain': oldGain,
+                                            'new_gain': newGain,
+                                          });
+                                        },
+                                        setClipPitch: _setClipPitchLive,
+                                        onClipPitchCommit:
+                                            (clipIndex, oldPitch, newPitch) {
+                                          _undoManager.execute(
+                                            SetClipPitchAction(
+                                              tracks: _audioTracks,
+                                              originalIndex: clipIndex,
+                                              oldPitch: oldPitch,
+                                              newPitch: newPitch,
+                                              applyToState: (clip, pitch) {
+                                                clip.pitchSemitones = pitch;
+                                                setState(() {});
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'clip_pitch', {
+                                            'clip': clipIndex,
+                                            'old_pitch': oldPitch,
+                                            'new_pitch': newPitch,
+                                          });
+                                        },
+                                        onSetClipReversed:
+                                            (clipIndex, reversed) async {
+                                          if (clipIndex < 0 ||
+                                              clipIndex >=
+                                                  _audioTracks.length) {
+                                            return;
+                                          }
+                                          final clip = _audioTracks[clipIndex];
+                                          if (clip.isMidi ||
+                                              clip.isReversed == reversed) {
+                                            return;
+                                          }
+                                          await _undoManager.execute(
+                                            SetClipReverseAction(
+                                              tracks: _audioTracks,
+                                              originalIndex: clipIndex,
+                                              oldReversed: clip.isReversed,
+                                              newReversed: reversed,
+                                              applyToState: (target, value) {
+                                                target.isReversed = value;
+                                                setState(() {});
+                                              },
+                                            ),
+                                          );
+                                          _recordProducerManualEdit(
+                                              'clip_reverse', {
+                                            'clip': clipIndex,
+                                            'reversed': reversed,
+                                          });
+                                        },
+                                        onAdjustClipToTempo:
+                                            _handleAdjustClipToTempo,
+                                        onStretchClipToTempoPreservePitch:
+                                            _handleStretchClipToTempoPreservePitch,
+                                        onDisableClipTempoFollow:
+                                            _handleDisableClipTempoFollow,
+                                        onDetectClipTempoAndSetProjectTempo:
+                                            _handleDetectClipTempoAndSetProjectTempo,
+                                        onStretchClip: _handleStretchClipResize,
+                                        onStretchClipCommit:
+                                            _handleStretchClipResizeCommit,
+                                        onRenameClip:
+                                            (clipIndex, newLabel) async {
+                                          if (clipIndex < 0 ||
+                                              clipIndex >=
+                                                  _audioTracks.length) {
+                                            return;
+                                          }
+                                          final oldLabel =
+                                              _audioTracks[clipIndex].label;
+                                          final nextLabel = newLabel.trim();
+                                          if (nextLabel.isEmpty ||
+                                              oldLabel == nextLabel) {
+                                            return;
+                                          }
+
+                                          await _undoManager.execute(
+                                            SetClipLabelAction(
+                                              tracks: _audioTracks,
+                                              originalIndex: clipIndex,
+                                              oldLabel: oldLabel,
+                                              newLabel: nextLabel,
+                                              applyToState: (clip, label) {
+                                                clip.label = label;
+                                                setState(() {});
+                                              },
+                                            ),
+                                          );
+
+                                          _recordProducerManualEdit(
+                                              'clip_rename', {
+                                            'clip': clipIndex,
+                                            'old_label': oldLabel,
+                                            'new_label': nextLabel,
+                                          });
+                                        },
+
+                                        onCopyClip: _handleCopyClip,
+                                        onDeleteClip: _handleDeleteClip,
+                                        onCopyClips: _handleCopyClips,
+                                        onDeleteClips: _handleDeleteClips,
+                                        onCutClipAt: _handleCutClipAt,
+                                        hasCopiedClip: _copiedClip != null ||
+                                            (_copiedClipGroup?.isNotEmpty ??
+                                                false),
+                                        onPasteClipAt: _handlePasteClipAt,
+                                        onClearCopiedClip: _clearCopiedClip,
+                                        onOpenMidiClip: _openMidiClipEditor,
+                                        onStemSeparation:
+                                            _handleStemSeparationForClip,
+                                        onSelectionChanged:
+                                            (selectedClipIndices,
+                                                primaryClipIndex) {
+                                          _timelineSelectedClipIndices =
+                                              List<int>.from(
+                                                  selectedClipIndices);
+                                          _timelinePrimarySelectedClipIndex =
+                                              primaryClipIndex;
+                                          unawaited(
+                                            _syncLiveMidiInputTargetClip(),
+                                          );
+                                        },
+                                        onSnapSettingsChanged: (magnetEnabled,
+                                            quantizeDivisionsPerBar) {
+                                          if (_timelineMagnetEnabled ==
+                                                  magnetEnabled &&
+                                              _timelineQuantizeDivisionsPerBar ==
+                                                  quantizeDivisionsPerBar) {
+                                            return;
+                                          }
+                                          setState(() {
+                                            _timelineMagnetEnabled =
+                                                magnetEnabled;
+                                            _timelineQuantizeDivisionsPerBar =
+                                                quantizeDivisionsPerBar;
+                                          });
+                                        },
+                                        onLoopToggle: (enabled) {
+                                          setState(
+                                              () => _loopEnabled = enabled);
+                                        },
+
+                                        onLoopRegionChanged: (start, end) {
+                                          setState(() {
+                                            _loopStartMs = start;
+                                            _loopEndMs = end;
+                                          });
+                                        },
+                                        isRecording: _isRecording,
+                                        recordingRowIndex: _selectedRow,
+                                        recordingStartMs: _recordingStartMs,
+                                        recordingPeaks:
+                                            _recordingPeaks, // TODO: FIX TO USE WITH JUCE
+                                        registerRowFxRefresher: (fn) {
+                                          _refreshRowFx = fn;
+                                          WidgetsBinding.instance
+                                              .addPostFrameCallback((_) {
+                                            if (!mounted) return;
+                                            for (int row = 0;
+                                                row < _rowCount;
+                                                row++) {
+                                              _refreshRowFx(row);
+                                            }
+                                          });
+                                        },
+                                        registerRowFxPlaybackRefresher: (fn) {
+                                          _refreshRowFxPlayback = fn;
+                                        },
+                                        meters: _meters,
+                                        getRowCompressorMeter: (row, fx) =>
+                                            JuceAudioEngine
+                                                .getRowCompressorMeter(row, fx),
+                                        getRowEqWaveform: (row, fx,
+                                                sampleCount) =>
+                                            JuceAudioEngine.getRowEqWaveform(
+                                                row, fx,
+                                                sampleCount: sampleCount),
+                                        onExternalSampleDrop:
+                                            (data, row, timeMs) async {
+                                          await _insertAudioFileAtTimeline(
+                                            data.filePath,
+                                            row: row,
+                                            timeMs: timeMs,
+                                            uploadMethod: 'dragdrop',
+                                          );
+                                        },
+                                        onExternalSampleDragEntered: () {
+                                          _handleSampleDragExitedBrowserPanel();
+                                        },
+                                        externalSampleDragActive:
+                                            _sampleDragActive,
+                                        onTutorialTimelineScrolled:
+                                            _handleDawOnboardingTimelineScrolled,
+                                        onTutorialTimelineZoomed:
+                                            _handleDawOnboardingTimelineZoomed,
+                                        onRowExpansionChanged:
+                                            _handleTimelineRowExpansionChanged,
+                                        onRowTabSelected:
+                                            _handleTimelineRowTabSelected,
+                                        onTutorialRowExpansionChanged:
+                                            _handleDawOnboardingRowExpansionChanged,
+                                        onTutorialRowTabSelected:
+                                            _handleDawOnboardingRowTabSelected,
+                                        onTutorialRowEffectAdded:
+                                            _handleDawOnboardingEffectAdded,
+                                        onTutorialRowEffectOpened:
+                                            _handleDawOnboardingEffectOpened,
+                                        tutorialHighlighter: _mixHighlighter,
+                                        bottomDockInset: _kChatBarStackHeight +
+                                            _kTransportBarHeight +
+                                            (_isProducerCaptureUiVisible
+                                                ? _kProducerBannerHeightEstimate
+                                                : 0.0),
+
+                                        mode: _resolvedMode,
                                       ),
                                     ),
                                   ),
@@ -33733,6 +33985,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             onFullscreenChanged: (v) {
                                               setState(() =>
                                                   _pianoRollFullscreen = v);
+                                              _syncMeterPollingForVisibility();
                                             },
                                             onClose: _closeMidiClipEditor,
                                             onCommit:
@@ -35281,6 +35534,7 @@ class ExportSuccessScreen extends StatelessWidget {
   static const MethodChannel _savedExportsChannel =
       MethodChannel('mixroom/saved_exports');
   final String filePath;
+  final String? previewFilePath;
   final String? savedFilePath;
   final String? savedFileName;
   final bool isVideo;
@@ -35288,6 +35542,7 @@ class ExportSuccessScreen extends StatelessWidget {
   const ExportSuccessScreen(
       {super.key,
       required this.filePath,
+      this.previewFilePath,
       required this.isVideo,
       this.savedFilePath,
       this.savedFileName});
@@ -35318,16 +35573,14 @@ class ExportSuccessScreen extends StatelessWidget {
   }
 
   String _resolvedFileName() {
+    final explicit = savedFileName?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
+    }
+
     final hintedFromPath = _savedNameFromPathHint();
     if (hintedFromPath != null && hintedFromPath.isNotEmpty) {
       return hintedFromPath;
-    }
-
-    final explicit = savedFileName?.trim();
-    if (explicit != null &&
-        explicit.isNotEmpty &&
-        explicit != p.basename(filePath).trim()) {
-      return explicit;
     }
 
     final savedLocalPath = _resolveSavedLocalPath();
@@ -35556,15 +35809,41 @@ class ExportSuccessScreen extends StatelessWidget {
   }
 
   String _resolvedPreviewPath() {
+    final preview = previewFilePath?.trim();
+    if (preview != null &&
+        preview.isNotEmpty &&
+        !_isUriLikePath(preview) &&
+        File(preview).existsSync()) {
+      return preview;
+    }
+
+    final normalizedFilePath = _normalizedCandidatePath(filePath);
     final savedLocal = _resolveSavedLocalPath();
     if (savedLocal != null && savedLocal.isNotEmpty) {
       return savedLocal;
     }
-    return _normalizedCandidatePath(filePath);
+
+    if (!_isUriLikePath(normalizedFilePath) &&
+        File(normalizedFilePath).existsSync()) {
+      return normalizedFilePath;
+    }
+
+    return normalizedFilePath;
   }
 
   Future<void> _shareFile(BuildContext context) async {
     try {
+      if (!kIsWeb && Platform.isAndroid) {
+        final saved = savedFilePath?.trim();
+        if (saved != null && saved.isNotEmpty) {
+          final shared =
+              await ExportSaveDialog.shareSavedExportFromPlatform(saved);
+          if (shared) {
+            return;
+          }
+        }
+      }
+
       var sharePath = _resolvedActionPath();
       if (_isUriLikePath(sharePath) || !File(sharePath).existsSync()) {
         final fallback = _normalizedCandidatePath(filePath);
@@ -35593,8 +35872,8 @@ class ExportSuccessScreen extends StatelessWidget {
     final savedLocalPath = _resolveSavedLocalPath();
     final hasSavedTarget = saved != null && saved.isNotEmpty;
     final candidates = <String>[
-      if (savedLocalPath != null && savedLocalPath.isNotEmpty) savedLocalPath,
       if (saved != null && saved.isNotEmpty) _normalizedCandidatePath(saved),
+      if (savedLocalPath != null && savedLocalPath.isNotEmpty) savedLocalPath,
       if (!hasSavedTarget) _normalizedCandidatePath(filePath),
     ];
 
@@ -36261,6 +36540,8 @@ class _DynamicRackContentState extends State<DynamicRackContent>
       _currentTabIndex = 1;
     });
   }
+
+  bool get isVolumeTabVisible => _currentTabIndex == 0;
 
   @override
   void dispose() {

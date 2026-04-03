@@ -397,6 +397,8 @@ private:
         OboeAudioIODevice::OboeStream tempStream (oboe::kUnspecified,
                                                   oboe::Direction::Output,
                                                   oboe::SharingMode::Exclusive,
+                                                  oboe::AudioApi::Unspecified,
+                                                  oboe::PerformanceMode::LowLatency,
                                                   2,
                                                   oboe::AudioFormat::Float,
                                                   (int) AndroidHighPerformanceAudioHelpers::getNativeSampleRate(),
@@ -461,11 +463,13 @@ private:
     public:
         OboeStream (int deviceId, oboe::Direction direction,
                     oboe::SharingMode sharingMode,
+                    oboe::AudioApi audioApi,
+                    oboe::PerformanceMode performanceMode,
                     int channelCount, oboe::AudioFormat format,
                     int32 sampleRateIn, int32 bufferSize,
                     oboe::AudioStreamCallback* callbackIn = nullptr)
         {
-            open (deviceId, direction, sharingMode, channelCount,
+            open (deviceId, direction, sharingMode, audioApi, performanceMode, channelCount,
                   format, sampleRateIn, bufferSize, callbackIn);
         }
 
@@ -536,6 +540,8 @@ private:
     private:
         void open (int deviceId, oboe::Direction direction,
                    oboe::SharingMode sharingMode,
+                   oboe::AudioApi audioApi,
+                   oboe::PerformanceMode performanceMode,
                    int channelCount, oboe::AudioFormat format,
                    int32 newSampleRate, int32 newBufferSize,
                    oboe::AudioStreamCallback* newCallback = nullptr)
@@ -548,12 +554,25 @@ private:
                 builder.setDeviceId (deviceId);
 
             // Note: letting OS to choose the buffer capacity & frames per callback.
+            builder.setAudioApi (audioApi);
             builder.setDirection (direction);
             builder.setSharingMode (sharingMode);
             builder.setChannelCount (channelCount);
             builder.setFormat (format);
             builder.setSampleRate (newSampleRate);
-            builder.setPerformanceMode (oboe::PerformanceMode::LowLatency);
+            builder.setPerformanceMode (performanceMode);
+
+            if (direction == oboe::Direction::Output)
+            {
+                builder.setUsage (oboe::Usage::Media);
+                builder.setContentType (oboe::ContentType::Music);
+            }
+            else
+            {
+                // Oboe defaults to VoiceRecognition for inputs, which can push
+                // Android onto voice-oriented preprocessing/duplex behavior.
+                builder.setInputPreset (oboe::InputPreset::Generic);
+            }
 
            #if JUCE_USE_ANDROID_OBOE_STABILIZED_CALLBACK
             if (newCallback != nullptr)
@@ -567,14 +586,14 @@ private:
 
             JUCE_OBOE_LOG (String ("Preparing Oboe stream with params:")
                  + "\nAAudio supported = " + String (int (builder.isAAudioSupported()))
-                 + "\nAPI = " + getOboeString (builder.getAudioApi())
+                 + "\nAPI = " + getOboeString (audioApi)
                  + "\nDeviceId = " + String (deviceId)
                  + "\nDirection = " + getOboeString (direction)
                  + "\nSharingMode = " + getOboeString (sharingMode)
                  + "\nChannelCount = " + String (channelCount)
                  + "\nFormat = " + getOboeString (format)
                  + "\nSampleRate = " + String (newSampleRate)
-                 + "\nPerformanceMode = " + getOboeString (oboe::PerformanceMode::LowLatency));
+                 + "\nPerformanceMode = " + getOboeString (performanceMode));
 
             openResult = builder.openStream (stream);
             JUCE_OBOE_LOG ("Building Oboe stream with result: " + getOboeString (openResult)
@@ -667,9 +686,17 @@ private:
               bufferSize (bufferSizeToUse),
               streamFormat (streamFormatToUse),
               bitDepth (bitDepthToUse),
+              outputSharingMode (numInputChannelsToUse > 0 ? oboe::SharingMode::Exclusive
+                                                           : oboe::SharingMode::Shared),
+              outputAudioApi (numInputChannelsToUse > 0 ? oboe::AudioApi::Unspecified
+                                                        : oboe::AudioApi::OpenSLES),
+              outputPerformanceMode (numInputChannelsToUse > 0 ? oboe::PerformanceMode::LowLatency
+                                                               : oboe::PerformanceMode::None),
               outputStream (new OboeStream (outputDeviceId,
                                             oboe::Direction::Output,
-                                            oboe::SharingMode::Exclusive,
+                                            outputSharingMode,
+                                            outputAudioApi,
+                                            outputPerformanceMode,
                                             numOutputChannels,
                                             streamFormatToUse,
                                             sampleRateToUse,
@@ -681,6 +708,8 @@ private:
                 inputStream.reset (new OboeStream (inputDeviceId,
                                                    oboe::Direction::Input,
                                                    oboe::SharingMode::Exclusive,
+                                                   oboe::AudioApi::Unspecified,
+                                                   oboe::PerformanceMode::LowLatency,
                                                    numInputChannels,
                                                    streamFormatToUse,
                                                    sampleRateToUse,
@@ -742,6 +771,9 @@ private:
         int bufferSize;
         oboe::AudioFormat streamFormat;
         int bitDepth;
+        oboe::SharingMode outputSharingMode;
+        oboe::AudioApi outputAudioApi;
+        oboe::PerformanceMode outputPerformanceMode;
 
         std::unique_ptr<OboeStream> inputStream, outputStream;
     };
@@ -972,7 +1004,9 @@ private:
                     outputStream = nullptr;
                     outputStream.reset (new OboeStream (oboe::kUnspecified,
                                                         oboe::Direction::Output,
-                                                        oboe::SharingMode::Exclusive,
+                                                        outputSharingMode,
+                                                        outputAudioApi,
+                                                        outputPerformanceMode,
                                                         numOutputChannels,
                                                         streamFormat,
                                                         sampleRate,
@@ -1329,6 +1363,8 @@ public:
         : testStream (new OboeStream (oboe::kUnspecified,
                                       oboe::Direction::Output,
                                       oboe::SharingMode::Exclusive,
+                                      oboe::AudioApi::Unspecified,
+                                      oboe::PerformanceMode::LowLatency,
                                       1,
                                       oboe::AudioFormat::Float,
                                       (int) AndroidHighPerformanceAudioHelpers::getNativeSampleRate(),
@@ -1342,6 +1378,8 @@ public:
             testStream.reset (new OboeStream (oboe::kUnspecified,
                                               oboe::Direction::Output,
                                               oboe::SharingMode::Exclusive,
+                                              oboe::AudioApi::Unspecified,
+                                              oboe::PerformanceMode::LowLatency,
                                               1,
                                               oboe::AudioFormat::I16,
                                               (int) AndroidHighPerformanceAudioHelpers::getNativeSampleRate(),

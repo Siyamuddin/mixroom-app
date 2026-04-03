@@ -1081,8 +1081,11 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AdminAllowlistTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ProducerCaptureWhitelistTable
+        - !If
+          - HasAiPromptLimitSettingsTableName
+          - DynamoDBCrudPolicy:
+              TableName: !Ref AiPromptLimitSettingsTableName
+          - !Ref AWS::NoValue
       Events:
         AdminAiPromptLimitsGet:
           Type: Api

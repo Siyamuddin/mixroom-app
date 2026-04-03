@@ -137,6 +137,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   final Set<String> _selectedNoteIds = <String>{};
   List<MidiNote>? _copiedNotes;
   Timer? _commitDebounce;
+  bool _commitInFlight = false;
+  bool _commitQueued = false;
   bool _velocityPanelOpen = false;
 
   Map<String, MidiNote>? _dragStartNotesById;
@@ -511,12 +513,25 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   Future<void> _commitNow() async {
-    await widget.onCommit(
-      notes: _notes.map((n) => n.copy()).toList(),
-      instrumentParams: Map<String, double>.from(_params),
-      instrumentId: _instrumentId,
-      instrumentName: _instrumentName,
-    );
+    if (_commitInFlight) {
+      _commitQueued = true;
+      return;
+    }
+
+    _commitInFlight = true;
+    try {
+      do {
+        _commitQueued = false;
+        await widget.onCommit(
+          notes: _notes.map((n) => n.copy()).toList(),
+          instrumentParams: Map<String, double>.from(_params),
+          instrumentId: _instrumentId,
+          instrumentName: _instrumentName,
+        );
+      } while (_commitQueued);
+    } finally {
+      _commitInFlight = false;
+    }
   }
 
   double _snapBeat(double beat) {
@@ -2215,11 +2230,11 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                   isPressed ? const Color(0xFF737D86) : const Color(0xFF525A62);
               final blackBottom =
                   isPressed ? const Color(0xFF626B74) : const Color(0xFF454C54);
-              return GestureDetector(
+              return Listener(
                 behavior: HitTestBehavior.opaque,
-                onTapDown: (_) => _previewPianoKey(pitch),
-                onTapUp: (_) => _releasePianoKey(pitch),
-                onTapCancel: () => _releasePianoKey(pitch),
+                onPointerDown: (_) => _previewPianoKey(pitch),
+                onPointerUp: (_) => _releasePianoKey(pitch),
+                onPointerCancel: (_) => _releasePianoKey(pitch),
                 child: SizedBox(
                   height: _rowHeight,
                   child: Stack(
