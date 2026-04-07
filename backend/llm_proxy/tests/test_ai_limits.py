@@ -48,6 +48,34 @@ class AiLimitsTests(unittest.TestCase):
         self.assertEqual(limits["daily_prompts"], 12)
         self.assertEqual(limits["weekly_prompts"], 90)
 
+    def test_get_prompt_limits_loads_remote_override_from_dynamodb(self) -> None:
+        class _FakeTable:
+            def get_item(self, **_kwargs):
+                return {
+                    "Item": {
+                        "free_daily_prompt_limit": 100,
+                        "free_weekly_prompt_limit": 500,
+                    }
+                }
+
+        class _FakeDynamoResource:
+            def Table(self, _name):
+                return _FakeTable()
+
+        fake_boto3 = mock.Mock()
+        fake_boto3.resource.return_value = _FakeDynamoResource()
+
+        with mock.patch.object(ai_limits, "boto3", fake_boto3), mock.patch.object(
+            ai_limits.config,
+            "AI_PROMPT_LIMIT_SETTINGS_TABLE",
+            "mixroom-ai-prompt-limit-settings-prod",
+        ):
+            ai_limits.clear_prompt_limits_cache()
+            limits = ai_limits.get_prompt_limits("free")
+
+        self.assertEqual(limits["daily_prompts"], 100)
+        self.assertEqual(limits["weekly_prompts"], 500)
+
     def test_get_prompt_limits_does_not_apply_free_override_to_pro_tier(self) -> None:
         with mock.patch.object(
             ai_limits,

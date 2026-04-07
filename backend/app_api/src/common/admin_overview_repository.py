@@ -139,21 +139,31 @@ class AdminOverviewRepository:
         tool_usage_range: str = "30d",
     ) -> Dict[str, Any]:
         warnings: list[str] = []
+        now = datetime.now(timezone.utc)
+        day_cutoff = now - timedelta(days=1)
+        week_cutoff = now - timedelta(days=7)
         recent_app_profiles = (
             self._recent_user_profiles(user_limit, warnings) if include_users else []
         )
         user_records: dict[str, Dict[str, Any]] = {}
         tracked_user_ids: set[str] = set()
 
-        total_credits_used_today = 0
-        total_tokens_used_month = 0
-        total_tokens_all_time = 0
-        total_credits_all_time = 0
         request_total = 0
         success_count = 0
         failed_count = 0
         rate_limited_count = 0
-        feature_counts: Counter[str] = Counter()
+        prompt_count_today = 0
+        prompt_count_week = 0
+        ai_active_users_today: set[str] = set()
+        ai_active_users_week: set[str] = set()
+        latency_total_today = 0.0
+        latency_total_week = 0.0
+        latency_count_today = 0
+        latency_count_week = 0
+        weekly_success_count = 0
+        weekly_failed_count = 0
+        weekly_rate_limited_count = 0
+        weekly_feature_counts: Counter[str] = Counter()
         project_records: dict[str, Dict[str, Any]] = {}
         for profile in recent_app_profiles:
             user_id = _safe_str(profile.get("user_id"))
@@ -181,19 +191,17 @@ class AdminOverviewRepository:
                 record["last_seen_at"] = _later_iso(record["last_seen_at"], usage_updated_at)
             user_records[user_id] = record
 
-        state_items = self._scan_state_items(warnings) if include_ai_usage else []
-        for item in state_items:
-            total_credits_used_today += _safe_int(item.get("ai_credits_used_today"))
-            total_tokens_used_month += _safe_int(item.get("ai_tokens_used_month"))
-
         should_load_event_items = include_ai_usage or include_projects or include_ai_observability
         event_items = self._list_recent_ai_events(warnings) if should_load_event_items else []
         for item in event_items:
             status = _safe_str(item.get("status")).lower()
 
             created_at = _safe_str(item.get("created_at"))
+            created_at_dt = _parse_iso(created_at)
             credits_charged = _safe_int(item.get("credits_charged"))
             total_tokens = _safe_int(item.get("total_tokens"))
+            user_id = _safe_str(item.get("user_id"))
+            prompt_latency_ms = _safe_float(item.get("proxy_handler_ms_total"))
 
             if include_ai_usage:
                 request_total += 1
@@ -205,15 +213,31 @@ class AdminOverviewRepository:
                     failed_count += 1
 
                 feature = _safe_str(item.get("feature")) or "unknown"
-                feature_counts[feature] += 1
-                total_credits_all_time += credits_charged
-                total_tokens_all_time += total_tokens
+                if created_at_dt is not None and created_at_dt >= week_cutoff:
+                    prompt_count_week += 1
+                    weekly_feature_counts[feature] += 1
+                    if status == "success":
+                        weekly_success_count += 1
+                    elif status == "rate_limited":
+                        weekly_rate_limited_count += 1
+                    else:
+                        weekly_failed_count += 1
+                    if user_id:
+                        ai_active_users_week.add(user_id)
+                    if prompt_latency_ms > 0:
+                        latency_total_week += prompt_latency_ms
+                        latency_count_week += 1
+                if created_at_dt is not None and created_at_dt >= day_cutoff:
+                    prompt_count_today += 1
+                    if user_id:
+                        ai_active_users_today.add(user_id)
+                    if prompt_latency_ms > 0:
+                        latency_total_today += prompt_latency_ms
+                        latency_count_today += 1
 
-                user_id = _safe_str(item.get("user_id"))
                 if user_id and user_id in user_records:
                     record = user_records[user_id]
                     record["ai_request_count"] += 1
-                    record["ai_credits_charged_total"] += credits_charged
                     record["ai_tokens_total"] += total_tokens
                     record["last_ai_activity_at"] = _later_iso(
                         record["last_ai_activity_at"],
@@ -307,10 +331,35 @@ class AdminOverviewRepository:
                     "feature": feature,
                     "request_count": count,
                 }
-                for feature, count in feature_counts.most_common(max(feature_limit, 1))
+                for feature, count in weekly_feature_counts.most_common(max(feature_limit, 1))
             ]
             if include_ai_usage
             else []
+        )
+        weekly_success_rate = (
+            round((weekly_success_count / prompt_count_week) * 100, 1)
+            if include_ai_usage and prompt_count_week > 0
+            else None
+        )
+        avg_prompts_per_user_today = (
+            round(prompt_count_today / len(ai_active_users_today), 1)
+            if include_ai_usage and ai_active_users_today
+            else None
+        )
+        avg_prompts_per_user_week = (
+            round(prompt_count_week / len(ai_active_users_week), 1)
+            if include_ai_usage and ai_active_users_week
+            else None
+        )
+        avg_latency_ms_today = (
+            round(latency_total_today / latency_count_today, 1)
+            if include_ai_usage and latency_count_today > 0
+            else None
+        )
+        avg_latency_ms_week = (
+            round(latency_total_week / latency_count_week, 1)
+            if include_ai_usage and latency_count_week > 0
+            else None
         )
         product_analytics = self._deferred_product_analytics(tool_usage_range)
         if include_product_analytics:
@@ -357,25 +406,43 @@ class AdminOverviewRepository:
                 "tracked_users": self._describe_item_count(config.AI_USAGE_STATE_TABLE, warnings),
                 "paid_users": paid_users,
                 "active_subscriptions": active_subscriptions,
+                "ai_prompts_today": prompt_count_today if include_ai_usage else None,
+                "ai_prompts_week": prompt_count_week if include_ai_usage else None,
+                "ai_active_users_today": (
+                    len(ai_active_users_today) if include_ai_usage else None
+                ),
+                "ai_active_users_week": (
+                    len(ai_active_users_week) if include_ai_usage else None
+                ),
+                "avg_prompts_per_user_today": avg_prompts_per_user_today,
+                "avg_prompts_per_user_week": avg_prompts_per_user_week,
+                "avg_latency_ms_today": avg_latency_ms_today,
+                "avg_latency_ms_week": avg_latency_ms_week,
+                "ai_success_rate_week": weekly_success_rate,
                 "tracked_projects": len(project_records) if include_projects else None,
-                "ai_requests_total": request_total if include_ai_usage else None,
-                "ai_credits_used_today": total_credits_used_today if include_ai_usage else None,
-                "ai_tokens_used_month": total_tokens_used_month if include_ai_usage else None,
-                "ai_credits_charged_total": total_credits_all_time if include_ai_usage else None,
-                "ai_tokens_total": total_tokens_all_time if include_ai_usage else None,
             },
             "subscription_tiers": tier_breakdown,
             "users": users,
             "projects": projects,
             "ai_usage": (
                 {
-                    "tracked_users": sum(
-                        1 for item in state_items if _safe_str(item.get("user_id"))
+                    "tracked_users": self._describe_item_count(
+                        config.AI_USAGE_STATE_TABLE,
+                        warnings,
                     ),
                     "event_records": request_total,
                     "successful_requests": success_count,
                     "failed_requests": failed_count,
                     "rate_limited_requests": rate_limited_count,
+                    "daily_request_count": prompt_count_today,
+                    "weekly_request_count": prompt_count_week,
+                    "active_users_today": len(ai_active_users_today),
+                    "active_users_week": len(ai_active_users_week),
+                    "avg_prompts_per_user_today": avg_prompts_per_user_today,
+                    "avg_prompts_per_user_week": avg_prompts_per_user_week,
+                    "avg_latency_ms_today": avg_latency_ms_today,
+                    "avg_latency_ms_week": avg_latency_ms_week,
+                    "success_rate_week": weekly_success_rate,
                     "top_features": top_features,
                 }
                 if include_ai_usage
@@ -383,6 +450,35 @@ class AdminOverviewRepository:
             ),
             "ai_observability": ai_observability,
             "product_analytics": product_analytics,
+        }
+
+    def build_live_presence(self) -> Dict[str, Any]:
+        client = getattr(self, "_posthog_metrics", None)
+        if client is None:
+            return {
+                "source": "posthog",
+                "status": "unconfigured",
+                "active_users": 0,
+                "window_minutes": 5,
+                "updated_at": "",
+            }
+        try:
+            if hasattr(client, "fetch_live_presence"):
+                return client.fetch_live_presence()
+        except Exception:
+            return {
+                "source": "posthog",
+                "status": "error",
+                "active_users": 0,
+                "window_minutes": 5,
+                "updated_at": "",
+            }
+        return {
+            "source": "posthog",
+            "status": "unavailable",
+            "active_users": 0,
+            "window_minutes": 5,
+            "updated_at": "",
         }
 
     def _deferred_ai_usage(self) -> Dict[str, Any]:
@@ -393,6 +489,15 @@ class AdminOverviewRepository:
             "successful_requests": None,
             "failed_requests": None,
             "rate_limited_requests": None,
+            "daily_request_count": None,
+            "weekly_request_count": None,
+            "active_users_today": None,
+            "active_users_week": None,
+            "avg_prompts_per_user_today": None,
+            "avg_prompts_per_user_week": None,
+            "avg_latency_ms_today": None,
+            "avg_latency_ms_week": None,
+            "success_rate_week": None,
             "top_features": [],
         }
 

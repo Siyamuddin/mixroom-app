@@ -96,6 +96,7 @@ Widget _buildFxParamsHeader({
   required String title,
   required VoidCallback onBack,
   VoidCallback? onReset,
+  Widget? trailing,
 }) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -148,10 +149,39 @@ Widget _buildFxParamsHeader({
               ),
             ),
           ),
+        if (trailing != null) ...[
+          if (onReset != null) const SizedBox(width: 8),
+          trailing,
+        ],
       ],
     ),
   );
 }
+
+enum _RowEffectsMenuAction {
+  copy,
+  paste,
+  clear,
+}
+
+enum _MasterEffectsMenuAction {
+  copy,
+  paste,
+  clear,
+}
+
+const double _kRowEffectsMenuButtonWidth = 34;
+const double _kRowEffectsPresetFadeWidth = 34;
+const double _kRowEffectsMenuPanelWidth = 220;
+const double _kRowEffectsMenuCloseButtonSize = 28;
+const double _kRowEffectsMenuRightOffset = -7;
+const double _kRowEffectsMenuTopOffset = -7;
+const double _kMasterEffectsMenuRightOffset = 0;
+const double _kMasterEffectsMenuTopOffset = -3;
+const double _kMasterEffectsMenuInnerRightInset = 3;
+const double _kRowEffectsMenuClosedWidthFactor =
+    _kRowEffectsMenuButtonWidth / _kRowEffectsMenuPanelWidth;
+const double _kRowEffectsMenuClosedHeightFactor = 0.22;
 
 bool _shouldShowDefaultReorderHandles(BuildContext context) {
   return Theme.of(context).platform != TargetPlatform.macOS;
@@ -287,6 +317,10 @@ class RowEffectsPanel extends StatefulWidget {
 
   final void Function(int row, int effectIndex, String paramId,
       dynamic oldValue, dynamic newValue)? onPluginParamCommit;
+  final VoidCallback? onCopyRowEffects;
+  final Future<void> Function()? onPasteRowEffects;
+  final Future<void> Function()? onClearRowEffects;
+  final bool hasCopiedRowEffects;
 
   final MeterBus meters;
   final Future<List<double>> Function(int row, int effectIndex)
@@ -325,6 +359,10 @@ class RowEffectsPanel extends StatefulWidget {
     required this.getRowCompressorMeter,
     required this.getRowEqWaveform,
     this.tutorialHighlighter,
+    this.onCopyRowEffects,
+    this.onPasteRowEffects,
+    this.onClearRowEffects,
+    this.hasCopiedRowEffects = false,
   }) : super(key: key);
 
   @override
@@ -347,6 +385,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   List<bool> _bypassed = [];
   bool _loading = true;
   int? _draggingEffectIndex;
+  bool _rowEffectsMenuOpen = false;
 
   int? _selectedEffectIndex;
   List<Map<String, dynamic>> _currentParams = [];
@@ -1611,6 +1650,254 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     });
   }
 
+  Future<void> _handleRowEffectsMenuAction(_RowEffectsMenuAction action) async {
+    if (mounted) {
+      setState(() {
+        _rowEffectsMenuOpen = false;
+      });
+    }
+    switch (action) {
+      case _RowEffectsMenuAction.copy:
+        widget.onCopyRowEffects?.call();
+        break;
+      case _RowEffectsMenuAction.paste:
+        await widget.onPasteRowEffects?.call();
+        break;
+      case _RowEffectsMenuAction.clear:
+        await widget.onClearRowEffects?.call();
+        break;
+    }
+    if (!mounted) return;
+    if (action != _RowEffectsMenuAction.copy) {
+      await _loadEffects(showLoading: false);
+    } else {
+      setState(() {});
+    }
+  }
+
+  Widget _buildRowEffectsMenuButton(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: ValueKey('row_effects_menu_${widget.rowIndex}'),
+          onTap: () {
+            setState(() {
+              _rowEffectsMenuOpen = !_rowEffectsMenuOpen;
+            });
+          },
+          borderRadius: BorderRadius.circular(999),
+          overlayColor: WidgetStateProperty.resolveWith<Color?>(
+            (states) {
+              if (states.contains(WidgetState.pressed)) {
+                return Colors.white.withValues(alpha: 0.12);
+              }
+              if (states.contains(WidgetState.hovered)) {
+                return Colors.white.withValues(alpha: 0.06);
+              }
+              return null;
+            },
+          ),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 170),
+            curve: Curves.easeOutCubic,
+            width: _kRowEffectsMenuButtonWidth,
+            height: 34,
+            decoration: _mixroomFxInsetDecoration(
+              radius: 999,
+              selected: _rowEffectsMenuOpen,
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Spacer(),
+                Icon(Icons.more_horiz, size: 18, color: _kFxPanelText),
+                Spacer(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRowEffectsMenuPanel(BuildContext context) {
+    Widget actionTile({
+      required String title,
+      required _RowEffectsMenuAction action,
+      required bool enabled,
+    }) {
+      final actionSlug = switch (action) {
+        _RowEffectsMenuAction.copy => 'copy',
+        _RowEffectsMenuAction.paste => 'paste',
+        _RowEffectsMenuAction.clear => 'clear',
+      };
+      return Opacity(
+        opacity: enabled ? 1.0 : 0.46,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: ValueKey(
+                'row_effects_menu_action_${widget.rowIndex}_$actionSlug'),
+            onTap: enabled
+                ? () => unawaited(_handleRowEffectsMenuAction(action))
+                : null,
+            borderRadius: BorderRadius.circular(14),
+            overlayColor: WidgetStateProperty.resolveWith<Color?>(
+              (states) {
+                if (states.contains(WidgetState.pressed)) {
+                  return Colors.white.withValues(alpha: 0.12);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return Colors.white.withValues(alpha: 0.05);
+                }
+                return null;
+              },
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: _mixroomFxInsetDecoration(radius: 14),
+              child: Text(
+                L10n.translate(context, title),
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: _kFxPanelText,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      key: ValueKey('row_effects_menu_panel_${widget.rowIndex}'),
+      padding: const EdgeInsets.all(10),
+      decoration: _mixroomFxSurfaceDecoration(radius: 18, active: true),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Text(
+                L10n.translate(context, 'Row effects'),
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: _kFxPanelText,
+                  fontSize: 13.4,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  key: ValueKey('row_effects_menu_close_${widget.rowIndex}'),
+                  onTap: () {
+                    setState(() {
+                      _rowEffectsMenuOpen = false;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(999),
+                  overlayColor: WidgetStateProperty.resolveWith<Color?>(
+                    (states) {
+                      if (states.contains(WidgetState.pressed)) {
+                        return Colors.white.withValues(alpha: 0.12);
+                      }
+                      if (states.contains(WidgetState.hovered)) {
+                        return Colors.white.withValues(alpha: 0.05);
+                      }
+                      return null;
+                    },
+                  ),
+                  child: Container(
+                    width: _kRowEffectsMenuCloseButtonSize,
+                    height: _kRowEffectsMenuCloseButtonSize,
+                    decoration: _mixroomFxInsetDecoration(radius: 999),
+                    child: const Icon(
+                      Icons.close,
+                      size: 16,
+                      color: _kFxPanelText,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          actionTile(
+            title: 'Copy effects',
+            action: _RowEffectsMenuAction.copy,
+            enabled: widget.onCopyRowEffects != null,
+          ),
+          const SizedBox(height: 8),
+          actionTile(
+            title: 'Paste effects',
+            action: _RowEffectsMenuAction.paste,
+            enabled:
+                widget.hasCopiedRowEffects && widget.onPasteRowEffects != null,
+          ),
+          const SizedBox(height: 8),
+          actionTile(
+            title: 'Clear effects',
+            action: _RowEffectsMenuAction.clear,
+            enabled: widget.onClearRowEffects != null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPresetStrip(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: SizedBox(
+            height: 34,
+            child: ShaderMask(
+              blendMode: BlendMode.dstIn,
+              shaderCallback: (Rect bounds) {
+                return const LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: <Color>[
+                    Colors.white,
+                    Colors.white,
+                    Colors.white,
+                    Colors.transparent,
+                  ],
+                  stops: <double>[0.0, 0.82, 0.93, 1.0],
+                ).createShader(bounds);
+              },
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.only(
+                  right: _kRowEffectsPresetFadeWidth + 6,
+                ),
+                child: Row(
+                  children: [
+                    _buildPresetChip("Concert Hall"),
+                    const SizedBox(width: 6),
+                    _buildPresetChip("Echoes"),
+                    const SizedBox(width: 6),
+                    _buildPresetChip("LoFi Effect"),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        _buildRowEffectsMenuButton(context),
+      ],
+    );
+  }
+
   Widget _buildContent(BuildContext context) {
     if (_loading) {
       return SizedBox(
@@ -1629,87 +1916,122 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     // Otherwise: presets + FX list + Add FX
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          // --- Presets Section ---
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4.0),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _buildPresetChip("Concert Hall"),
-                  const SizedBox(width: 6),
-                  _buildPresetChip("Echoes"),
-                  const SizedBox(width: 6),
-                  _buildPresetChip("LoFi Effect"),
-                  // const SizedBox(width: 6),
-                  // _buildPresetChip("Heavy Crunch"), // TODO: TEMP
-                ],
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4.0),
+                child: _buildPresetStrip(context),
               ),
-            ),
+              const SizedBox(height: 2),
+
+              // --- Effects List ---
+              if (_effects.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 0.0, right: 0.0),
+                  child: _wrapWithHalos(
+                    haloKeys: <String>[
+                      'row:${widget.rowIndex}:fx_list',
+                      'row:${widget.rowIndex}:effects_panel',
+                    ],
+                    borderRadius: BorderRadius.circular(10),
+                    child: ReorderableListView(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      buildDefaultDragHandles:
+                          _shouldShowDefaultReorderHandles(context),
+                      padding: EdgeInsets.zero,
+                      onReorderStart: (index) {
+                        setState(() {
+                          _draggingEffectIndex = index;
+                        });
+                      },
+                      onReorderEnd: (_) {
+                        if (_draggingEffectIndex == null) return;
+                        setState(() {
+                          _draggingEffectIndex = null;
+                        });
+                      },
+                      children: [
+                        for (int i = 0; i < _effects.length; i++)
+                          _buildEffectTile(i)
+                      ],
+                      onReorder: (oldIndex, newIndex) async {
+                        if (oldIndex < 0 || oldIndex >= _effects.length) return;
+                        if (newIndex > oldIndex) newIndex--;
+                        newIndex = newIndex.clamp(0, _effects.length - 1);
+                        if (oldIndex == newIndex) return;
+
+                        setState(() {
+                          _applyLocalReorder(oldIndex, newIndex);
+                        });
+
+                        try {
+                          await widget.reorderEffectsForRow(
+                              widget.rowIndex, oldIndex, newIndex);
+                        } catch (_) {
+                          await _loadEffects(showLoading: false);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+
+              // --- Add FX Button ---
+              if (_effects.length < maxNumEffects)
+                Padding(
+                    padding: const EdgeInsets.only(top: 4.0, left: 0.0),
+                    child: _buildAddTile()),
+            ],
           ),
-
-          const SizedBox(height: 2),
-
-          // --- Effects List ---
-          if (_effects.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 0.0, right: 0.0),
-              child: _wrapWithHalos(
-                haloKeys: <String>[
-                  'row:${widget.rowIndex}:fx_list',
-                  'row:${widget.rowIndex}:effects_panel',
-                ],
-                borderRadius: BorderRadius.circular(10),
-                child: ReorderableListView(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  buildDefaultDragHandles:
-                      _shouldShowDefaultReorderHandles(context),
-                  padding: EdgeInsets.zero,
-                  onReorderStart: (index) {
-                    setState(() {
-                      _draggingEffectIndex = index;
-                    });
-                  },
-                  onReorderEnd: (_) {
-                    if (_draggingEffectIndex == null) return;
-                    setState(() {
-                      _draggingEffectIndex = null;
-                    });
-                  },
-                  children: [
-                    for (int i = 0; i < _effects.length; i++)
-                      _buildEffectTile(i)
-                  ],
-                  onReorder: (oldIndex, newIndex) async {
-                    if (oldIndex < 0 || oldIndex >= _effects.length) return;
-                    if (newIndex > oldIndex) newIndex--;
-                    newIndex = newIndex.clamp(0, _effects.length - 1);
-                    if (oldIndex == newIndex) return;
-
-                    setState(() {
-                      _applyLocalReorder(oldIndex, newIndex);
-                    });
-
-                    try {
-                      await widget.reorderEffectsForRow(
-                          widget.rowIndex, oldIndex, newIndex);
-                    } catch (_) {
-                      await _loadEffects(showLoading: false);
-                    }
-                  },
+          Positioned(
+            top: _kRowEffectsMenuTopOffset,
+            right: _kRowEffectsMenuRightOffset,
+            child: IgnorePointer(
+              ignoring: !_rowEffectsMenuOpen,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(
+                  begin: 0.0,
+                  end: _rowEffectsMenuOpen ? 1.0 : 0.0,
+                ),
+                duration: const Duration(milliseconds: 170),
+                curve: Curves.easeOutCubic,
+                builder: (context, t, child) {
+                  if (t <= 0.001) {
+                    return const SizedBox.shrink();
+                  }
+                  final widthFactor = _kRowEffectsMenuClosedWidthFactor +
+                      ((1.0 - _kRowEffectsMenuClosedWidthFactor) * t);
+                  final heightFactor = _kRowEffectsMenuClosedHeightFactor +
+                      ((1.0 - _kRowEffectsMenuClosedHeightFactor) * t);
+                  return Opacity(
+                    opacity: t,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: Align(
+                        alignment: Alignment.topRight,
+                        widthFactor: widthFactor,
+                        heightFactor: heightFactor,
+                        child: Transform.translate(
+                          offset: Offset((1.0 - t) * 8, (1.0 - t) * -4),
+                          child: child,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: _kRowEffectsMenuPanelWidth,
+                  ),
+                  child: _buildRowEffectsMenuPanel(context),
                 ),
               ),
             ),
-
-          // --- Add FX Button ---
-          if (_effects.length < maxNumEffects)
-            Padding(
-                padding: const EdgeInsets.only(top: 4.0, left: 0.0),
-                child: _buildAddTile()),
+          ),
         ],
       ),
     );
@@ -1869,6 +2191,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         await widget.insertEffectOnRow(widget.rowIndex, 'Reverb');
         await _setTrackEffectParam(widget.rowIndex, 0, 'Room Size', 53);
         await _setTrackEffectParam(widget.rowIndex, 0, 'Mix', 20);
+        await widget.insertEffectOnRow(widget.rowIndex, 'EQ 3-Band');
+        await _setTrackEffectParam(widget.rowIndex, 1, 'Low Gain', -1.0);
+        await _setTrackEffectParam(widget.rowIndex, 1, 'Mid Gain', 0.6);
+        await _setTrackEffectParam(widget.rowIndex, 1, 'High Gain', 1.2);
         break;
 
       case 'Echoes':
@@ -2352,6 +2678,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     );
 
     setState(() {
+      _rowEffectsMenuOpen = false;
       _selectedEffectIndex = idx;
       _paramsLoading = true;
       _currentParams = [];
@@ -3458,6 +3785,10 @@ class MasterEffectsPanel extends StatefulWidget {
   final void Function(
           MasterEffectsSnapshot before, MasterEffectsSnapshot after)?
       onMasterPresetCommit;
+  final VoidCallback? onCopyMasterEffects;
+  final Future<void> Function()? onPasteMasterEffects;
+  final Future<void> Function()? onClearMasterEffects;
+  final bool hasCopiedMasterEffects;
 
   final void Function(double height)? onHeightChanged;
   final double projectBpm;
@@ -3489,6 +3820,10 @@ class MasterEffectsPanel extends StatefulWidget {
     this.onHeightChanged,
     this.onMasterPluginParamCommit,
     this.onMasterPresetCommit,
+    this.onCopyMasterEffects,
+    this.onPasteMasterEffects,
+    this.onClearMasterEffects,
+    this.hasCopiedMasterEffects = false,
     required this.projectBpm,
     required this.meters,
     required this.getMasterCompressorMeter,
@@ -3506,6 +3841,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   List<String> _effectKeys = [];
   List<bool> _bypassed = [];
   double _panelHeight = 220;
+  bool _masterEffectsMenuOpen = false;
 
   int? _selectedEffectIndex;
   List<Map<String, dynamic>> _currentParams = [];
@@ -3814,12 +4150,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         child: _wrapWithHalos(
           haloKeys: haloKeys,
           borderRadius: borderRadius,
-          child: Container(
-            decoration: _mixroomFxInsetDecoration(
-              radius: (borderRadius?.topLeft.x ?? 18).toDouble(),
-            ),
-            child: child,
-          ),
+          child: child,
         ),
       ),
     );
@@ -4355,6 +4686,250 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     }
   }
 
+  Future<void> _handleMasterEffectsMenuAction(
+      _MasterEffectsMenuAction action) async {
+    if (mounted) {
+      setState(() {
+        _masterEffectsMenuOpen = false;
+      });
+    }
+    switch (action) {
+      case _MasterEffectsMenuAction.copy:
+        widget.onCopyMasterEffects?.call();
+        break;
+      case _MasterEffectsMenuAction.paste:
+        await widget.onPasteMasterEffects?.call();
+        break;
+      case _MasterEffectsMenuAction.clear:
+        await widget.onClearMasterEffects?.call();
+        break;
+    }
+    if (!mounted) return;
+    if (action != _MasterEffectsMenuAction.copy) {
+      await _loadEffects();
+    } else {
+      setState(() {});
+    }
+  }
+
+  Widget _buildMasterEffectsMenuButton(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: const ValueKey('master_effects_menu'),
+          onTap: () {
+            setState(() {
+              _masterEffectsMenuOpen = !_masterEffectsMenuOpen;
+            });
+          },
+          borderRadius: BorderRadius.circular(999),
+          overlayColor: WidgetStateProperty.resolveWith<Color?>(
+            (states) {
+              if (states.contains(WidgetState.pressed)) {
+                return Colors.white.withValues(alpha: 0.12);
+              }
+              if (states.contains(WidgetState.hovered)) {
+                return Colors.white.withValues(alpha: 0.06);
+              }
+              return null;
+            },
+          ),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 170),
+            curve: Curves.easeOutCubic,
+            width: _kRowEffectsMenuButtonWidth,
+            height: 34,
+            decoration: _mixroomFxInsetDecoration(
+              radius: 999,
+              selected: _masterEffectsMenuOpen,
+            ),
+            child: const Row(
+              children: [
+                Spacer(),
+                Icon(Icons.more_horiz, size: 18, color: _kFxPanelText),
+                Spacer(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMasterEffectsMenuPanel(BuildContext context) {
+    Widget actionTile({
+      required String title,
+      required _MasterEffectsMenuAction action,
+      required bool enabled,
+    }) {
+      final actionSlug = switch (action) {
+        _MasterEffectsMenuAction.copy => 'copy',
+        _MasterEffectsMenuAction.paste => 'paste',
+        _MasterEffectsMenuAction.clear => 'clear',
+      };
+      return Opacity(
+        opacity: enabled ? 1.0 : 0.46,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: ValueKey('master_effects_menu_action_$actionSlug'),
+            onTap: enabled
+                ? () => unawaited(_handleMasterEffectsMenuAction(action))
+                : null,
+            borderRadius: BorderRadius.circular(14),
+            overlayColor: WidgetStateProperty.resolveWith<Color?>(
+              (states) {
+                if (states.contains(WidgetState.pressed)) {
+                  return Colors.white.withValues(alpha: 0.12);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return Colors.white.withValues(alpha: 0.05);
+                }
+                return null;
+              },
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: _mixroomFxInsetDecoration(radius: 14),
+              child: Text(
+                L10n.translate(context, title),
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: _kFxPanelText,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      key: const ValueKey('master_effects_menu_panel'),
+      padding: const EdgeInsets.all(10),
+      decoration: _mixroomFxSurfaceDecoration(radius: 18, active: true),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Text(
+                L10n.translate(context, 'Master effects'),
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: _kFxPanelText,
+                  fontSize: 13.4,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  key: const ValueKey('master_effects_menu_close'),
+                  onTap: () {
+                    setState(() {
+                      _masterEffectsMenuOpen = false;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(999),
+                  overlayColor: WidgetStateProperty.resolveWith<Color?>(
+                    (states) {
+                      if (states.contains(WidgetState.pressed)) {
+                        return Colors.white.withValues(alpha: 0.12);
+                      }
+                      if (states.contains(WidgetState.hovered)) {
+                        return Colors.white.withValues(alpha: 0.05);
+                      }
+                      return null;
+                    },
+                  ),
+                  child: Container(
+                    width: _kRowEffectsMenuCloseButtonSize,
+                    height: _kRowEffectsMenuCloseButtonSize,
+                    decoration: _mixroomFxInsetDecoration(radius: 999),
+                    child:
+                        const Icon(Icons.close, size: 16, color: _kFxPanelText),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          actionTile(
+            title: 'Copy effects',
+            action: _MasterEffectsMenuAction.copy,
+            enabled: widget.onCopyMasterEffects != null,
+          ),
+          const SizedBox(height: 8),
+          actionTile(
+            title: 'Paste effects',
+            action: _MasterEffectsMenuAction.paste,
+            enabled: widget.hasCopiedMasterEffects &&
+                widget.onPasteMasterEffects != null,
+          ),
+          const SizedBox(height: 8),
+          actionTile(
+            title: 'Clear effects',
+            action: _MasterEffectsMenuAction.clear,
+            enabled: widget.onClearMasterEffects != null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMasterPresetStrip(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: SizedBox(
+            height: 34,
+            child: ShaderMask(
+              blendMode: BlendMode.dstIn,
+              shaderCallback: (Rect bounds) {
+                return const LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: <Color>[
+                    Colors.white,
+                    Colors.white,
+                    Colors.white,
+                    Colors.transparent,
+                  ],
+                  stops: <double>[0.0, 0.82, 0.93, 1.0],
+                ).createShader(bounds);
+              },
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.only(
+                  right: _kRowEffectsPresetFadeWidth + 6,
+                ),
+                child: Row(
+                  children: [
+                    _buildPresetChip("Concert Hall"),
+                    const SizedBox(width: 6),
+                    _buildPresetChip("Echoes"),
+                    const SizedBox(width: 6),
+                    _buildPresetChip("LoFi Effect"),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        _buildMasterEffectsMenuButton(context),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // If an effect is selected → show parameter page (no inner scroll)
@@ -4363,62 +4938,99 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4.0),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _buildPresetChip("Concert Hall"),
-                  const SizedBox(width: 6),
-                  _buildPresetChip("Echoes"),
-                  const SizedBox(width: 6),
-                  _buildPresetChip("LoFi Effect"),
-                  // const SizedBox(width: 6),
-                  // _buildPresetChip("Heavy Crunch"), // TODO: TEMP
-                ],
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4.0),
+                child: _buildMasterPresetStrip(context),
+              ),
+              const SizedBox(height: 2),
+              const SizedBox(height: 12),
+              Flexible(
+                fit: FlexFit.loose,
+                child: ReorderableListView(
+                  buildDefaultDragHandles:
+                      _shouldShowDefaultReorderHandles(context),
+                  padding: EdgeInsets.zero,
+                  children: [
+                    for (int i = 0; i < _effects.length; i++)
+                      _buildMasterEffectTile(i)
+                  ],
+                  onReorder: (oldIndex, newIndex) async {
+                    if (oldIndex < 0 || oldIndex >= _effects.length) return;
+                    if (newIndex > oldIndex) newIndex--;
+                    newIndex = newIndex.clamp(0, _effects.length - 1);
+                    if (oldIndex == newIndex) return;
+
+                    setState(() {
+                      _applyLocalReorder(oldIndex, newIndex);
+                    });
+
+                    try {
+                      await widget.reorderMasterEffects(oldIndex, newIndex);
+                    } catch (_) {
+                      await _loadEffects();
+                    }
+                  },
+                ),
+              ),
+              if (_effects.length < maxNumEffects)
+                Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: _buildAddTile()),
+            ],
+          ),
+          Positioned(
+            top: _kMasterEffectsMenuTopOffset,
+            right: _kMasterEffectsMenuRightOffset,
+            child: IgnorePointer(
+              ignoring: !_masterEffectsMenuOpen,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(
+                  begin: 0.0,
+                  end: _masterEffectsMenuOpen ? 1.0 : 0.0,
+                ),
+                duration: const Duration(milliseconds: 170),
+                curve: Curves.easeOutCubic,
+                builder: (context, t, child) {
+                  if (t <= 0.001) return const SizedBox.shrink();
+                  final widthFactor = _kRowEffectsMenuClosedWidthFactor +
+                      ((1.0 - _kRowEffectsMenuClosedWidthFactor) * t);
+                  final heightFactor = _kRowEffectsMenuClosedHeightFactor +
+                      ((1.0 - _kRowEffectsMenuClosedHeightFactor) * t);
+                  return Opacity(
+                    opacity: t,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: Align(
+                        alignment: Alignment.topRight,
+                        widthFactor: widthFactor,
+                        heightFactor: heightFactor,
+                        child: Transform.translate(
+                          offset: Offset((1.0 - t) * 8, (1.0 - t) * -4),
+                          child: child,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: _kRowEffectsMenuPanelWidth +
+                        _kMasterEffectsMenuInnerRightInset,
+                  ),
+                  child: Align(
+                    alignment: Alignment.topRight,
+                    child: _buildMasterEffectsMenuPanel(context),
+                  ),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 2),
-          const SizedBox(height: 12),
-          Flexible(
-            fit: FlexFit.loose,
-            child: ReorderableListView(
-              // shrinkWrap: true,
-              // physics: const NeverScrollableScrollPhysics(),
-              buildDefaultDragHandles:
-                  _shouldShowDefaultReorderHandles(context),
-              padding: EdgeInsets.zero,
-              children: [
-                for (int i = 0; i < _effects.length; i++)
-                  _buildMasterEffectTile(i)
-              ],
-              onReorder: (oldIndex, newIndex) async {
-                if (oldIndex < 0 || oldIndex >= _effects.length) return;
-                if (newIndex > oldIndex) newIndex--;
-                newIndex = newIndex.clamp(0, _effects.length - 1);
-                if (oldIndex == newIndex) return;
-
-                setState(() {
-                  _applyLocalReorder(oldIndex, newIndex);
-                });
-
-                try {
-                  await widget.reorderMasterEffects(oldIndex, newIndex);
-                } catch (_) {
-                  await _loadEffects();
-                }
-              },
-            ),
-          ),
-          if (_effects.length < maxNumEffects)
-            Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: _buildAddTile()),
         ],
       ),
     );
@@ -4553,6 +5165,10 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         await widget.insertMasterEffect('Reverb');
         await widget.setMasterEffectParam(0, 'Room Size', 53);
         await widget.setMasterEffectParam(0, 'Mix', 20);
+        await widget.insertMasterEffect('EQ 3-Band');
+        await widget.setMasterEffectParam(1, 'Low Gain', -1.0);
+        await widget.setMasterEffectParam(1, 'Mid Gain', 0.6);
+        await widget.setMasterEffectParam(1, 'High Gain', 1.2);
         break;
 
       case 'Echoes':
@@ -4976,6 +5592,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 
   Future<void> _openPluginParams(int idx) async {
     setState(() {
+      _masterEffectsMenuOpen = false;
       _selectedEffectIndex = idx;
       _paramsLoading = true;
       _currentParams = [];

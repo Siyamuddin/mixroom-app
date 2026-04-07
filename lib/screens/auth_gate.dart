@@ -309,10 +309,12 @@ class _RequiredProfileCompletionGateState
 
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _birthdateController = TextEditingController();
+  final TextEditingController _bioController = TextEditingController();
 
   DateTime? _selectedBirthdateUtc;
   String? _musicProfileValue;
   bool _musicProfileMenuOpen = false;
+  bool _acceptedLegalTerms = false;
   bool _newsletterOptIn = false;
   String? _inlineError;
   bool _isSubmitting = false;
@@ -335,6 +337,8 @@ class _RequiredProfileCompletionGateState
     _musicProfileValue = (widget.profile.musicProfile ?? '').trim().isEmpty
         ? null
         : widget.profile.musicProfile!.trim().toLowerCase();
+    _bioController.text = (widget.profile.bio ?? '').trim();
+    _acceptedLegalTerms = false;
     _newsletterOptIn = widget.profile.newsletterOptIn;
   }
 
@@ -421,6 +425,7 @@ class _RequiredProfileCompletionGateState
   void dispose() {
     _usernameController.dispose();
     _birthdateController.dispose();
+    _bioController.dispose();
     super.dispose();
   }
 
@@ -458,17 +463,14 @@ class _RequiredProfileCompletionGateState
 
   Widget _buildMusicProfileSelector({required bool busy}) {
     final triggerText = _musicProfileValue == null
-        ? L10n.translate(context, 'Select one (optional)')
+        ? L10n.translate(context, 'Select one')
         : musicProfileLabel(_musicProfileValue);
     final textColor = _musicProfileValue == null
         ? const Color.fromRGBO(244, 244, 244, 0.72)
         : const Color(0xFFF4F4F4);
-    final options = <MapEntry<String, String>>[
-      MapEntry('__unset__', L10n.translate(context, 'Not set')),
-      ...kMusicProfileOptions.map(
-        (option) => MapEntry(option.value, option.label),
-      ),
-    ];
+    final options = kMusicProfileOptions
+        .map((option) => MapEntry(option.value, option.label))
+        .toList();
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
@@ -567,9 +569,7 @@ class _RequiredProfileCompletionGateState
                             ),
                           ),
                           ...options.map((entry) {
-                            final isSelected = entry.key == '__unset__'
-                                ? _musicProfileValue == null
-                                : _musicProfileValue == entry.key;
+                            final isSelected = _musicProfileValue == entry.key;
                             return Material(
                               color: Colors.transparent,
                               child: InkWell(
@@ -577,10 +577,7 @@ class _RequiredProfileCompletionGateState
                                     ? null
                                     : () {
                                         setState(() {
-                                          _musicProfileValue =
-                                              entry.key == '__unset__'
-                                                  ? null
-                                                  : entry.key;
+                                          _musicProfileValue = entry.key;
                                           _inlineError = null;
                                           _musicProfileMenuOpen = false;
                                         });
@@ -733,11 +730,39 @@ class _RequiredProfileCompletionGateState
       return;
     }
     final birthdate = _selectedBirthdateUtc;
+    final bio = _bioController.text.trim();
     final latestAllowedBirthdate = _latestAllowedBirthdateUtc();
     if (birthdate != null && birthdate.isAfter(latestAllowedBirthdate)) {
       setState(() {
         _inlineError =
             'You must be at least ${LegalConfig.minimumSignupAgeYears} years old to use Mixroom.';
+      });
+      return;
+    }
+    if (_musicProfileValue == null) {
+      setState(() {
+        _inlineError = L10n.translate(
+          context,
+          'Please choose what you use Mixroom for.',
+        );
+      });
+      return;
+    }
+    if (bio.length > 160) {
+      setState(() {
+        _inlineError = L10n.translate(
+          context,
+          'Bio must be 160 characters or fewer.',
+        );
+      });
+      return;
+    }
+    if (!_acceptedLegalTerms) {
+      setState(() {
+        _inlineError = L10n.translate(
+          context,
+          'Please agree to the Terms of Service and Privacy Policy.',
+        );
       });
       return;
     }
@@ -767,6 +792,7 @@ class _RequiredProfileCompletionGateState
         familyName: widget.profile.familyName,
         birthdate: birthdate == null ? null : _formatBirthdate(birthdate),
         musicProfile: _musicProfileValue,
+        bio: bio.isEmpty ? null : bio,
         newsletterOptIn: _newsletterOptIn,
         syncImmediately: false,
       );
@@ -780,6 +806,7 @@ class _RequiredProfileCompletionGateState
         familyName: widget.profile.familyName,
         birthdate: birthdate == null ? null : _formatBirthdate(birthdate),
         musicProfile: _musicProfileValue,
+        bio: bio.isEmpty ? null : bio,
         newsletterOptIn: _newsletterOptIn,
       );
       if (!mounted) return;
@@ -818,6 +845,26 @@ class _RequiredProfileCompletionGateState
   Widget build(BuildContext context) {
     final busy = widget.busy || _isSubmitting;
     final errorText = (_inlineError ?? '').trim();
+    final legalErrorText = L10n.translate(
+      context,
+      'Please agree to the Terms of Service and Privacy Policy.',
+    );
+    final musicProfileErrorText = L10n.translate(
+      context,
+      'Please choose what you use Mixroom for.',
+    );
+    final bioErrorText = L10n.translate(
+      context,
+      'Bio must be 160 characters or fewer.',
+    );
+    final normalizedError = errorText.toLowerCase();
+    final highlightsUsernameSection = errorText.isNotEmpty &&
+        errorText != legalErrorText &&
+        errorText != musicProfileErrorText &&
+        errorText != bioErrorText &&
+        (normalizedError.contains('username') ||
+            errorText.startsWith('You must be at least '));
+    final highlightsConsentSection = errorText == legalErrorText;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -889,7 +936,7 @@ class _RequiredProfileCompletionGateState
                             ),
                             const SizedBox(height: 34),
                             MixroomGlassPanel(
-                              borderColor: errorText.isNotEmpty
+                              borderColor: highlightsUsernameSection
                                   ? const Color.fromRGBO(255, 157, 71, 0.72)
                                   : const Color.fromRGBO(244, 244, 244, 0.14),
                               child: Column(
@@ -910,10 +957,6 @@ class _RequiredProfileCompletionGateState
                                     label: L10n.translate(
                                       context,
                                       'Birthday (yyyy.mm.dd)',
-                                    ),
-                                    hintText: L10n.translate(
-                                      context,
-                                      'Birthday (optional)',
                                     ),
                                     readOnly: true,
                                     onTap: busy ? null : _pickBirthdate,
@@ -940,8 +983,7 @@ class _RequiredProfileCompletionGateState
                                           ),
                                         GestureDetector(
                                           onTap: busy ? null : _pickBirthdate,
-                                          behavior:
-                                              HitTestBehavior.translucent,
+                                          behavior: HitTestBehavior.translucent,
                                           child: Padding(
                                             padding: const EdgeInsets.only(
                                               right: 4,
@@ -959,6 +1001,7 @@ class _RequiredProfileCompletionGateState
                                 ],
                               ),
                             ),
+                            const SizedBox(height: 18),
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton.icon(
@@ -981,6 +1024,69 @@ class _RequiredProfileCompletionGateState
                                   ),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 18),
+                            Text(
+                              L10n.translate(context, 'Bio'),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 15,
+                                height: 22 / 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            MixroomGlassPanel(
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(23, 18, 23, 14),
+                                child: TextField(
+                                  controller: _bioController,
+                                  enabled: !busy,
+                                  minLines: 4,
+                                  maxLines: 4,
+                                  maxLength: 160,
+                                  cursorColor: Colors.white,
+                                  style: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Color(0xFFF4F4F4),
+                                    fontSize: 15,
+                                    height: 22 / 15,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                  onChanged: (_) {
+                                    if (_inlineError != null) {
+                                      setState(() => _inlineError = null);
+                                    }
+                                  },
+                                  decoration: InputDecoration(
+                                    border: InputBorder.none,
+                                    isDense: true,
+                                    hintText: L10n.translate(
+                                      context,
+                                      'Tell people a bit about yourself',
+                                    ),
+                                    hintStyle: const TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color:
+                                          Color.fromRGBO(244, 244, 244, 0.72),
+                                      fontSize: 15,
+                                      height: 22 / 15,
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                    counterStyle: const TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color:
+                                          Color.fromRGBO(244, 244, 244, 0.72),
+                                      fontSize: 11,
+                                      height: 1.3,
+                                      fontWeight: FontWeight.w400,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1017,6 +1123,153 @@ class _RequiredProfileCompletionGateState
                             ),
                             const SizedBox(height: 14),
                             _buildMusicProfileSelector(busy: busy),
+                            const SizedBox(height: 22),
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 160),
+                              curve: Curves.easeOutCubic,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: highlightsConsentSection
+                                      ? const Color.fromRGBO(
+                                          255,
+                                          157,
+                                          71,
+                                          0.72,
+                                        )
+                                      : Colors.transparent,
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  _SignupConsentCheckbox(
+                                    value:
+                                        _acceptedLegalTerms && _newsletterOptIn,
+                                    onChanged: busy
+                                        ? null
+                                        : (next) {
+                                            setState(() {
+                                              _acceptedLegalTerms = next;
+                                              _newsletterOptIn = next;
+                                              _inlineError = null;
+                                            });
+                                          },
+                                    label:
+                                        L10n.translate(context, 'Agree to all'),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  _SignupConsentCheckbox(
+                                    value: _acceptedLegalTerms,
+                                    onChanged: busy
+                                        ? null
+                                        : (next) {
+                                            setState(() {
+                                              _acceptedLegalTerms = next;
+                                              _inlineError = null;
+                                            });
+                                          },
+                                    richLabel: Wrap(
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      spacing: 2,
+                                      runSpacing: 2,
+                                      children: [
+                                        Text(
+                                          L10n.translate(
+                                            context,
+                                            'I agree to the',
+                                          ),
+                                          style: const TextStyle(
+                                            fontFamily: 'Pretendard',
+                                            color: Color.fromRGBO(
+                                              244,
+                                              244,
+                                              244,
+                                              0.82,
+                                            ),
+                                            fontSize: 13,
+                                            height: 18 / 13,
+                                            fontWeight: FontWeight.w400,
+                                          ),
+                                        ),
+                                        _ConsentLinkText(
+                                          label: L10n.translate(
+                                            context,
+                                            'Terms of Service',
+                                          ),
+                                          onTap: busy
+                                              ? null
+                                              : () => _openUrl(
+                                                    LegalConfig.termsUrl,
+                                                  ),
+                                        ),
+                                        Text(
+                                          L10n.translate(context, 'and'),
+                                          style: const TextStyle(
+                                            fontFamily: 'Pretendard',
+                                            color: Color.fromRGBO(
+                                              244,
+                                              244,
+                                              244,
+                                              0.82,
+                                            ),
+                                            fontSize: 13,
+                                            height: 18 / 13,
+                                            fontWeight: FontWeight.w400,
+                                          ),
+                                        ),
+                                        _ConsentLinkText(
+                                          label: L10n.translate(
+                                            context,
+                                            'Privacy Policy',
+                                          ),
+                                          onTap: busy
+                                              ? null
+                                              : () => _openUrl(
+                                                    LegalConfig.privacyUrl,
+                                                  ),
+                                        ),
+                                        const Text(
+                                          '.',
+                                          style: TextStyle(
+                                            fontFamily: 'Pretendard',
+                                            color: Color.fromRGBO(
+                                              244,
+                                              244,
+                                              244,
+                                              0.82,
+                                            ),
+                                            fontSize: 13,
+                                            height: 18 / 13,
+                                            fontWeight: FontWeight.w400,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  _SignupConsentCheckbox(
+                                    value: _newsletterOptIn,
+                                    onChanged: busy
+                                        ? null
+                                        : (next) {
+                                            setState(() {
+                                              _newsletterOptIn = next;
+                                              _inlineError = null;
+                                            });
+                                          },
+                                    label: L10n.translate(
+                                      context,
+                                      'Receive marketing and update emails',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                             const SizedBox(height: 60),
                             Center(
                               child: MixroomPillButton(
@@ -1048,6 +1301,92 @@ class _RequiredProfileCompletionGateState
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SignupConsentCheckbox extends StatelessWidget {
+  const _SignupConsentCheckbox({
+    required this.value,
+    required this.onChanged,
+    this.label,
+    this.richLabel,
+  }) : assert(label != null || richLabel != null);
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final String? label;
+  final Widget? richLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onChanged != null;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: enabled ? () => onChanged!(!value) : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 1.5),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Checkbox(
+              value: value,
+              onChanged: enabled ? (next) => onChanged!(next ?? false) : null,
+              activeColor: const Color(0xFF5F96FF),
+              visualDensity: const VisualDensity(
+                horizontal: -4,
+                vertical: -2,
+              ),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.40)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: richLabel ??
+                  Text(
+                    label!,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color.fromRGBO(244, 244, 244, 0.82),
+                      fontSize: 13,
+                      height: 18 / 13,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ConsentLinkText extends StatelessWidget {
+  const _ConsentLinkText({
+    required this.label,
+    required this.onTap,
+  });
+
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontFamily: 'Pretendard',
+          color: Color(0xFFF4F4F4),
+          fontSize: 13,
+          height: 18 / 13,
+          fontWeight: FontWeight.w500,
+          decoration: TextDecoration.underline,
+          decorationColor: Color(0xFFF4F4F4),
+        ),
       ),
     );
   }

@@ -3,13 +3,15 @@ import UIKit
 import AVFAudio
 
 @main
-@objc class AppDelegate: FlutterAppDelegate {
+@objc class AppDelegate: FlutterAppDelegate, UIDocumentInteractionControllerDelegate {
 
   private let channelName = "mixroom/open_file"
   private var channel: FlutterMethodChannel?
   private var hapticsChannel: FlutterMethodChannel?
   private var edgeGesturesChannel: FlutterMethodChannel?
   private var savedExportsChannel: FlutterMethodChannel?
+  private var savedExportDocumentController: UIDocumentInteractionController?
+  private var savedExportScopedURL: URL?
   private var initialMixroomPath: String?
   private var didAttemptHapticsAudioSessionConfig = false
   private var channelsInitialized = false
@@ -208,7 +210,7 @@ import AVFAudio
         result(false)
         return
       }
-      guard call.method == "openSavedExport" else {
+      guard call.method == "openSavedExport" || call.method == "shareSavedExport" else {
         result(FlutterMethodNotImplemented)
         return
       }
@@ -217,58 +219,175 @@ import AVFAudio
         result(false)
         return
       }
-      self.openSavedExport(path: path, result: result)
+      if call.method == "shareSavedExport" {
+        self.shareSavedExport(path: path, result: result)
+      } else {
+        self.openSavedExport(path: path, result: result)
+      }
     }
 
     channelsInitialized = true
   }
 
   private func openSavedExport(path: String, result: @escaping FlutterResult) {
-    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmed.isEmpty {
+    guard let url = resolvedSavedExportURL(path: path),
+          let presenter = topPresentingViewController() else {
       result(false)
       return
     }
 
-    var candidates: [URL] = []
-    if let url = URL(string: trimmed), url.scheme != nil {
-      candidates.append(url)
-    }
-    if trimmed.hasPrefix("/") {
-      candidates.append(URL(fileURLWithPath: trimmed))
-    }
-
-    var seen = Set<String>()
-    candidates = candidates.filter { url in
-      let key = url.absoluteString
-      if seen.contains(key) { return false }
-      seen.insert(key)
-      return true
-    }
-
     DispatchQueue.main.async {
-      for url in candidates {
-        var didStartAccess = false
-        if url.isFileURL {
-          didStartAccess = url.startAccessingSecurityScopedResource()
-        }
+      let didStartAccess = self.startAccessingSavedExportIfNeeded(url: url)
+      if !self.savedExportExists(url: url) {
+        self.stopAccessingSavedExportIfNeeded(url: url, didStartAccess: didStartAccess)
+        result(false)
+        return
+      }
 
-        let canOpen = UIApplication.shared.canOpenURL(url)
-        if canOpen {
-          UIApplication.shared.open(url, options: [:]) { _ in
-            if didStartAccess {
-              url.stopAccessingSecurityScopedResource()
-            }
-          }
+      UIApplication.shared.open(url, options: [:]) { success in
+        if success {
+          self.stopAccessingSavedExportIfNeeded(url: url, didStartAccess: didStartAccess)
           result(true)
           return
         }
-
-        if didStartAccess {
-          url.stopAccessingSecurityScopedResource()
-        }
+        self.presentSavedExportOptions(
+          url: url,
+          presenter: presenter,
+          didStartAccess: didStartAccess,
+          result: result
+        )
       }
-      result(false)
     }
+  }
+
+  private func shareSavedExport(path: String, result: @escaping FlutterResult) {
+    guard let url = resolvedSavedExportURL(path: path),
+          let presenter = topPresentingViewController() else {
+      result(false)
+      return
+    }
+
+    DispatchQueue.main.async {
+      let didStartAccess = self.startAccessingSavedExportIfNeeded(url: url)
+      if !self.savedExportExists(url: url) {
+        self.stopAccessingSavedExportIfNeeded(url: url, didStartAccess: didStartAccess)
+        result(false)
+        return
+      }
+
+      let activityViewController = UIActivityViewController(
+        activityItems: [url],
+        applicationActivities: nil
+      )
+      activityViewController.completionWithItemsHandler = { _, _, _, _ in
+        self.stopAccessingSavedExportIfNeeded(url: url, didStartAccess: didStartAccess)
+      }
+      if let popover = activityViewController.popoverPresentationController {
+        popover.sourceView = presenter.view
+        popover.sourceRect = CGRect(
+          x: presenter.view.bounds.midX,
+          y: presenter.view.bounds.midY,
+          width: 1,
+          height: 1
+        )
+        popover.permittedArrowDirections = []
+      }
+
+      presenter.present(activityViewController, animated: true)
+      result(true)
+    }
+  }
+
+  private func resolvedSavedExportURL(path: String) -> URL? {
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+      return nil
+    }
+    if let url = URL(string: trimmed), url.scheme != nil {
+      return url
+    }
+    if trimmed.hasPrefix("/") {
+      return URL(fileURLWithPath: trimmed)
+    }
+    return nil
+  }
+
+  private func topPresentingViewController() -> UIViewController? {
+    var current = currentFlutterViewController() ?? window?.rootViewController
+    while let presented = current?.presentedViewController {
+      current = presented
+    }
+    return current
+  }
+
+  private func startAccessingSavedExportIfNeeded(url: URL) -> Bool {
+    guard url.isFileURL else { return false }
+    return url.startAccessingSecurityScopedResource()
+  }
+
+  private func stopAccessingSavedExportIfNeeded(url: URL, didStartAccess: Bool) {
+    guard didStartAccess, url.isFileURL else { return }
+    url.stopAccessingSecurityScopedResource()
+  }
+
+  private func savedExportExists(url: URL) -> Bool {
+    if !url.isFileURL {
+      return true
+    }
+    return FileManager.default.fileExists(atPath: url.path)
+  }
+
+  private func presentSavedExportOptions(
+    url: URL,
+    presenter: UIViewController,
+    didStartAccess: Bool,
+    result: @escaping FlutterResult
+  ) {
+    let controller = UIDocumentInteractionController(url: url)
+    controller.delegate = self
+    savedExportDocumentController = controller
+    savedExportScopedURL = didStartAccess ? url : nil
+
+    if controller.presentPreview(animated: true) {
+      result(true)
+      return
+    }
+
+    if controller.presentOptionsMenu(from: presenter.view.bounds, in: presenter.view, animated: true) {
+      result(true)
+      return
+    }
+
+    releaseSavedExportDocumentController()
+    result(false)
+  }
+
+  private func releaseSavedExportDocumentController() {
+    if let url = savedExportScopedURL {
+      url.stopAccessingSecurityScopedResource()
+    }
+    savedExportScopedURL = nil
+    savedExportDocumentController = nil
+  }
+
+  func documentInteractionControllerViewControllerForPreview(
+    _ controller: UIDocumentInteractionController
+  ) -> UIViewController {
+    return topPresentingViewController()
+      ?? currentFlutterViewController()
+      ?? window?.rootViewController
+      ?? UIViewController()
+  }
+
+  func documentInteractionControllerDidEndPreview(_ controller: UIDocumentInteractionController) {
+    releaseSavedExportDocumentController()
+  }
+
+  func documentInteractionControllerDidDismissOptionsMenu(_ controller: UIDocumentInteractionController) {
+    releaseSavedExportDocumentController()
+  }
+
+  func documentInteractionControllerDidDismissOpenInMenu(_ controller: UIDocumentInteractionController) {
+    releaseSavedExportDocumentController()
   }
 }

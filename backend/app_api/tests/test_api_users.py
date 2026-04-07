@@ -729,6 +729,52 @@ class UsersApiHandlerTests(unittest.TestCase):
         self.assertEqual(payload.get("username"), None)
         self.assertEqual(payload.get("onboarding_state"), "bootstrap_only")
 
+    def test_patch_me_preserves_legacy_welcome_seen_marker(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-1",
+            "email": "user@example.com",
+            "email_lc": "user@example.com",
+            "display_name": "User Example",
+            "email_verified": True,
+            "cognito_username": "user@example.com",
+            "auth_provider": "email",
+            "username": "mixroomer",
+            "username_lc": "mixroomer",
+            "music_profile": None,
+            "profile_status": "active",
+            "onboarding_state": "signup_complete",
+            "accepted_terms_version": "2026-03-10",
+            "accepted_privacy_version": "2026-03-10",
+            "accepted_at": "2026-03-10T00:00:00+00:00",
+            "newsletter_opt_in": False,
+            "newsletter_opt_in_at": None,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "last_seen_at": "2026-01-01T00:00:00+00:00",
+            "schema_version": 4,
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {
+            "sub": "user-1",
+            "email": "user@example.com",
+            "email_verified": "true",
+            "cognito:username": "user@example.com",
+        }
+
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me",
+                "requestContext": {"http": {"method": "PATCH"}},
+                "body": '{"onboarding_state":"signup_complete_welcome_seen"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        self.assertEqual(payload.get("onboarding_state"), "signup_complete_welcome_seen")
+
     def test_delete_me_removes_account_for_free_user(self):
         repo = _FakeRepo()
         repo._auth_account = {

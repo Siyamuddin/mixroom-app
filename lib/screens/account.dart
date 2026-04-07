@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:intl/intl.dart';
+import 'package:mixroom/config/legal_config.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
@@ -19,6 +22,7 @@ import 'package:mixroom/widgets/app_shell_figma.dart';
 import 'package:mixroom/widgets/auth_figma_shell.dart';
 import 'package:mixroom/widgets/email_verification_sheet.dart';
 import 'package:mixroom/widgets/language_selector.dart';
+import 'package:mixroom/widgets/remote_welcome_onboarding_screen.dart';
 import 'package:provider/provider.dart';
 
 class AccountScreen extends StatelessWidget {
@@ -173,8 +177,10 @@ class _AccountBody extends StatefulWidget {
 class _AccountBodyState extends State<_AccountBody> {
   late TextEditingController _nameController;
   late TextEditingController _usernameController;
+  late TextEditingController _birthdateController;
   late TextEditingController _bioController;
   String? _musicProfileValue;
+  DateTime? _selectedBirthdateUtc;
   bool _isEditing = false;
   bool _isSaving = false;
 
@@ -183,6 +189,7 @@ class _AccountBodyState extends State<_AccountBody> {
     super.initState();
     _nameController = TextEditingController();
     _usernameController = TextEditingController();
+    _birthdateController = TextEditingController();
     _bioController = TextEditingController();
     _syncFromUser();
   }
@@ -201,6 +208,7 @@ class _AccountBodyState extends State<_AccountBody> {
   void dispose() {
     _nameController.dispose();
     _usernameController.dispose();
+    _birthdateController.dispose();
     _bioController.dispose();
     super.dispose();
   }
@@ -212,6 +220,11 @@ class _AccountBodyState extends State<_AccountBody> {
     _musicProfileValue = (widget.appUser?.musicProfile ?? '').trim().isEmpty
         ? null
         : widget.appUser?.musicProfile;
+    final rawBirthdate = (widget.appUser?.birthdate ?? '').trim();
+    _selectedBirthdateUtc = _parseStoredBirthdate(rawBirthdate);
+    _birthdateController.text = _selectedBirthdateUtc == null
+        ? rawBirthdate
+        : _formatBirthdate(_selectedBirthdateUtc!);
   }
 
   bool get _hasAuthChanges {
@@ -221,9 +234,77 @@ class _AccountBodyState extends State<_AccountBody> {
   bool get _hasAppProfileChanges {
     return _usernameController.text.trim() !=
             (widget.appUser?.username ?? '').trim() ||
+        _birthdateController.text.trim() !=
+            (widget.appUser?.birthdate ?? '').trim() ||
         _bioController.text.trim() != (widget.appUser?.bio ?? '').trim() ||
         ((_musicProfileValue ?? '').trim().toLowerCase() !=
             (widget.appUser?.musicProfile ?? '').trim().toLowerCase());
+  }
+
+  String? _validateBirthdate(DateTime? birthdateUtc) {
+    if (birthdateUtc == null) return null;
+    final latestAllowed = _latestAllowedBirthdateUtc();
+    if (birthdateUtc.isAfter(latestAllowed)) {
+      return 'You must be at least ${LegalConfig.minimumSignupAgeYears} years old to use Mixroom.';
+    }
+    return null;
+  }
+
+  DateTime _latestAllowedBirthdateUtc() {
+    final now = DateTime.now().toUtc();
+    final normalizedNow = DateTime.utc(now.year, now.month, now.day);
+    return DateTime.utc(
+      normalizedNow.year - LegalConfig.minimumSignupAgeYears,
+      normalizedNow.month,
+      normalizedNow.day,
+    );
+  }
+
+  DateTime _earliestSelectableBirthdateUtc() {
+    final latestAllowed = _latestAllowedBirthdateUtc();
+    return DateTime.utc(latestAllowed.year - 120, 1, 1);
+  }
+
+  String _formatBirthdate(DateTime birthdateUtc) {
+    final year = birthdateUtc.year.toString().padLeft(4, '0');
+    final month = birthdateUtc.month.toString().padLeft(2, '0');
+    final day = birthdateUtc.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
+
+  DateTime _defaultBirthdateForPickerUtc() {
+    final now = DateTime.now().toUtc();
+    final defaultDate = DateTime.utc(now.year - 18, now.month, now.day);
+    final first = _earliestSelectableBirthdateUtc();
+    final last = _latestAllowedBirthdateUtc();
+    if (defaultDate.isBefore(first)) return first;
+    if (defaultDate.isAfter(last)) return last;
+    return defaultDate;
+  }
+
+  Future<void> _pickBirthdate() async {
+    final initialDate =
+        _selectedBirthdateUtc ?? _defaultBirthdateForPickerUtc();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: _earliestSelectableBirthdateUtc(),
+      lastDate: _latestAllowedBirthdateUtc(),
+      helpText: 'Select birthday',
+    );
+    if (picked == null || !mounted) return;
+    final normalized = DateTime.utc(picked.year, picked.month, picked.day);
+    setState(() {
+      _selectedBirthdateUtc = normalized;
+      _birthdateController.text = _formatBirthdate(normalized);
+    });
+  }
+
+  void _clearBirthdate() {
+    setState(() {
+      _selectedBirthdateUtc = null;
+      _birthdateController.clear();
+    });
   }
 
   void _handleEditToggle() {
@@ -240,6 +321,7 @@ class _AccountBodyState extends State<_AccountBody> {
   Future<void> _save() async {
     final safeName = _nameController.text.trim();
     final safeUsername = _usernameController.text.trim().toLowerCase();
+    final safeBirthdate = _birthdateController.text.trim();
     final safeBio = _bioController.text.trim();
     if (safeName.isEmpty) {
       showAppSnackBar(
@@ -248,13 +330,18 @@ class _AccountBodyState extends State<_AccountBody> {
       );
       return;
     }
+    final birthdateError = _validateBirthdate(_selectedBirthdateUtc);
+    if (birthdateError != null) {
+      showAppSnackBar(context, birthdateError);
+      return;
+    }
     if (_isSaving) return;
     if (!widget.canEditAppProfile && _hasAppProfileChanges) {
       showAppSnackBar(
         context,
         L10n.translate(
           context,
-          'Username and bio require the deployed account backend before they can be saved.',
+          'Username, birthday, and bio require the deployed account backend before they can be saved.',
         ),
       );
       return;
@@ -279,6 +366,7 @@ class _AccountBodyState extends State<_AccountBody> {
         await appUserService.updateProfile(
           displayName: safeName,
           username: safeUsername,
+          birthdate: safeBirthdate,
           musicProfile: _musicProfileValue,
           bio: safeBio,
         );
@@ -372,7 +460,12 @@ class _AccountBodyState extends State<_AccountBody> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final appUserService = context.watch<AppUserService>();
-    final joinedAt = _formatDate(widget.user.createdAt.toLocal());
+    final joinedAt =
+        _formatReadableDate(context, widget.user.createdAt.toLocal());
+    final birthdayValue = _formatStoredBirthdateForDisplay(
+      context,
+      widget.appUser?.birthdate,
+    );
     final usernameValue = (widget.appUser?.username ?? '').trim();
     final bioValue = (widget.appUser?.bio ?? '').trim();
     final musicProfileValue = musicProfileLabel(widget.appUser?.musicProfile);
@@ -461,6 +554,15 @@ class _AccountBodyState extends State<_AccountBody> {
                 value: usernameValue.isEmpty
                     ? L10n.translate(context, 'Not set')
                     : usernameValue,
+              ),
+              _DividerLine(),
+              _EditableBirthdayRow(
+                isEditing: _isEditing,
+                enabled: widget.canEditAppProfile,
+                controller: _birthdateController,
+                value: birthdayValue,
+                onPick: _pickBirthdate,
+                onClear: _clearBirthdate,
               ),
               _DividerLine(),
               _EditableMusicProfileRow(
@@ -562,7 +664,7 @@ class _AccountBodyState extends State<_AccountBody> {
                               child: Text(
                                 L10n.translate(
                                   context,
-                                  'Username and bio save after the account backend is deployed.',
+                                  'Username, birthday, and bio save after the account backend is deployed.',
                                 ),
                                 style: const TextStyle(
                                   color: Colors.white60,
@@ -600,6 +702,10 @@ class _AccountBodyState extends State<_AccountBody> {
             );
           },
         ),
+        if (kDebugMode) ...[
+          const SizedBox(height: 12),
+          const _DebugOnboardingCard(),
+        ],
         if (widget.embeddedMode) ...[
           const SizedBox(height: 16),
           _EmbeddedLogoutButton(
@@ -608,6 +714,79 @@ class _AccountBodyState extends State<_AccountBody> {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _DebugOnboardingCard extends StatelessWidget {
+  const _DebugOnboardingCard();
+
+  Future<void> _openWelcomeOnboarding(BuildContext context) async {
+    await Navigator.of(context, rootNavigator: true).push<void>(
+      PageRouteBuilder<void>(
+        opaque: true,
+        barrierDismissible: false,
+        pageBuilder: (_, __, ___) => RemoteWelcomeOnboardingScreen(
+          onCompleted: () => Navigator.of(context, rootNavigator: true).pop(),
+        ),
+        transitionsBuilder: (_, animation, __, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MixroomShellSurface(
+      radius: 24,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      color: const Color.fromRGBO(244, 244, 244, 0.12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Debug Onboarding',
+            style: TextStyle(
+              color: Color(0xFFF4F4F4),
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Visible only in debug builds. Opens onboarding flows without resetting stored state.',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.74),
+              fontSize: 12.5,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: () => _openWelcomeOnboarding(context),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF54708F),
+                foregroundColor: const Color(0xFFF4F4F4),
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              child: const Text(
+                'Open Welcome Onboarding',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1361,6 +1540,118 @@ class _EditableBioRow extends StatelessWidget {
                   borderSide: BorderSide(color: Color(0xFF5F96FF), width: 1.1),
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EditableBirthdayRow extends StatelessWidget {
+  const _EditableBirthdayRow({
+    required this.isEditing,
+    required this.enabled,
+    required this.controller,
+    required this.value,
+    required this.onPick,
+    required this.onClear,
+  });
+
+  final bool isEditing;
+  final bool enabled;
+  final TextEditingController controller;
+  final String value;
+  final Future<void> Function() onPick;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isEditing) {
+      return _ReadonlyRow(label: 'Birthday', value: value);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _AccountFieldLabel(label: 'Birthday'),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: controller,
+                  enabled: enabled,
+                  readOnly: true,
+                  onTap: enabled ? onPick : null,
+                  onTapOutside: (_) => FocusScope.of(context).unfocus(),
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: L10n.translate(context, 'Select birthday'),
+                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.45)),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(enabled ? 0.06 : 0.03),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          BorderSide(color: Colors.white.withOpacity(0.12)),
+                    ),
+                    disabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          BorderSide(color: Colors.white.withOpacity(0.08)),
+                    ),
+                    focusedBorder: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(10)),
+                      borderSide:
+                          BorderSide(color: Color(0xFF5F96FF), width: 1.1),
+                    ),
+                    suffixIcon: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (controller.text.trim().isNotEmpty)
+                          IconButton(
+                            onPressed: enabled ? onClear : null,
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        IconButton(
+                          onPressed: enabled ? onPick : null,
+                          icon: const Icon(
+                            Icons.calendar_month_rounded,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ],
+                    ),
+                    suffixIconConstraints: const BoxConstraints(),
+                  ),
+                ),
+                if (!enabled) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    L10n.translate(
+                      context,
+                      'Available after the account backend is deployed.',
+                    ),
+                    style: const TextStyle(
+                      color: Colors.white60,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -2195,11 +2486,28 @@ class _AccountActions extends StatelessWidget {
   }
 }
 
-String _formatDate(DateTime value) {
-  final y = value.year.toString().padLeft(4, '0');
-  final m = value.month.toString().padLeft(2, '0');
-  final d = value.day.toString().padLeft(2, '0');
-  return '$y-$m-$d';
+DateTime? _parseStoredBirthdate(String raw) {
+  final safe = raw.trim();
+  if (safe.isEmpty) return null;
+  final parsed = DateTime.tryParse(safe);
+  if (parsed == null) return null;
+  return DateTime.utc(parsed.year, parsed.month, parsed.day);
+}
+
+String _formatReadableDate(BuildContext context, DateTime value) {
+  final locale = Localizations.localeOf(context).toString();
+  return DateFormat('MMMM d, yyyy', locale).format(value);
+}
+
+String _formatStoredBirthdateForDisplay(BuildContext context, String? raw) {
+  final safe = (raw ?? '').trim();
+  if (safe.isEmpty) return L10n.translate(context, 'Not set');
+  final parsed = _parseStoredBirthdate(safe);
+  if (parsed == null) return safe;
+  return _formatReadableDate(
+    context,
+    DateTime(parsed.year, parsed.month, parsed.day),
+  );
 }
 
 String _initials(String name) {

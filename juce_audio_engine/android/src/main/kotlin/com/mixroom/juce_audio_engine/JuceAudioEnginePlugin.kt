@@ -52,7 +52,12 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   override fun onAttachedToEngine(binding: FlutterPluginBinding) {
     sharedInstance = this
     applicationContext = binding.applicationContext
-    promptAnalysisService = PromptAnalysisService(binding.applicationContext)
+    promptAnalysisService =
+      PromptAnalysisService(
+        context = binding.applicationContext,
+        yamnetAssetLookupKey =
+          binding.flutterAssets.getAssetFilePathBySubpath("assets/models/yamnet.onnx"),
+      )
 
     JuceBridge.setAndroidContextJNI(binding.applicationContext)
 

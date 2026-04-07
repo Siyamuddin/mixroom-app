@@ -2975,8 +2975,7 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
     if (effectIndex < 0 || effectIndex >= chain.size())
         return;
 
-    auto nodeID = chain.getReference(effectIndex);
-    graph.removeNode(nodeID);
+    const auto nodeID = chain.getReference(effectIndex);
 
     chain.removeRange(effectIndex, 1);
     auto &fxIds = rows[(size_t)trackRow].fxIds;
@@ -2999,6 +2998,18 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
     }
 
     rewireTrackBusFxChain(trackRow);
+
+    juce::Array<AudioProcessorGraph::Connection> nodeConnections;
+    for (const auto &connection : graph.getConnections())
+    {
+        if (connection.source.nodeID == nodeID ||
+            connection.destination.nodeID == nodeID)
+            nodeConnections.addIfNotAlreadyThere(connection);
+    }
+    for (const auto &connection : nodeConnections)
+        graph.removeConnection(connection);
+    if (graph.getNodeForId(nodeID) != nullptr)
+        graph.removeNode(nodeID);
 }
 
 void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
@@ -3771,8 +3782,7 @@ void JuceEngine::removeMasterEffect(int effectIndex)
     if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
         return;
 
-    auto nodeID = masterEffectChain->getReference(effectIndex);
-    graph.removeNode(nodeID);
+    const auto nodeID = masterEffectChain->getReference(effectIndex);
 
     masterEffectChain->removeRange(effectIndex, 1);
     if (effectIndex >= 0 && effectIndex < masterEffectIds.size())
@@ -3793,6 +3803,18 @@ void JuceEngine::removeMasterEffect(int effectIndex)
     }
 
     rewireMasterFxChain();
+
+    juce::Array<AudioProcessorGraph::Connection> nodeConnections;
+    for (const auto &connection : graph.getConnections())
+    {
+        if (connection.source.nodeID == nodeID ||
+            connection.destination.nodeID == nodeID)
+            nodeConnections.addIfNotAlreadyThere(connection);
+    }
+    for (const auto &connection : nodeConnections)
+        graph.removeConnection(connection);
+    if (graph.getNodeForId(nodeID) != nullptr)
+        graph.removeNode(nodeID);
 }
 
 void JuceEngine::reorderMasterEffects(int fromIndex, int toIndex)
@@ -5600,13 +5622,11 @@ void JuceEngine::applyOutputSafetyGuard(float *const *output,
             continue;
         }
 
+        const float frameGain =
+            peak > kSafetyCeiling ? (kSafetyCeiling / peak) : 1.0f;
         const bool transitionGuardActive =
             outputSafetyFadeSamplesRemaining > 0 &&
             outputSafetyFadeSamplesTotal > 0;
-        const float frameGain =
-            (transitionGuardActive && peak > kSafetyCeiling)
-                ? (kSafetyCeiling / peak)
-                : 1.0f;
         const float fadeGain =
             transitionGuardActive
                 ? 1.0f - ((float)outputSafetyFadeSamplesRemaining /
@@ -5627,8 +5647,7 @@ void JuceEngine::applyOutputSafetyGuard(float *const *output,
                     juce::jmax(outputSafetyMuteSamplesRemaining, emergencyMuteSamples);
             }
 
-            if (transitionGuardActive)
-                value = juce::jlimit(-kSafetyCeiling, kSafetyCeiling, value);
+            value = juce::jlimit(-kSafetyCeiling, kSafetyCeiling, value);
             channelData[sample] = value;
 
             if (ch < (int)outputSafetyLastSample.size())

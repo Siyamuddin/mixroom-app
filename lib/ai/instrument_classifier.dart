@@ -105,7 +105,7 @@ class InstrumentClassifier {
       final inputName = session.inputNames.first;
       final outputName = session.outputNames.first;
 
-      final inputTensor = await OrtValue.fromList(frame, [1, frame.length]);
+      final inputTensor = await OrtValue.fromList(frame, [frame.length]);
       final inputs = {inputName: inputTensor};
       final outputs = await session.run(inputs);
 

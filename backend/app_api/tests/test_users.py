@@ -154,6 +154,42 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
         self.assertEqual(updated["music_profile"], "artist")
         self.assertEqual(updated["onboarding_state"], "profile_ready")
 
+    def test_apply_patch_accepts_student_music_profile(self) -> None:
+        updated = apply_user_profile_patch(
+            {
+                "user_id": "user-123",
+                "email": "hello@example.com",
+                "display_name": "Existing Name",
+                "email_verified": True,
+                "cognito_username": "hello@example.com",
+                "auth_provider": "email",
+                "username": "mixroom_user",
+                "username_lc": "mixroom_user",
+                "given_name": None,
+                "family_name": None,
+                "birthdate": None,
+                "music_profile": None,
+                "avatar_url": None,
+                "bio": None,
+                "profile_status": "active",
+                "onboarding_state": "bootstrap_only",
+                "accepted_terms_version": None,
+                "accepted_privacy_version": None,
+                "accepted_at": None,
+                "newsletter_opt_in": False,
+                "newsletter_opt_in_at": None,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "last_seen_at": "2026-01-01T00:00:00+00:00",
+                "schema_version": 1,
+            },
+            {
+                "music_profile": "student",
+            },
+        )
+
+        self.assertEqual(updated["music_profile"], "student")
+
     def test_apply_patch_sets_display_name_from_username_when_display_name_is_email_fallback(
         self,
     ) -> None:
@@ -319,6 +355,41 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
         self.assertIsNone(updated["birthdate"])
         self.assertEqual(updated["username"], "hello_user")
         self.assertEqual(updated["onboarding_state"], "signup_complete")
+
+    def test_apply_patch_preserves_legacy_welcome_seen_marker(self) -> None:
+        updated = apply_user_profile_patch(
+            {
+                "user_id": "user-123",
+                "email": "hello@example.com",
+                "display_name": "Existing Name",
+                "email_verified": True,
+                "cognito_username": "hello@example.com",
+                "auth_provider": "email",
+                "username": "hello_user",
+                "username_lc": "hello_user",
+                "given_name": None,
+                "family_name": None,
+                "birthdate": None,
+                "avatar_url": None,
+                "bio": None,
+                "profile_status": "active",
+                "onboarding_state": "signup_complete",
+                "accepted_terms_version": "2026-03-10",
+                "accepted_privacy_version": "2026-03-10",
+                "accepted_at": "2026-03-10T00:00:00+00:00",
+                "newsletter_opt_in": False,
+                "newsletter_opt_in_at": None,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "last_seen_at": "2026-01-01T00:00:00+00:00",
+                "schema_version": 4,
+            },
+            {
+                "onboarding_state": "signup_complete_welcome_seen",
+            },
+        )
+
+        self.assertEqual(updated["onboarding_state"], "signup_complete_welcome_seen")
 
     def test_rejects_unsupported_music_profile(self) -> None:
         with self.assertRaisesRegex(

@@ -7101,6 +7101,21 @@ class ExportSuccessScreen extends StatelessWidget {
 
   Future<void> _shareFile(BuildContext context) async {
     try {
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+        final saved = savedFilePath?.trim();
+        if (saved != null && saved.isNotEmpty) {
+          final shared = await ExportSaveDialog.shareSavedExportFromPlatform(
+            saved,
+          );
+          if (shared) {
+            return;
+          }
+          if (Platform.isIOS) {
+            throw Exception('Unable to share the saved export on iOS.');
+          }
+        }
+      }
+
       var sharePath = _resolvedActionPath();
       if (_isUriLikePath(sharePath) || !File(sharePath).existsSync()) {
         final fallback = _normalizedCandidatePath(filePath);

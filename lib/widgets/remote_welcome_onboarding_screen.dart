@@ -79,19 +79,23 @@ class _RemoteWelcomeOnboardingScreenState
               ),
             ),
             SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: _buildPageViewport(copy),
+              child: Column(
+                children: [
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: _buildPageViewport(copy),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                    child: Column(
+                      children: [
+                        _buildPageIndicators(),
+                        const SizedBox(height: 18),
+                        _buildPrimaryButton(copy),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                    _buildPageIndicators(),
-                    const SizedBox(height: 18),
-                    _buildPrimaryButton(copy),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],

@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 
 const bool kAiDebugLogs = bool.fromEnvironment(
   'MIXROOM_AI_DEBUG',
-  defaultValue: true,
+  defaultValue: false,
 );
 
 const bool kAiDebugVerbose = bool.fromEnvironment(
@@ -11,8 +11,16 @@ const bool kAiDebugVerbose = bool.fromEnvironment(
   defaultValue: false,
 );
 
+const Set<String> _kAiVerboseOnlyScopes = <String>{
+  'pipeline',
+  'mix-plan',
+  'onnx-mag',
+  'yamnet',
+};
+
 void aiDebugLog(String scope, String message) {
   if (!kAiDebugLogs) return;
+  if (!kAiDebugVerbose && _kAiVerboseOnlyScopes.contains(scope)) return;
   final loggerName = 'AI.$scope';
   developer.log(message, name: loggerName);
   debugPrint('[$loggerName] $message');

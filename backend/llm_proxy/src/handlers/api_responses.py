@@ -640,6 +640,15 @@ def _decode_tool_arguments(value: Any) -> Dict[str, Any] | None:
             stripped = current.strip()
             if not stripped:
                 return None
+            if stripped.startswith("```") and stripped.endswith("```"):
+                stripped = re.sub(
+                    r"^```(?:json)?\s*|\s*```$",
+                    "",
+                    stripped,
+                    flags=re.IGNORECASE | re.DOTALL,
+                ).strip()
+                if not stripped:
+                    return None
             try:
                 current = json.loads(stripped)
             except json.JSONDecodeError:

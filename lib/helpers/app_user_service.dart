@@ -146,6 +146,7 @@ class AppUserService extends ChangeNotifier {
   Future<void> updateProfile({
     required String displayName,
     required String username,
+    String? birthdate,
     String? musicProfile,
     required String bio,
     String? avatarUrl,
@@ -167,6 +168,8 @@ class AppUserService extends ChangeNotifier {
       final body = <String, dynamic>{
         'display_name': displayName.trim(),
         'username': username.trim(),
+        'birthdate':
+            (birthdate ?? '').trim().isEmpty ? null : birthdate!.trim(),
         'music_profile': (musicProfile ?? '').trim().isEmpty
             ? null
             : musicProfile!.trim().toLowerCase(),
@@ -230,6 +233,7 @@ class AppUserService extends ChangeNotifier {
     String? familyName,
     String? birthdate,
     String? musicProfile,
+    String? bio,
     required bool newsletterOptIn,
   }) async {
     final auth = _auth;
@@ -252,6 +256,7 @@ class AppUserService extends ChangeNotifier {
     final safeFamilyName = (familyName ?? '').trim();
     final safeBirthdate = (birthdate ?? '').trim();
     final safeMusicProfile = (musicProfile ?? '').trim().toLowerCase();
+    final safeBio = (bio ?? '').trim();
     final acceptedAt = DateTime.now().toUtc();
 
     _isLoading = true;
@@ -275,6 +280,7 @@ class AppUserService extends ChangeNotifier {
                 'birthdate': safeBirthdate.isEmpty ? null : safeBirthdate,
                 'music_profile':
                     safeMusicProfile.isEmpty ? null : safeMusicProfile,
+                'bio': safeBio.isEmpty ? null : safeBio,
                 'accepted_terms_version': LegalConfig.termsVersion,
                 'accepted_privacy_version': LegalConfig.privacyVersion,
                 'accepted_at': acceptedAt.toIso8601String(),
@@ -324,7 +330,6 @@ class AppUserService extends ChangeNotifier {
 
   Future<void> markWelcomeOnboardingSeen() async {
     await stageWelcomeOnboardingSeen();
-    await syncWelcomeOnboardingSeen();
   }
 
   Future<bool> hasSeenWelcomeOnboardingLocally(String userId) async {
@@ -362,59 +367,6 @@ class AppUserService extends ChangeNotifier {
     await _writeWelcomeSeenFlag(user.userId, true);
   }
 
-  Future<void> syncWelcomeOnboardingSeen() async {
-    final auth = _auth;
-    final user = auth?.signedInUser;
-    final current = _current;
-    if (auth == null || user == null || current == null) {
-      return;
-    }
-
-    if (!supportsRemoteProfileEdits) {
-      return;
-    }
-
-    final response = await auth.authorizedRequest(
-      (token) => _httpClient
-          .patch(
-            _buildUri('/v1/users/me'),
-            headers: <String, String>{
-              'Authorization': 'Bearer $token',
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode(<String, dynamic>{
-              'onboarding_state': AppUserSnapshot.welcomeSeenState,
-            }),
-          )
-          .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
-    );
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      if (response.statusCode == 401 || response.statusCode == 403) {
-        throw StateError('Session expired. Please sign in again.');
-      }
-      throw StateError(
-        _extractErrorMessage(
-              response.body,
-              fallback: 'Failed to save welcome state.',
-            ) ??
-            'Failed to save welcome state.',
-      );
-    }
-
-    _current = _parseProfileResponse(response.body, fallbackUser: user);
-    _syncAnalyticsProfile(_current);
-    _lastSyncedAtUtc = DateTime.now().toUtc();
-    _lastError = null;
-    _isInitialized = true;
-    notifyListeners();
-    await _writeCachedProfile(user.userId, _current!);
-    if (_current!.hasSeenWelcomeOnboarding) {
-      await _writeWelcomeSeenFlag(user.userId, true);
-    }
-  }
-
   Future<void> stageSignupConsents({
     required String email,
     String? username,
@@ -423,6 +375,7 @@ class AppUserService extends ChangeNotifier {
     String? familyName,
     String? birthdate,
     String? musicProfile,
+    String? bio,
     required bool newsletterOptIn,
     bool syncImmediately = true,
   }) async {
@@ -434,6 +387,7 @@ class AppUserService extends ChangeNotifier {
     final safeFamilyName = (familyName ?? '').trim();
     final safeBirthdate = (birthdate ?? '').trim();
     final safeMusicProfile = (musicProfile ?? '').trim().toLowerCase();
+    final safeBio = (bio ?? '').trim();
 
     final acceptedAt = DateTime.now().toUtc();
     final payload = <String, dynamic>{
@@ -444,6 +398,7 @@ class AppUserService extends ChangeNotifier {
       'family_name': safeFamilyName.isEmpty ? null : safeFamilyName,
       'birthdate': safeBirthdate.isEmpty ? null : safeBirthdate,
       'music_profile': safeMusicProfile.isEmpty ? null : safeMusicProfile,
+      'bio': safeBio.isEmpty ? null : safeBio,
       'accepted_terms_version': LegalConfig.termsVersion,
       'accepted_privacy_version': LegalConfig.privacyVersion,
       'accepted_at': acceptedAt.toIso8601String(),
@@ -770,6 +725,7 @@ class AppUserService extends ChangeNotifier {
       final birthdate = (payload['birthdate'] ?? '').toString().trim();
       final musicProfile =
           (payload['music_profile'] ?? '').toString().trim().toLowerCase();
+      final bio = (payload['bio'] ?? '').toString().trim();
       final username =
           (payload['username'] ?? '').toString().trim().toLowerCase();
       final newsletterOptIn = payload['newsletter_opt_in'] == true;
@@ -791,6 +747,7 @@ class AppUserService extends ChangeNotifier {
           ((currentProfile.musicProfile ?? '').trim().toLowerCase() ==
                   musicProfile ||
               musicProfile.isEmpty) &&
+          ((currentProfile.bio ?? '').trim() == bio || bio.isEmpty) &&
           currentProfile.acceptedPrivacyVersion == acceptedPrivacyVersion &&
           (currentProfile.acceptedAt?.toIso8601String() ?? '') == acceptedAt &&
           currentProfile.newsletterOptIn == newsletterOptIn &&
@@ -820,6 +777,7 @@ class AppUserService extends ChangeNotifier {
                 if (familyName.isNotEmpty) 'family_name': familyName,
                 'birthdate': birthdate.isEmpty ? null : birthdate,
                 'music_profile': musicProfile.isEmpty ? null : musicProfile,
+                'bio': bio.isEmpty ? null : bio,
                 'accepted_terms_version': acceptedTermsVersion,
                 'accepted_privacy_version': acceptedPrivacyVersion,
                 'accepted_at': acceptedAt,

@@ -1,0 +1,7 @@
+{
+  "OPENAI_API_KEY": "sk-...",
+  "OPENAI_MODEL": "gpt-4.1-mini",
+  "LLM_DISABLE_PROXY_IN_DEBUG": "true",
+  "MIXROOM_AI_DEBUG": "true",
+  "MIXROOM_AI_DEBUG_VERBOSE": "false"
+}

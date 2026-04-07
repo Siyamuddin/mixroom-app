@@ -121,7 +121,6 @@ const String kMixroomDawTopBackIconAsset = 'assets/daw/top_back_icon.png';
 const String kMixroomDawTopShareIconAsset = 'assets/daw/top_share_icon.png';
 const String kMixroomDawTransportWaveIconAsset =
     'assets/daw/transport_wave_icon.png';
-const String kMixroomDawChatBarIconAsset = 'assets/daw/chat_bar_icon.svg';
 const String kMixroomExportProgressBgAsset =
     'assets/daw/export_progress_bg.png';
 const Set<String> kDefaultProducerCaptureUsernameAllowlist = <String>{
@@ -2444,6 +2443,34 @@ class _CopiedClipGroupEntry {
   });
 }
 
+class _CopiedRowEffectsEntry {
+  final RowEffectsSnapshot effects;
+  final List<AutomationLaneSnapshot> automationLanes;
+  final List<AutomationClipSnapshot> automationClips;
+  final String? selectedAutomationTargetId;
+
+  const _CopiedRowEffectsEntry({
+    required this.effects,
+    required this.automationLanes,
+    required this.automationClips,
+    this.selectedAutomationTargetId,
+  });
+}
+
+class _EffectsClipboardEntry {
+  final List<EffectSnapshot> effects;
+  final List<AutomationLaneSnapshot> automationLanes;
+  final List<AutomationClipSnapshot> automationClips;
+  final String? selectedAutomationTargetId;
+
+  const _EffectsClipboardEntry({
+    required this.effects,
+    this.automationLanes = const <AutomationLaneSnapshot>[],
+    this.automationClips = const <AutomationClipSnapshot>[],
+    this.selectedAutomationTargetId,
+  });
+}
+
 class _InputChannelRouteOption {
   final int channelStart;
   final int channelCount;
@@ -3940,6 +3967,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<_CopiedClipGroupEntry>? _copiedClipGroup;
   Duration _copiedTrimStart = Duration.zero;
   Duration _copiedTrimEnd = Duration.zero;
+  _EffectsClipboardEntry? _copiedEffects;
 
   // Piano roll / instrument editor
   bool _showPianoRoll = false;
@@ -4102,6 +4130,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _reopenSampleBrowserExpanded = false;
   bool _showAddActionsPanel = false;
   String? _activeAddActionId;
+  bool _backButtonExitInFlight = false;
+  bool _backButtonPressed = false;
+  bool _backButtonTapFeedbackActive = false;
   bool _addButtonPressed = false;
   final GlobalKey _addButtonAnchorKey = GlobalKey();
   int? _topPopupTapPointerId;
@@ -5345,6 +5376,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           '이제 제작, 편집, 오토메이션, 내보내기를 진행할 수 있어요. 프로젝트 설정에서 언제든 튜토리얼을 다시 실행할 수 있어요.',
       'ja': 'これで制作、編集、オートメーション、書き出しの準備ができました。チュートリアルはプロジェクト設定からいつでも再実行できます。',
     },
+    'start_dialog_title': {
+      'en': 'Start DAW tutorial?',
+      'ko': 'DAW 튜토리얼을 시작할까요?',
+      'ja': 'DAW チュートリアルを始めますか？',
+    },
+    'start_dialog_body': {
+      'en':
+          'Take a guided 23-step walkthrough of the timeline, tracks, effects, automation, AI, and export flow. You can replay it anytime from project settings.',
+      'ko':
+          '타임라인, 트랙, 이펙트, 오토메이션, AI, 내보내기 흐름을 23단계로 안내해 드려요. 프로젝트 설정에서 언제든 다시 실행할 수 있어요.',
+      'ja':
+          'タイムライン、トラック、エフェクト、オートメーション、AI、書き出しの流れを 23 ステップで案内します。プロジェクト設定からいつでも再実行できます。',
+    },
+    'start_tutorial': {
+      'en': 'Start tutorial',
+      'ko': '튜토리얼 시작',
+      'ja': 'チュートリアルを開始',
+    },
   };
 
   String _dawTutorialLanguageCode() {
@@ -5949,10 +5998,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              L10n.translate(
-                                dialogContext,
-                                'Start DAW tutorial?',
-                              ),
+                              _dawTutorialText('start_dialog_title'),
                               style: const TextStyle(
                                 fontFamily: 'Pretendard',
                                 color: Color(0xFFF4F4F4),
@@ -5966,10 +6012,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       ),
                       const SizedBox(height: 14),
                       Text(
-                        L10n.translate(
-                          dialogContext,
-                          'Take a guided 23-step walkthrough of the timeline, tracks, effects, automation, AI, and export flow. You can replay it anytime from project settings.',
-                        ),
+                        _dawTutorialText('start_dialog_body'),
                         style: TextStyle(
                           fontFamily: 'Pretendard',
                           color: Colors.white.withValues(alpha: 0.84),
@@ -5998,7 +6041,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               child: Text(
-                                L10n.translate(dialogContext, 'Skip'),
+                                _dawTutorialText('skip'),
                                 style: const TextStyle(
                                   fontFamily: 'Pretendard',
                                   fontWeight: FontWeight.w600,
@@ -6021,7 +6064,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               child: Text(
-                                L10n.translate(dialogContext, 'Start tutorial'),
+                                _dawTutorialText('start_tutorial'),
                                 style: const TextStyle(
                                   fontFamily: 'Pretendard',
                                   fontWeight: FontWeight.w700,
@@ -6041,6 +6084,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ) ??
         false;
     return shouldStart;
+  }
+
+  Future<void> _debugShowDawOnboardingStartDialog() async {
+    if (!kDebugMode) return;
+    final shouldStart = await _showDawOnboardingStartDialog();
+    if (!mounted || !shouldStart) return;
+    _startDawOnboarding();
   }
 
   Future<void> _maybeShowDawOnboarding() async {
@@ -7605,6 +7655,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       await JuceAudioEngine.shutdown();
       Navigator.of(context).pop();
+    }
+  }
+
+  void _handleBackButtonTap() {
+    if (_backButtonExitInFlight) return;
+    unawaited(_runBackButtonExitSequence());
+  }
+
+  Future<void> _runBackButtonExitSequence() async {
+    _backButtonExitInFlight = true;
+    if (mounted) {
+      setState(() {
+        _backButtonTapFeedbackActive = true;
+      });
+    }
+    unawaited(AppHaptics.impact(AppHapticImpact.light));
+    await SchedulerBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 48));
+    if (mounted && _backButtonTapFeedbackActive) {
+      setState(() {
+        _backButtonTapFeedbackActive = false;
+      });
+    }
+    try {
+      await _handleBackPressed();
+    } finally {
+      _backButtonExitInFlight = false;
+      if (mounted && (_backButtonTapFeedbackActive || _backButtonPressed)) {
+        setState(() {
+          _backButtonTapFeedbackActive = false;
+          _backButtonPressed = false;
+        });
+      }
     }
   }
 
@@ -9218,8 +9301,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         reportProgress(0.80);
 
         if (exportedPath.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(L10n.translate(context, "Export failed"))));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(L10n.translate(context, "Export failed"))));
           return "";
         }
 
@@ -16215,6 +16298,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'after_count': after.effects.length,
         });
       },
+      onCopyMasterEffects: () {
+        unawaited(_copyMasterEffects());
+      },
+      onPasteMasterEffects: () => _pasteMasterEffects(onMasterFxGraphChanged),
+      onClearMasterEffects: () => _clearMasterEffects(onMasterFxGraphChanged),
+      hasCopiedMasterEffects: _copiedEffects != null,
       projectBpm: _tempo,
       meters: _meters,
       getMasterCompressorMeter: (fx) =>
@@ -16317,9 +16406,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     double size = 52,
     bool drawShell = true,
     bool showPressFeedback = false,
+    bool pressed = false,
+    ValueChanged<bool>? onHighlightChanged,
   }) {
     final BorderRadius buttonRadius = BorderRadius.circular(size / 2);
-    final Widget body = drawShell
+    final Widget shell = drawShell
         ? _buildDawConnectedSurface(
             borderRadius: buttonRadius,
             active: active,
@@ -16334,6 +16425,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             height: size,
             child: child,
           );
+    final Widget body = AnimatedScale(
+      duration: const Duration(milliseconds: 110),
+      curve: Curves.easeOutCubic,
+      scale: pressed ? 0.93 : 1.0,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOutCubic,
+        opacity: pressed ? 0.82 : 1.0,
+        child: shell,
+      ),
+    );
     return Semantics(
       button: true,
       enabled: onTap != null,
@@ -16343,6 +16445,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               child: InkResponse(
                 key: key,
                 onTap: onTap,
+                onHighlightChanged: onHighlightChanged,
                 containedInkWell: true,
                 highlightShape: BoxShape.circle,
                 customBorder: const CircleBorder(),
@@ -16402,10 +16505,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           children: [
             _buildTopCircleButtonShell(
               key: _editorBackButtonKey,
-              onTap: _handleBackPressed,
+              onTap: _handleBackButtonTap,
               active: connectedTopPanelVisible,
               size: layoutSpec.topBarActionButtonSize,
               showPressFeedback: true,
+              pressed: _backButtonPressed || _backButtonTapFeedbackActive,
+              onHighlightChanged: (pressed) {
+                if (!mounted || _backButtonPressed == pressed) return;
+                setState(() {
+                  _backButtonPressed = pressed;
+                });
+              },
               child: Center(
                 child: SvgPicture.asset(
                   kMixroomDawTopBackIconAsset,
@@ -16883,6 +16993,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   ),
                                 ),
                               ),
+                              if (kDebugMode) ...[
+                                const SizedBox(height: 10),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton(
+                                    onPressed: () {
+                                      unawaited(
+                                        _debugShowDawOnboardingStartDialog(),
+                                      );
+                                    },
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFFF4F4F4),
+                                      side: BorderSide(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.18),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 14,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(999),
+                                      ),
+                                    ),
+                                    child: const Text(
+                                      'Debug: Show First-Open Prompt',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                               const SizedBox(height: 12),
                               Center(
                                 child: TextButton(
@@ -19717,7 +19862,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         fallback: true,
       );
       final targets = drilldown
-          ? sequence
+          ? AssistantActionUtils.compactTutorialPlaybackTargets(sequence)
           : <String>[sequence.isEmpty ? 'tutorial:timeline' : sequence.last];
       if (targets.isEmpty) continue;
 
@@ -19725,22 +19870,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               _toActionInt(data['duration_ms']) ??
               3200)
           .clamp(1200, 18000);
-      final perTargetDurationMs = (targets.length <= 1)
-          ? baseDurationMs
-          : (baseDurationMs / math.min(targets.length, 3))
-              .round()
-              .clamp(1100, 4200);
+      final previewDurationMs =
+          AssistantActionUtils.tutorialPreviewDurationMs(baseDurationMs);
+      final previewPauseMs = (_toActionInt(step['pause_ms']) ??
+              AssistantActionUtils.tutorialPreviewPauseMs(previewDurationMs))
+          .clamp(480, 1400);
+      final finalDurationMs =
+          AssistantActionUtils.tutorialFinalDurationMs(baseDurationMs);
 
       for (int j = 0; j < targets.length; j++) {
         final key = targets[j];
+        final isLastOverall = i == steps.length - 1 && j == targets.length - 1;
+        final durationMs = isLastOverall ? finalDurationMs : previewDurationMs;
         _mixHighlighter.clear();
         _mixHighlighter.trigger(
           [HaloKey(key)],
-          duration: Duration(milliseconds: perTargetDurationMs),
+          duration: Duration(milliseconds: durationMs),
         );
-        final pauseMs = (_toActionInt(step['pause_ms']) ??
-                (perTargetDurationMs * 0.72).round())
-            .clamp(650, 5200);
+        if (isLastOverall) continue;
+        final pauseMs = previewPauseMs;
         await Future<void>.delayed(Duration(milliseconds: pauseMs));
       }
     }
@@ -23279,6 +23427,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return out;
   }
 
+  List<AutomationLaneSnapshot> _pluginAutomationLanesForRowSave(int row) {
+    return _automationLanesForRowSave(row)
+        .where((lane) => lane.targetId != 'volume')
+        .map(
+          (lane) => AutomationLaneSnapshot(
+            targetId: lane.targetId,
+            label: lane.label,
+            effectIndex: lane.effectIndex,
+            paramId: lane.paramId,
+            type: lane.type,
+            min: lane.min,
+            max: lane.max,
+            points: lane.points.map((point) => point.copy()).toList(
+                  growable: false,
+                ),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  List<AutomationClipSnapshot> _pluginAutomationClipsForRowSave(int row) {
+    return _automationClipsForRowSave(row)
+        .where((clip) => clip.targetId != 'volume')
+        .map((clip) => clip.copyWith())
+        .toList(growable: false);
+  }
+
   void _restoreAutomationClipsForRow(
     int row,
     List<AutomationClipSnapshot> clips,
@@ -23303,6 +23478,287 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
     }
     _rowAutomationClips[row] = sanitized;
+  }
+
+  Future<_CopiedRowEffectsEntry> _captureCopiedRowEffectsEntry(int row) async {
+    return _CopiedRowEffectsEntry(
+      effects: await captureRowSnapshot(row, rowId: _rowIdAt(row)),
+      automationLanes: _pluginAutomationLanesForRowSave(row),
+      automationClips: _pluginAutomationClipsForRowSave(row),
+      selectedAutomationTargetId: _selectedAutomationTargetIdForRow(row),
+    );
+  }
+
+  Future<void> _applyCopiedRowEffectsEntry(
+    int row,
+    _CopiedRowEffectsEntry entry,
+  ) async {
+    if (row < 0 || row >= _rowCount) return;
+
+    await restoreRowSnapshot(
+      RowEffectsSnapshot(
+        row,
+        entry.effects.effects,
+        rowId: _rowIdAt(row),
+      ),
+    );
+
+    final preservedVolume = _rowVolumeAutomation[row]
+        .map((point) => point.copy())
+        .toList(growable: false);
+    final lanes = <AutomationLaneSnapshot>[
+      _volumeAutomationTargetMeta().toLaneSnapshot(preservedVolume),
+      ...entry.automationLanes.map(
+        (lane) => AutomationLaneSnapshot(
+          targetId: lane.targetId,
+          label: lane.label,
+          effectIndex: lane.effectIndex,
+          paramId: lane.paramId,
+          type: lane.type,
+          min: lane.min,
+          max: lane.max,
+          points: lane.points.map((point) => point.copy()).toList(
+                growable: false,
+              ),
+        ),
+      ),
+    ];
+
+    setState(() {
+      _restoreAutomationLanesForRow(
+        row,
+        lanes,
+        selectedTargetId: entry.selectedAutomationTargetId,
+      );
+      _restoreAutomationClipsForRow(row, entry.automationClips);
+    });
+
+    await _refreshAutomationTargetsForRow(
+      row,
+      setStateWhenDone: false,
+      syncNativeWhenDone: false,
+    );
+    await _syncNativeAutomationForRow(row);
+    _refreshRowFx(row);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _copyRowEffects(int row) async {
+    if (row < 0 || row >= _rowCount) return;
+    final snapshot = await _captureCopiedRowEffectsEntry(row);
+    final clipboard = _EffectsClipboardEntry(
+      effects: snapshot.effects.effects
+          .map(
+            (fx) => EffectSnapshot(
+              fx.effectId,
+              fx.bypassed,
+              Map<String, dynamic>.from(fx.params),
+            ),
+          )
+          .toList(growable: false),
+      automationLanes: snapshot.automationLanes
+          .map(
+            (lane) => AutomationLaneSnapshot(
+              targetId: lane.targetId,
+              label: lane.label,
+              effectIndex: lane.effectIndex,
+              paramId: lane.paramId,
+              type: lane.type,
+              min: lane.min,
+              max: lane.max,
+              points: lane.points.map((point) => point.copy()).toList(
+                    growable: false,
+                  ),
+            ),
+          )
+          .toList(growable: false),
+      automationClips: snapshot.automationClips
+          .map((clip) => clip.copyWith())
+          .toList(growable: false),
+      selectedAutomationTargetId: snapshot.selectedAutomationTargetId,
+    );
+    if (mounted) {
+      setState(() {
+        _copiedEffects = clipboard;
+      });
+    } else {
+      _copiedEffects = clipboard;
+    }
+    _showSmallNotice('Copied row effects.');
+  }
+
+  Future<void> _pasteRowEffects(int row) async {
+    if (row < 0 || row >= _rowCount) return;
+    final clipboard = _copiedEffects;
+    if (clipboard == null) {
+      _showSmallNotice('Copy effects first.');
+      return;
+    }
+
+    final before = await _captureCopiedRowEffectsEntry(row);
+    final after = _CopiedRowEffectsEntry(
+      effects: RowEffectsSnapshot(
+        row,
+        clipboard.effects
+            .map(
+              (fx) => EffectSnapshot(
+                fx.effectId,
+                fx.bypassed,
+                Map<String, dynamic>.from(fx.params),
+              ),
+            )
+            .toList(growable: false),
+        rowId: _rowIdAt(row),
+      ),
+      automationLanes: clipboard.automationLanes
+          .map(
+            (lane) => AutomationLaneSnapshot(
+              targetId: lane.targetId,
+              label: lane.label,
+              effectIndex: lane.effectIndex,
+              paramId: lane.paramId,
+              type: lane.type,
+              min: lane.min,
+              max: lane.max,
+              points: lane.points.map((point) => point.copy()).toList(
+                    growable: false,
+                  ),
+            ),
+          )
+          .toList(growable: false),
+      automationClips:
+          clipboard.automationClips.map((clip) => clip.copyWith()).toList(
+                growable: false,
+              ),
+      selectedAutomationTargetId: clipboard.selectedAutomationTargetId,
+    );
+
+    await _undoManager.execute(
+      _RowEffectsAutomationSnapshotAction(
+        descriptionText: 'Paste track effects',
+        before: before,
+        after: after,
+        applySnapshot: (snap) => _applyCopiedRowEffectsEntry(row, snap),
+      ),
+    );
+    _recordProducerManualEdit('row_fx_paste', <String, Object?>{
+      'row': row,
+      'effect_count': after.effects.effects.length,
+      'automation_lane_count': after.automationLanes.length,
+      'automation_clip_count': after.automationClips.length,
+    });
+    _showSmallNotice('Pasted row effects.');
+  }
+
+  Future<void> _clearRowEffects(int row) async {
+    if (row < 0 || row >= _rowCount) return;
+    final before = await _captureCopiedRowEffectsEntry(row);
+    final hasEffects = before.effects.effects.isNotEmpty;
+    final hasAutomation =
+        before.automationLanes.isNotEmpty || before.automationClips.isNotEmpty;
+    if (!hasEffects && !hasAutomation) {
+      _showSmallNotice('This row has no effects to clear.');
+      return;
+    }
+
+    await _undoManager.execute(
+      _RowEffectsAutomationSnapshotAction(
+        descriptionText: 'Clear track effects',
+        before: before,
+        after: _CopiedRowEffectsEntry(
+          effects: RowEffectsSnapshot(row, const <EffectSnapshot>[],
+              rowId: _rowIdAt(row)),
+          automationLanes: const <AutomationLaneSnapshot>[],
+          automationClips: const <AutomationClipSnapshot>[],
+          selectedAutomationTargetId: 'volume',
+        ),
+        applySnapshot: (snap) => _applyCopiedRowEffectsEntry(row, snap),
+      ),
+    );
+    _recordProducerManualEdit('row_fx_clear', <String, Object?>{
+      'row': row,
+      'effect_count': before.effects.effects.length,
+      'automation_lane_count': before.automationLanes.length,
+      'automation_clip_count': before.automationClips.length,
+    });
+    _showSmallNotice('Cleared row effects.');
+  }
+
+  Future<void> _copyMasterEffects() async {
+    final snapshot = await captureMasterSnapshot();
+    final clipboard = _EffectsClipboardEntry(
+      effects: snapshot.effects
+          .map(
+            (fx) => EffectSnapshot(
+              fx.effectId,
+              fx.bypassed,
+              Map<String, dynamic>.from(fx.params),
+            ),
+          )
+          .toList(growable: false),
+    );
+    if (mounted) {
+      setState(() {
+        _copiedEffects = clipboard;
+      });
+    } else {
+      _copiedEffects = clipboard;
+    }
+    _showSmallNotice('Copied master effects.');
+  }
+
+  Future<void> _pasteMasterEffects(VoidCallback onChange) async {
+    final clipboard = _copiedEffects;
+    if (clipboard == null) {
+      _showSmallNotice('Copy effects first.');
+      return;
+    }
+    final before = await captureMasterSnapshot();
+    final after = MasterEffectsSnapshot(
+      clipboard.effects
+          .map(
+            (fx) => EffectSnapshot(
+              fx.effectId,
+              fx.bypassed,
+              Map<String, dynamic>.from(fx.params),
+            ),
+          )
+          .toList(growable: false),
+    );
+    await _undoManager.execute(
+      _MasterEffectsSnapshotAction(
+        descriptionText: 'Paste master effects',
+        before: before,
+        after: after,
+        applySnapshot: restoreMasterSnapshot,
+        onChange: onChange,
+      ),
+    );
+    _recordProducerManualEdit('master_fx_paste', <String, Object?>{
+      'effect_count': after.effects.length,
+    });
+    _showSmallNotice('Pasted master effects.');
+  }
+
+  Future<void> _clearMasterEffects(VoidCallback onChange) async {
+    final before = await captureMasterSnapshot();
+    if (before.effects.isEmpty) {
+      _showSmallNotice('Master has no effects to clear.');
+      return;
+    }
+    await _undoManager.execute(
+      _MasterEffectsSnapshotAction(
+        descriptionText: 'Clear master effects',
+        before: before,
+        after: MasterEffectsSnapshot(const <EffectSnapshot>[]),
+        applySnapshot: restoreMasterSnapshot,
+        onChange: onChange,
+      ),
+    );
+    _recordProducerManualEdit('master_fx_clear', <String, Object?>{
+      'effect_count': before.effects.length,
+    });
+    _showSmallNotice('Cleared master effects.');
   }
 
   Future<void> _setAutomationClipsForTargetWithUndo(
@@ -25625,6 +26081,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _performStemSeparationForClip(clipIndex);
   }
 
+  Future<_RowLayoutSnapshotAction?> _ensureStemOutputRowsBelow({
+    required int sourceRow,
+    required int stemCount,
+  }) async {
+    if (sourceRow < 0 || stemCount <= 0) return null;
+
+    final requiredBottomRow = sourceRow + stemCount;
+    if (_rowCount > requiredBottomRow) return null;
+
+    final before = await _captureRowLayoutSnapshot();
+    while (_rowCount <= requiredBottomRow) {
+      if (_rowCount >= kMaxRows) {
+        await _applyRowLayoutSnapshot(before);
+        return null;
+      }
+      final added = await _addRowImpl();
+      if (!added) {
+        await _applyRowLayoutSnapshot(before);
+        return null;
+      }
+    }
+
+    final after = await _captureRowLayoutSnapshot();
+    if (after.rows.length == before.rows.length) return null;
+
+    return _RowLayoutSnapshotAction(
+      descriptionText: 'Add rows for stem separation',
+      before: before,
+      after: after,
+      applySnapshot: _applyRowLayoutSnapshot,
+    );
+  }
+
   Future<bool> _performStemSeparationForClip(
     int clipIndex, {
     bool showInlineFailureNotice = true,
@@ -25663,7 +26152,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         File(p.join(audioDir.path, '${stem}_instrumental_$ts.wav'));
 
     if (showInlineFailureNotice) {
-      _showSmallNotice('Separating stems with Spleeter...');
+      _showSmallNotice('Splitting stems...');
     }
     try {
       await _spleeterStemSeparator.separateVocalsInstrumental(
@@ -25687,6 +26176,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final row = clip.rowIndex;
+    const stemCount = 2;
+    final vocalsRow = row + 1;
+    final instrumentalRow = row + 2;
+    if (instrumentalRow >= kMaxRows) {
+      if (showInlineFailureNotice) {
+        _showSmallNotice(
+          'Need two rows below this clip for stem separation, but the row limit was reached.',
+        );
+      }
+      return false;
+    }
+
+    final rowLayoutAction = await _ensureStemOutputRowsBelow(
+      sourceRow: row,
+      stemCount: stemCount,
+    );
+    if (_rowCount <= instrumentalRow) {
+      if (showInlineFailureNotice) {
+        _showSmallNotice(
+          'Could not create rows below this clip for the separated stems.',
+        );
+      }
+      return false;
+    }
+
     final startMs = clip.offset * 1000.0;
     final trimStart = clip.trimStart;
     final trimEnd = clip.trimEnd;
@@ -25701,8 +26215,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }) =>
           _addAudioTrackFromProjectFile(
         projectAudioFile: file,
-        label:
-            clip.label.trim().isEmpty ? 'Vocals Stem' : '${clip.label} Vocals',
+        label: clip.label.trim().isEmpty
+            ? 'Vocals Stem'
+            : '${clip.label} (Vocals)',
         row: row,
         timeMs: timeMs,
         trimStartRequested: trimStartRequested,
@@ -25714,7 +26229,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
       tracks: _audioTracks,
       file: vocalFile,
-      row: row,
+      row: vocalsRow,
       timeMs: startMs,
       trimStart: trimStart,
       trimEnd: trimEnd,
@@ -25732,7 +26247,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         projectAudioFile: file,
         label: clip.label.trim().isEmpty
             ? 'Instrumental Stem'
-            : '${clip.label} Instrumental',
+            : '${clip.label} (Instrumental)',
         row: row,
         timeMs: timeMs,
         trimStartRequested: trimStartRequested,
@@ -25744,17 +26259,56 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
       tracks: _audioTracks,
       file: instrumentalFile,
-      row: row,
+      row: instrumentalRow,
       timeMs: startMs,
       trimStart: trimStart,
       trimEnd: trimEnd,
     );
 
-    await _undoManager.execute(
-      CompoundUndoAction('Separate stems', [addVocals, addInstrumental]),
-    );
+    final actions = <EditorUndoAction>[
+      if (rowLayoutAction != null) rowLayoutAction,
+      addVocals,
+      addInstrumental,
+    ];
+
+    var vocalsAdded = false;
+    var instrumentalAdded = false;
+    try {
+      final beforeCount = _audioTracks.length;
+      await _undoManager.executeWithoutAdd(addVocals);
+      vocalsAdded = _audioTracks.length == beforeCount + 1;
+      if (!vocalsAdded) {
+        throw StateError('Failed to add vocal stem clip.');
+      }
+
+      await _undoManager.executeWithoutAdd(addInstrumental);
+      instrumentalAdded = _audioTracks.length == beforeCount + 2;
+      if (!instrumentalAdded) {
+        throw StateError('Failed to add instrumental stem clip.');
+      }
+
+      await _undoManager.addWithoutExecute(
+        CompoundUndoAction('Separate stems', actions),
+      );
+    } catch (e) {
+      debugPrint('Failed to place separated stems on new rows: $e');
+      if (instrumentalAdded) {
+        await addInstrumental.undo();
+      }
+      if (vocalsAdded) {
+        await addVocals.undo();
+      }
+      if (rowLayoutAction != null) {
+        await rowLayoutAction.undo();
+      }
+      if (showInlineFailureNotice) {
+        _showSmallNotice('Stem separation failed.');
+      }
+      return false;
+    }
+
     if (showInlineFailureNotice) {
-      _showSmallNotice('Created vocal/instrumental stems with Spleeter.');
+      _showSmallNotice('Created vocal/instrumental stems.');
     }
     return true;
   }
@@ -26516,7 +27070,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     aiDebugLog('audio-editor', 'ai chat failure stage=$stage error=$error');
     unawaited(
       CrashReportingService.instance.captureException(
-        StateError('AI chat failure at $stage: $error'),
+        error,
         stackTrace: stackTrace,
       ),
     );
@@ -26913,7 +27467,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required int promptCycleTotalMs,
     int? applyMixMs,
   }) {
-    if (!kAiDebugLogs) return;
+    if (!kAiDebugLogs || !kAiDebugVerbose) return;
     final parts = <String>[
       'trace=$promptTraceId',
       'status=$status',
@@ -27109,6 +27663,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ..writeln('trace: $promptTraceId')
       ..writeln('tool: ${toolName.isEmpty ? '-' : toolName}')
       ..writeln(
+        'route: ${fmtStr('llm_route')}  prompt: ${fmtStr('prompt_source')}',
+      )
+      ..writeln(
         'timings: total=${promptCycleTotalMs}ms project=${fmtMs('project_stats_ms')} '
         'proxy=${fmtMs('proxy_roundtrip_ms')} openai=${fmtMs('openai_api_ms')} '
         'mixPlan=${fmtMs('mix_plan_ms')} heuristic=${fmtMs('mix_model_heuristic_ms')} '
@@ -27135,7 +27692,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (steps.isEmpty) {
       b.writeln('steps: none');
     } else {
-      const maxVisibleSteps = 4;
+      final maxVisibleSteps = kAiDebugVerbose ? 4 : 2;
       final visibleCount = math.min(steps.length, maxVisibleSteps);
       b.writeln('steps: ${steps.length}');
       for (int i = 0; i < visibleCount; i++) {
@@ -27152,16 +27709,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             '     onnx_deltas=${magnitudeEntries.length} '
             'changed=$changedCount dropped=$droppedCount',
           );
-          final visibleDeltas = kAiDebugVerbose
-              ? magnitudeEntries.length
-              : math.min(magnitudeEntries.length, 6);
-          for (int j = 0; j < visibleDeltas; j++) {
-            b.writeln('       ${formatMagnitudeEntry(magnitudeEntries[j])}');
-          }
-          if (magnitudeEntries.length > visibleDeltas) {
-            b.writeln(
-              '       ... +${magnitudeEntries.length - visibleDeltas} more action delta(s)',
-            );
+          if (kAiDebugVerbose) {
+            final visibleDeltas = magnitudeEntries.length;
+            for (int j = 0; j < visibleDeltas; j++) {
+              b.writeln('       ${formatMagnitudeEntry(magnitudeEntries[j])}');
+            }
+          } else {
+            final topEntries = magnitudeEntries.take(2).toList(growable: false);
+            for (final entry in topEntries) {
+              b.writeln('       ${formatMagnitudeEntry(entry)}');
+            }
+            if (magnitudeEntries.length > topEntries.length) {
+              b.writeln(
+                '       ... +${magnitudeEntries.length - topEntries.length} more action delta(s)',
+              );
+            }
           }
         }
       }
@@ -27905,6 +28467,218 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 ),
               ),
             ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showChatCapabilitiesDialog() async {
+    if (!mounted) return;
+
+    Widget buildBullet({
+      required IconData icon,
+      required String text,
+      required Color iconColor,
+    }) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              icon,
+              size: 16,
+              color: iconColor,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white.withValues(alpha: 0.84),
+                fontSize: 13.5,
+                height: 1.34,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          clipBehavior: Clip.antiAlias,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: MixroomShellSurface(
+              radius: 24,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.question_mark_rounded,
+                          color: Color(0xFFF4F4F4),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          L10n.translate(context, 'chat_help_title'),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            height: 1.15,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    L10n.translate(
+                      context,
+                      'chat_help_intro',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.82),
+                      fontSize: 13.5,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    L10n.translate(context, 'chat_help_can'),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  buildBullet(
+                    icon: Icons.tune_rounded,
+                    iconColor: const Color(0xFF8FD3FF),
+                    text: L10n.translate(
+                      context,
+                      'chat_help_can_mix',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  buildBullet(
+                    icon: Icons.content_cut_rounded,
+                    iconColor: const Color(0xFF8FD3FF),
+                    text: L10n.translate(
+                      context,
+                      'chat_help_can_edit',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  buildBullet(
+                    icon: Icons.school_rounded,
+                    iconColor: const Color(0xFF8FD3FF),
+                    text: L10n.translate(
+                      context,
+                      'chat_help_can_tools',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    L10n.translate(
+                      context,
+                      'chat_help_examples',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.66),
+                      fontSize: 12.5,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    L10n.translate(context, 'chat_help_cannot'),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  buildBullet(
+                    icon: Icons.block_rounded,
+                    iconColor: const Color(0xFFFFB27A),
+                    text: L10n.translate(
+                      context,
+                      'chat_help_cannot_generate',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  buildBullet(
+                    icon: Icons.block_rounded,
+                    iconColor: const Color(0xFFFFB27A),
+                    text: L10n.translate(
+                      context,
+                      'chat_help_cannot_empty',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  buildBullet(
+                    icon: Icons.block_rounded,
+                    iconColor: const Color(0xFFFFB27A),
+                    text: L10n.translate(
+                      context,
+                      'chat_help_cannot_text_to_music',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: Text(
+                          L10n.translate(dialogContext, 'Close'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },
@@ -28939,11 +29713,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
     );
 
+    final replyMix = reply.mixing;
+    final replyHasMix =
+        replyMix != null && !(replyMix.isNoOp || replyMix.actions.isEmpty);
+
     try {
-      if (reply.hasMix) {
+      if (replyMix != null && !replyMix.isNoOp && replyMix.actions.isNotEmpty) {
+        final mix = replyMix;
         final applyStopwatch = Stopwatch()..start();
         final appliedCount = await applyMixingResult(
-          reply.mixing!,
+          mix,
           emitActionSummaries: true,
         );
         applyStopwatch.stop();
@@ -28971,7 +29750,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
 
         _chatPipeline.recordAppliedMix(
-          reply.mixing!,
+          mix,
           visibleAssistantText: reply.message,
         );
 
@@ -28981,8 +29760,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             prompt: trimmed,
             preSnapshot: producerPreSnapshot,
             postSnapshot: producerPostSnapshot,
-            resolvedActions:
-                reply.mixing!.actions.map((a) => a.toJson()).toList(),
+            resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
             llmPayload: reply.meta,
             projectId: _projectId,
             projectName: _projectName,
@@ -29008,7 +29786,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       );
       _insertAssistantChatText(
-        reply.hasMix ? _kAiApplyFailureMessage : _kAiRequestFailureMessage,
+        replyHasMix ? _kAiApplyFailureMessage : _kAiRequestFailureMessage,
       );
       if (mounted) {
         setState(() {});
@@ -29523,11 +30301,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
     );
 
+    final replyMix = reply.mixing;
+    final replyHasMix =
+        replyMix != null && !(replyMix.isNoOp || replyMix.actions.isEmpty);
+
     try {
-      if (reply.hasMix) {
+      if (replyMix != null && !replyMix.isNoOp && replyMix.actions.isNotEmpty) {
+        final mix = replyMix;
         final applyMixStopwatch = Stopwatch()..start();
         final appliedCount = await applyMixingResult(
-          reply.mixing!,
+          mix,
           emitActionSummaries: true,
         );
         applyMixStopwatch.stop();
@@ -29550,7 +30333,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           return;
         }
         _chatPipeline.recordAppliedMix(
-          reply.mixing!,
+          mix,
           visibleAssistantText: reply.message,
         );
 
@@ -29560,8 +30343,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             prompt: prompt,
             preSnapshot: producerPreSnapshot,
             postSnapshot: producerPostSnapshot,
-            resolvedActions:
-                reply.mixing!.actions.map((a) => a.toJson()).toList(),
+            resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
             llmPayload: reply.meta,
             projectId: _projectId,
             projectName: _projectName,
@@ -29587,7 +30369,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       );
       _insertAssistantChatText(
-        reply.hasMix ? _kAiApplyFailureMessage : _kAiRequestFailureMessage,
+        replyHasMix ? _kAiApplyFailureMessage : _kAiRequestFailureMessage,
       );
       return;
     }
@@ -29870,6 +30652,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           promptRateLimitLoading: _promptRateLimitLoading,
                           onShowPromptRateLimits: () {
                             unawaited(_showPromptRateLimitDialog());
+                          },
+                          onShowCapabilities: () {
+                            unawaited(_showChatCapabilitiesDialog());
                           },
                           onTapBar: () {
                             unawaited(
@@ -32683,6 +33468,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             before.row,
                                           );
                                         },
+                                        onCopyRowEffects: () {
+                                          unawaited(
+                                            _copyRowEffects(_selectedRow),
+                                          );
+                                        },
+                                        onPasteRowEffects: (row) =>
+                                            _pasteRowEffects(row),
+                                        onClearRowEffects: (row) =>
+                                            _clearRowEffects(row),
+                                        hasCopiedRowEffects:
+                                            _copiedEffects != null,
 
                                         scanPlugins: () =>
                                             JuceAudioEngine.scanPlugins(),
@@ -35833,13 +36629,16 @@ class ExportSuccessScreen extends StatelessWidget {
 
   Future<void> _shareFile(BuildContext context) async {
     try {
-      if (!kIsWeb && Platform.isAndroid) {
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         final saved = savedFilePath?.trim();
         if (saved != null && saved.isNotEmpty) {
           final shared =
               await ExportSaveDialog.shareSavedExportFromPlatform(saved);
           if (shared) {
             return;
+          }
+          if (Platform.isIOS) {
+            throw Exception('Unable to share the saved export on iOS.');
           }
         }
       }
@@ -38063,6 +38862,29 @@ class CompoundUndoAction extends EditorUndoAction {
   }
 }
 
+class _RowEffectsAutomationSnapshotAction extends EditorUndoAction {
+  final String descriptionText;
+  final _CopiedRowEffectsEntry before;
+  final _CopiedRowEffectsEntry after;
+  final Future<void> Function(_CopiedRowEffectsEntry snap) applySnapshot;
+
+  _RowEffectsAutomationSnapshotAction({
+    required this.descriptionText,
+    required this.before,
+    required this.after,
+    required this.applySnapshot,
+  });
+
+  @override
+  String get description => descriptionText;
+
+  @override
+  Future<void> redo() => applySnapshot(after);
+
+  @override
+  Future<void> undo() => applySnapshot(before);
+}
+
 // ----------------------------------------------------------------
 // SNAPSHOT HISTORY
 // ----------------------------------------------------------------
@@ -38246,18 +39068,80 @@ class MasterPresetChangeAction extends EditorUndoAction {
   }
 }
 
+class _MasterEffectsSnapshotAction extends EditorUndoAction {
+  final String descriptionText;
+  final MasterEffectsSnapshot before;
+  final MasterEffectsSnapshot after;
+  final Future<void> Function(MasterEffectsSnapshot snap) applySnapshot;
+  final VoidCallback onChange;
+
+  _MasterEffectsSnapshotAction({
+    required this.descriptionText,
+    required this.before,
+    required this.after,
+    required this.applySnapshot,
+    required this.onChange,
+  });
+
+  @override
+  String get description => descriptionText;
+
+  @override
+  Future<void> redo() async {
+    await applySnapshot(after);
+    onChange();
+  }
+
+  @override
+  Future<void> undo() async {
+    await applySnapshot(before);
+    onChange();
+  }
+}
+
 AudioTrack? _resolveClip(List<AudioTrack> tracks, int index) {
   if (index < 0 || index >= tracks.length) return null;
   return tracks[index];
 }
 
-Widget _chatIcon() {
-  return SizedBox(
-    width: 20,
-    height: 18,
-    child: SvgPicture.asset(
-      kMixroomDawChatBarIconAsset,
-      fit: BoxFit.contain,
+Widget _chatHelpButton({
+  required BuildContext context,
+  required VoidCallback onTap,
+}) {
+  return Tooltip(
+    message: L10n.translate(context, 'chat_help_tooltip'),
+    child: SizedBox(
+      width: 28,
+      height: 28,
+      child: Material(
+        color: Colors.transparent,
+        shape: const CircleBorder(),
+        child: InkResponse(
+          onTap: onTap,
+          containedInkWell: true,
+          customBorder: const CircleBorder(),
+          radius: 20,
+          splashColor: Colors.white.withValues(alpha: 0.14),
+          highlightColor: Colors.white.withValues(alpha: 0.08),
+          child: Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.10),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.12),
+              ),
+            ),
+            alignment: Alignment.center,
+            child: const Icon(
+              Icons.question_mark_rounded,
+              size: 16,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ),
     ),
   );
 }
@@ -38272,6 +39156,7 @@ class _ChatBar extends StatelessWidget {
   final AiPromptRateLimitStatus? promptRateLimitStatus;
   final bool promptRateLimitLoading;
   final VoidCallback onShowPromptRateLimits;
+  final VoidCallback onShowCapabilities;
   final VoidCallback onTapBar;
   final VoidCallback onSubmit;
 
@@ -38286,6 +39171,7 @@ class _ChatBar extends StatelessWidget {
     required this.promptRateLimitStatus,
     required this.promptRateLimitLoading,
     required this.onShowPromptRateLimits,
+    required this.onShowCapabilities,
     required this.onTapBar,
     required this.onSubmit,
   });
@@ -38484,7 +39370,10 @@ class _ChatBar extends StatelessWidget {
                   child: !expanded
                       ? Row(
                           children: [
-                            _chatIcon(),
+                            _chatHelpButton(
+                              context: context,
+                              onTap: onShowCapabilities,
+                            ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(

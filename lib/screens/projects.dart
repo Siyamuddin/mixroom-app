@@ -658,6 +658,23 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return origin & box.size;
   }
 
+  Rect? _shareSheetOriginForCurrentContext() {
+    final overlayContext = Navigator.of(context).overlay?.context;
+    final overlayBox = overlayContext?.findRenderObject();
+    if (overlayBox is RenderBox && overlayBox.hasSize) {
+      final center = overlayBox.size.center(Offset.zero);
+      return Rect.fromCenter(center: center, width: 1, height: 1);
+    }
+
+    final rootBox = context.findRenderObject();
+    if (rootBox is RenderBox && rootBox.hasSize) {
+      final center = rootBox.size.center(Offset.zero);
+      return Rect.fromCenter(center: center, width: 1, height: 1);
+    }
+
+    return null;
+  }
+
   Future<String?> _showAnchoredShellMenu({
     required GlobalKey anchorKey,
     required Widget child,
@@ -1055,6 +1072,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
       final params = ShareParams(
         files: [XFile(bundlePath)],
+        sharePositionOrigin: _shareSheetOriginForCurrentContext(),
         // title: meta.name, // shows in some share UIs
         // subject: meta.name, // used by some email clients
       );
@@ -2052,21 +2070,20 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                 ),
                               ),
                             )
-                          : const SizedBox(
-                              key: ValueKey('search-clear-hidden'),
-                              width: 0,
-                              height: 20,
+                          : Padding(
+                              key: const ValueKey('search-icon-visible'),
+                              padding: const EdgeInsets.only(right: 8),
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: Icon(
+                                  Icons.search_rounded,
+                                  size: 18,
+                                  color: Colors.white.withValues(alpha: 0.78),
+                                ),
+                              ),
                             ),
                     ),
-                    if (!showSearchClear) ...[
-                      const SizedBox(width: 6),
-                      Icon(
-                        Icons.search_rounded,
-                        size: 18,
-                        color: Colors.white.withValues(alpha: 0.78),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
                     Expanded(
                       child: TextField(
                         controller: _searchController,
@@ -2088,7 +2105,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                             color: Colors.white.withValues(alpha: 0.68),
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
-                            letterSpacing: 0.08,
                           ),
                         ),
                       ),

@@ -4,6 +4,7 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
+import android.util.Log
 import java.io.Closeable
 import java.io.File
 import java.io.FileOutputStream
@@ -11,9 +12,11 @@ import java.nio.FloatBuffer
 
 internal class PromptAnalysisService(
   private val context: Context,
+  private val yamnetAssetLookupKey: String,
 ) : Closeable {
   companion object {
     private const val YAMNET_ASSET_PATH = "assets/models/yamnet.onnx"
+    private const val YAMNET_SCORES_OUTPUT_NAME = "output_0"
     private const val YAMNET_WINDOW_SAMPLES = 15600
     private const val YAMNET_WINDOW_COUNT = 3
   }
@@ -81,13 +84,16 @@ internal class PromptAnalysisService(
 
   private fun runWindow(session: OrtSession, window: FloatArray): FloatArray? {
     val inputName = session.inputNames.firstOrNull() ?: return null
-    val outputName = session.outputNames.firstOrNull() ?: return null
+    val outputName =
+      session.outputNames.firstOrNull { it == YAMNET_SCORES_OUTPUT_NAME }
+        ?: session.outputNames.firstOrNull()
+        ?: return null
 
     return try {
       OnnxTensor.createTensor(
         ortEnvironment,
         FloatBuffer.wrap(window),
-        longArrayOf(1L, window.size.toLong()),
+        longArrayOf(window.size.toLong()),
       ).use { inputTensor ->
         session.run(mapOf(inputName to inputTensor)).use { outputs ->
           val outputTensor = unwrapTensor(outputs[outputName]) ?: return null
@@ -97,7 +103,8 @@ internal class PromptAnalysisService(
           if (data.isEmpty()) null else data
         }
       }
-    } catch (_: Throwable) {
+    } catch (error: Throwable) {
+      Log.w("PromptAnalysisService", "YAMNet window inference failed", error)
       null
     }
   }
@@ -118,20 +125,22 @@ internal class PromptAnalysisService(
         ortEnvironment.createSession(modelFile.absolutePath, options).also {
           yamnetSession = it
         }
-      } catch (_: Throwable) {
+      } catch (error: Throwable) {
+        Log.e("PromptAnalysisService", "Failed to create YAMNet session", error)
         null
       }
     }
   }
 
   private fun materializeAsset(assetPath: String): File {
+    val sourcePath = resolveAssetPath(assetPath)
     val targetDir = File(context.filesDir, "onnx_models").apply { mkdirs() }
     val target = File(targetDir, assetPath.substringAfterLast('/'))
     val temp = File(target.parentFile, "${target.name}.part")
     if (temp.exists()) {
       temp.delete()
     }
-    context.assets.open(assetPath).use { input ->
+    context.assets.open(sourcePath).use { input ->
       FileOutputStream(temp).use { output ->
         input.copyTo(output)
       }
@@ -144,6 +153,25 @@ internal class PromptAnalysisService(
       temp.delete()
     }
     return target
+  }
+
+  private fun resolveAssetPath(assetPath: String): String {
+    val candidates = linkedSetOf(yamnetAssetLookupKey, assetPath)
+    for (candidate in candidates) {
+      if (candidate.isBlank()) continue
+      val exists = try {
+        context.assets.open(candidate).use { _ -> }
+        true
+      } catch (_: Exception) {
+        false
+      }
+      if (exists) {
+        return candidate
+      }
+    }
+    throw IllegalStateException(
+      "Could not locate YAMNet asset. tried=${candidates.joinToString(",")}",
+    )
   }
 
   private fun unwrapTensor(output: Any?): OnnxTensor? {

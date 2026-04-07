@@ -1073,6 +1073,55 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(goal["target"]["scope"], "row")
         self.assertEqual(goal["target"]["row_index"], 0)
 
+    def test_handler_accepts_code_fenced_tool_arguments(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_123",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "mix_model_request",
+                        "arguments": """```json
+{"mode":"execute","assistant_message":"Boosted the lead slightly.","actions":[{"goal":{"type":"mix_request","intents":[{"kind":"balance","direction":"up","descriptor":"slightly","confidence":1}],"target":{"scope":"row","row_index":0,"confidence":1},"intensity":0.2}}]}
+```""",
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 200,
+                    "output_tokens": 100,
+                    "total_tokens": 300,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": "Turn the vocal up slightly.",
+                        }
+                    ],
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "mix_model_request")
+        self.assertEqual(output["arguments"]["mode"], "execute")
+        self.assertEqual(
+            output["arguments"]["actions"][0]["goal"]["target"]["row_index"],
+            0,
+        )
+        self.assertNotIn("soft_error", payload)
+
     def test_handler_reports_refunded_soft_failures_to_observability(self) -> None:
         provider = _FakeProvider(
             response_body={

@@ -995,6 +995,12 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/overview
             Method: get
+        AdminLivePresence:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/live-presence
+            Method: get
 
   AdminUsersApiFunction:
     Type: AWS::Serverless::Function

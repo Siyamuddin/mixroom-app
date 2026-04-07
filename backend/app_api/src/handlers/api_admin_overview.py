@@ -42,6 +42,10 @@ def _include_section_value(value: Any, *, default: bool = True) -> bool:
     return default
 
 
+def _path(event: Dict[str, Any]) -> str:
+    return str(event.get("rawPath") or event.get("path") or "").strip()
+
+
 def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     started_at = time.perf_counter()
     admin_client_id = (
@@ -93,6 +97,12 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         )
 
     try:
+        if _path(event).endswith("/live-presence"):
+            payload = repo.build_live_presence()
+            payload["requested_by"] = user_id
+            payload["requested_email"] = email
+            return _finalize(json_response(200, payload))
+
         query = event.get("queryStringParameters") or {}
         user_limit = _limit_value(
             query.get("user_limit") if isinstance(query, dict) else None,

@@ -402,6 +402,10 @@ class AudioCanvasTimeline extends StatefulWidget {
       dynamic oldValue, dynamic newValue)? onPluginParamCommit;
   final void Function(RowEffectsSnapshot before, RowEffectsSnapshot after)?
       onPresetCommit;
+  final VoidCallback? onCopyRowEffects;
+  final Future<void> Function(int row)? onPasteRowEffects;
+  final Future<void> Function(int row)? onClearRowEffects;
+  final bool hasCopiedRowEffects;
   final void Function(void Function(int row) refreshRowFx)?
       registerRowFxRefresher;
   final void Function(void Function(int row) refreshRowFxPlayback)?
@@ -531,6 +535,10 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.mode,
     this.onPluginParamCommit,
     this.onPresetCommit,
+    this.onCopyRowEffects,
+    this.onPasteRowEffects,
+    this.onClearRowEffects,
+    this.hasCopiedRowEffects = false,
     this.registerRowFxRefresher,
     this.registerRowFxPlaybackRefresher,
     this.onSnapSettingsChanged,
@@ -5699,14 +5707,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                 _syncPlaybackViewport(playheadPx);
                                 return _buildPlaybackDrivenTimelineLayers(
                                   viewportWidth: viewportWidth,
-                                  visibleTimelineHeight:
-                                      visibleTimelineHeight,
+                                  visibleTimelineHeight: visibleTimelineHeight,
                                   playheadPx: playheadPx,
-                                  timelineUnderlayWidth:
-                                      timelineUnderlayWidth,
+                                  timelineUnderlayWidth: timelineUnderlayWidth,
                                   expandedHeights: expandedHeights,
-                                  automationLaneHeights:
-                                      automationLaneHeights,
+                                  automationLaneHeights: automationLaneHeights,
                                   timelineAutomationClipVisuals:
                                       timelineAutomationClipVisuals,
                                 );
@@ -5734,8 +5739,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     final int expectedRestartMs =
         (_loopEnabled && _loopStartMs != null) ? _loopStartMs! : 0;
-    final bool isRestart =
-        (!widget.isPlaying) && (_currentPlayheadMs - expectedRestartMs).abs() < 0.01;
+    final bool isRestart = (!widget.isPlaying) &&
+        (_currentPlayheadMs - expectedRestartMs).abs() < 0.01;
 
     if (isRestart) {
       final targetScrollMs = expectedRestartMs - (playheadPx) / _pixelsPerMs;
@@ -5790,8 +5795,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           getFullDurationMs: widget.getFullDurationMs,
                           getPeaks: widget.getPeaks,
                           pixelsPerMs: _pixelsPerMs,
-                          scrollOffsetMs:
-                              _scrollOffsetMs - (timelineUnderlayWidth / _pixelsPerMs),
+                          scrollOffsetMs: _scrollOffsetMs -
+                              (timelineUnderlayWidth / _pixelsPerMs),
                           viewportWidth: timelineUnderlayWidth,
                           playheadPx: playheadPx,
                           selectedClipIndex: _selectedClipIndex,
@@ -5875,8 +5880,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             clips: widget.clips,
                             getStartMs: widget.getStartMs,
                             getDurationMs: widget.getDurationMs,
-                            getTimelineDurationMs:
-                                widget.getTimelineDurationMs,
+                            getTimelineDurationMs: widget.getTimelineDurationMs,
                             getTrimStartMs: widget.getTrimStartMs,
                             getTrimEndMs: widget.getTrimEndMs,
                             getFullDurationMs: widget.getFullDurationMs,
@@ -5897,8 +5901,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             draggedClipStartMs: _interactionMode == 'drag'
                                 ? _dragStartClipMs
                                 : null,
-                            draggedClipRowIndex:
-                                _interactionMode == 'drag' ? _dragStartRow : null,
+                            draggedClipRowIndex: _interactionMode == 'drag'
+                                ? _dragStartRow
+                                : null,
                             rowExpanded: _rowExpanded,
                             kExpandedRowHeight: kExpandedRowHeight,
                             verticalScrollOffset: _verticalScrollOffset,
@@ -5914,14 +5919,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             beatsPerBar: widget.beatsPerBar,
                             quantizeDivisions: _quantizeDivisionsPerBar,
                             highlightedSegmentRow: _highlightedSegmentRow,
-                            highlightedSegmentStartMs: _highlightedSegmentStartMs,
+                            highlightedSegmentStartMs:
+                                _highlightedSegmentStartMs,
                             highlightedSegmentEndMs: _highlightedSegmentEndMs,
                             sampleDropPreviewRow: _externalSampleDropRow,
-                            sampleDropPreviewStartMs: _externalSampleDropStartMs,
+                            sampleDropPreviewStartMs:
+                                _externalSampleDropStartMs,
                             sampleDropPreviewEndMs: _externalSampleDropEndMs,
                             cutPreviewClipIndex: _cutPreviewClipIndex,
                             cutPreviewMs: _cutPreviewMs,
-                            automationClipVisuals: timelineAutomationClipVisuals,
+                            automationClipVisuals:
+                                timelineAutomationClipVisuals,
                             leftVisibleExtensionPx: 0.0,
                           ),
                           size: Size(viewportWidth, _timelinePaintHeight),
@@ -6410,7 +6418,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             //   ),
             // ),
 
-            // === Background for Pan + Gain (same as automation background) ===
+            // === Background for Gain + Pan (same as automation background) ===
             Container(
               decoration: BoxDecoration(
                 color: _kTimelineExpandedInnerSurface,
@@ -6424,60 +6432,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Builder(
-                      builder: (context) {
-                        Widget child = PrettyStereoSlider(
-                          value: widget.rowPan[row],
-                          onLongPress: () {
-                            unawaited(
-                                AppHaptics.impact(AppHapticImpact.medium));
-                            _openAutomationTabForTarget(
-                              row: row,
-                              targetId: 'mix:pan',
-                              haloKeys: <String>[
-                                'row:$row:automation_tab',
-                                'row:$row:volume_tab',
-                                'row:$row:mixer',
-                                'row:$row:pan',
-                                'row:$row:param:pan',
-                              ],
-                            );
-                          },
-                          onChangeStart: (v) {
-                            _panDragStart = v;
-                          },
-                          onChanged: (v) {
-                            setState(() => widget.rowPan[row] = v);
-                            widget.setRowPan(row, v);
-                          },
-                          onChangeEnd: (v) {
-                            widget.onRowPanCommit!(
-                                row, _panDragStart!, widget.rowPan[row]);
-                            _panDragStart = null;
-                          },
-                        );
-                        if (widget.tutorialHighlighter != null) {
-                          child = MultiHalo(
-                            highlighter: widget.tutorialHighlighter!,
-                            haloKeys: <HaloKey>[
-                              HaloKey('row:$row:pan'),
-                              HaloKey('row:$row:param:pan'),
-                            ],
-                            borderRadius: BorderRadius.circular(10),
-                            child: child,
-                          );
-                        }
-                        return child;
-                      },
-                    ),
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  // === Gain slider ===
                   Padding(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -6519,6 +6473,60 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             haloKeys: <HaloKey>[
                               HaloKey('row:$row:gain'),
                               HaloKey('row:$row:param:gain'),
+                            ],
+                            borderRadius: BorderRadius.circular(10),
+                            child: child,
+                          );
+                        }
+                        return child;
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // === Pan slider ===
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Builder(
+                      builder: (context) {
+                        Widget child = PrettyStereoSlider(
+                          value: widget.rowPan[row],
+                          onLongPress: () {
+                            unawaited(
+                                AppHaptics.impact(AppHapticImpact.medium));
+                            _openAutomationTabForTarget(
+                              row: row,
+                              targetId: 'mix:pan',
+                              haloKeys: <String>[
+                                'row:$row:automation_tab',
+                                'row:$row:volume_tab',
+                                'row:$row:mixer',
+                                'row:$row:pan',
+                                'row:$row:param:pan',
+                              ],
+                            );
+                          },
+                          onChangeStart: (v) {
+                            _panDragStart = v;
+                          },
+                          onChanged: (v) {
+                            setState(() => widget.rowPan[row] = v);
+                            widget.setRowPan(row, v);
+                          },
+                          onChangeEnd: (v) {
+                            widget.onRowPanCommit!(
+                                row, _panDragStart!, widget.rowPan[row]);
+                            _panDragStart = null;
+                          },
+                        );
+                        if (widget.tutorialHighlighter != null) {
+                          child = MultiHalo(
+                            highlighter: widget.tutorialHighlighter!,
+                            haloKeys: <HaloKey>[
+                              HaloKey('row:$row:pan'),
+                              HaloKey('row:$row:param:pan'),
                             ],
                             borderRadius: BorderRadius.circular(10),
                             child: child,
@@ -7349,6 +7357,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         onRequestAutomateParameter: _handleRowEffectAutomationRequest,
         onPluginParamCommit: widget.onPluginParamCommit,
         onPresetCommit: widget.onPresetCommit,
+        onCopyRowEffects: widget.onCopyRowEffects,
+        onPasteRowEffects: widget.onPasteRowEffects == null
+            ? null
+            : () => widget.onPasteRowEffects!(row),
+        onClearRowEffects: widget.onClearRowEffects == null
+            ? null
+            : () => widget.onClearRowEffects!(row),
+        hasCopiedRowEffects: widget.hasCopiedRowEffects,
         onTutorialEffectAdded: widget.onTutorialRowEffectAdded,
         onTutorialEffectOpened: widget.onTutorialRowEffectOpened,
         registerRefresh: (refreshFn) {
@@ -9085,6 +9101,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return (timelineVisibleMs / rawVisibleMs).clamp(0.0001, double.infinity);
   }
 
+  double _sanitizeTrimMs(
+    double value, {
+    required double min,
+    required double max,
+  }) {
+    if (!value.isFinite) return min;
+    return value.clamp(min, max).toDouble().roundToDouble();
+  }
+
   void _handleTrimUpdate(ScaleUpdateDetails details) {
     if (_hasActiveAutomationClipDrag) {
       final row = _automationClipDragRow;
@@ -9173,20 +9198,60 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       // newStartMs remains null, correctly signaling no position change
     }
 
-    if (newStartMs != null) {
-      widget.onTrimClip(_trimClipIndex!, newTrimStart, newTrimEnd,
-          newStartMs: newStartMs);
+    final minTrimWindowMs = minRawTrimMs.roundToDouble();
+    final maxTrimStart = math.max(0.0, fullDuration - minTrimWindowMs);
+    var sanitizedTrimStart = _sanitizeTrimMs(
+      newTrimStart,
+      min: 0.0,
+      max: maxTrimStart,
+    );
+    var sanitizedTrimEnd = _sanitizeTrimMs(
+      newTrimEnd,
+      min: sanitizedTrimStart + minTrimWindowMs,
+      max: fullDuration,
+    );
+    if (sanitizedTrimEnd < sanitizedTrimStart + minTrimWindowMs) {
+      sanitizedTrimEnd =
+          (sanitizedTrimStart + minTrimWindowMs).clamp(0.0, fullDuration);
+      if (sanitizedTrimEnd >= fullDuration) {
+        sanitizedTrimStart =
+            (sanitizedTrimEnd - minTrimWindowMs).clamp(0.0, maxTrimStart);
+      }
+      sanitizedTrimStart = sanitizedTrimStart.roundToDouble();
+      sanitizedTrimEnd = sanitizedTrimEnd.roundToDouble();
+    }
+    final sanitizedNewStartMs = newStartMs == null
+        ? null
+        : _sanitizeTrimMs(
+            newStartMs,
+            min: minVisibleStartMs,
+            max: originalVisibleEndMs - minTimelineTrimMs,
+          );
+
+    if (newTrimStartUpdate == sanitizedTrimStart &&
+        newTrimEndUpdate == sanitizedTrimEnd &&
+        newStartMsUpdate == sanitizedNewStartMs) {
+      return;
+    }
+
+    if (sanitizedNewStartMs != null) {
+      widget.onTrimClip(
+        _trimClipIndex!,
+        sanitizedTrimStart,
+        sanitizedTrimEnd,
+        newStartMs: sanitizedNewStartMs,
+      );
     } else {
       widget.onTrimClip(
         _trimClipIndex!,
-        newTrimStart,
-        newTrimEnd,
+        sanitizedTrimStart,
+        sanitizedTrimEnd,
         // newStartMs is omitted for trim-end
       );
     }
-    newTrimStartUpdate = newTrimStart;
-    newTrimEndUpdate = newTrimEnd;
-    newStartMsUpdate = newStartMs;
+    newTrimStartUpdate = sanitizedTrimStart;
+    newTrimEndUpdate = sanitizedTrimEnd;
+    newStartMsUpdate = sanitizedNewStartMs;
 
     setState(() {});
   }
@@ -12062,9 +12127,8 @@ class _AutomationPainter extends CustomPainter {
   double _volToDb(double v) {
     if (v <= 0.0001) return double.negativeInfinity;
     final clamped = v.clamp(0.0, 1.0).toDouble();
-    final gain = clamped >= 0.75
-        ? (1.0 + ((clamped - 0.75) / 0.25))
-        : (clamped / 0.75);
+    final gain =
+        clamped >= 0.75 ? (1.0 + ((clamped - 0.75) / 0.25)) : (clamped / 0.75);
     if (gain <= 0.0001) return double.negativeInfinity;
     return 20 * math.log(gain) / math.log(10);
   }
@@ -12547,9 +12611,8 @@ class _AutomationValueFormatter {
   double _volToDb(double value) {
     if (value <= 0.0001) return double.negativeInfinity;
     final clamped = value.clamp(0.0, 1.0).toDouble();
-    final gain = clamped >= 0.75
-        ? (1.0 + ((clamped - 0.75) / 0.25))
-        : (clamped / 0.75);
+    final gain =
+        clamped >= 0.75 ? (1.0 + ((clamped - 0.75) / 0.25)) : (clamped / 0.75);
     if (gain <= 0.0001) return double.negativeInfinity;
     return 20 * math.log(gain) / math.log(10);
   }
@@ -12774,17 +12837,71 @@ class PrettyStereoSlider extends StatefulWidget {
   State<PrettyStereoSlider> createState() => _PrettyStereoSliderState();
 }
 
+double _pan01ToSignedPercent(double pan01) {
+  final clamped = pan01.clamp(0.0, 1.0).toDouble();
+  return ((clamped - 0.5) * 2.0) * 100.0;
+}
+
+String _panReadoutText(double pan01) {
+  final signedPercent = _pan01ToSignedPercent(pan01);
+  if (signedPercent.abs() < 2.0) return 'Center';
+  final rounded = signedPercent.abs().round();
+  return signedPercent < 0 ? 'L $rounded%' : 'R $rounded%';
+}
+
+class _SliderDefaultMarkerPainter extends CustomPainter {
+  final double positionFraction;
+  final Color color;
+  final double edgeInset;
+
+  const _SliderDefaultMarkerPainter({
+    required this.positionFraction,
+    required this.color,
+    this.edgeInset = 12.0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final clampedFraction = positionFraction.clamp(0.0, 1.0);
+    final trackWidth = math.max(0.0, size.width - (edgeInset * 2));
+    if (trackWidth <= 0.0) return;
+
+    final x = edgeInset + (trackWidth * clampedFraction);
+    final centerY = size.height / 2;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawLine(
+      Offset(x, centerY - 8),
+      Offset(x, centerY + 8),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _SliderDefaultMarkerPainter oldDelegate) {
+    return oldDelegate.positionFraction != positionFraction ||
+        oldDelegate.color != color ||
+        oldDelegate.edgeInset != edgeInset;
+  }
+}
+
 class _PrettyStereoSliderState extends State<PrettyStereoSlider> {
   @override
   Widget build(BuildContext context) {
+    const sliderThumbRadius = 11.0;
+    const readoutWidth = 58.0;
+    final readoutText = _panReadoutText(widget.value);
+
     return Row(
       children: [
-        Text(L10n.translate(context, 'L'),
-            style: const TextStyle(color: Colors.white, fontSize: 14)),
-
+        Text(
+          'Pan:',
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+        ),
         const SizedBox(width: 6),
-
-        // ⭐ THIS is the fix — Expanded makes the slider fill all space
         Expanded(
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
@@ -12794,39 +12911,71 @@ class _PrettyStereoSliderState extends State<PrettyStereoSlider> {
                 widget.onChanged(0.5); // RESET to default
               });
             },
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 6,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 11),
-                overlayShape: SliderComponentShape.noOverlay,
-                activeTrackColor: const Color(0xFF4D5566),
-                inactiveTrackColor: const Color(0xFF4D5566),
-                thumbColor: const Color(0xFFB7BECC),
-              ),
-              child: Slider(
-                value: widget.value,
-                min: 0,
-                max: 1,
-                label: widget.value.toStringAsFixed(3),
-                onChangeStart: (v) {
-                  widget.onChangeStart(v);
-                },
-                onChanged: (v) {
-                  setState(() {});
-                  widget.onChanged(v);
-                },
-                onChangeEnd: (v) {
-                  widget.onChangeEnd(v);
-                },
+            child: SizedBox(
+              height: 24,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _SliderDefaultMarkerPainter(
+                          positionFraction: 0.5,
+                          color: Colors.white.withValues(alpha: 0.24),
+                          edgeInset: sliderThumbRadius + 1,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 6,
+                      thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: sliderThumbRadius),
+                      overlayShape: SliderComponentShape.noOverlay,
+                      showValueIndicator: ShowValueIndicator.onDrag,
+                      valueIndicatorTextStyle: const TextStyle(
+                        color: Color.fromARGB(255, 0, 0, 0),
+                        fontSize: 12,
+                      ),
+                      activeTrackColor: const Color(0xFF4D5566),
+                      inactiveTrackColor: const Color(0xFF4D5566),
+                      thumbColor: const Color(0xFFB7BECC),
+                    ),
+                    child: Slider(
+                      value: widget.value,
+                      min: 0,
+                      max: 1,
+                      divisions: 200,
+                      label: readoutText,
+                      onChangeStart: (v) {
+                        widget.onChangeStart(v);
+                      },
+                      onChanged: (v) {
+                        setState(() {});
+                        widget.onChanged(v);
+                      },
+                      onChangeEnd: (v) {
+                        widget.onChangeEnd(v);
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
         ),
-
-        const SizedBox(width: 6),
-
-        Text(L10n.translate(context, 'R'),
-            style: const TextStyle(color: Colors.white, fontSize: 14)),
+        SizedBox(
+          width: readoutWidth,
+          child: Text(
+            readoutText,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.visible,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+          ),
+        ),
       ],
     );
   }
@@ -12966,9 +13115,25 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
     return clamped;
   }
 
+  String _gainReadoutText(double gainUi) {
+    final db = _gainToDb(gainUi);
+    if (db.isInfinite) return '–∞ dB';
+    return db > 0
+        ? '+${db.toStringAsFixed(1)} dB'
+        : '${db.toStringAsFixed(1)} dB';
+  }
+
   @override
   Widget build(BuildContext context) {
+    const sliderThumbRadius = 11.0;
+    const uiUnity = 2.0;
     final visualValue = _gainUiToVisualValue(widget.value);
+    final gainReadoutText = _gainReadoutText(widget.value);
+    final unityUi = math.min(uiUnity, widget.maxValue);
+    final unityVisualValue = _gainUiToVisualValue(unityUi);
+    final unityFraction = widget.maxValue <= 0.0
+        ? 0.0
+        : (unityVisualValue / widget.maxValue).clamp(0.0, 1.0).toDouble();
 
     return Row(
       children: [
@@ -12983,41 +13148,61 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
             behavior: HitTestBehavior.translucent,
             onLongPress: widget.onLongPress,
             onDoubleTap: () {
-              const uiUnity = 2.0;
               final unity = math.min(uiUnity, widget.maxValue);
               setState(() {
                 widget.onChanged(unity); // reset to unity gain (0 dB)
               });
             },
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 6,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 11),
-                overlayShape: SliderComponentShape.noOverlay,
-                activeTrackColor: widget.trackColor,
-                inactiveTrackColor: widget.trackColor.withOpacity(0.65),
-                thumbColor: widget.thumbColor,
-              ),
-              child: Slider(
-                value: visualValue.clamp(0.0, widget.maxValue),
-                min: 0.0,
-                max: widget.maxValue,
-                // divisions: 60,
-                // label: () {
-                //   final db = _gainToDb(widget.value);
-                //   if (db.isInfinite) return "–∞ dB";
-                //   return "${db.toStringAsFixed(1)} dB";
-                // }(),
-                onChangeStart: (v) {
-                  widget.onChangeStart(_visualValueToGainUi(v));
-                },
-                onChanged: (v) {
-                  setState(() {});
-                  widget.onChanged(_visualValueToGainUi(v));
-                },
-                onChangeEnd: (v) {
-                  widget.onChangeEnd(_visualValueToGainUi(v));
-                },
+            child: SizedBox(
+              height: 24,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _SliderDefaultMarkerPainter(
+                          positionFraction: unityFraction,
+                          color: Colors.white.withValues(alpha: 0.24),
+                          edgeInset: sliderThumbRadius + 1,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 6,
+                      thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: sliderThumbRadius),
+                      overlayShape: SliderComponentShape.noOverlay,
+                      showValueIndicator: ShowValueIndicator.onDrag,
+                      valueIndicatorTextStyle: const TextStyle(
+                        color: Color.fromARGB(255, 0, 0, 0),
+                        fontSize: 12,
+                      ),
+                      activeTrackColor: widget.trackColor,
+                      inactiveTrackColor: widget.trackColor.withOpacity(0.65),
+                      thumbColor: widget.thumbColor,
+                    ),
+                    child: Slider(
+                      value: visualValue.clamp(0.0, widget.maxValue),
+                      min: 0.0,
+                      max: widget.maxValue,
+                      divisions: 300,
+                      label: gainReadoutText,
+                      onChangeStart: (v) {
+                        widget.onChangeStart(_visualValueToGainUi(v));
+                      },
+                      onChanged: (v) {
+                        setState(() {});
+                        widget.onChanged(_visualValueToGainUi(v));
+                      },
+                      onChangeEnd: (v) {
+                        widget.onChangeEnd(_visualValueToGainUi(v));
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -13038,13 +13223,7 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
         SizedBox(
           width: 50, // fixed width so slider never shifts
           child: Text(
-            () {
-              final db = _gainToDb(widget.value);
-              if (db.isInfinite) return "–∞ dB";
-              return db > 0
-                  ? "+${db.toStringAsFixed(1)} dB"
-                  : "${db.toStringAsFixed(1)} dB";
-            }(),
+            gainReadoutText,
             maxLines: 1,
             softWrap: false,
             overflow:

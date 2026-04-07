@@ -16,6 +16,7 @@ from .secrets import load_posthog_personal_api_key
 _ACTIVE_USER_EVENT = "$screen"
 _TREND_RANGE_DAYS = 365
 _AI_OBSERVABILITY_RANGE_DAYS = 30
+_LIVE_PRESENCE_WINDOW_MINUTES = 5
 _TOOL_USAGE_RANGE_OPTIONS = {
     "7d": ("Weekly", "timestamp >= now() - INTERVAL 7 DAY"),
     "30d": ("Monthly", "timestamp >= now() - INTERVAL 30 DAY"),
@@ -188,6 +189,45 @@ class PosthogAdminMetricsClient:
         payload["daily_hours_used"] = results["daily_hours_used"]
         payload["top_countries"] = results["top_countries"]
         payload["updated_at"] = _utc_now_iso()
+        self._set_cached(cache_key, payload)
+        return copy.deepcopy(payload)
+
+    def fetch_live_presence(self) -> Dict[str, Any]:
+        cache_key = "live_presence"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            headers = self._build_headers()
+        except Exception as exc:
+            payload = {
+                "source": "posthog",
+                "status": "unconfigured",
+                "active_users": 0,
+                "window_minutes": _LIVE_PRESENCE_WINDOW_MINUTES,
+                "updated_at": "",
+                "note": str(exc),
+            }
+            self._set_cached(cache_key, payload)
+            return copy.deepcopy(payload)
+
+        payload = {
+            "source": "posthog",
+            "status": "live",
+            "active_users": self._query_scalar(
+                headers,
+                (
+                    "SELECT count(DISTINCT person_id) AS value "
+                    "FROM events "
+                    f"WHERE event = '{_ACTIVE_USER_EVENT}' "
+                    "AND person_id IS NOT NULL "
+                    f"AND timestamp >= now() - INTERVAL {_LIVE_PRESENCE_WINDOW_MINUTES} MINUTE"
+                ),
+            ),
+            "window_minutes": _LIVE_PRESENCE_WINDOW_MINUTES,
+            "updated_at": _utc_now_iso(),
+        }
         self._set_cached(cache_key, payload)
         return copy.deepcopy(payload)
 

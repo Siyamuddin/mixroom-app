@@ -229,7 +229,10 @@ class ExportSaveDialog {
 
   static Future<bool> shareSavedExportFromPlatform(String? rawPath) async {
     final input = rawPath?.trim();
-    if (input == null || input.isEmpty || kIsWeb || !Platform.isAndroid) {
+    if (input == null ||
+        input.isEmpty ||
+        kIsWeb ||
+        (!Platform.isAndroid && !Platform.isIOS)) {
       return false;
     }
     try {

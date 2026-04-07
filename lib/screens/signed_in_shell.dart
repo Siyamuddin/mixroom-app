@@ -109,12 +109,6 @@ class _SignedInShellState extends State<SignedInShell> {
     }
 
     if (refreshed.hasSeenWelcomeOnboarding || hasSeenLocally) {
-      if (hasSeenLocally && !refreshed.hasSeenWelcomeOnboarding) {
-        await appUser.stageWelcomeOnboardingSeen();
-        unawaited(
-          appUser.syncWelcomeOnboardingSeen().catchError((_) {}),
-        );
-      }
       return;
     }
     _welcomeCheckStarted = true;
@@ -160,9 +154,6 @@ class _SignedInShellState extends State<SignedInShell> {
       ),
     );
     await appUser.stageWelcomeOnboardingSeen();
-    unawaited(
-      appUser.syncWelcomeOnboardingSeen().catchError((_) {}),
-    );
   }
 
   Future<void> _refreshRemoteAnnouncementState({

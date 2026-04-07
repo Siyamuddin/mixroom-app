@@ -88,6 +88,13 @@
                   <div id="identity-email" class="identity-email">Not signed in</div>
                   <p id="identity-meta" class="identity-meta">Allowlisted employee access</p>
                 </div>
+                <div id="live-presence-badge" class="live-presence-badge hidden" aria-live="polite">
+                  <span class="live-presence-dot" aria-hidden="true"></span>
+                  <div class="live-presence-copy">
+                    <span id="live-presence-label" class="live-presence-label">Live now</span>
+                    <span id="live-presence-value" class="live-presence-value">0 users</span>
+                  </div>
+                </div>
                 <div class="hero-actions">
                   <button
                     id="refresh-button"
@@ -310,7 +317,7 @@
             </article>
           </section>
 
-          <section class="panel" data-home-section-panel="observability">
+          <section class="panel hidden" data-home-section-panel="observability">
             <div class="section-loading-state hidden" data-home-section-loading="observability">
               <div class="loading-spinner" aria-hidden="true"></div>
               <p class="loading-copy" data-home-section-loading-label="observability">Loading recent AI calls…</p>
@@ -382,7 +389,7 @@
             </div>
           </section>
 
-          <section class="panel" data-home-section-panel="users">
+          <section class="panel hidden" data-home-section-panel="users">
             <div class="section-loading-state hidden" data-home-section-loading="users">
               <div class="loading-spinner" aria-hidden="true"></div>
               <p class="loading-copy" data-home-section-loading-label="users">Loading account activity…</p>
@@ -441,7 +448,7 @@
             </div>
           </section>
 
-          <section class="panel" data-home-section-panel="projects">
+          <section class="panel hidden" data-home-section-panel="projects">
             <div class="section-loading-state hidden" data-home-section-loading="projects">
               <div class="loading-spinner" aria-hidden="true"></div>
               <p class="loading-copy" data-home-section-loading-label="projects">Loading project activity…</p>

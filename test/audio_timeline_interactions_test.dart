@@ -71,6 +71,10 @@ Widget _buildHarness({
   Map<String, List<AutomationClipSnapshot>> initialAutomationClipsByTarget =
       const <String, List<AutomationClipSnapshot>>{},
   String initialSelectedAutomationTargetId = 'volume',
+  VoidCallback? onCopyRowEffects,
+  Future<void> Function(int row)? onPasteRowEffects,
+  Future<void> Function(int row)? onClearRowEffects,
+  bool hasCopiedRowEffects = false,
 }) {
   final rows = <TimelineRow>[
     TimelineRow(rowId: 1, name: 'Track 1', iconId: 0),
@@ -154,7 +158,7 @@ Widget _buildHarness({
           onTrimClip: (_, __, ___, {newStartMs}) {},
           onTrimClipCommit: onTrimClipCommit ??
               (_, __, ___, ____, _____, ______, {newStartMs}) {},
-          playheadMs: 0.0,
+          transportClockListenable: ValueNotifier<Duration>(Duration.zero),
           onScrubRequested: (_) {},
           isPlaying: false,
           maxDuration: const Duration(seconds: 30),
@@ -212,6 +216,10 @@ Widget _buildHarness({
           mode: 'Pro',
           onPluginParamCommit: null,
           onPresetCommit: null,
+          onCopyRowEffects: onCopyRowEffects,
+          onPasteRowEffects: onPasteRowEffects,
+          onClearRowEffects: onClearRowEffects,
+          hasCopiedRowEffects: hasCopiedRowEffects,
           registerRowFxRefresher: null,
           registerRowFxPlaybackRefresher: null,
           onSnapSettingsChanged: null,
@@ -434,6 +442,84 @@ void main() {
 
     expect(find.byType(RowEffectsPanel), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  testWidgets('row effects menu exposes copy, paste, and clear actions',
+      (tester) async {
+    bool copied = false;
+    int? pastedRow;
+    int? clearedRow;
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: <AudioTrack>[await _buildClip()],
+        onMoveClipCommit: (_, __, ___) async {},
+        rowEffects: const <String>['EQ'],
+        onCopyRowEffects: () {
+          copied = true;
+        },
+        onPasteRowEffects: (row) async {
+          pastedRow = row;
+        },
+        onClearRowEffects: (row) async {
+          clearedRow = row;
+        },
+        hasCopiedRowEffects: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(const Offset(24, _kRulerHeight + 40.0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Effects'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('row_effects_menu_0')));
+    await tester.pumpAndSettle();
+
+    final panelFinder = find.byKey(const ValueKey('row_effects_menu_panel_0'));
+    expect(panelFinder, findsOneWidget);
+    expect(
+      find.descendant(of: panelFinder, matching: find.text('Copy row effects')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+          of: panelFinder, matching: find.text('Paste row effects')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: panelFinder, matching: find.text('Clear effects')),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('row_effects_menu_action_0_copy')),
+    );
+    await tester
+        .tap(find.byKey(const ValueKey('row_effects_menu_action_0_copy')));
+    await tester.pumpAndSettle();
+    expect(copied, isTrue);
+
+    await tester.tap(find.byKey(const ValueKey('row_effects_menu_0')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('row_effects_menu_action_0_paste')),
+    );
+    await tester
+        .tap(find.byKey(const ValueKey('row_effects_menu_action_0_paste')));
+    await tester.pumpAndSettle();
+    expect(pastedRow, 0);
+
+    await tester.tap(find.byKey(const ValueKey('row_effects_menu_0')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('row_effects_menu_action_0_clear')),
+    );
+    await tester
+        .tap(find.byKey(const ValueKey('row_effects_menu_action_0_clear')));
+    await tester.pumpAndSettle();
+    expect(clearedRow, 0);
   });
 
   testWidgets(

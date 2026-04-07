@@ -2,6 +2,7 @@ import importlib
 import os
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest import mock
@@ -69,10 +70,21 @@ class _FakeRepo:
     def __init__(self, payload):
         self.payload = payload
         self.calls = []
+        self.live_presence_calls = 0
 
     def build_overview(self, **kwargs):
         self.calls.append(dict(kwargs))
         return dict(self.payload)
+
+    def build_live_presence(self):
+        self.live_presence_calls += 1
+        return {
+            "source": "posthog",
+            "status": "live",
+            "active_users": 3,
+            "window_minutes": 5,
+            "updated_at": "2026-04-05T00:00:00+00:00",
+        }
 
 
 class _FakeAccessRepo:
@@ -212,6 +224,28 @@ class AdminOverviewHandlerTests(unittest.TestCase):
         self.assertEqual(admin_module.repo.calls[0]["include_ai_observability"], False)
         self.assertEqual(admin_module.repo.calls[0]["include_users"], False)
         self.assertEqual(admin_module.repo.calls[0]["include_projects"], False)
+
+    def test_returns_live_presence_payload(self):
+        admin_module.config.ADMIN_COGNITO_APP_CLIENT_ID = "admin-client"
+        admin_module.config.ADMIN_COGNITO_USER_POOL_ID = "admin-pool"
+        admin_module.extract_claims_from_event = lambda event, audiences=None, user_pool_ids=None: {
+            "sub": "admin-user",
+            "email": "admin@example.com",
+        }
+        admin_module.access_repo = _FakeAccessRepo({"admin@example.com"})
+        admin_module.repo = _FakeRepo({"summary": {}})
+
+        result = admin_module.handler(
+            {
+                "rawPath": "/v1/internal/admin/live-presence",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(admin_module.repo.live_presence_calls, 1)
+        self.assertIn('"active_users": 3', result["body"])
 
 
 class AdminOverviewRepositoryTests(unittest.TestCase):
@@ -442,6 +476,90 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
         self.assertEqual(result["product_analytics"]["status"], "deferred")
         self.assertEqual(result["ai_usage"]["status"], "deferred")
         self.assertEqual(result["ai_observability"]["dashboard_status"], "deferred")
+
+    def test_build_live_presence_uses_posthog_client(self):
+        repo = overview_module.AdminOverviewRepository.__new__(
+            overview_module.AdminOverviewRepository
+        )
+        repo._posthog_metrics = mock.Mock(
+            fetch_live_presence=mock.Mock(
+                return_value={
+                    "source": "posthog",
+                    "status": "live",
+                    "active_users": 4,
+                    "window_minutes": 5,
+                    "updated_at": "2026-04-05T00:00:00+00:00",
+                }
+            )
+        )
+
+        result = overview_module.AdminOverviewRepository.build_live_presence(repo)
+
+        repo._posthog_metrics.fetch_live_presence.assert_called_once()
+        self.assertEqual(result["active_users"], 4)
+
+    def test_build_overview_includes_ai_usage_averages(self):
+        repo = overview_module.AdminOverviewRepository.__new__(
+            overview_module.AdminOverviewRepository
+        )
+        repo._entitlements = None
+        repo._ai_usage_state = None
+        repo._ai_usage_events = None
+        repo._billing_repo = None
+        repo._posthog_metrics = mock.Mock()
+        repo._recent_user_profiles = mock.Mock(return_value=[])
+        repo._scan_state_items = mock.Mock(return_value=[])
+        now = datetime.now(timezone.utc)
+        repo._list_recent_ai_events = mock.Mock(
+            return_value=[
+                {
+                    "user_id": "user-1",
+                    "feature": "chat",
+                    "status": "success",
+                    "created_at": (now - timedelta(hours=2)).isoformat(),
+                    "proxy_handler_ms_total": 1000,
+                },
+                {
+                    "user_id": "user-1",
+                    "feature": "chat",
+                    "status": "success",
+                    "created_at": (now - timedelta(hours=3)).isoformat(),
+                    "proxy_handler_ms_total": 2000,
+                },
+                {
+                    "user_id": "user-2",
+                    "feature": "mix_balance",
+                    "status": "success",
+                    "created_at": (now - timedelta(days=3)).isoformat(),
+                    "proxy_handler_ms_total": 3000,
+                },
+            ]
+        )
+        repo._build_tier_breakdown_fast = mock.Mock(
+            return_value=[
+                {"tier": "free", "user_count": 0, "active_user_count": 0},
+                {"tier": "pro", "user_count": 0, "active_user_count": 0},
+                {"tier": "studio", "user_count": 0, "active_user_count": 0},
+            ]
+        )
+        repo._describe_item_count = mock.Mock(return_value=0)
+
+        result = overview_module.AdminOverviewRepository.build_overview(
+            repo,
+            include_product_analytics=False,
+            include_ai_observability=False,
+            include_users=False,
+            include_projects=False,
+        )
+
+        self.assertEqual(result["ai_usage"]["daily_request_count"], 2)
+        self.assertEqual(result["ai_usage"]["weekly_request_count"], 3)
+        self.assertEqual(result["ai_usage"]["active_users_today"], 1)
+        self.assertEqual(result["ai_usage"]["active_users_week"], 2)
+        self.assertEqual(result["ai_usage"]["avg_prompts_per_user_today"], 2.0)
+        self.assertEqual(result["ai_usage"]["avg_prompts_per_user_week"], 1.5)
+        self.assertEqual(result["ai_usage"]["avg_latency_ms_today"], 1500.0)
+        self.assertEqual(result["ai_usage"]["avg_latency_ms_week"], 2000.0)
 
 
 if __name__ == "__main__":

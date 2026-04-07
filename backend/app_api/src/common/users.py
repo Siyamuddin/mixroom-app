@@ -70,10 +70,12 @@ _ALLOWED_MUSIC_PROFILES = {
     "artist",
     "songwriter",
     "audio_engineer",
+    "student",
     "music_enthusiast",
     "beginner",
     "music_for_work",
 }
+_WELCOME_SEEN_ONBOARDING_STATE = "signup_complete_welcome_seen"
 
 
 def _utc_now_iso() -> str:
@@ -522,8 +524,18 @@ def apply_user_profile_patch(
     else:
         record["newsletter_opt_in_at"] = None
 
+    requested_onboarding_state = str(patch.get("onboarding_state") or "").strip()
+
     record["updated_at"] = now
     record["last_seen_at"] = now
     record["onboarding_state"] = _default_onboarding_state(record)
+    if (
+        requested_onboarding_state == _WELCOME_SEEN_ONBOARDING_STATE
+        and record["onboarding_state"] == "signup_complete"
+    ):
+        # Preserve the legacy welcome-complete marker so older clients stop
+        # resending the same PATCH on every refresh. Newer clients should keep
+        # welcome completion local-only.
+        record["onboarding_state"] = _WELCOME_SEEN_ONBOARDING_STATE
     record["schema_version"] = max(4, int(record.get("schema_version") or 1))
     return record

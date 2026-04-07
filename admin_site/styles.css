@@ -490,6 +490,70 @@ ul {
   min-width: 240px;
 }
 
+.live-presence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 148px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: rgba(13, 26, 20, 0.72);
+  border: 1px solid rgba(144, 183, 162, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.live-presence-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #90b7a2;
+  box-shadow: 0 0 0 0 rgba(144, 183, 162, 0.55);
+  animation: live-presence-pulse 1.8s ease-out infinite;
+}
+
+.live-presence-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.live-presence-label {
+  color: rgba(231, 237, 244, 0.68);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.live-presence-value {
+  color: #edf7f1;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.live-presence-badge.is-idle {
+  background: rgba(21, 29, 39, 0.8);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.live-presence-badge.is-idle .live-presence-dot {
+  background: rgba(147, 161, 179, 0.88);
+  animation: none;
+  box-shadow: none;
+}
+
+@keyframes live-presence-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(144, 183, 162, 0.48);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(144, 183, 162, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(144, 183, 162, 0);
+  }
+}
+
 .welcome-copy {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

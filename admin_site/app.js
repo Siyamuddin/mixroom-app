@@ -4,6 +4,7 @@ const SESSION_META_STORAGE_KEY = "mixroom.admin.site.session_meta.v1";
 const PKCE_STATE_KEY = "mixroom.admin.site.pkce_state.v1";
 const PKCE_VERIFIER_KEY = "mixroom.admin.site.pkce_verifier.v1";
 const OVERVIEW_PATH = "/v1/internal/admin/overview";
+const LIVE_PRESENCE_PATH = "/v1/internal/admin/live-presence";
 const ADMIN_USERS_PATH = "/v1/internal/admin/users";
 const ADMIN_USERS_DELETE_PATH = "/v1/internal/admin/users/delete";
 const ADMIN_USERS_GRANT_PROMPTS_PATH = "/v1/internal/admin/users/grant-prompts";
@@ -25,6 +26,7 @@ const SUPPORTED_LOCALES = new Set(["en", "ko"]);
 const ADMIN_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 const ADMIN_MAX_SESSION_MS = 8 * 60 * 60 * 1000;
 const ACTIVITY_PERSIST_INTERVAL_MS = 30 * 1000;
+const LIVE_PRESENCE_POLL_MS = 60 * 1000;
 const DEFAULT_TAB = "home";
 const TAB_KEYS = ["home", "users", "feedback", "dev"];
 const ANDREW_ADMIN_EMAIL = "andrew@mixroom.ai";
@@ -101,6 +103,11 @@ const MESSAGES = {
     "welcome.session": "Session",
     "welcome.mode": "Mode",
     "welcome.fallbackName": "Operator",
+    "presence.liveNow": "Live now",
+    "presence.userCount": "{count} users",
+    "presence.userCountOne": "{count} user",
+    "presence.idle": "No users in last {minutes}m",
+    "presence.offline": "Live users unavailable",
     "tab.home": "Home",
     "tab.users": "Users",
     "tab.feedback": "Feedback",
@@ -144,7 +151,7 @@ const MESSAGES = {
     "panel.selectedUser.title": "User details",
     "panel.selectedUser.meta": "Review actions here.",
     "panel.aiUsage.label": "AI Usage",
-    "panel.aiUsage.title": "AI activity",
+    "panel.aiUsage.title": "Daily and weekly AI snapshot",
     "panel.aiPromptLimits.label": "AI Prompt Limits",
     "panel.aiPromptLimits.title": "Free tier defaults",
     "panel.aiPromptLimits.meta": "Server-enforced prompt limits for free users.",
@@ -155,7 +162,7 @@ const MESSAGES = {
     "panel.producerCaptureWhitelist.title": "Producer capture usernames",
     "panel.producerCaptureWhitelist.meta":
       "Usernames allowlisted to see the Producer Capture UI toggle.",
-    "panel.features.title": "Features",
+    "panel.features.title": "Most used AI tools this week",
     "panel.tiers.label": "Subscription Tier",
     "panel.tiers.title": "Tiers",
     "panel.accountActivity.label": "Account Activity",
@@ -260,10 +267,10 @@ const MESSAGES = {
     "status.sessionExpiredAbsolute": "Admin session expired. Sign in again.",
     "summary.users": "Users",
     "summary.usersDetail": "{count} with AI or billing data",
-    "summary.projects": "Projects",
-    "summary.projectsDetail": "Project IDs with AI activity",
-    "summary.aiRequests": "AI Requests",
-    "summary.aiRequestsDetail": "{count} lifetime credits",
+    "summary.aiPromptsToday": "AI prompts today",
+    "summary.aiPromptsTodayDetail": "{count} AI-active users today",
+    "summary.aiPromptsWeek": "AI prompts 7d",
+    "summary.aiPromptsWeekDetail": "{count} AI-active users this week",
     "summary.paidUsers": "Paid Users",
     "summary.paidUsersDetail": "{count} active subs",
     "generated.at": "Generated {date}",
@@ -273,10 +280,14 @@ const MESSAGES = {
     "identity.employeeEmailsOnly": "Allowlisted employee emails only",
     "identity.employee": "Employee",
     "identity.notSignedIn": "Not signed in",
-    "usage.creditsToday": "Credits today",
-    "usage.tokensMonth": "Tokens this month",
-    "usage.activeUsers": "AI-active users",
-    "usage.successRate": "Success rate",
+    "usage.promptsToday": "Prompts today",
+    "usage.promptsWeek": "Prompts 7d",
+    "usage.activeUsersToday": "AI users today",
+    "usage.activeUsersWeek": "AI users 7d",
+    "usage.avgPromptsPerUserToday": "Avg prompts / user today",
+    "usage.avgPromptsPerUserWeek": "Avg prompts / user 7d",
+    "usage.avgLatencyToday": "Avg latency today",
+    "usage.avgLatencyWeek": "Avg latency 7d",
     "usage.na": "n/a",
     "usage.noFeatures": "No AI feature events recorded yet.",
     "overview.loading": "Loading…",
@@ -478,6 +489,11 @@ const MESSAGES = {
     "welcome.session": "세션",
     "welcome.mode": "모드",
     "welcome.fallbackName": "Operator",
+    "presence.liveNow": "실시간",
+    "presence.userCount": "사용자 {count}명",
+    "presence.userCountOne": "사용자 {count}명",
+    "presence.idle": "최근 {minutes}분 사용자 없음",
+    "presence.offline": "실시간 사용자 불러오기 불가",
     "tab.home": "홈",
     "tab.users": "사용자",
     "tab.feedback": "피드백",
@@ -521,7 +537,7 @@ const MESSAGES = {
     "panel.selectedUser.title": "사용자 상세",
     "panel.selectedUser.meta": "여기서 작업 내용을 검토하세요.",
     "panel.aiUsage.label": "AI 사용량",
-    "panel.aiUsage.title": "AI 활동",
+    "panel.aiUsage.title": "일간 및 주간 AI 스냅샷",
     "panel.aiPromptLimits.label": "AI 프롬프트 제한",
     "panel.aiPromptLimits.title": "무료 티어 기본값",
     "panel.aiPromptLimits.meta": "무료 사용자에게 서버에서 강제되는 프롬프트 제한입니다.",
@@ -532,7 +548,7 @@ const MESSAGES = {
     "panel.producerCaptureWhitelist.title": "프로듀서 캡처 사용자명",
     "panel.producerCaptureWhitelist.meta":
       "프로듀서 캡처 UI 토글을 볼 수 있는 사용자명 허용 목록입니다.",
-    "panel.features.title": "기능",
+    "panel.features.title": "이번 주 가장 많이 쓴 AI 도구",
     "panel.tiers.label": "구독 티어",
     "panel.tiers.title": "티어",
     "panel.accountActivity.label": "계정 활동",
@@ -637,10 +653,10 @@ const MESSAGES = {
     "status.sessionExpiredAbsolute": "관리자 세션이 만료되었습니다. 다시 로그인하세요.",
     "summary.users": "사용자",
     "summary.usersDetail": "AI 또는 결제 데이터가 있는 사용자 {count}명",
-    "summary.projects": "프로젝트",
-    "summary.projectsDetail": "AI 활동이 있는 프로젝트 ID",
-    "summary.aiRequests": "AI 요청",
-    "summary.aiRequestsDetail": "누적 크레딧 {count}",
+    "summary.aiPromptsToday": "오늘 AI 프롬프트",
+    "summary.aiPromptsTodayDetail": "오늘 AI 활성 사용자 {count}명",
+    "summary.aiPromptsWeek": "최근 7일 AI 프롬프트",
+    "summary.aiPromptsWeekDetail": "이번 주 AI 활성 사용자 {count}명",
     "summary.paidUsers": "유료 사용자",
     "summary.paidUsersDetail": "활성 구독 {count}",
     "generated.at": "{date} 생성",
@@ -650,10 +666,14 @@ const MESSAGES = {
     "identity.employeeEmailsOnly": "허용 목록의 직원 이메일만 허용",
     "identity.employee": "직원",
     "identity.notSignedIn": "로그인되지 않음",
-    "usage.creditsToday": "오늘 크레딧",
-    "usage.tokensMonth": "이번 달 토큰",
-    "usage.activeUsers": "AI 활성 사용자",
-    "usage.successRate": "성공률",
+    "usage.promptsToday": "오늘 프롬프트",
+    "usage.promptsWeek": "최근 7일 프롬프트",
+    "usage.activeUsersToday": "오늘 AI 사용자",
+    "usage.activeUsersWeek": "최근 7일 AI 사용자",
+    "usage.avgPromptsPerUserToday": "오늘 사용자당 평균 프롬프트",
+    "usage.avgPromptsPerUserWeek": "최근 7일 사용자당 평균 프롬프트",
+    "usage.avgLatencyToday": "오늘 평균 지연 시간",
+    "usage.avgLatencyWeek": "최근 7일 평균 지연 시간",
     "usage.na": "해당 없음",
     "usage.noFeatures": "기록된 AI 기능 이벤트가 아직 없습니다.",
     "overview.loading": "불러오는 중…",
@@ -845,6 +865,9 @@ const elements = {
   dashboard: document.querySelector("#dashboard"),
   welcomeBanner: document.querySelector("#welcome-banner"),
   welcomeName: document.querySelector("#welcome-name"),
+  livePresenceBadge: document.querySelector("#live-presence-badge"),
+  livePresenceLabel: document.querySelector("#live-presence-label"),
+  livePresenceValue: document.querySelector("#live-presence-value"),
   tabButtons: Array.from(document.querySelectorAll("[data-tab-button]")),
   tabPanels: Array.from(document.querySelectorAll("[data-tab-panel]")),
   tabLoadingStates: Object.fromEntries(
@@ -994,8 +1017,10 @@ const state = {
   producerCaptureWhitelistFeedback: null,
   aiRuntimeSettings: null,
   aiRuntimeFeedbackByFeature: {},
-  analyticsRange: "30d",
-  aiToolUsageRange: "30d",
+  livePresence: null,
+  livePresenceRequestId: 0,
+  analyticsRange: "7d",
+  aiToolUsageRange: "7d",
   feedbackRequestId: 0,
   deleteFeedback: null,
   grantFeedback: null,
@@ -1008,6 +1033,7 @@ let tokens = loadTokens();
 let currentUser = decodeIdToken(tokens?.idToken);
 let sessionMeta = loadSessionMeta();
 let sessionExpiryTimer = null;
+let livePresenceTimer = null;
 let lastActivityPersistAt = 0;
 let welcomeAnimationPlayed = false;
 const analyticsCharts = {};
@@ -1146,6 +1172,7 @@ function rerenderForLocale() {
   renderFeedbackTable(state.feedbackList);
   renderFeedbackInspector();
   renderWelcomeBanner(currentUser);
+  renderLivePresence();
   renderAiPromptLimitSettings();
   renderProducerCaptureWhitelistSettings();
   renderAiRuntimeSettings();
@@ -1308,8 +1335,7 @@ function handleAiToolUsageRangeClick(event) {
   state.aiToolUsageRange = nextRange;
   void refreshOverviewSections({
     include_ai_usage: true,
-    include_ai_observability: true,
-    loadingKeys: ["usage", "observability"],
+    loadingKeys: ["usage"],
     statusMessage: t("status.loadingAdminOverview"),
   });
 }
@@ -1414,6 +1440,78 @@ function getWelcomeName(email) {
 function renderWelcomeBanner(user) {
   const email = user?.email || state.overview?.requested_email || "";
   elements.welcomeName.textContent = getWelcomeName(email);
+}
+
+function renderLivePresence(presence = state.livePresence) {
+  if (!elements.livePresenceBadge || !elements.livePresenceLabel || !elements.livePresenceValue) {
+    return;
+  }
+
+  elements.livePresenceLabel.textContent = t("presence.liveNow");
+  if (!presence) {
+    elements.livePresenceBadge.classList.add("hidden");
+    elements.livePresenceBadge.classList.remove("is-idle");
+    return;
+  }
+
+  const count = Number(presence.active_users || 0);
+  const minutes = Number(presence.window_minutes || 5);
+  const isLive = presence.status === "live";
+  const hasUsers = isLive && count > 0;
+  elements.livePresenceBadge.classList.remove("hidden");
+  elements.livePresenceBadge.classList.toggle("is-idle", !hasUsers);
+  if (!isLive) {
+    elements.livePresenceValue.textContent = t("presence.offline");
+    return;
+  }
+  elements.livePresenceValue.textContent = hasUsers
+    ? t(count === 1 ? "presence.userCountOne" : "presence.userCount", {
+      count: formatWholeNumber(count),
+    })
+    : t("presence.idle", { minutes: formatWholeNumber(minutes) });
+}
+
+async function loadLivePresence({ silent = true } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+
+  const requestId = ++state.livePresenceRequestId;
+  try {
+    const payload = await fetchAdminJson(LIVE_PRESENCE_PATH);
+    if (requestId !== state.livePresenceRequestId) {
+      return;
+    }
+    state.livePresence = payload;
+    renderLivePresence();
+  } catch (error) {
+    if (requestId !== state.livePresenceRequestId) {
+      return;
+    }
+    state.livePresence = {
+      status: "error",
+      active_users: 0,
+      window_minutes: 5,
+    };
+    renderLivePresence();
+    if (!silent) {
+      handleAdminRequestError(error, t("status.loadAdminOverviewFailed"));
+    }
+  }
+}
+
+function startLivePresencePolling() {
+  if (livePresenceTimer) {
+    window.clearInterval(livePresenceTimer);
+    livePresenceTimer = null;
+  }
+  if (!tokens?.idToken) {
+    return;
+  }
+  void loadLivePresence({ silent: true });
+  livePresenceTimer = window.setInterval(() => {
+    void loadLivePresence({ silent: true });
+  }, LIVE_PRESENCE_POLL_MS);
 }
 
 function animateWelcomeBanner({ force = false } = {}) {
@@ -1756,7 +1854,12 @@ async function refreshOverview() {
   updateBusyState();
   setStatus(t("status.loadingAdminOverview"), "info");
   setHomeSectionLoading(
-    ["analytics", "usage", "observability", "users", "projects"],
+    ["usage"],
+    true,
+    t("overview.loadingSection"),
+  );
+  setHomeSectionLoading(
+    ["analytics"],
     true,
     t("overview.loadingSection"),
   );
@@ -1767,8 +1870,14 @@ async function refreshOverview() {
       throw new Error(t("status.sessionMissingEmail"));
     }
 
-    state.overviewIncludes = buildOverviewIncludes();
-    const params = buildOverviewParams(buildOverviewIncludes());
+    state.overviewIncludes = {
+      ...buildOverviewIncludes(),
+      aiUsage: true,
+    };
+    const params = buildOverviewParams({
+      aiUsage: true,
+      productAnalytics: false,
+    });
     const payload = await fetchAdminJson(`${OVERVIEW_PATH}?${params.toString()}`);
     if (requestId !== state.overviewRequestId) {
       return;
@@ -1777,28 +1886,20 @@ async function refreshOverview() {
     syncOverviewIncludesFromPayload(state.overview);
     setSignedInState(currentUser);
     renderOverview(state.overview);
+    setHomeSectionLoading(["usage"], false);
     state.loadedTabs.home = true;
     setStatus(t("status.adminOverviewLoaded"), "success");
 
     state.overviewBusy = false;
     updateBusyState();
-
-    void Promise.allSettled([
-      refreshOverviewSections({
-        requestId,
-        include_ai_usage: true,
-        include_ai_observability: true,
-        include_users: true,
-        include_projects: true,
-        loadingKeys: ["usage", "observability", "users", "projects"],
-      }),
-      refreshOverviewSections({
-        requestId,
-        include_product_analytics: true,
-        loadingKeys: ["analytics"],
-      }),
-    ]);
+    void refreshOverviewSections({
+      requestId,
+      include_product_analytics: true,
+      loadingKeys: ["analytics"],
+      statusMessage: "",
+    });
   } catch (error) {
+    setHomeSectionLoading(["usage", "analytics"], false);
     handleAdminRequestError(error, t("status.loadAdminOverviewFailed"));
   } finally {
     if (requestId === state.overviewRequestId && state.overviewBusy) {
@@ -2065,10 +2166,7 @@ function renderOverview(overview) {
   renderSummary(overview.summary || {});
   renderProductAnalytics(overview.product_analytics || {});
   renderUsage(overview);
-  renderAiObservability(overview.ai_observability || {});
   renderTiers(overview.subscription_tiers || []);
-  renderTrackedUsers(overview.users || []);
-  renderProjects(overview.projects || []);
 
   const warnings = Array.isArray(overview.warnings) ? overview.warnings : [];
   const generatedAt = overview.generated_at
@@ -2452,20 +2550,22 @@ function renderSummary(summary) {
       className: "summary-users",
     },
     {
-      title: t("summary.projects"),
-      value: formatOverviewMetricValue(summary.tracked_projects),
-      detail: summary.tracked_projects == null
+      title: t("summary.aiPromptsToday"),
+      value: formatOverviewMetricValue(summary.ai_prompts_today),
+      detail: summary.ai_prompts_today == null
         ? t("overview.loading")
-        : t("summary.projectsDetail"),
+        : t("summary.aiPromptsTodayDetail", {
+          count: formatOverviewMetricValue(summary.ai_active_users_today),
+        }),
       className: "summary-projects",
     },
     {
-      title: t("summary.aiRequests"),
-      value: formatOverviewMetricValue(summary.ai_requests_total),
-      detail: summary.ai_requests_total == null
+      title: t("summary.aiPromptsWeek"),
+      value: formatOverviewMetricValue(summary.ai_prompts_week),
+      detail: summary.ai_prompts_week == null
         ? t("overview.loading")
-        : t("summary.aiRequestsDetail", {
-          count: formatOverviewMetricValue(summary.ai_credits_charged_total),
+        : t("summary.aiPromptsWeekDetail", {
+          count: formatOverviewMetricValue(summary.ai_active_users_week),
         }),
       className: "summary-ai",
     },
@@ -2828,31 +2928,48 @@ function renderCountryConstellation(container, countries, { emptyLabel } = {}) {
 
 function renderUsage(overview) {
   const includes = getOverviewSectionIncludes(overview);
-  const summary = overview.summary || {};
   const usage = overview.ai_usage || {};
   const usageLoaded = includes.aiUsage;
-  const eventRecords = Number(usage.event_records || 0);
-  const successfulRequests = Number(usage.successful_requests || 0);
-  const successRate = !usageLoaded
-    ? t("overview.loading")
-    : eventRecords
-    ? `${Math.round((successfulRequests / eventRecords) * 100)}%`
-    : t("usage.na");
+  const formatUsageDecimal = (value) => (
+    value == null ? t("usage.na") : formatDecimal(value)
+  );
+  const formatUsageLatency = (value) => (
+    value == null ? t("usage.na") : formatMilliseconds(value)
+  );
 
   const metrics = [
     {
-      label: t("usage.creditsToday"),
-      value: usageLoaded ? formatNumber(summary.ai_credits_used_today || 0) : t("overview.loading"),
+      label: t("usage.promptsToday"),
+      value: usageLoaded ? formatNumber(usage.daily_request_count || 0) : t("overview.loading"),
     },
     {
-      label: t("usage.tokensMonth"),
-      value: usageLoaded ? formatNumber(summary.ai_tokens_used_month || 0) : t("overview.loading"),
+      label: t("usage.promptsWeek"),
+      value: usageLoaded ? formatNumber(usage.weekly_request_count || 0) : t("overview.loading"),
     },
     {
-      label: t("usage.activeUsers"),
-      value: usageLoaded ? formatNumber(usage.tracked_users || 0) : t("overview.loading"),
+      label: t("usage.activeUsersToday"),
+      value: usageLoaded ? formatNumber(usage.active_users_today || 0) : t("overview.loading"),
     },
-    { label: t("usage.successRate"), value: successRate },
+    {
+      label: t("usage.activeUsersWeek"),
+      value: usageLoaded ? formatNumber(usage.active_users_week || 0) : t("overview.loading"),
+    },
+    {
+      label: t("usage.avgPromptsPerUserToday"),
+      value: usageLoaded ? formatUsageDecimal(usage.avg_prompts_per_user_today) : t("overview.loading"),
+    },
+    {
+      label: t("usage.avgPromptsPerUserWeek"),
+      value: usageLoaded ? formatUsageDecimal(usage.avg_prompts_per_user_week) : t("overview.loading"),
+    },
+    {
+      label: t("usage.avgLatencyToday"),
+      value: usageLoaded ? formatUsageLatency(usage.avg_latency_ms_today) : t("overview.loading"),
+    },
+    {
+      label: t("usage.avgLatencyWeek"),
+      value: usageLoaded ? formatUsageLatency(usage.avg_latency_ms_week) : t("overview.loading"),
+    },
   ];
 
   elements.aiUsageMetrics.innerHTML = metrics
@@ -4170,13 +4287,19 @@ function setSignedInState(user) {
   elements.identityEmail.textContent = user.email || t("identity.employee");
   elements.identityMeta.textContent = t("identity.employeeAccess");
   renderWelcomeBanner(user);
+  renderLivePresence();
   updateTabView();
   updateBusyState();
   animateWelcomeBanner();
+  startLivePresencePolling();
 }
 
 function setSignedOutState() {
   welcomeAnimationPlayed = false;
+  if (livePresenceTimer) {
+    window.clearInterval(livePresenceTimer);
+    livePresenceTimer = null;
+  }
   elements.signedInHero.classList.add("hidden");
   elements.dashboard.classList.add("hidden");
   elements.signedOutPanel.classList.remove("hidden");
@@ -4184,6 +4307,7 @@ function setSignedOutState() {
   elements.identityMeta.textContent = t("identity.employeeEmailsOnly");
   renderWelcomeBanner(null);
   resetAdminState();
+  renderLivePresence();
   updateTabView();
   updateBusyState();
 }
@@ -5070,8 +5194,10 @@ function resetAdminState() {
   state.producerCaptureWhitelistFeedback = null;
   state.aiRuntimeSettings = null;
   state.aiRuntimeFeedbackByFeature = {};
-  state.analyticsRange = "30d";
-  state.aiToolUsageRange = "30d";
+  state.livePresence = null;
+  state.livePresenceRequestId = 0;
+  state.analyticsRange = "7d";
+  state.aiToolUsageRange = "7d";
   state.feedbackRequestId = 0;
   state.deleteFeedback = null;
   state.grantFeedback = null;

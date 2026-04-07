@@ -160,6 +160,8 @@ NSString *yamnetModelPath()
     NSString *_outputName;
 }
 
+static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
+
 + (instancetype)sharedService
 {
     static MixroomPromptAnalysisService *service = nil;
@@ -191,19 +193,31 @@ NSString *yamnetModelPath()
         {
             _env = [[ORTEnv alloc] initWithLoggingLevel:ORTLoggingLevelWarning error:&error];
             if (_env == nil || error != nil)
+            {
+                NSLog(@"[MixroomPromptAnalysis] Failed to create ORTEnv: %@", error);
                 return NO;
+            }
         }
 
         NSString *modelPath = yamnetModelPath();
         if (modelPath == nil)
+        {
+            NSLog(@"[MixroomPromptAnalysis] Could not resolve yamnet model path");
             return NO;
+        }
 
         ORTSessionOptions *options = [[ORTSessionOptions alloc] initWithError:&error];
         if (options == nil || error != nil)
+        {
+            NSLog(@"[MixroomPromptAnalysis] Failed to create session options: %@", error);
             return NO;
+        }
 
         if (![options setIntraOpNumThreads:1 error:&error] || error != nil)
+        {
+            NSLog(@"[MixroomPromptAnalysis] Failed to set intra-op threads: %@", error);
             return NO;
+        }
 #if MIXROOM_ORT_HAS_INTERNAL_SESSION_OPTIONS
         // Best effort parity with Android to avoid thread oversubscription.
         [options CXXAPIOrtSessionOptions].SetInterOpNumThreads(1);
@@ -211,17 +225,28 @@ NSString *yamnetModelPath()
 
         _session = [[ORTSession alloc] initWithEnv:_env modelPath:modelPath sessionOptions:options error:&error];
         if (_session == nil || error != nil)
+        {
+            NSLog(@"[MixroomPromptAnalysis] Failed to create session modelPath=%@: %@", modelPath, error);
             return NO;
+        }
 
         NSArray<NSString *> *inputNames = [_session inputNamesWithError:&error];
         if (inputNames.count == 0 || error != nil)
+        {
+            NSLog(@"[MixroomPromptAnalysis] Failed to read input names: %@", error);
             return NO;
+        }
         NSArray<NSString *> *outputNames = [_session outputNamesWithError:&error];
         if (outputNames.count == 0 || error != nil)
+        {
+            NSLog(@"[MixroomPromptAnalysis] Failed to read output names: %@", error);
             return NO;
+        }
 
         _inputName = inputNames.firstObject;
-        _outputName = outputNames.firstObject;
+        _outputName = [outputNames containsObject:kMixroomYamnetScoresOutputName]
+                          ? kMixroomYamnetScoresOutputName
+                          : outputNames.firstObject;
         return YES;
     }
     @finally
@@ -244,10 +269,13 @@ NSString *yamnetModelPath()
                                                           length:window.size() * sizeof(float)];
         ORTValue *inputValue = [[ORTValue alloc] initWithTensorData:tensorData
                                                         elementType:ORTTensorElementDataTypeFloat
-                                                              shape:@[ @1, @((NSInteger)window.size()) ]
+                                                              shape:@[ @((NSInteger)window.size()) ]
                                                               error:&error];
         if (inputValue == nil || error != nil)
+        {
+            NSLog(@"[MixroomPromptAnalysis] Failed to create input tensor: %@", error);
             return NO;
+        }
 
         NSDictionary<NSString *, ORTValue *> *outputs =
             [_session runWithInputs:@{ _inputName : inputValue }
@@ -255,15 +283,24 @@ NSString *yamnetModelPath()
                          runOptions:nil
                               error:&error];
         if (outputs == nil || error != nil)
+        {
+            NSLog(@"[MixroomPromptAnalysis] Session run failed output=%@: %@", _outputName, error);
             return NO;
+        }
 
         ORTValue *outputValue = outputs[_outputName];
         if (outputValue == nil)
+        {
+            NSLog(@"[MixroomPromptAnalysis] Missing output tensor for %@", _outputName);
             return NO;
+        }
 
         NSMutableData *outputData = [outputValue tensorDataWithError:&error];
         if (outputData == nil || error != nil || outputData.length == 0)
+        {
+            NSLog(@"[MixroomPromptAnalysis] Failed to read output tensor data output=%@ error=%@", _outputName, error);
             return NO;
+        }
 
         const float *values = (const float *)outputData.bytes;
         const NSUInteger count = outputData.length / sizeof(float);
@@ -281,7 +318,10 @@ NSString *yamnetModelPath()
 - (NSDictionary<NSString *, NSNumber *> *)classifyWindows:(const std::vector<std::vector<float>> &)windows
 {
     if (windows.empty())
+    {
+        NSLog(@"[MixroomPromptAnalysis] No windows available for classification");
         return fallbackPromptRoleProbs();
+    }
 
     std::vector<double> accum;
     int used = 0;
@@ -302,7 +342,10 @@ NSString *yamnetModelPath()
     }
 
     if (accum.empty() || used <= 0)
+    {
+        NSLog(@"[MixroomPromptAnalysis] No usable YAMNet windows used=%d", used);
         return fallbackPromptRoleProbs();
+    }
 
     for (double &value : accum)
         value /= (double)used;
@@ -328,7 +371,7 @@ NSString *yamnetModelPath()
             synth += score;
     }
 
-    return normalizePromptRoleProbs(@{
+    NSDictionary<NSString *, NSNumber *> *normalized = normalizePromptRoleProbs(@{
         @"vocals" : @(vocals),
         @"guitar" : @(guitar),
         @"bass" : @(bass),
@@ -336,6 +379,8 @@ NSString *yamnetModelPath()
         @"synth" : @(synth),
         @"other" : @0.01,
     });
+    NSLog(@"[MixroomPromptAnalysis] Classified %d windows roleProbs=%@", used, normalized);
+    return normalized;
 }
 
 @end
@@ -1821,6 +1866,7 @@ NSString *yamnetModelPath()
     juce::File file = juceFileFromNSString(path);
     auto stats = JuceEngine::get().analyzeAudioPrompt16k(file);
     auto windows = JuceEngine::get().sampleAudioMono16kWindows(file, 15600, 3);
+    NSLog(@"[MixroomPromptAnalysis] analyzeAudioForPrompt path=%@ windows=%lu", path, (unsigned long)windows.size());
     NSDictionary<NSString *, NSNumber *> *roleProbs =
         [[MixroomPromptAnalysisService sharedService] classifyWindows:windows];
     return @{

@@ -41,7 +41,15 @@ class LlmConfig {
     defaultValue: false,
   );
 
+  static const bool disableProxyInDebug = bool.fromEnvironment(
+    'LLM_DISABLE_PROXY_IN_DEBUG',
+    defaultValue: false,
+  );
+
   static String get effectiveProxyApiBaseUrl {
+    if (kDebugMode && disableProxyInDebug) {
+      return '';
+    }
     final configured = proxyApiBaseUrl.trim();
     if (configured.isNotEmpty) {
       return _normalizeProxyApiBaseUrl(configured);

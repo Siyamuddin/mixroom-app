@@ -196,6 +196,64 @@ class AssistantActionUtils {
     return tutorialAliases[normalizedKey] ?? 'tutorial:$normalizedKey';
   }
 
+  static List<String> compactTutorialPlaybackTargets(List<String> sequence) {
+    final cleaned = sequence
+        .map((key) => key.trim())
+        .where((key) => key.isNotEmpty)
+        .toList(growable: false);
+    if (cleaned.length <= 2) return cleaned;
+
+    final compact = <String>[];
+    void add(String? key) {
+      if (key == null || key.isEmpty || compact.contains(key)) return;
+      compact.add(key);
+    }
+
+    add(cleaned.first);
+
+    String? bridge;
+    for (final candidate in cleaned.skip(1).take(cleaned.length - 2)) {
+      if (candidate.endsWith(':effects_tab') ||
+          candidate.endsWith(':fx_list') ||
+          candidate.endsWith(':add_effect') ||
+          candidate == 'tutorial:toolbar' ||
+          candidate == 'tutorial:plugins' ||
+          candidate == 'tutorial:chatbar' ||
+          candidate == 'tutorial:timeline') {
+        bridge = candidate;
+        break;
+      }
+    }
+    bridge ??= cleaned[cleaned.length - 2];
+    add(bridge);
+    add(cleaned.last);
+    return compact;
+  }
+
+  static int tutorialPreviewDurationMs(int baseDurationMs) {
+    final normalized = _clampInt(baseDurationMs, 1200, 18000);
+    return _clampInt(math.max((normalized * 0.32).round(), 900), 900, 1400);
+  }
+
+  static int tutorialPreviewPauseMs(int previewDurationMs) {
+    return _clampInt(
+      math.min((previewDurationMs * 0.55).round(), previewDurationMs),
+      480,
+      1400,
+    );
+  }
+
+  static int tutorialFinalDurationMs(int baseDurationMs) {
+    final normalized = _clampInt(baseDurationMs, 1200, 18000);
+    return _clampInt(math.max(normalized, 2800), 2600, 5200);
+  }
+
+  static int _clampInt(int value, int min, int max) {
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+  }
+
   static String normalizeClipEditOperation(String raw) {
     switch (raw.trim().toLowerCase()) {
       case 'dialog_cleanup':

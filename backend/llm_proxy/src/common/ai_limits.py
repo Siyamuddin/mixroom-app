@@ -40,7 +40,7 @@ _PROMPT_LIMIT_SETTINGS_KEY = "ai_prompt_limits"
 _PROMPT_LIMITS_CACHE_TTL_SECONDS = 60
 _prompt_limits_cache: dict[str, Any] | None = None
 _prompt_limits_cache_loaded_at: datetime | None = None
-_prompt_limits_table = None
+_prompt_limits_table_client = None
 
 
 def _limits_path() -> Path:
@@ -99,15 +99,15 @@ def _default_prompt_limits_for_tier(tier: str) -> dict[str, int]:
 
 
 def _prompt_limits_table():
-    global _prompt_limits_table
-    if _prompt_limits_table is not None:
-        return _prompt_limits_table
+    global _prompt_limits_table_client
+    if _prompt_limits_table_client is not None:
+        return _prompt_limits_table_client
     if boto3 is None or not config.AI_PROMPT_LIMIT_SETTINGS_TABLE:
         return None
-    _prompt_limits_table = boto3.resource("dynamodb").Table(
+    _prompt_limits_table_client = boto3.resource("dynamodb").Table(
         config.AI_PROMPT_LIMIT_SETTINGS_TABLE
     )
-    return _prompt_limits_table
+    return _prompt_limits_table_client
 
 
 def _load_remote_prompt_limits() -> dict[str, Any]:
@@ -143,10 +143,10 @@ def _get_cached_remote_prompt_limits() -> dict[str, Any]:
 
 
 def clear_prompt_limits_cache() -> None:
-    global _prompt_limits_cache, _prompt_limits_cache_loaded_at, _prompt_limits_table
+    global _prompt_limits_cache, _prompt_limits_cache_loaded_at, _prompt_limits_table_client
     _prompt_limits_cache = None
     _prompt_limits_cache_loaded_at = None
-    _prompt_limits_table = None
+    _prompt_limits_table_client = None
 
 
 def normalize_feature_name(feature: str) -> str:

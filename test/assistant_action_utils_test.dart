@@ -105,6 +105,47 @@ void main() {
       );
     });
 
+    test('compactTutorialPlaybackTargets keeps bridge plus final target', () {
+      expect(
+        AssistantActionUtils.compactTutorialPlaybackTargets(const <String>[
+          'row:0',
+          'row:0:effects_tab',
+          'row:0:fx_list',
+          'row:0:fx_contains:reverb',
+          'row:0:fx_contains:reverb:param:mix',
+        ]),
+        equals(const <String>[
+          'row:0',
+          'row:0:effects_tab',
+          'row:0:fx_contains:reverb:param:mix',
+        ]),
+      );
+
+      expect(
+        AssistantActionUtils.compactTutorialPlaybackTargets(const <String>[
+          'tutorial:toolbar',
+          'tutorial:export',
+        ]),
+        equals(const <String>[
+          'tutorial:toolbar',
+          'tutorial:export',
+        ]),
+      );
+    });
+
+    test('tutorial playback timing favors quick previews and longer final hold',
+        () {
+      expect(AssistantActionUtils.tutorialPreviewDurationMs(3200), 1024);
+      expect(AssistantActionUtils.tutorialPreviewPauseMs(1024), 563);
+      expect(AssistantActionUtils.tutorialFinalDurationMs(3200), 3200);
+
+      expect(AssistantActionUtils.tutorialPreviewDurationMs(1200), 900);
+      expect(AssistantActionUtils.tutorialFinalDurationMs(1200), 2800);
+
+      expect(AssistantActionUtils.tutorialPreviewDurationMs(8000), 1400);
+      expect(AssistantActionUtils.tutorialFinalDurationMs(8000), 5200);
+    });
+
     test('normalizeClipEditOperation maps synonyms', () {
       expect(
         AssistantActionUtils.normalizeClipEditOperation('remove_coughs'),

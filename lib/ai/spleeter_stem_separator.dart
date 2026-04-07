@@ -136,7 +136,7 @@ class SpleeterStemSeparator {
       onProgress,
       stage: 'prepare',
       progress: 0.0,
-      message: 'Preparing Spleeter stem separation.',
+      message: 'Preparing stem separation.',
     );
 
     final sessions = await _ensureSessions(onProgress: onProgress);
@@ -196,7 +196,7 @@ class SpleeterStemSeparator {
         onProgress,
         stage: 'done',
         progress: 1.0,
-        message: 'Spleeter stem separation complete.',
+        message: 'Stem separation complete.',
       );
     } finally {
       if (prepFile.existsSync()) {
@@ -241,7 +241,7 @@ class SpleeterStemSeparator {
       onProgress,
       stage: 'load_models',
       progress: 0.0,
-      message: 'Loading Spleeter models.',
+      message: 'Loading stem separation models.',
     );
 
     final options = OrtSessionOptions(
@@ -351,7 +351,7 @@ class SpleeterStemSeparator {
         onProgress,
         stage: 'prepare_model',
         progress: 0.0,
-        message: 'Preparing bundled Spleeter models.',
+        message: 'Preparing bundled stem separation models.',
       );
 
       final data = await rootBundle.load(assetPath);
@@ -386,7 +386,7 @@ class SpleeterStemSeparator {
       onProgress,
       stage: stage,
       progress: 0.0,
-      message: 'Downloading Spleeter model.',
+      message: 'Downloading stem separation model.',
     );
 
     final request = http.Request('GET', uri);
@@ -418,7 +418,7 @@ class SpleeterStemSeparator {
             stage: stage,
             progress: progress,
             message:
-                'Downloading Spleeter model ${(progress * 100).toStringAsFixed(0)}%.',
+                'Downloading stem separation model ${(progress * 100).toStringAsFixed(0)}%.',
           );
         }
       }
