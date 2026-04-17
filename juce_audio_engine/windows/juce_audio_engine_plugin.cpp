@@ -1650,6 +1650,48 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "getRowStereoScope") {
+      const int row = FindInt(args, "row", 0);
+      const int effect = FindInt(args, "effect", 0);
+      const int point_count = FindInt(args, "pointCount", 256);
+      const auto values = CallOnMessageThreadSync([row, effect, point_count] {
+        return JuceEngine::get().getRowStereoScope(row, effect, point_count);
+      });
+      result->Success(flutter::EncodableValue(FloatVectorToEncodableList(values)));
+      return;
+    }
+
+    if (method_call.method_name() == "getMasterStereoScope") {
+      const int effect = FindInt(args, "effect", 0);
+      const int point_count = FindInt(args, "pointCount", 256);
+      const auto values = CallOnMessageThreadSync([effect, point_count] {
+        return JuceEngine::get().getMasterStereoScope(effect, point_count);
+      });
+      result->Success(flutter::EncodableValue(FloatVectorToEncodableList(values)));
+      return;
+    }
+
+    if (method_call.method_name() == "getRowShaperPreview") {
+      const int row = FindInt(args, "row", 0);
+      const int effect = FindInt(args, "effect", 0);
+      const int point_count = FindInt(args, "pointCount", 192);
+      const auto values = CallOnMessageThreadSync([row, effect, point_count] {
+        return JuceEngine::get().getRowShaperPreview(row, effect, point_count);
+      });
+      result->Success(flutter::EncodableValue(FloatVectorToEncodableList(values)));
+      return;
+    }
+
+    if (method_call.method_name() == "getMasterShaperPreview") {
+      const int effect = FindInt(args, "effect", 0);
+      const int point_count = FindInt(args, "pointCount", 192);
+      const auto values = CallOnMessageThreadSync([effect, point_count] {
+        return JuceEngine::get().getMasterShaperPreview(effect, point_count);
+      });
+      result->Success(flutter::EncodableValue(FloatVectorToEncodableList(values)));
+      return;
+    }
+
     if (method_call.method_name() == "setAutomationTransport") {
       const double time_seconds = FindDouble(args, "timeSeconds", 0.0);
       CallOnMessageThreadSync([time_seconds] {

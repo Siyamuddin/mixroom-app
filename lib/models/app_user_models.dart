@@ -25,6 +25,9 @@ class AppUserSnapshot {
     required this.acceptedAt,
     required this.newsletterOptIn,
     required this.newsletterOptInAt,
+    required this.telemetryEnabled,
+    required this.telemetryEnabledAt,
+    required this.localeCode,
     required this.createdAt,
     required this.updatedAt,
     required this.lastSeenAt,
@@ -50,6 +53,9 @@ class AppUserSnapshot {
   final DateTime? acceptedAt;
   final bool newsletterOptIn;
   final DateTime? newsletterOptInAt;
+  final bool telemetryEnabled;
+  final DateTime? telemetryEnabledAt;
+  final String? localeCode;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? lastSeenAt;
@@ -92,6 +98,9 @@ class AppUserSnapshot {
       'accepted_at': acceptedAt?.toIso8601String(),
       'newsletter_opt_in': newsletterOptIn,
       'newsletter_opt_in_at': newsletterOptInAt?.toIso8601String(),
+      'telemetry_enabled': telemetryEnabled,
+      'telemetry_enabled_at': telemetryEnabledAt?.toIso8601String(),
+      'locale_code': localeCode,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
       'last_seen_at': lastSeenAt?.toIso8601String(),
@@ -198,6 +207,17 @@ class AppUserSnapshot {
           : (fallback?.newsletterOptIn ?? false),
       newsletterOptInAt: parseOptionalDate(json['newsletter_opt_in_at']) ??
           fallback?.newsletterOptInAt,
+      telemetryEnabled: json['telemetry_enabled'] is bool
+          ? json['telemetry_enabled'] as bool
+          : (fallback?.telemetryEnabled ?? true),
+      telemetryEnabledAt: parseOptionalDate(json['telemetry_enabled_at']) ??
+          fallback?.telemetryEnabledAt,
+      localeCode: ((json['locale_code'] ?? fallback?.localeCode) as String?)
+                  ?.trim()
+                  .isEmpty ==
+              true
+          ? null
+          : (json['locale_code'] ?? fallback?.localeCode)?.toString(),
       createdAt: parseOptionalDate(json['created_at']) ?? fallbackCreatedAt,
       updatedAt: parseOptionalDate(json['updated_at']) ?? fallbackUpdatedAt,
       lastSeenAt:
@@ -227,6 +247,9 @@ class AppUserSnapshot {
       acceptedAt: null,
       newsletterOptIn: false,
       newsletterOptInAt: null,
+      telemetryEnabled: true,
+      telemetryEnabledAt: null,
+      localeCode: null,
       createdAt: user.createdAt.toUtc(),
       updatedAt: DateTime.now().toUtc(),
       lastSeenAt: null,

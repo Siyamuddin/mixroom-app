@@ -14,6 +14,7 @@ Pod::Spec.new do |s|
   s.private_header_files = 'Classes/*.h'
 
   s.dependency 'FlutterMacOS'
+  s.dependency 'onnxruntime-objc', '1.21.0'
 
   s.frameworks = [
     'Cocoa',

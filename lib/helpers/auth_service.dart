@@ -93,6 +93,12 @@ class AuthService extends ChangeNotifier {
     return idToken.isEmpty ? null : idToken;
   }
 
+  Future<List<String>> getRequestTokenCandidates({
+    bool forceRefresh = false,
+  }) {
+    return _collectAuthTokenCandidates(forceRefresh: forceRefresh);
+  }
+
   Future<http.Response> authorizedRequest(
     Future<http.Response> Function(String token) send,
   ) async {

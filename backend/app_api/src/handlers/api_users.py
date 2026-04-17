@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 from common import config
@@ -13,6 +14,7 @@ from common.producer_capture_whitelist_repository import (
     ProducerCaptureWhitelistRepository,
 )
 from common.social_auth import SocialAuthError, verify_social_reauthentication
+from common.stibee import StibeeConfigError, StibeeSyncError, sync_user_profile
 from common.users import (
     apply_user_profile_patch,
     build_user_profile_from_claims,
@@ -24,6 +26,7 @@ from common.users import (
 repo = BillingRepository()
 rate_limiter = RequestRateLimiter()
 producer_capture_whitelist_repo = ProducerCaptureWhitelistRepository()
+logger = logging.getLogger(__name__)
 
 
 def _path(event: Dict[str, Any]) -> str:
@@ -162,6 +165,22 @@ def _patch_me(event: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         profile = apply_user_profile_patch(base_profile, body)
+        try:
+            sync_user_profile(
+                previous_profile=base_profile,
+                next_profile=profile,
+                locale_code=body.get("locale_code"),
+            )
+        except (StibeeConfigError, StibeeSyncError) as exc:
+            logger.warning(
+                "Stibee profile sync failed; persisting local profile update anyway.",
+                extra={
+                    "user_id": user_id,
+                    "has_newsletter_opt_in_patch": "newsletter_opt_in" in body,
+                    "has_locale_patch": "locale_code" in body,
+                    "error": str(exc),
+                },
+            )
         repo.upsert_user_profile(
             profile,
             previous_username_lc=previous_username_lc,

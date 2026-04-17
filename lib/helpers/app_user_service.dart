@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:mixroom/config/legal_config.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
+import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/core/privacy/privacy_preferences.dart';
 import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/helpers/auth_service.dart';
@@ -20,6 +21,8 @@ class AppUserService extends ChangeNotifier {
   static const String _prefsKeyPrefix = 'mixroom.app_user.profile.v1';
   static const String _pendingSignupConsentKeyPrefix =
       'mixroom.app_user.signup_legal_consent.v1';
+  static const String _pendingLocaleSyncKeyPrefix =
+      'mixroom.app_user.locale_sync.v1';
   static const String _welcomeSeenKeyPrefix =
       'mixroom.app_user.welcome_seen.v1';
 
@@ -36,6 +39,7 @@ class AppUserService extends ChangeNotifier {
   String? _boundUserId;
   String? _boundSignature;
   bool _isSyncingPendingConsent = false;
+  bool _isSyncingPendingLocale = false;
   bool _hasPendingSignupProfileSync = false;
   bool _isResolvingPostSignIn = false;
   Future<void>? _refreshInFlight;
@@ -116,9 +120,20 @@ class AppUserService extends ChangeNotifier {
       if (consentSyncedProfile != null) {
         nextProfile = consentSyncedProfile;
       }
+      final localeSyncedProfile = await _syncPendingLocalePreference(
+        user: user,
+        currentProfile: nextProfile,
+      );
+      if (localeSyncedProfile != null) {
+        nextProfile = localeSyncedProfile;
+      }
 
       _current = nextProfile;
       _syncAnalyticsProfile(_current);
+      await _applyTelemetryPreferenceFromProfile(_current);
+      await PrivacyPreferences.setProductEmailsEnabled(
+        _current!.newsletterOptIn,
+      );
       _lastSyncedAtUtc = DateTime.now().toUtc();
       _lastError = null;
       _isInitialized = true;
@@ -211,11 +226,165 @@ class AppUserService extends ChangeNotifier {
         fallbackUser: auth.signedInUser ?? user,
       );
       _syncAnalyticsProfile(_current);
+      await _applyTelemetryPreferenceFromProfile(_current);
+      await PrivacyPreferences.setProductEmailsEnabled(
+        _current!.newsletterOptIn,
+      );
       _lastSyncedAtUtc = DateTime.now().toUtc();
       _lastError = null;
       _isInitialized = true;
       await _writeCachedProfile(user.userId, _current!);
     } catch (e) {
+      _lastError = e.toString().replaceFirst('Bad state: ', '');
+      _isInitialized = true;
+      rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateNewsletterPreference({
+    required bool newsletterOptIn,
+    String? localeCode,
+  }) async {
+    final auth = _auth;
+    final user = auth?.signedInUser;
+    if (auth == null || user == null) {
+      throw StateError('No active account.');
+    }
+    if (!supportsRemoteProfileEdits) {
+      throw StateError('App profile backend is not configured yet.');
+    }
+    if (_isLoading) return;
+
+    final acceptedAt = DateTime.now().toUtc();
+    final safeLocaleCode = (localeCode ?? '').trim();
+
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final response = await auth.authorizedRequest(
+        (token) => _httpClient
+            .patch(
+              _buildUri('/v1/users/me'),
+              headers: <String, String>{
+                'Authorization': 'Bearer $token',
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode(<String, dynamic>{
+                'newsletter_opt_in': newsletterOptIn,
+                'newsletter_opt_in_at':
+                    newsletterOptIn ? acceptedAt.toIso8601String() : null,
+                if (safeLocaleCode.isNotEmpty) 'locale_code': safeLocaleCode,
+              }),
+            )
+            .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          throw StateError('Session expired. Please sign in again.');
+        }
+        throw StateError(
+          _extractErrorMessage(
+                response.body,
+                fallback:
+                    'Marketing email preference update failed (${response.statusCode}).',
+              ) ??
+              'Marketing email preference update failed (${response.statusCode}).',
+        );
+      }
+
+      _current = _parseProfileResponse(
+        response.body,
+        fallbackUser: auth.signedInUser ?? user,
+      );
+      _syncAnalyticsProfile(_current);
+      await _applyTelemetryPreferenceFromProfile(_current);
+      await PrivacyPreferences.setProductEmailsEnabled(
+        _current!.newsletterOptIn,
+      );
+      _lastSyncedAtUtc = DateTime.now().toUtc();
+      _lastError = null;
+      _isInitialized = true;
+      await _writeCachedProfile(user.userId, _current!);
+    } catch (e) {
+      _lastError = e.toString().replaceFirst('Bad state: ', '');
+      _isInitialized = true;
+      rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateTelemetryPreference({
+    required bool telemetryEnabled,
+  }) async {
+    final auth = _auth;
+    final user = auth?.signedInUser;
+    if (auth == null || user == null) {
+      throw StateError('No active account.');
+    }
+    if (!supportsRemoteProfileEdits) {
+      throw StateError('App profile backend is not configured yet.');
+    }
+    if (_isLoading) return;
+
+    final enabledAt = DateTime.now().toUtc();
+    final previousValue = _current?.telemetryEnabled ?? true;
+
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final response = await auth.authorizedRequest(
+        (token) => _httpClient
+            .patch(
+              _buildUri('/v1/users/me'),
+              headers: <String, String>{
+                'Authorization': 'Bearer $token',
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode(<String, dynamic>{
+                'telemetry_enabled': telemetryEnabled,
+                'telemetry_enabled_at':
+                    telemetryEnabled ? enabledAt.toIso8601String() : null,
+              }),
+            )
+            .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          throw StateError('Session expired. Please sign in again.');
+        }
+        throw StateError(
+          _extractErrorMessage(
+                response.body,
+                fallback:
+                    'Telemetry preference update failed (${response.statusCode}).',
+              ) ??
+              'Telemetry preference update failed (${response.statusCode}).',
+        );
+      }
+
+      _current = _parseProfileResponse(
+        response.body,
+        fallbackUser: auth.signedInUser ?? user,
+      );
+      _syncAnalyticsProfile(_current);
+      await _applyTelemetryPreferenceFromProfile(_current);
+      _lastSyncedAtUtc = DateTime.now().toUtc();
+      _lastError = null;
+      _isInitialized = true;
+      await _writeCachedProfile(user.userId, _current!);
+    } catch (e) {
+      await _applyTelemetryPreference(enabled: previousValue);
       _lastError = e.toString().replaceFirst('Bad state: ', '');
       _isInitialized = true;
       rethrow;
@@ -235,6 +404,7 @@ class AppUserService extends ChangeNotifier {
     String? musicProfile,
     String? bio,
     required bool newsletterOptIn,
+    String? localeCode,
   }) async {
     final auth = _auth;
     final user = auth?.signedInUser;
@@ -257,6 +427,7 @@ class AppUserService extends ChangeNotifier {
     final safeBirthdate = (birthdate ?? '').trim();
     final safeMusicProfile = (musicProfile ?? '').trim().toLowerCase();
     final safeBio = (bio ?? '').trim();
+    final safeLocaleCode = (localeCode ?? '').trim();
     final acceptedAt = DateTime.now().toUtc();
 
     _isLoading = true;
@@ -287,6 +458,7 @@ class AppUserService extends ChangeNotifier {
                 'newsletter_opt_in': newsletterOptIn,
                 'newsletter_opt_in_at':
                     newsletterOptIn ? acceptedAt.toIso8601String() : null,
+                if (safeLocaleCode.isNotEmpty) 'locale_code': safeLocaleCode,
               }),
             )
             .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
@@ -309,6 +481,10 @@ class AppUserService extends ChangeNotifier {
 
       _current = _parseProfileResponse(response.body, fallbackUser: user);
       _syncAnalyticsProfile(_current);
+      await _applyTelemetryPreferenceFromProfile(_current);
+      await PrivacyPreferences.setProductEmailsEnabled(
+        _current!.newsletterOptIn,
+      );
       _lastSyncedAtUtc = DateTime.now().toUtc();
       _lastError = null;
       _isInitialized = true;
@@ -330,6 +506,41 @@ class AppUserService extends ChangeNotifier {
 
   Future<void> markWelcomeOnboardingSeen() async {
     await stageWelcomeOnboardingSeen();
+  }
+
+  Future<void> stageLocalePreference({
+    required String localeCode,
+    bool syncImmediately = true,
+  }) async {
+    final auth = _auth;
+    final user = auth?.signedInUser;
+    final safeLocaleCode = localeCode.trim().toLowerCase();
+    if (auth == null ||
+        user == null ||
+        safeLocaleCode.isEmpty ||
+        !supportsRemoteProfileEdits) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_pendingLocaleSyncKey(user.userId), safeLocaleCode);
+
+    final current = _current;
+    if (current != null && current.localeCode != safeLocaleCode) {
+      _current = AppUserSnapshot.fromJson(
+        <String, dynamic>{
+          ...current.toJson(),
+          'locale_code': safeLocaleCode,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        fallbackAuthUser: user,
+      );
+      notifyListeners();
+    }
+
+    if (syncImmediately && auth.hasActiveSessionTokens) {
+      unawaited(refresh(force: true));
+    }
   }
 
   Future<bool> hasSeenWelcomeOnboardingLocally(String userId) async {
@@ -377,6 +588,7 @@ class AppUserService extends ChangeNotifier {
     String? musicProfile,
     String? bio,
     required bool newsletterOptIn,
+    String? localeCode,
     bool syncImmediately = true,
   }) async {
     final safeEmail = email.trim().toLowerCase();
@@ -388,6 +600,7 @@ class AppUserService extends ChangeNotifier {
     final safeBirthdate = (birthdate ?? '').trim();
     final safeMusicProfile = (musicProfile ?? '').trim().toLowerCase();
     final safeBio = (bio ?? '').trim();
+    final safeLocaleCode = (localeCode ?? '').trim();
 
     final acceptedAt = DateTime.now().toUtc();
     final payload = <String, dynamic>{
@@ -405,6 +618,7 @@ class AppUserService extends ChangeNotifier {
       'newsletter_opt_in': newsletterOptIn,
       'newsletter_opt_in_at':
           newsletterOptIn ? acceptedAt.toIso8601String() : null,
+      'locale_code': safeLocaleCode.isEmpty ? null : safeLocaleCode,
     };
 
     final prefs = await SharedPreferences.getInstance();
@@ -596,6 +810,9 @@ class AppUserService extends ChangeNotifier {
         fallbackAuthUser: user,
       );
       _syncAnalyticsProfile(_current);
+      await PrivacyPreferences.setProductEmailsEnabled(
+        _current!.newsletterOptIn,
+      );
       _lastSyncedAtUtc = DateTime.now().toUtc();
       _lastError = null;
       _isInitialized = true;
@@ -656,6 +873,9 @@ class AppUserService extends ChangeNotifier {
 
   String _pendingSignupConsentKey(String email) =>
       '$_pendingSignupConsentKeyPrefix.${email.trim().toLowerCase()}';
+
+  String _pendingLocaleSyncKey(String userId) =>
+      '$_pendingLocaleSyncKeyPrefix.$userId';
 
   Future<void> _loadPendingSignupProfileSyncFlag(String email) async {
     final prefs = await SharedPreferences.getInstance();
@@ -731,6 +951,7 @@ class AppUserService extends ChangeNotifier {
       final newsletterOptIn = payload['newsletter_opt_in'] == true;
       final newsletterOptInAt =
           (payload['newsletter_opt_in_at'] ?? '').toString().trim();
+      final localeCode = (payload['locale_code'] ?? '').toString().trim();
 
       final alreadySynced = currentProfile.acceptedTermsVersion ==
               acceptedTermsVersion &&
@@ -784,6 +1005,7 @@ class AppUserService extends ChangeNotifier {
                 'newsletter_opt_in': newsletterOptIn,
                 'newsletter_opt_in_at':
                     newsletterOptIn ? newsletterOptInAt : null,
+                if (localeCode.isNotEmpty) 'locale_code': localeCode,
               }),
             )
             .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
@@ -816,8 +1038,78 @@ class AppUserService extends ChangeNotifier {
     }
   }
 
+  Future<AppUserSnapshot?> _syncPendingLocalePreference({
+    required AuthUserProfile user,
+    required AppUserSnapshot currentProfile,
+  }) async {
+    if (!supportsRemoteProfileEdits || _isSyncingPendingLocale) {
+      return null;
+    }
+    final auth = _auth;
+    if (auth == null || auth.signedInUser == null) {
+      return null;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final key = _pendingLocaleSyncKey(user.userId);
+    final localeCode = (prefs.getString(key) ?? '').trim().toLowerCase();
+    if (localeCode.isEmpty) {
+      return null;
+    }
+    if ((currentProfile.localeCode ?? '').trim().toLowerCase() == localeCode) {
+      await prefs.remove(key);
+      return null;
+    }
+
+    _isSyncingPendingLocale = true;
+    try {
+      final response = await auth.authorizedRequest(
+        (authedToken) => _httpClient
+            .patch(
+              _buildUri('/v1/users/me'),
+              headers: <String, String>{
+                'Authorization': 'Bearer $authedToken',
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode(<String, dynamic>{
+                'locale_code': localeCode,
+              }),
+            )
+            .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return null;
+      }
+
+      await prefs.remove(key);
+      return _parseProfileResponse(response.body, fallbackUser: user);
+    } catch (_) {
+      return null;
+    } finally {
+      _isSyncingPendingLocale = false;
+    }
+  }
+
   void _syncAnalyticsProfile(AppUserSnapshot? profile) {
     AnalyticsService.instance.setMusicProfile(profile?.musicProfile);
+  }
+
+  Future<void> _applyTelemetryPreferenceFromProfile(
+    AppUserSnapshot? profile,
+  ) async {
+    await _applyTelemetryPreference(
+      enabled: profile?.telemetryEnabled ?? true,
+    );
+  }
+
+  Future<void> _applyTelemetryPreference({
+    required bool enabled,
+  }) async {
+    await PrivacyPreferences.setAnalyticsAndCrashDiagnosticsEnabled(enabled);
+    await AnalyticsService.instance.setCollectionEnabled(enabled);
+    await CrashReportingService.instance.setCollectionEnabled(enabled);
   }
 
   void _detachAuthListener() {

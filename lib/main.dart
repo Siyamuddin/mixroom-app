@@ -28,6 +28,52 @@ import 'package:mixroom/providers/locale_provider.dart'; // Import LocaleProvide
 
 final GlobalKey<NavigatorState> rootNavKey = GlobalKey<NavigatorState>();
 
+class _BundledLicenseNotice {
+  const _BundledLicenseNotice({
+    required this.packages,
+    required this.licenseAssetPath,
+    this.noticeAssetPath,
+  });
+
+  final List<String> packages;
+  final String licenseAssetPath;
+  final String? noticeAssetPath;
+}
+
+const List<_BundledLicenseNotice> _bundledLicenseNotices =
+    <_BundledLicenseNotice>[
+  _BundledLicenseNotice(
+    packages: <String>[
+      'Basic Pitch',
+      'Spotify AB',
+    ],
+    licenseAssetPath: 'assets/licenses/basic_pitch/LICENSE',
+    noticeAssetPath: 'assets/licenses/basic_pitch/NOTICE',
+  ),
+];
+
+Future<void> _registerBundledThirdPartyLicenses() async {
+  for (final notice in _bundledLicenseNotices) {
+    try {
+      final licenseText = await rootBundle.loadString(notice.licenseAssetPath);
+      final noticeText = notice.noticeAssetPath == null
+          ? null
+          : await rootBundle.loadString(notice.noticeAssetPath!);
+      final combinedText = noticeText == null || noticeText.trim().isEmpty
+          ? licenseText
+          : '$licenseText\n\nNOTICE\n\n$noticeText';
+      LicenseRegistry.addLicense(() async* {
+        yield LicenseEntryWithLineBreaks(notice.packages, combinedText);
+      });
+    } catch (error) {
+      debugPrint(
+        'Bundled license registration skipped for '
+        '${notice.licenseAssetPath}: $error',
+      );
+    }
+  }
+}
+
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -256,6 +302,9 @@ void main() async {
 
   await _runStartupStep('analytics.initialize', () async {
     await AnalyticsService.instance.initialize();
+  });
+  await _runStartupStep('licenses.register', () async {
+    await _registerBundledThirdPartyLicenses();
   });
   await _runStartupStep('crash_reporting.initialize', () async {
     await CrashReportingService.instance.initialize();

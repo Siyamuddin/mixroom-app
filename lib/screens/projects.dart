@@ -7,8 +7,6 @@ import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:mixroom/core/analytics/analytics_events.dart';
-import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:share_plus/share_plus.dart';
@@ -42,6 +40,11 @@ enum _ProjectSortMode {
   alphabetical,
 }
 
+enum _ProjectLibraryTab {
+  yourProjects,
+  demoProjects,
+}
+
 class _ProjectListEntry {
   const _ProjectListEntry.project(this.project)
       : bundledDemo = null,
@@ -58,7 +61,6 @@ class _ProjectListEntry {
 
 class _ProjectsScreenState extends State<ProjectsScreen> {
   static const Key _projectsScreenKey = Key('projects_screen');
-  static const Key _newProjectCardKey = Key('projects_new_project_card');
   static const Key _projectsListKey = Key('projects_list');
   static const Key _renameDialogKey = ValueKey('projects_rename_dialog');
   static const Key _renameFieldKey = ValueKey('projects_rename_field');
@@ -77,6 +79,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   final FocusNode _searchFocusNode = FocusNode(debugLabel: 'projects_search');
   final GlobalKey _projectToolsButtonKey = GlobalKey();
   _ProjectSortMode _sortMode = _ProjectSortMode.recent;
+  _ProjectLibraryTab _libraryTab = _ProjectLibraryTab.yourProjects;
   final Set<String> _selectedProjectPaths = <String>{};
   final Set<String> _selectedBundledDemoAssetPaths = <String>{};
   bool _selectionModePinned = false;
@@ -213,57 +216,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
 
     // 5. Refresh project list
-    await _refresh();
-  }
-
-  Future<void> _newProject() async {
-    if (!await ProjectManager.canCreateNew()) return;
-    if (!mounted) return;
-    final resolvedMode = _resolvedEditorMode();
-    final isProEntitled = _isProEntitled();
-
-    showLoadingDialog(
-      context,
-      message: L10n.translate(context, 'Creating project…'),
-    );
-
-    // TODO: arbitrary delay to prevent bad UX from (probably) unavoidable blocking UI lag when going to DAW screen
-    await Future.delayed(const Duration(milliseconds: 300));
-    if (!mounted) return;
-
-    final dir = await ProjectManager.createNewProjectDir(
-      name: L10n.translate(context, 'Untitled Project'),
-    );
-    final projectId = await ProjectManager.ensureProjectId(dir);
-    unawaited(
-      AnalyticsService.instance.track(
-        AnalyticsEvents.projectCreated(
-          projectId: projectId,
-          initialTrackCount: 0,
-        ),
-      ),
-    );
-    await AnalyticsService.instance.trackFirstProjectCreated(
-      projectId: projectId,
-    );
-    if (!mounted) return;
-
-    await Navigator.push(
-      context,
-      _NoSwipeMaterialPageRoute(
-        builder: (_) => AudioEditorScreen(
-          mode: resolvedMode,
-          projectDir: dir,
-          isProEntitled: isProEntitled,
-        ),
-      ),
-    );
-    if (!mounted) return;
-
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    }
-
     await _refresh();
   }
 
@@ -583,11 +535,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   List<_ProjectListEntry> _visibleEntries() {
-    final entries = <_ProjectListEntry>[
-      ..._visibleProjects().map(_ProjectListEntry.project),
-      ..._visibleBundledDemoProjects().map(_ProjectListEntry.bundledDemo),
-    ];
-    return entries;
+    switch (_libraryTab) {
+      case _ProjectLibraryTab.yourProjects:
+        return _visibleProjects().map(_ProjectListEntry.project).toList();
+      case _ProjectLibraryTab.demoProjects:
+        return _visibleBundledDemoProjects()
+            .map(_ProjectListEntry.bundledDemo)
+            .toList();
+    }
   }
 
   void _toggleSelection(ProjectMeta meta) {
@@ -616,6 +571,17 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       return;
     }
     setState(() => _selectionModePinned = true);
+  }
+
+  void _setLibraryTab(_ProjectLibraryTab tab) {
+    if (_libraryTab == tab) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _libraryTab = tab;
+      _selectionModePinned = false;
+      _selectedProjectPaths.clear();
+      _selectedBundledDemoAssetPaths.clear();
+    });
   }
 
   void _selectAllVisible() {
@@ -1300,69 +1266,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
   }
 
-  Widget _compactActionCard({
-    Key? key,
-    required IconData icon,
-    required String title,
-    String? subtitle,
-    required VoidCallback? onTap,
-  }) {
-    final isCompactLabel = subtitle == null;
-    return _GlassCard(
-      key: key,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: isCompactLabel ? 10 : 14,
-            vertical: 14,
-          ),
-          child: Row(
-            children: [
-              Icon(icon, color: Colors.white, size: isCompactLabel ? 20 : 24),
-              SizedBox(width: isCompactLabel ? 8 : 12),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: isCompactLabel ? 14 : 15,
-                        ),
-                      ),
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   void _showProjectLimitDialog() {
     showAppMessageDialog(
       context: context,
@@ -1424,23 +1327,17 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: MixroomShellSegmentedControl<int>(
-                          value: 0,
+                          value: _libraryTab.index,
                           options: const [0, 1],
                           labelBuilder: (value) => L10n.translate(
                             context,
-                            value == 0 ? 'Music project' : 'Video projects',
+                            value == 0 ? 'Your Projects' : 'Demo Projects',
                           ),
-                          onChanged: (value) {
-                            if (value == 1) {
-                              showAppSnackBar(
-                                context,
-                                L10n.translate(
-                                  context,
-                                  'Video projects are coming soon.',
-                                ),
-                              );
-                            }
-                          },
+                          onChanged: (value) => _setLibraryTab(
+                            value == 0
+                                ? _ProjectLibraryTab.yourProjects
+                                : _ProjectLibraryTab.demoProjects,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1549,10 +1446,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                     child: Text(
                                       L10n.translate(
                                         context,
-                                        _projects.isEmpty &&
-                                                _bundledDemoProjects.isEmpty
-                                            ? 'No saved projects yet.'
-                                            : 'No matching projects.',
+                                        hasSearchQuery
+                                            ? 'No matching projects.'
+                                            : _libraryTab ==
+                                                    _ProjectLibraryTab
+                                                        .yourProjects
+                                                ? 'No saved projects yet.'
+                                                : 'No demo projects available.',
                                       ),
                                       style: const TextStyle(
                                         color: Colors.white70,
@@ -2139,32 +2039,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _GlassCard extends StatelessWidget {
-  final Widget child;
-  const _GlassCard({
-    super.key,
-    required this.child,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
-              blurRadius: 18,
-              offset: const Offset(0, 10))
-        ],
-      ),
-      child: child,
     );
   }
 }

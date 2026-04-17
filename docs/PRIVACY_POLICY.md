@@ -1,6 +1,6 @@
 # Mixroom Privacy Policy
 
-Last updated: 2026-03-22
+Last updated: 2026-04-15
 
 This Privacy Policy explains how (주)믹스룸 (Mixroom) ("Mixroom," "we," "us,"
 or "our") collects, uses, shares, and retains information when you use the
@@ -52,6 +52,9 @@ When you use Mixroom, we may collect:
 - crash, error, and performance data if analytics and diagnostics are enabled;
 - usage events, such as screen views, feature use, first-project creation, and
   purchase flow events;
+- save-time project telemetry, including project JSON, plugin/effect settings,
+  and project-structure snapshots; if optional analytics and diagnostics are
+  enabled, those uploads can also include associated assistant chat history;
 - security and operational logs, such as API request metadata, authentication
   attempts, rate-limit events, and service health events.
 
@@ -212,6 +215,8 @@ deployment or request path, contact `privacy@mixroom.ai`.
 You can control certain privacy settings in Mixroom, including:
 
 - enabling or disabling usage analytics and crash diagnostics;
+- enabling or disabling whether optional analytics and diagnostics also include
+  assistant chat history in save-time project telemetry uploads;
 - requesting export, correction, or deletion of personal data;
 - deleting your Mixroom account;
 - managing product email preferences where offered.

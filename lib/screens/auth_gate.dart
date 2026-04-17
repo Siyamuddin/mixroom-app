@@ -776,6 +776,7 @@ class _RequiredProfileCompletionGateState
 
     if (!mounted) return;
     final appUser = context.read<AppUserService>();
+    final localeCode = Localizations.localeOf(context).languageCode;
     setState(() {
       _inlineError = null;
       _isSubmitting = true;
@@ -794,6 +795,7 @@ class _RequiredProfileCompletionGateState
         musicProfile: _musicProfileValue,
         bio: bio.isEmpty ? null : bio,
         newsletterOptIn: _newsletterOptIn,
+        localeCode: localeCode,
         syncImmediately: false,
       );
       await appUser.completeSignupProfile(
@@ -808,6 +810,7 @@ class _RequiredProfileCompletionGateState
         musicProfile: _musicProfileValue,
         bio: bio.isEmpty ? null : bio,
         newsletterOptIn: _newsletterOptIn,
+        localeCode: localeCode,
       );
       if (!mounted) return;
       final nextProfile = appUser.current;

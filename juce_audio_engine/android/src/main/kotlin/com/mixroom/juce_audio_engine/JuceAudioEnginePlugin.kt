@@ -1,11 +1,12 @@
 package com.mixroom.juce_audio_engine
 
+import android.content.Context
+import android.content.res.AssetManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
-import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.Build
 import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
@@ -115,13 +116,71 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
   }
 
-  private fun extractInstrumentAssets(context: Context) {
-    val marker = File(context.filesDir, ".mixroom_instruments_extracted_v3")
-    val packageInfo =
-      context.packageManager.getPackageInfo(context.packageName, 0)
-    val extractionVersion = packageInfo.lastUpdateTime.toString()
-    if (marker.exists() && marker.readText().trim() == extractionVersion) return
+  private fun packageAssetManager(context: Context): AssetManager {
+    return try {
+      context.createPackageContext(context.packageName, 0).assets
+    } catch (_: Exception) {
+      context.assets
+    }
+  }
 
+  private fun currentExtractionVersion(context: Context): String {
+    val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+    return packageInfo.lastUpdateTime.toString()
+  }
+
+  private fun assetExists(assetManager: AssetManager, path: String): Boolean {
+    val entries = assetManager.list(path) ?: return false
+    if (entries.isNotEmpty()) return true
+    return try {
+      assetManager.open(path).use { _ -> }
+      true
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun copyAssetTree(
+    assetManager: AssetManager,
+    sourcePath: String,
+    targetRoot: File,
+    outputRelativePath: (String) -> String,
+  ) {
+    val entries = assetManager.list(sourcePath) ?: return
+    if (entries.isEmpty()) {
+      val outFile = File(targetRoot, outputRelativePath(sourcePath))
+      outFile.parentFile?.mkdirs()
+      assetManager.open(sourcePath).use { input ->
+        FileOutputStream(outFile, false).use { output ->
+          input.copyTo(output)
+        }
+      }
+      return
+    }
+
+    for (entry in entries) {
+      val child = if (sourcePath.isEmpty()) entry else "$sourcePath/$entry"
+      copyAssetTree(assetManager, child, targetRoot, outputRelativePath)
+    }
+  }
+
+  private fun bundledInstrumentRootDir(context: Context): File {
+    return File(context.filesDir, "flutter_assets/assets/instruments")
+  }
+
+  private fun extractInstrumentAssets(context: Context): File? {
+    val marker = File(context.filesDir, ".mixroom_instruments_extracted_v4")
+    val extractionVersion = currentExtractionVersion(context)
+    val extractedRoot = bundledInstrumentRootDir(context)
+    if (
+      marker.exists() &&
+        marker.readText().trim() == extractionVersion &&
+        extractedRoot.exists()
+    ) {
+      return extractedRoot
+    }
+
+    val assetManager = packageAssetManager(context)
     val targetRoot = File(context.filesDir, "flutter_assets")
     val sourceCandidates =
       listOf(
@@ -129,21 +188,10 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "flutter_assets/assets/instruments",
       )
 
-    fun sourceExists(path: String): Boolean {
-      val entries = context.assets.list(path) ?: return false
-      if (entries.isNotEmpty()) return true
-      return try {
-        context.assets.open(path).use { _ -> }
-        true
-      } catch (_: Exception) {
-        false
-      }
-    }
-
-    val sourceRoot = sourceCandidates.firstOrNull { sourceExists(it) }
+    val sourceRoot = sourceCandidates.firstOrNull { assetExists(assetManager, it) }
     if (sourceRoot == null) {
-      Log.e("JuceAudioEngine", "Could not locate instrument asset root in APK assets")
-      return
+      Log.e("JuceAudioEngine", "Could not locate instrument asset root in packaged assets")
+      return null
     }
 
     fun outputRelativePath(path: String): String {
@@ -154,33 +202,97 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       }
     }
 
-    fun copyAssetTree(path: String) {
-      val entries = context.assets.list(path) ?: return
-      if (entries.isEmpty()) {
-        val outFile = File(targetRoot, outputRelativePath(path))
-        outFile.parentFile?.mkdirs()
-        context.assets.open(path).use { input ->
-          FileOutputStream(outFile, false).use { output ->
-            input.copyTo(output)
-          }
-        }
-        return
-      }
-
-      for (entry in entries) {
-        val child = if (path.isEmpty()) entry else "$path/$entry"
-        copyAssetTree(child)
-      }
-    }
-
     try {
-      copyAssetTree(sourceRoot)
+      copyAssetTree(assetManager, sourceRoot, targetRoot, ::outputRelativePath)
       marker.writeText(extractionVersion)
+      return extractedRoot
     } catch (e: IOException) {
       Log.e("JuceAudioEngine", "Failed extracting instrument assets", e)
     } catch (e: Exception) {
       Log.e("JuceAudioEngine", "Failed extracting instrument assets", e)
     }
+    return null
+  }
+
+  private fun displayNameForBundledSamplePack(packSlug: String): String {
+    val normalized = packSlug.trim().replace("-", "_")
+    val parts =
+      normalized
+        .split('_')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+    if (parts.isEmpty()) return "Sample Pack"
+    return parts.joinToString(" ") { part ->
+      val lower = part.lowercase()
+      when {
+        Regex("^v\\d+$").matches(lower) -> lower
+        Regex("^\\d+$").matches(lower) -> lower
+        lower == "cc0" -> "CC0"
+        else -> lower.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+      }
+    }
+  }
+
+  private fun bundledSamplePackTargetRoots(samplePacksDir: File): List<String> {
+    return samplePacksDir
+      .listFiles()
+      ?.filter { it.isDirectory }
+      ?.map { it.absolutePath }
+      ?.sorted()
+      ?: emptyList()
+  }
+
+  private fun extractBundledSamplePacks(context: Context): List<String> {
+    val samplePacksDir = File(context.filesDir, "sample_packs")
+    val marker = File(samplePacksDir, ".mixroom_sample_packs_extracted_v1")
+    val extractionVersion = currentExtractionVersion(context)
+    if (
+      marker.exists() &&
+        marker.readText().trim() == extractionVersion &&
+        samplePacksDir.exists()
+    ) {
+      return bundledSamplePackTargetRoots(samplePacksDir)
+    }
+
+    val assetManager = packageAssetManager(context)
+    val sourceCandidates =
+      listOf(
+        "assets/sample_packs",
+        "flutter_assets/assets/sample_packs",
+      )
+    val sourceRoot = sourceCandidates.firstOrNull { assetExists(assetManager, it) }
+    if (sourceRoot == null) {
+      Log.e("JuceAudioEngine", "Could not locate sample pack asset root in packaged assets")
+      return emptyList()
+    }
+
+    if (samplePacksDir.exists()) {
+      samplePacksDir.deleteRecursively()
+    }
+    samplePacksDir.mkdirs()
+
+    try {
+      val packEntries = assetManager.list(sourceRoot)?.sorted().orEmpty()
+      for (packSlug in packEntries) {
+        val sourcePackRoot = "$sourceRoot/$packSlug"
+        val children = assetManager.list(sourcePackRoot) ?: continue
+        if (children.isEmpty()) continue
+        val displayName = displayNameForBundledSamplePack(packSlug)
+        val targetPackRoot = File(samplePacksDir, displayName)
+        copyAssetTree(assetManager, sourcePackRoot, targetPackRoot) { path ->
+          path.removePrefix("$sourcePackRoot/").removePrefix(sourcePackRoot)
+        }
+      }
+      marker.writeText(extractionVersion)
+    } catch (e: IOException) {
+      Log.e("JuceAudioEngine", "Failed extracting sample packs", e)
+      return emptyList()
+    } catch (e: Exception) {
+      Log.e("JuceAudioEngine", "Failed extracting sample packs", e)
+      return emptyList()
+    }
+
+    return bundledSamplePackTargetRoots(samplePacksDir)
   }
 
   private fun emitLog(message: String) {
@@ -713,6 +825,14 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "supportsLiveMidiClipPlayback" -> {
           result.success(JuceBridge.supportsLiveMidiClipPlaybackJNI())
         }
+        "getBundledInstrumentRootPath" -> {
+          instrumentExtractionFuture?.get()
+          val root = bundledInstrumentRootDir(applicationContext)
+          result.success(if (root.exists()) root.absolutePath else null)
+        }
+        "mountBundledSamplePacks" -> {
+          result.success(extractBundledSamplePacks(applicationContext))
+        }
         "loadMidiClip" -> {
           val clip = args.intValue("clip")
           val rowId = resolveRowId(args, 0)
@@ -731,6 +851,14 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             args.doubleValue("inFileOffsetSec"),
           )
           result.success(ok)
+        }
+        "beginProjectClipLoad", "beginProjectClipLoadTransaction" -> {
+          JuceBridge.beginProjectClipLoadTransactionJNI()
+          result.success(null)
+        }
+        "endProjectClipLoad", "endProjectClipLoadTransaction" -> {
+          JuceBridge.endProjectClipLoadTransactionJNI()
+          result.success(null)
         }
         "updateMidiClipEvents" -> {
           val instrumentId = args.stringValue("instrumentId", "mixroom.basic_synth")
@@ -768,7 +896,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           val clip = args.intValue("clip")
           val rowId = resolveRowId(args, 0)
           val path = args.stringValue("path")
-          JuceBridge.loadClipJNI(
+          val ok = JuceBridge.loadClipJNI(
             clip,
             rowId,
             path,
@@ -776,8 +904,8 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             args.doubleValue("lengthSec"),
             args.doubleValue("inFileOffsetSec"),
           )
-          emitPluginLoaded(clip, path, true)
-          result.success(null)
+          emitPluginLoaded(clip, path, ok)
+          result.success(ok)
         }
         "unloadClip" -> {
           JuceBridge.unloadClipJNI(args.intValue("clip"))
@@ -1142,6 +1270,40 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             ).toList(),
           )
         }
+        "getRowStereoScope" -> {
+          result.success(
+            JuceBridge.getRowStereoScopeJNI(
+              args.intValue("row"),
+              args.intValue("effect"),
+              args.intValue("pointCount", 256),
+            ).toList(),
+          )
+        }
+        "getMasterStereoScope" -> {
+          result.success(
+            JuceBridge.getMasterStereoScopeJNI(
+              args.intValue("effect"),
+              args.intValue("pointCount", 256),
+            ).toList(),
+          )
+        }
+        "getRowShaperPreview" -> {
+          result.success(
+            JuceBridge.getRowShaperPreviewJNI(
+              args.intValue("row"),
+              args.intValue("effect"),
+              args.intValue("pointCount", 192),
+            ).toList(),
+          )
+        }
+        "getMasterShaperPreview" -> {
+          result.success(
+            JuceBridge.getMasterShaperPreviewJNI(
+              args.intValue("effect"),
+              args.intValue("pointCount", 192),
+            ).toList(),
+          )
+        }
         "setAutomationTransport" -> {
           JuceBridge.setAutomationTransportJNI(args.doubleValue("timeSeconds"))
           result.success(null)
@@ -1194,9 +1356,15 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "analyzeAudioForPrompt" -> {
           val path = args.stringValue("path")
+          val trimStartMs = args.doubleValue("trimStartMs", 0.0)
+          val trimEndMs = args.doubleValue("trimEndMs", -1.0)
           heavyWorkExecutor.execute {
             try {
-              val analysis = promptAnalysisService.analyzeClip(path)
+              val analysis = promptAnalysisService.analyzeClip(
+                path,
+                trimStartMs,
+                trimEndMs,
+              )
               mainHandler.post { result.success(analysis) }
             } catch (t: Throwable) {
               mainHandler.post {

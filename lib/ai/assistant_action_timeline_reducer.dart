@@ -238,6 +238,12 @@ class AssistantActionTimelineReducer {
         case 'clarify':
           working = _applyClarify(working, data);
           break;
+        case 'project_edit':
+          working = _applyProjectEdit(working, data);
+          break;
+        case 'sample_insert':
+          working = _applySampleInsert(working, data);
+          break;
         case 'clip_edit':
           working = _applyClipEdit(working, data);
           break;
@@ -310,6 +316,258 @@ class AssistantActionTimelineReducer {
     return state.copyWith(
       clarifyQuestion: q.isEmpty ? null : q,
       clarifyOptions: options,
+    );
+  }
+
+  static TimelineActionState _applyProjectEdit(
+    TimelineActionState state,
+    Map<String, dynamic> data,
+  ) {
+    final target = AssistantActionUtils.toActionMap(data['target']);
+    final operation = (data['operation'] ?? '').toString().trim().toLowerCase();
+    if (operation != 'set_tempo') return state;
+    final tempo = AssistantActionUtils.toActionDouble(
+      data['tempo_bpm'] ?? target['tempo_bpm'] ?? data['bpm'] ?? target['bpm'],
+    );
+    if (tempo == null || !tempo.isFinite || tempo <= 0.0) return state;
+    return state.copyWith(
+      projectTempoBpm: tempo.clamp(20.0, 999.0).toDouble(),
+    );
+  }
+
+  static TimelineActionState _applySampleInsert(
+    TimelineActionState state,
+    Map<String, dynamic> data,
+  ) {
+    final operation = (data['operation'] ?? '').toString().trim().toLowerCase();
+    if (operation != 'insert_audio_clips' &&
+        operation != 'insert_audio_clip' &&
+        operation != 'replace_audio_clips') {
+      return state;
+    }
+    final rawItems = data['items'];
+    final items = <Map<String, dynamic>>[];
+    if (rawItems is List && rawItems.isNotEmpty) {
+      for (final raw in rawItems) {
+        final item = AssistantActionUtils.toActionMap(raw);
+        if (item.isNotEmpty) items.add(item);
+      }
+    } else {
+      items.add(data);
+    }
+    if (items.isEmpty) return state;
+
+    final nextClips = List<TimelineClip>.from(state.clips);
+    final nextSelected = List<int>.from(state.selectedClipIndices);
+    var nextPrimary = state.primarySelectedClipIndex;
+    final nextRow = state.selectedRowIndex ?? 0;
+
+    List<int> resolveTargetIndices(Map<String, dynamic> item) {
+      final target = AssistantActionUtils.toActionMap(item['target']);
+      final out = <int>{};
+
+      void addIndex(int? idx) {
+        if (idx != null && idx >= 0 && idx < nextClips.length) {
+          final clip = nextClips[idx];
+          if (!clip.isMidi) out.add(idx);
+        }
+      }
+
+      final directListRaw =
+          (item['clip_indices'] as List?) ?? (target['clip_indices'] as List?);
+      if (directListRaw != null) {
+        for (final raw in directListRaw) {
+          addIndex(AssistantActionUtils.toActionInt(raw));
+        }
+      }
+
+      final directIndex = AssistantActionUtils.toActionInt(
+            item['clip_index'] ?? target['clip_index'],
+          ) ??
+          AssistantActionUtils.toActionInt(
+            item['clip'] ?? target['clip'],
+          );
+      addIndex(directIndex);
+
+      final scope = (target['scope'] ?? item['scope'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (scope == 'selected' || scope == 'selection') {
+        for (final idx in state.selectedClipIndices) {
+          addIndex(idx);
+        }
+        addIndex(state.primarySelectedClipIndex);
+      } else if (scope == 'all' || scope == 'all_audio') {
+        for (int i = 0; i < nextClips.length; i++) {
+          addIndex(i);
+        }
+      }
+
+      final rowIndex = AssistantActionUtils.toActionInt(
+        item['row_index'] ?? target['row_index'],
+      );
+      final fileContains =
+          (item['file_name_contains'] ?? target['file_name_contains'])
+              ?.toString()
+              .trim()
+              .toLowerCase();
+      final labelContains = (item['label_contains'] ?? target['label_contains'])
+          ?.toString()
+          .trim()
+          .toLowerCase();
+      if (rowIndex != null ||
+          (fileContains?.isNotEmpty ?? false) ||
+          (labelContains?.isNotEmpty ?? false)) {
+        for (int i = 0; i < nextClips.length; i++) {
+          final clip = nextClips[i];
+          if (clip.isMidi) continue;
+          if (rowIndex != null && clip.rowIndex != rowIndex) continue;
+          if (fileContains != null &&
+              fileContains.isNotEmpty &&
+              !clip.label.toLowerCase().contains(fileContains)) {
+            continue;
+          }
+          if (labelContains != null &&
+              labelContains.isNotEmpty &&
+              !clip.label.toLowerCase().contains(labelContains)) {
+            continue;
+          }
+          out.add(i);
+        }
+      }
+
+      if (out.isEmpty) {
+        for (final idx in state.selectedClipIndices) {
+          addIndex(idx);
+        }
+        addIndex(state.primarySelectedClipIndex);
+      }
+
+      final sorted = out.toList()..sort();
+      return sorted;
+    }
+
+    for (final item in items) {
+      final target = AssistantActionUtils.toActionMap(item['target']);
+      final libraryPath = (item['library_path'] ??
+              target['library_path'] ??
+              item['asset_path'] ??
+              target['asset_path'])
+          .toString()
+          .trim();
+      final label =
+          libraryPath.isEmpty ? 'Library Sample' : libraryPath.split('/').last;
+
+      if (operation == 'replace_audio_clips') {
+        final targetIndices = resolveTargetIndices(item);
+        if (targetIndices.isEmpty) continue;
+        for (final idx in targetIndices) {
+          final clip = nextClips[idx];
+          nextClips[idx] = clip.copyWith(
+            label: label,
+          );
+        }
+        nextSelected
+          ..clear()
+          ..addAll(targetIndices);
+        nextPrimary = targetIndices.isEmpty ? nextPrimary : targetIndices.last;
+        continue;
+      }
+
+      final row = AssistantActionUtils.toActionInt(
+            item['row_index'] ?? target['row_index'],
+          ) ??
+          nextRow;
+      final repeatCountHint = AssistantActionUtils.toActionInt(
+            item['repeat_count'] ??
+                target['repeat_count'] ??
+                item['copies'] ??
+                target['copies'] ??
+                item['count'] ??
+                target['count'],
+          ) ??
+          1;
+      final startMs = AssistantActionUtils.resolveMoveMusicalStartMs(
+            data: item,
+            target: target,
+            bpm: state.projectTempoBpm,
+          ) ??
+          AssistantActionUtils.toActionDouble(
+            item['start_ms'] ?? target['start_ms'],
+          ) ??
+          AssistantActionUtils.defaultSampleInsertStartMs(
+            libraryPath,
+            bpm: state.projectTempoBpm,
+          ) ??
+          0.0;
+      final stepMs = AssistantActionUtils.resolveMoveMusicalDeltaMs(
+            data: item,
+            target: target,
+            bpm: state.projectTempoBpm,
+          ) ??
+          AssistantActionUtils.toActionDouble(
+            item['step_ms'] ??
+                target['step_ms'] ??
+                item['spacing_ms'] ??
+                target['spacing_ms'],
+          ) ??
+          AssistantActionUtils.defaultSampleInsertStepMs(
+            libraryPath,
+            bpm: state.projectTempoBpm,
+            repeatCount: repeatCountHint,
+          ) ??
+          1000.0;
+      final repeatCount = AssistantActionUtils.resolvePlacementRepeatCount(
+        data: item,
+        target: target,
+        bpm: state.projectTempoBpm,
+        startMs: startMs,
+        stepMs: stepMs,
+        preferSpanCoverageOverExplicitCount: true,
+      );
+      final rowStep = AssistantActionUtils.toActionInt(
+            item['delta_rows'] ??
+                target['delta_rows'] ??
+                item['row_delta'] ??
+                target['row_delta'] ??
+                item['step_rows'] ??
+                target['step_rows'],
+          ) ??
+          0;
+      for (int copyIndex = 0; copyIndex < repeatCount; copyIndex++) {
+        final clipStartMs = math.max(0.0, startMs + (stepMs * copyIndex));
+        final clipRow = (row + (rowStep * copyIndex)).clamp(0, 1024);
+        final clip = TimelineClip(
+          id: 'sample_${nextClips.length}_${clipRow}_${clipStartMs.round()}_$copyIndex',
+          isMidi: false,
+          rowIndex: clipRow,
+          startMs: clipStartMs,
+          sourceDurationMs: 1000.0,
+          trimStartMs: 0.0,
+          trimEndMs: 1000.0,
+          gain: 1.0,
+          label: label,
+          tempoFollow: false,
+          detectedTempoBpm: null,
+          midiNotes: const <MidiNote>[],
+        );
+        nextClips.add(clip);
+        final clipIndex = nextClips.length - 1;
+        nextSelected
+          ..clear()
+          ..add(clipIndex);
+        nextPrimary = clipIndex;
+      }
+    }
+
+    return state.copyWith(
+      clips: nextClips,
+      selectedClipIndices: nextSelected,
+      primarySelectedClipIndex: nextPrimary,
+      selectedRowIndex: nextPrimary >= 0 && nextPrimary < nextClips.length
+          ? nextClips[nextPrimary].rowIndex
+          : state.selectedRowIndex,
     );
   }
 
@@ -701,17 +959,68 @@ class AssistantActionTimelineReducer {
         return state.copyWith(clips: clips);
       }
       final clip = clips[idx];
-      final pasteStart = AssistantActionUtils.toActionDouble(
-            data['paste_start_ms'] ?? target['paste_start_ms'],
+      final firstPasteStart = AssistantActionUtils.resolveMoveMusicalStartMs(
+            data: data,
+            target: target,
+            bpm: state.projectTempoBpm,
+          ) ??
+          AssistantActionUtils.toActionDouble(
+            data['paste_start_ms'] ??
+                target['paste_start_ms'] ??
+                data['start_ms'] ??
+                target['start_ms'],
           ) ??
           (clip.startMs + clip.localDurationMs);
-      clips.insert(
-        idx + 1,
-        clip.copyWith(
-          id: '${clip.id}:dup:${pasteStart.round()}',
-          startMs: math.max(0.0, pasteStart),
-        ),
+      final stepMs = AssistantActionUtils.resolveMoveMusicalDeltaMs(
+            data: data,
+            target: target,
+            bpm: state.projectTempoBpm,
+          ) ??
+          AssistantActionUtils.toActionDouble(
+            data['step_ms'] ??
+                target['step_ms'] ??
+                data['spacing_ms'] ??
+                target['spacing_ms'],
+          ) ??
+          clip.localDurationMs;
+      final repeatCount = AssistantActionUtils.resolvePlacementRepeatCount(
+        data: data,
+        target: target,
+        bpm: state.projectTempoBpm,
+        startMs: firstPasteStart,
+        stepMs: stepMs,
       );
+      final baseRow = AssistantActionUtils.toActionInt(
+            data['row_index'] ??
+                target['row_index'] ??
+                data['new_row_index'] ??
+                target['new_row_index'],
+          ) ??
+          clip.rowIndex;
+      final rowStep = AssistantActionUtils.toActionInt(
+            data['delta_rows'] ??
+                target['delta_rows'] ??
+                data['row_delta'] ??
+                target['row_delta'] ??
+                data['step_rows'] ??
+                target['step_rows'],
+          ) ??
+          0;
+      for (int copyIndex = 0; copyIndex < repeatCount; copyIndex++) {
+        final pasteStart = math.max(
+          0.0,
+          firstPasteStart + (stepMs * copyIndex),
+        );
+        final pasteRow = math.max(0, baseRow + (rowStep * copyIndex));
+        clips.insert(
+          idx + 1 + copyIndex,
+          clip.copyWith(
+            id: '${clip.id}:dup:${pasteStart.round()}:$copyIndex',
+            rowIndex: pasteRow,
+            startMs: pasteStart,
+          ),
+        );
+      }
       return state.copyWith(clips: clips);
     }
 
@@ -1096,7 +1405,11 @@ class AssistantActionTimelineReducer {
       return clips.isEmpty ? null : clips.length - 1;
     }
 
-    List<AutomationPoint> templatePoints(String template, double lengthMs) {
+    List<AutomationPoint> templatePoints(
+      String template,
+      double lengthMs, {
+      String direction = 'left',
+    }) {
       final t = template.trim().toLowerCase();
       final safeLen = lengthMs.clamp(40.0, 1e9).toDouble();
       if (t == 'sidechain' || t == 'sidechain_pump' || t == 'pump') {
@@ -1119,6 +1432,25 @@ class AssistantActionTimelineReducer {
         return <AutomationPoint>[
           AutomationPoint(x: 0.0, volume: 0.0),
           AutomationPoint(x: safeLen, volume: 1.0),
+        ];
+      }
+      if (t == 'auto_pan' ||
+          t == 'autopan' ||
+          t == 'stereo_motion' ||
+          t == 'stereo_direction' ||
+          t == 'pan_motion' ||
+          t == 'left_right_motion') {
+        final startsRight = direction.trim().toLowerCase() == 'right';
+        final nearStartSide = startsRight ? 0.84 : 0.16;
+        final nearOppositeSide = startsRight ? 0.16 : 0.84;
+        final settleSide = startsRight ? 0.74 : 0.26;
+        return <AutomationPoint>[
+          AutomationPoint(x: 0.0, volume: 0.5),
+          AutomationPoint(x: safeLen * 0.16, volume: nearStartSide),
+          AutomationPoint(x: safeLen * 0.34, volume: 0.5),
+          AutomationPoint(x: safeLen * 0.56, volume: nearOppositeSide),
+          AutomationPoint(x: safeLen * 0.78, volume: settleSide),
+          AutomationPoint(x: safeLen, volume: 0.5),
         ];
       }
       return <AutomationPoint>[
@@ -1189,9 +1521,11 @@ class AssistantActionTimelineReducer {
           .toDouble();
       final template =
           (data['template'] ?? target['template'] ?? '').toString();
+      final direction =
+          (data['direction'] ?? target['direction'] ?? 'left').toString();
       final points = parsePoints(
         data['points'],
-        templatePoints(template, len),
+        templatePoints(template, len, direction: direction),
       );
       if (operation == 'apply_template' &&
           template.trim().toLowerCase() == 'sidechain_from_kick') {
@@ -1382,8 +1716,16 @@ class AssistantActionTimelineReducer {
     if (op.isEmpty) return state;
 
     final clips = List<TimelineClip>.from(state.clips);
+    final forceCreateNewClip = op == 'create_clip' ||
+        AssistantActionUtils.toActionBool(
+          data['create_new_clip'] ?? target['create_new_clip'],
+        ) ||
+        AssistantActionUtils.toActionBool(
+          data['prefer_new_clip'] ?? target['prefer_new_clip'],
+        );
 
     int? findMidiClipIndex() {
+      if (forceCreateNewClip) return null;
       final explicit = AssistantActionUtils.toActionInt(
           data['clip_index'] ?? target['clip_index']);
       if (explicit != null &&
@@ -1424,6 +1766,39 @@ class AssistantActionTimelineReducer {
       return null;
     }
 
+    int? findAudioClipIndex() {
+      final explicit = AssistantActionUtils.toActionInt(
+        data['clip_index'] ?? target['clip_index'],
+      );
+      if (explicit != null &&
+          explicit >= 0 &&
+          explicit < clips.length &&
+          !clips[explicit].isMidi) {
+        return explicit;
+      }
+      for (final idx in state.selectedClipIndices) {
+        if (idx >= 0 && idx < clips.length && !clips[idx].isMidi) return idx;
+      }
+      if (state.primarySelectedClipIndex >= 0 &&
+          state.primarySelectedClipIndex < clips.length &&
+          !clips[state.primarySelectedClipIndex].isMidi) {
+        return state.primarySelectedClipIndex;
+      }
+      final row = AssistantActionUtils.toActionInt(
+        data['row_index'] ?? target['row_index'] ?? state.selectedRowIndex,
+      );
+      if (row != null) {
+        for (int i = 0; i < clips.length; i++) {
+          final clip = clips[i];
+          if (!clip.isMidi && clip.rowIndex == row) return i;
+        }
+      }
+      for (int i = 0; i < clips.length; i++) {
+        if (!clips[i].isMidi) return i;
+      }
+      return null;
+    }
+
     List<MidiNote> parseNotes(dynamic raw) {
       final out = <MidiNote>[];
       if (raw is! List) return out;
@@ -1433,16 +1808,10 @@ class AssistantActionTimelineReducer {
         final pitch = AssistantActionUtils.midiPitchFromRaw(
           m['pitch'] ?? m['midi'] ?? m['note'] ?? m['note_name'],
         );
-        final start = AssistantActionUtils.toActionDouble(
-          m['start_beat'] ?? m['startBeat'] ?? m['beat'] ?? m['start'],
-        );
-        final len = AssistantActionUtils.toActionDouble(
-              m['length_beats'] ?? m['lengthBeat'] ?? m['length'],
-            ) ??
-            AssistantActionUtils.toActionDouble(
-              m['duration_beats'] ?? m['duration'],
-            );
-        final vel = AssistantActionUtils.toActionDouble(m['velocity']) ?? 0.8;
+        final start = AssistantActionUtils.resolveMidiNoteStartBeat(m);
+        final len = AssistantActionUtils.resolveMidiNoteLengthBeats(m);
+        final vel =
+            AssistantActionUtils.normalizeMidiVelocity(m['velocity']) ?? 0.8;
         if (pitch == null || start == null || len == null) continue;
         out.add(
           MidiNote(
@@ -1457,9 +1826,68 @@ class AssistantActionTimelineReducer {
       return out;
     }
 
+    double? resolveTargetLengthBeats() {
+      return AssistantActionUtils.resolveMidiTargetLengthBeatsFromAction(
+        data,
+        target: target,
+      );
+    }
+
+    List<MidiNote> resizeNotesToTargetLength(
+      List<MidiNote> sourceNotes,
+      double targetBeats,
+    ) {
+      if (sourceNotes.isEmpty || !targetBeats.isFinite || targetBeats <= 0.0) {
+        return const <MidiNote>[];
+      }
+      final sorted = sourceNotes.map((n) => n.copy()).toList(growable: false)
+        ..sort((a, b) {
+          final byStart = a.startBeat.compareTo(b.startBeat);
+          if (byStart != 0) return byStart;
+          return a.pitch.compareTo(b.pitch);
+        });
+      final cycleBeats = sorted
+          .map((n) => n.startBeat + n.lengthBeats)
+          .fold<double>(0.0, math.max);
+      if (!cycleBeats.isFinite || cycleBeats <= 0.0) {
+        return const <MidiNote>[];
+      }
+      final out = <MidiNote>[];
+      final repeats = math.max(1, (targetBeats / cycleBeats).ceil());
+      const epsilon = 1e-6;
+      for (int repeat = 0; repeat < repeats; repeat++) {
+        final beatOffset = repeat * cycleBeats;
+        for (int i = 0; i < sorted.length; i++) {
+          final note = sorted[i];
+          final startBeat = note.startBeat + beatOffset;
+          if (startBeat >= targetBeats - epsilon) continue;
+          final remaining = targetBeats - startBeat;
+          if (remaining <= epsilon) continue;
+          out.add(
+            MidiNote(
+              id: 'resize_${repeat}_$i',
+              pitch: note.pitch,
+              startBeat: startBeat,
+              lengthBeats: math.min(note.lengthBeats, remaining),
+              velocity: note.velocity,
+            ),
+          );
+        }
+      }
+      return out;
+    }
+
     List<MidiNote> resolveNotes() {
       final explicit = parseNotes(data['notes']);
       if (explicit.isNotEmpty) return explicit;
+      final operation =
+          (data['operation'] ?? '').toString().trim().toLowerCase();
+      final notesPerChord = (AssistantActionUtils.toActionInt(
+                data['notes_per_chord'] ?? target['notes_per_chord'],
+              ) ??
+              4)
+          .clamp(1, 8);
+      final isBassline = operation == 'compose_bassline';
       return AssistantActionUtils.fallbackMidiNotesFromProgression(
         progressionRaw: AssistantActionUtils.progressionTokensFromRaw(
           data['progression'] ??
@@ -1467,10 +1895,77 @@ class AssistantActionTimelineReducer {
               data['chords'] ??
               target['chords'],
         ),
+        beatsPerChord: AssistantActionUtils.toActionDouble(
+              data['beats_per_chord'] ??
+                  target['beats_per_chord'] ??
+                  data['chord_length_beats'] ??
+                  target['chord_length_beats'],
+            ) ??
+            4.0,
+        notesPerChord: notesPerChord,
+        octave: (AssistantActionUtils.toActionInt(
+                  data['octave'] ?? target['octave'],
+                ) ??
+                (isBassline ? 2 : 3))
+            .clamp(-1, 8),
+        velocity: (AssistantActionUtils.toActionDouble(
+                  data['velocity'] ?? target['velocity'],
+                ) ??
+                0.78)
+            .clamp(0.2, 1.0),
+        mode: isBassline ? 'bass' : 'chords',
       );
     }
 
-    final notes = resolveNotes();
+    if (op == 'convert_audio_to_midi') {
+      final sourceIndex = findAudioClipIndex();
+      if (sourceIndex == null ||
+          sourceIndex < 0 ||
+          sourceIndex >= clips.length) {
+        return state;
+      }
+      final source = clips[sourceIndex];
+      if (source.isMidi) return state;
+      clips.add(
+        TimelineClip(
+          id: 'midi_audio_${clips.length}',
+          isMidi: true,
+          rowIndex: math.max(0, source.rowIndex + 1),
+          startMs: source.startMs,
+          sourceDurationMs: math.max(500.0, source.localDurationMs),
+          trimStartMs: 0.0,
+          trimEndMs: math.max(500.0, source.localDurationMs),
+          gain: 1.0,
+          label: source.label.trim().isEmpty
+              ? 'Audio to MIDI'
+              : '${source.label} MIDI',
+          tempoFollow: true,
+          detectedTempoBpm: state.projectTempoBpm,
+          midiNotes: const <MidiNote>[],
+        ),
+      );
+      return state.copyWith(clips: clips);
+    }
+
+    List<MidiNote> maybeExtendGeneratedNotes(List<MidiNote> source) {
+      if (source.isEmpty) return source;
+      final targetBeats = resolveTargetLengthBeats();
+      if (targetBeats == null || !targetBeats.isFinite || targetBeats <= 0.0) {
+        return source;
+      }
+      final currentSpan = source
+          .map((n) => n.startBeat + n.lengthBeats)
+          .fold<double>(0.0, math.max);
+      if (currentSpan <= 0.0 || currentSpan >= targetBeats - 1e-6) {
+        return source;
+      }
+      return resizeNotesToTargetLength(source, targetBeats);
+    }
+
+    final preserveExistingNotes = AssistantActionUtils.toActionBool(
+      data['preserve_existing_notes'] ?? target['preserve_existing_notes'],
+    );
+    var notes = maybeExtendGeneratedNotes(resolveNotes());
     final idx = findMidiClipIndex();
     if (idx == null) {
       if (notes.isEmpty) return state;
@@ -1507,6 +2002,20 @@ class AssistantActionTimelineReducer {
 
     if (idx < 0 || idx >= clips.length || !clips[idx].isMidi) return state;
     final clip = clips[idx];
+    if (notes.isEmpty &&
+        clip.midiNotes.isNotEmpty &&
+        AssistantActionUtils.hasStyleDrivenMidiGenerationDirectives(
+          data,
+          target: target,
+        )) {
+      notes = AssistantActionUtils.generateStyledMidiNotesFromSource(
+        sourceNotes: clip.midiNotes,
+        data: data,
+        target: target,
+        noteIdPrefix: 'ai_style',
+      );
+      notes = maybeExtendGeneratedNotes(notes);
+    }
 
     if (op == 'chop_notes') {
       final subdivision = AssistantActionUtils.toActionInt(
@@ -1531,18 +2040,52 @@ class AssistantActionTimelineReducer {
       return state.copyWith(clips: clips);
     }
 
+    if (op == 'transpose_notes') {
+      final semitones =
+          (AssistantActionUtils.toActionDouble(data['semitones']) ?? 0.0) +
+              ((AssistantActionUtils.toActionDouble(data['octaves']) ?? 0.0) *
+                  12.0);
+      final delta = semitones.round();
+      if (delta == 0 || clip.midiNotes.isEmpty) return state;
+      final next = clip.midiNotes
+          .map(
+            (n) => MidiNote(
+              id: n.id,
+              pitch: (n.pitch + delta).clamp(0, 127),
+              startBeat: n.startBeat,
+              lengthBeats: n.lengthBeats,
+              velocity: n.velocity,
+            ),
+          )
+          .toList(growable: false);
+      clips[idx] = clip.copyWith(midiNotes: next);
+      return state.copyWith(clips: clips);
+    }
+
     if (op == 'append_notes') {
       final add = notes;
+      if (add.isEmpty && preserveExistingNotes) {
+        final targetBeats = resolveTargetLengthBeats();
+        if (targetBeats == null || clip.midiNotes.isEmpty) return state;
+        final next = resizeNotesToTargetLength(clip.midiNotes, targetBeats);
+        if (next.isEmpty) return state;
+        clips[idx] = clip.copyWith(midiNotes: next);
+        return state.copyWith(clips: clips);
+      }
       if (add.isEmpty) return state;
-      double offset =
-          AssistantActionUtils.toActionDouble(data['append_start_beat']) ?? 0.0;
+      final explicitAppendStartBeat =
+          AssistantActionUtils.toActionDouble(data['append_start_beat']);
+      double offset = explicitAppendStartBeat ?? 0.0;
       final appendAtEnd = AssistantActionUtils.toActionBool(
-          data['append_at_end'],
-          fallback: true);
+        data['append_at_end'],
+        fallback: !preserveExistingNotes,
+      );
       if (appendAtEnd && clip.midiNotes.isNotEmpty) {
         offset = clip.midiNotes
             .map((n) => n.startBeat + n.lengthBeats)
             .fold<double>(0.0, math.max);
+      } else if (explicitAppendStartBeat == null && preserveExistingNotes) {
+        offset = 0.0;
       }
       final next = <MidiNote>[
         ...clip.midiNotes.map((n) => n.copy()),
@@ -1556,6 +2099,15 @@ class AssistantActionTimelineReducer {
           ),
         ),
       ];
+      clips[idx] = clip.copyWith(midiNotes: next);
+      return state.copyWith(clips: clips);
+    }
+
+    if (notes.isEmpty && preserveExistingNotes) {
+      final targetBeats = resolveTargetLengthBeats();
+      if (targetBeats == null || clip.midiNotes.isEmpty) return state;
+      final next = resizeNotesToTargetLength(clip.midiNotes, targetBeats);
+      if (next.isEmpty) return state;
       clips[idx] = clip.copyWith(midiNotes: next);
       return state.copyWith(clips: clips);
     }

@@ -30,9 +30,14 @@ _ALLOWED_MODEL_OVERRIDES = frozenset(
         "gpt-5.1-codex-mini",
         "gpt-5.1-chat-latest",
         "gpt-5.2",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
     }
 )
-_ALLOWED_REASONING_EFFORT_OVERRIDES = frozenset({"minimal", "low", "medium", "high"})
+_ALLOWED_REASONING_EFFORT_OVERRIDES = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh"}
+)
 _ALLOWED_PROMPT_CACHE_RETENTION_OVERRIDES = frozenset({"in_memory", "24h"})
 
 
@@ -122,7 +127,7 @@ class AdminAiRuntimeRepository:
             and reasoning_effort_value not in _ALLOWED_REASONING_EFFORT_OVERRIDES
         ):
             raise ValueError(
-                "Reasoning effort override must be one of: minimal, low, medium, high."
+                "Reasoning effort override must be one of: none, minimal, low, medium, high, xhigh."
             )
         max_output_tokens_value = self._validate_optional_int(
             max_output_tokens_override,

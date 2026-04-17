@@ -68,6 +68,8 @@ def parse_json_body(
 
 def provider_from_path(path: str) -> str:
     p = path.lower()
+    if p.endswith("/stibee"):
+        return "stibee"
     if p.endswith("/apple"):
         return "apple"
     if p.endswith("/google"):

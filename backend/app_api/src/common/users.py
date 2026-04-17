@@ -111,6 +111,15 @@ def _normalize_iso_datetime(value: Any, field_name: str) -> Optional[str]:
     return parsed.isoformat()
 
 
+def normalize_locale_code(value: Any) -> Optional[str]:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    if raw.startswith("ko"):
+        return "ko"
+    return "en"
+
+
 def _claim_str(claims: Dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = str(claims.get(key) or "").strip()
@@ -340,13 +349,20 @@ def build_user_profile_from_claims(
         "newsletter_opt_in_at": _normalize_optional_string(
             current.get("newsletter_opt_in_at")
         ),
+        "telemetry_enabled": _claim_bool(current, "telemetry_enabled")
+        if "telemetry_enabled" in current
+        else True,
+        "telemetry_enabled_at": _normalize_optional_string(
+            current.get("telemetry_enabled_at")
+        ),
+        "locale_code": normalize_locale_code(current.get("locale_code")),
         "created_at": current.get("created_at") or now,
         "updated_at": now,
         "last_seen_at": now,
         "bootstrap_source": "native_auth_token"
         if _claim_str(claims, "iss") == config.APP_AUTH_ISSUER
         else "cognito_claims",
-        "schema_version": 4,
+        "schema_version": 5,
     }
     record["onboarding_state"] = _default_onboarding_state(record)
     return record
@@ -516,6 +532,23 @@ def apply_user_profile_patch(
             "Newsletter opt-in at",
         )
 
+    if "telemetry_enabled" in patch:
+        telemetry_enabled = patch.get("telemetry_enabled")
+        if not isinstance(telemetry_enabled, bool):
+            raise ValueError("Telemetry enabled must be a boolean.")
+        record["telemetry_enabled"] = telemetry_enabled
+        if not telemetry_enabled:
+            record["telemetry_enabled_at"] = None
+
+    if "telemetry_enabled_at" in patch:
+        record["telemetry_enabled_at"] = _normalize_iso_datetime(
+            patch.get("telemetry_enabled_at"),
+            "Telemetry enabled at",
+        )
+
+    if "locale_code" in patch:
+        record["locale_code"] = normalize_locale_code(patch.get("locale_code"))
+
     if record.get("accepted_terms_version") and record.get("accepted_privacy_version"):
         record["accepted_at"] = record.get("accepted_at") or now
 
@@ -523,6 +556,14 @@ def apply_user_profile_patch(
         record["newsletter_opt_in_at"] = record.get("newsletter_opt_in_at") or now
     else:
         record["newsletter_opt_in_at"] = None
+
+    if record.get("telemetry_enabled") is False:
+        record["telemetry_enabled_at"] = None
+    else:
+        record["telemetry_enabled"] = True
+        record["telemetry_enabled_at"] = (
+            record.get("telemetry_enabled_at") or now
+        )
 
     requested_onboarding_state = str(patch.get("onboarding_state") or "").strip()
 
@@ -537,5 +578,5 @@ def apply_user_profile_patch(
         # resending the same PATCH on every refresh. Newer clients should keep
         # welcome completion local-only.
         record["onboarding_state"] = _WELCOME_SEEN_ONBOARDING_STATE
-    record["schema_version"] = max(4, int(record.get("schema_version") or 1))
+    record["schema_version"] = max(5, int(record.get("schema_version") or 1))
     return record

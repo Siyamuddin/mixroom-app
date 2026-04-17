@@ -160,6 +160,256 @@ void main() {
       expect(next.clips.first.localDurationMs, closeTo(3000.0, 0.001));
     });
 
+    test('duplicate supports repeat_count with musical spacing', () {
+      final initial = TimelineActionState.empty(
+        projectTempoBpm: 120.0,
+        clips: <TimelineClip>[_audioClip(id: 'kick', sourceDurationMs: 1000.0)],
+        selectedClipIndices: const <int>[0],
+        primarySelectedClipIndex: 0,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('clip_edit', <String, dynamic>{
+            'operation': 'duplicate',
+            'target': <String, dynamic>{'clip_index': 0},
+            'paste_start_measure': 2,
+            'repeat_count': 4,
+            'step_measures': 1,
+          }),
+        ],
+      );
+
+      expect(next.clips.length, 5);
+      expect(
+        next.clips.skip(1).map((c) => c.startMs).toList(),
+        <double>[2000.0, 4000.0, 6000.0, 8000.0],
+      );
+    });
+
+    test('sample_insert supports repeat_count with beat spacing', () {
+      final initial = TimelineActionState.empty(projectTempoBpm: 120.0);
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('sample_insert', <String, dynamic>{
+            'operation': 'insert_audio_clips',
+            'items': [
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.flac',
+                'row_index': 0,
+                'start_measure': 1,
+                'repeat_count': 4,
+                'step_beats': 1,
+              },
+            ],
+          }),
+        ],
+      );
+
+      expect(next.clips.length, 4);
+      expect(
+        next.clips.map((c) => c.startMs).toList(),
+        <double>[0.0, 500.0, 1000.0, 1500.0],
+      );
+    });
+
+    test('sample_insert infers sane drum spacing when repeat_count has no step',
+        () {
+      final initial = TimelineActionState.empty(projectTempoBpm: 120.0);
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('sample_insert', <String, dynamic>{
+            'operation': 'insert_audio_clips',
+            'items': [
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.flac',
+                'row_index': 0,
+                'repeat_count': 4,
+              },
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Snare-01.flac',
+                'row_index': 1,
+                'repeat_count': 4,
+              },
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Crash-01.flac',
+                'row_index': 2,
+                'repeat_count': 3,
+              },
+            ],
+          }),
+        ],
+      );
+
+      final kickStarts = next.clips
+          .where((c) => c.rowIndex == 0)
+          .map((c) => c.startMs)
+          .toList();
+      final snareStarts = next.clips
+          .where((c) => c.rowIndex == 1)
+          .map((c) => c.startMs)
+          .toList();
+      final crashStarts = next.clips
+          .where((c) => c.rowIndex == 2)
+          .map((c) => c.startMs)
+          .toList();
+
+      expect(kickStarts, <double>[0.0, 500.0, 1000.0, 1500.0]);
+      expect(snareStarts, <double>[500.0, 1500.0, 2500.0, 3500.0]);
+      expect(crashStarts, <double>[0.0, 4000.0, 8000.0]);
+    });
+
+    test('sample_insert derives section length from musical span fields', () {
+      final initial = TimelineActionState.empty(projectTempoBpm: 120.0);
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('sample_insert', <String, dynamic>{
+            'operation': 'insert_audio_clips',
+            'items': [
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Hat-01.flac',
+                'row_index': 0,
+                'start_measure': 1,
+                'length_measures': 2,
+                'step_beats': 1,
+              },
+            ],
+          }),
+        ],
+      );
+
+      expect(next.clips.length, 8);
+      expect(next.clips.first.startMs, 0.0);
+      expect(next.clips.last.startMs, 3500.0);
+    });
+
+    test(
+        'sample_insert keeps repeated drum layers spanning the declared section',
+        () {
+      final initial = TimelineActionState.empty(projectTempoBpm: 120.0);
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('sample_insert', <String, dynamic>{
+            'operation': 'insert_audio_clips',
+            'items': [
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.flac',
+                'row_index': 0,
+                'start_measure': 1,
+                'repeat_count': 8,
+                'step_beats': 1,
+                'length_measures': 8,
+              },
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Snare-01.flac',
+                'row_index': 1,
+                'start_measure': 1,
+                'repeat_count': 8,
+                'step_beats': 2,
+                'length_measures': 8,
+              },
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Hi-Hat-01.flac',
+                'row_index': 2,
+                'start_measure': 1,
+                'repeat_count': 8,
+                'step_beats': 0.5,
+                'length_measures': 8,
+              },
+            ],
+          }),
+        ],
+      );
+
+      expect(next.clips.where((c) => c.rowIndex == 0), hasLength(32));
+      expect(next.clips.where((c) => c.rowIndex == 1), hasLength(16));
+      expect(next.clips.where((c) => c.rowIndex == 2), hasLength(64));
+    });
+
+    test(
+        'sample_insert replace_audio_clips preserves timing while swapping labels',
+        () {
+      final initial = TimelineActionState.empty(
+        clips: <TimelineClip>[
+          _audioClip(id: 'k0', row: 0, startMs: 0.0, label: 'Kick-01.flac'),
+          _audioClip(id: 's0', row: 1, startMs: 500.0, label: 'Snare-01.flac'),
+          _audioClip(id: 's1', row: 1, startMs: 1500.0, label: 'Snare-01.flac'),
+        ],
+        selectedClipIndices: const <int>[1, 2],
+        primarySelectedClipIndex: 1,
+        selectedRowIndex: 1,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('sample_insert', <String, dynamic>{
+            'operation': 'replace_audio_clips',
+            'items': [
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Snare-02.flac',
+                'target': <String, dynamic>{
+                  'row_index': 1,
+                  'label_contains': 'snare',
+                },
+              },
+            ],
+          }),
+        ],
+      );
+
+      expect(next.clips.length, 3);
+      expect(next.clips[0].label, 'Kick-01.flac');
+      expect(next.clips[1].label, 'Snare-02.flac');
+      expect(next.clips[2].label, 'Snare-02.flac');
+      expect(next.clips[1].startMs, closeTo(500.0, 0.001));
+      expect(next.clips[2].startMs, closeTo(1500.0, 0.001));
+    });
+
+    test('clip duplicate derives repeat count from until_measure', () {
+      final initial = TimelineActionState.empty(
+        projectTempoBpm: 120.0,
+        clips: <TimelineClip>[
+          _audioClip(
+            id: 'loop0',
+            row: 0,
+            startMs: 0.0,
+            sourceDurationMs: 1000.0,
+          ),
+        ],
+        selectedClipIndices: const <int>[0],
+        primarySelectedClipIndex: 0,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('clip_edit', <String, dynamic>{
+            'operation': 'duplicate',
+            'target': <String, dynamic>{'clip_index': 0},
+            'paste_start_measure': 2,
+            'step_measures': 1,
+            'until_measure': 5,
+          }),
+        ],
+      );
+
+      expect(next.clips.length, 5);
+      expect(
+        next.clips.map((c) => c.startMs).toList(),
+        <double>[0.0, 2000.0, 4000.0, 6000.0, 8000.0],
+      );
+    });
+
     test('tempo_follow and tempo_detect_set_project update tempo state', () {
       final initial = TimelineActionState.empty(
         projectTempoBpm: 120.0,
@@ -406,6 +656,14 @@ void main() {
             'start_ms': 100,
             'length_ms': 600,
           }),
+          _action('automation_edit', <String, dynamic>{
+            'operation': 'apply_template',
+            'template': 'auto_pan',
+            'direction': 'right',
+            'target': <String, dynamic>{'row_index': 3, 'target_id': 'pan'},
+            'start_ms': 200,
+            'length_ms': 800,
+          }),
         ],
       );
 
@@ -423,6 +681,14 @@ void main() {
       expect(sweepLane.first.points.length, 2);
       expect(sweepLane.first.points.first.volume, closeTo(0.0, 0.001));
       expect(sweepLane.first.points.last.volume, closeTo(1.0, 0.001));
+
+      final autoPanLane = next.automationClips['3::pan']!;
+      expect(autoPanLane.length, 1);
+      expect(autoPanLane.first.points.length, 6);
+      expect(autoPanLane.first.points.first.volume, closeTo(0.5, 0.001));
+      expect(autoPanLane.first.points[1].volume, greaterThan(0.8));
+      expect(autoPanLane.first.points[3].volume, lessThan(0.2));
+      expect(autoPanLane.first.points.last.volume, closeTo(0.5, 0.001));
     });
 
     test('shared duplicate propagates point edits across linked clips only',
@@ -866,6 +1132,303 @@ void main() {
       expect(patternClip, isNotEmpty);
       expect(patternClip.first.label, 'Arp Pattern');
       expect(patternClip.first.midiNotes, isNotEmpty);
+    });
+
+    test('convert_audio_to_midi adds a midi clip below the source audio row',
+        () {
+      final initial = TimelineActionState.empty(
+        clips: <TimelineClip>[
+          _audioClip(
+            id: 'vox',
+            row: 2,
+            startMs: 2400.0,
+            sourceDurationMs: 3200.0,
+            label: 'Lead Vox',
+          ),
+        ],
+        selectedClipIndices: const <int>[0],
+        primarySelectedClipIndex: 0,
+        selectedRowIndex: 2,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('midi_compose', <String, dynamic>{
+            'operation': 'audio_to_midi',
+            'target': <String, dynamic>{'prefer_selected': true},
+          }),
+        ],
+      );
+
+      final midiClips =
+          next.clips.where((clip) => clip.isMidi).toList(growable: false);
+      expect(midiClips, hasLength(1));
+      expect(midiClips.single.rowIndex, 3);
+      expect(midiClips.single.startMs, 2400.0);
+      expect(midiClips.single.label, 'Lead Vox MIDI');
+    });
+
+    test('create_clip adds a fresh midi clip instead of reusing selection', () {
+      final initial = TimelineActionState.empty(
+        clips: <TimelineClip>[
+          _midiClip(
+            id: 'm0',
+            row: 1,
+            notes: <MidiNote>[
+              MidiNote(
+                id: 'n0',
+                pitch: 48,
+                startBeat: 0.0,
+                lengthBeats: 4.0,
+                velocity: 0.8,
+              ),
+            ],
+          ),
+        ],
+        selectedClipIndices: const <int>[0],
+        primarySelectedClipIndex: 0,
+        selectedRowIndex: 1,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('midi_compose', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{'prefer_selected': true},
+            'create_new_clip': true,
+            'notes': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'pitch': 60,
+                'start_beat': 0.0,
+                'length_beats': 4.0,
+                'velocity': 0.8,
+              },
+            ],
+          }),
+        ],
+      );
+
+      final midiClips =
+          next.clips.where((clip) => clip.isMidi).toList(growable: false);
+      expect(midiClips, hasLength(2));
+      expect(midiClips.first.midiNotes.first.pitch, 48);
+      expect(midiClips.last.midiNotes.first.pitch, 60);
+    });
+
+    test('fresh generated midi clips stretch to requested/default section span',
+        () {
+      final initial = TimelineActionState.empty(
+        selectedRowIndex: 1,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('midi_compose', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{'row_index': 1},
+            'create_new_clip': true,
+            'length_measures': 8,
+            'notes': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'pitch': 60,
+                'start_beat': 0.0,
+                'length_beats': 4.0,
+                'velocity': 0.8,
+              },
+            ],
+          }),
+        ],
+      );
+
+      final midiClip = next.clips.singleWhere((clip) => clip.isMidi);
+      final lastEnd = midiClip.midiNotes
+          .map((n) => n.startBeat + n.lengthBeats)
+          .fold<double>(0.0, math.max);
+      expect(lastEnd, closeTo(32.0, 1e-6));
+      expect(midiClip.midiNotes.length, 8);
+    });
+
+    test('create_clip honors note measure plus beat positions', () {
+      final initial = TimelineActionState.empty(
+        selectedRowIndex: 1,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('midi_compose', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{'row_index': 1},
+            'create_new_clip': true,
+            'length_measures': 8,
+            'notes': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'pitch': 50,
+                'measure': 1,
+                'beat': 1,
+                'duration_beats': 4,
+                'velocity': 72,
+              },
+              <String, dynamic>{
+                'pitch': 43,
+                'measure': 2,
+                'beat': 1,
+                'duration_beats': 4,
+                'velocity': 72,
+              },
+              <String, dynamic>{
+                'pitch': 45,
+                'measure': 3,
+                'beat': 3,
+                'duration_beats': 2,
+                'velocity': 72,
+              },
+            ],
+          }),
+        ],
+      );
+
+      final midiClip = next.clips.singleWhere((clip) => clip.isMidi);
+      expect(midiClip.midiNotes[0].startBeat, closeTo(0.0, 1e-6));
+      expect(midiClip.midiNotes[1].startBeat, closeTo(4.0, 1e-6));
+      expect(midiClip.midiNotes[2].startBeat, closeTo(10.0, 1e-6));
+      expect(midiClip.midiNotes[0].velocity, closeTo(72 / 127, 1e-6));
+    });
+
+    test('length-only preserve_existing_notes repeats midi phrase to target',
+        () {
+      final initial = TimelineActionState.empty(
+        clips: <TimelineClip>[
+          _midiClip(
+            id: 'm0',
+            row: 1,
+            notes: <MidiNote>[
+              MidiNote(
+                id: 'n0',
+                pitch: 60,
+                startBeat: 0.0,
+                lengthBeats: 4.0,
+                velocity: 0.8,
+              ),
+            ],
+          ),
+        ],
+        selectedClipIndices: const <int>[0],
+        primarySelectedClipIndex: 0,
+        selectedRowIndex: 1,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('midi_compose', <String, dynamic>{
+            'operation': 'replace_notes',
+            'target': <String, dynamic>{'prefer_selected': true},
+            'preserve_existing_notes': true,
+            'length_measures': 8,
+          }),
+        ],
+      );
+
+      final midiClip = next.clips.singleWhere((clip) => clip.isMidi);
+      expect(midiClip.midiNotes.length, 8);
+      final lastEnd = midiClip.midiNotes
+          .map((n) => n.startBeat + n.lengthBeats)
+          .fold<double>(0.0, math.max);
+      expect(lastEnd, closeTo(32.0, 1e-6));
+    });
+
+    test('style-driven append_notes can add a topline over the same clip span',
+        () {
+      final initial = TimelineActionState.empty(
+        clips: <TimelineClip>[
+          _midiClip(
+            id: 'm0',
+            row: 1,
+            notes: <MidiNote>[
+              MidiNote(
+                id: 'c0',
+                pitch: 48,
+                startBeat: 0.0,
+                lengthBeats: 4.0,
+                velocity: 0.8,
+              ),
+              MidiNote(
+                id: 'e0',
+                pitch: 52,
+                startBeat: 0.0,
+                lengthBeats: 4.0,
+                velocity: 0.8,
+              ),
+              MidiNote(
+                id: 'g0',
+                pitch: 55,
+                startBeat: 0.0,
+                lengthBeats: 4.0,
+                velocity: 0.8,
+              ),
+              MidiNote(
+                id: 'a1',
+                pitch: 45,
+                startBeat: 4.0,
+                lengthBeats: 4.0,
+                velocity: 0.8,
+              ),
+              MidiNote(
+                id: 'c1',
+                pitch: 48,
+                startBeat: 4.0,
+                lengthBeats: 4.0,
+                velocity: 0.8,
+              ),
+              MidiNote(
+                id: 'e1',
+                pitch: 52,
+                startBeat: 4.0,
+                lengthBeats: 4.0,
+                velocity: 0.8,
+              ),
+            ],
+          ),
+        ],
+        selectedClipIndices: const <int>[0],
+        primarySelectedClipIndex: 0,
+        selectedRowIndex: 1,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('midi_compose', <String, dynamic>{
+            'operation': 'append_notes',
+            'target': <String, dynamic>{'prefer_selected': true},
+            'length_measures': 2,
+            'preserve_existing_notes': true,
+            'style': 'running topline',
+            'register': 'upper',
+            'density': 'medium',
+            'direction': 'mostly_stepwise',
+          }),
+        ],
+      );
+
+      final midiClip = next.clips.singleWhere((clip) => clip.isMidi);
+      expect(
+        midiClip.midiNotes.length,
+        greaterThan(initial.clips.first.midiNotes.length),
+      );
+      final generated = midiClip.midiNotes
+          .where((note) => note.startBeat > 0.0 && note.startBeat < 8.0)
+          .toList(growable: false);
+      expect(generated, isNotEmpty);
+      final lastGeneratedEnd = generated
+          .map((n) => n.startBeat + n.lengthBeats)
+          .fold<double>(0.0, math.max);
+      expect(lastGeneratedEnd, closeTo(8.0, 1e-6));
+      expect(midiClip.midiNotes.any((note) => note.pitch > 60), isTrue);
     });
   });
 

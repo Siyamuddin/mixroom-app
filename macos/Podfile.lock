@@ -68,6 +68,7 @@ PODS:
     - FlutterMacOS
   - juce_audio_engine (0.0.1):
     - FlutterMacOS
+    - onnxruntime-objc (= 1.21.0)
   - just_audio (0.0.1):
     - Flutter
     - FlutterMacOS
@@ -222,7 +223,7 @@ SPEC CHECKSUMS:
   GTMAppAuth: 217a876b249c3c585a54fd6f73e6b58c4f5c4238
   GTMSessionFetcher: 5aea5ba6bd522a239e236100971f10cb71b96ab6
   in_app_purchase_storekit: 22cca7d08eebca9babdf4d07d0baccb73325d3c8
-  juce_audio_engine: d3f84941d24a6fd612c0d4f69efc427722a123f0
+  juce_audio_engine: 574797e70786e7e18bd7ba0fa8d8ed94b6c6cf84
   just_audio: 4e391f57b79cad2b0674030a00453ca5ce817eed
   onnxruntime-c: ac65025f01072d25d7d394a2b43ac30d9397b260
   onnxruntime-objc: 5fa03134356d47b642ec85b1023d9907a123d201

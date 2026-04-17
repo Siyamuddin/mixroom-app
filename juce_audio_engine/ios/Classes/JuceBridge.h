@@ -62,12 +62,14 @@
 + (void)debugPrintGraphStructureObjC;
 
 // Clip-level control (per-clip)
-+ (void)loadClipObjC:(NSInteger)clipIndex
++ (BOOL)loadClipObjC:(NSInteger)clipIndex
                rowId:(NSInteger)rowId
                 path:(NSString *)path
             startSec:(double)startSec
            lengthSec:(double)lengthSec
      inFileOffsetSec:(double)inFileOffsetSec;
++ (void)beginProjectClipLoadObjC;
++ (void)endProjectClipLoadObjC;
 + (BOOL)supportsLiveMidiClipPlaybackObjC;
 + (BOOL)loadMidiClipObjC:(NSInteger)clipIndex
                    rowId:(NSInteger)rowId
@@ -202,7 +204,9 @@
 
 + (NSArray<NSNumber *> *)decodeAudioMono16kObjC:(NSString *)path;
 + (NSDictionary<NSString *, NSNumber *> *)analyzeAudioStereo16kObjC:(NSString *)path;
-+ (NSDictionary<NSString *, id> *)analyzeAudioForPromptObjC:(NSString *)path;
++ (NSDictionary<NSString *, id> *)analyzeAudioForPromptObjC:(NSString *)path
+                                                trimStartMs:(double)trimStartMs
+                                                  trimEndMs:(double)trimEndMs;
 
 + (NSArray<NSString *> *)getInputDevicesObjC;
 + (BOOL)selectInputDeviceObjC:(NSString *)name;
@@ -251,5 +255,9 @@
 + (double)getHostSampleRateObjC;
 + (NSArray<NSNumber *> *)getRowEqWaveformObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex sampleCount:(NSInteger)sampleCount;
 + (NSArray<NSNumber *> *)getMasterEqWaveformObjC:(NSInteger)effectIndex sampleCount:(NSInteger)sampleCount;
++ (NSArray<NSNumber *> *)getRowStereoScopeObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;
++ (NSArray<NSNumber *> *)getMasterStereoScopeObjC:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;
++ (NSArray<NSNumber *> *)getRowShaperPreviewObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;
++ (NSArray<NSNumber *> *)getMasterShaperPreviewObjC:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;
 
 @end

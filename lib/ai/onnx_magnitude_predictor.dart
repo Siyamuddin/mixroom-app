@@ -111,7 +111,7 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
     required this.magnitudeModelAsset,
     this.applyThreshold = 0.5,
     RemoteMagnitudeModelManager? remoteModelManager,
-  }) : _remoteModelManager =
+  })  : _remoteModelManager =
             remoteModelManager ?? RemoteMagnitudeModelManager();
 
   @override
@@ -245,6 +245,7 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
     required GoalVector goal,
     required List<MixAction> actions,
     required bool strict,
+    String? projectId,
   }) async {
     if (actions.isEmpty) {
       return const MagnitudeRefineResult(actions: [], fallbackUsed: false);
@@ -263,6 +264,28 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
         actions: actions,
         fallbackUsed: true,
         fallbackReason: 'model_not_ready',
+      );
+    }
+    if (goal.executionProfile == MixExecutionProfile.experimentalExtreme) {
+      aiDebugLog(
+        'onnx-mag',
+        'bypassing learned refine for execution_profile=${goal.executionProfile.wireValue} destructive_ok=${_effectiveDestructive(goal)}',
+      );
+      return MagnitudeRefineResult(
+        actions: actions,
+        fallbackUsed: true,
+        fallbackReason: 'execution_profile_bypass',
+      );
+    }
+    if (goal.referenceTarget != null) {
+      aiDebugLog(
+        'onnx-mag',
+        'bypassing learned refine for reference-guided mix goal',
+      );
+      return MagnitudeRefineResult(
+        actions: actions,
+        fallbackUsed: true,
+        fallbackReason: 'reference_match_bypass',
       );
     }
 
@@ -303,7 +326,6 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
           fallbackReason: 'feature_contract_mismatch',
         );
       }
-
       final applyScore = await _predictApplyScore(_applySession!, features);
       final rawMagnitude = await _predictScalar(_magnitudeSession!, features);
 
@@ -322,9 +344,11 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
       // Match training clamp (0..3).
       var predictedScale = rawMagnitude.clamp(0.0, 3.0);
       var decision = 'keep';
+      final minScaleFloor = _minimumScaleFloor(goal, strict: strict);
+      final preserveAudibleRequest = minScaleFloor >= 0.75;
 
       if (applyScore < 0.15) {
-        if (!strict) {
+        if (!strict && !preserveAudibleRequest) {
           aiDebugLog(
             'onnx-mag',
             'action=${action.type} applyScore=${applyScore.toStringAsFixed(3)} rawScale=${rawMagnitude.toStringAsFixed(3)} decision=drop(strict=false)',
@@ -345,7 +369,9 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
           continue;
         }
         predictedScale = math.min(predictedScale, 0.25);
-        decision = 'strong_attenuate';
+        decision = preserveAudibleRequest
+            ? 'preserve_audible_floor'
+            : 'strong_attenuate';
       }
 
       if (applyScore < applyThreshold) {
@@ -359,10 +385,11 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
           }
         }
       }
+      predictedScale = math.max(predictedScale, minScaleFloor).clamp(0.0, 3.0);
 
       aiDebugLog(
         'onnx-mag',
-        'action=${action.type} applyScore=${applyScore.toStringAsFixed(3)} rawScale=${rawMagnitude.toStringAsFixed(3)} finalScale=${predictedScale.toStringAsFixed(3)} decision=$decision strict=$strict',
+        'action=${action.type} applyScore=${applyScore.toStringAsFixed(3)} rawScale=${rawMagnitude.toStringAsFixed(3)} finalScale=${predictedScale.toStringAsFixed(3)} decision=$decision strict=$strict profile=${goal.executionProfile.wireValue} audibility=${goal.audibility.wireValue}',
       );
       if (kAiDebugVerbose) {
         aiDebugLog(
@@ -391,10 +418,44 @@ class OnnxMixingMagnitudePredictor implements MixingMagnitudePredictor {
       actions: refined,
       fallbackUsed: false,
       debugEntries: debugEntries,
+      observability: observabilityContext,
     );
   }
 
   static const int _actionFeatureCount = 15;
+
+  double _minimumScaleFloor(GoalVector goal, {required bool strict}) {
+    final destructive = _effectiveDestructive(goal);
+    switch (goal.executionProfile) {
+      case MixExecutionProfile.producerSafe:
+        switch (goal.audibility) {
+          case MixAudibility.subtle:
+          case MixAudibility.noticeable:
+            return 0.0;
+          case MixAudibility.obvious:
+            return strict ? 0.75 : 0.85;
+          case MixAudibility.extreme:
+            return strict ? 0.85 : 1.0;
+        }
+      case MixExecutionProfile.creativeBold:
+        switch (goal.audibility) {
+          case MixAudibility.subtle:
+            return 0.55;
+          case MixAudibility.noticeable:
+            return 0.8;
+          case MixAudibility.obvious:
+            return 1.0;
+          case MixAudibility.extreme:
+            return destructive ? 1.25 : 1.1;
+        }
+      case MixExecutionProfile.experimentalExtreme:
+        return destructive ? 1.35 : 1.1;
+    }
+  }
+
+  bool _effectiveDestructive(GoalVector goal) {
+    return goal.effectiveDestructive;
+  }
 
   List<double> _buildContextFeatures({
     required ProjectState project,

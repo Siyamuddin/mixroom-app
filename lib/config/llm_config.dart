@@ -16,6 +16,16 @@ class LlmConfig {
     defaultValue: '/v1/llm/responses',
   );
 
+  static const String _legacyMixResolvePath = String.fromEnvironment(
+    'LLM_MIX_RESOLVE_PATH',
+    defaultValue: '',
+  );
+
+  static const String _proxyMixResolvePath = String.fromEnvironment(
+    'LLM_PROXY_MIX_RESOLVE_PATH',
+    defaultValue: '',
+  );
+
   static const String proxyStage = String.fromEnvironment(
     'LLM_PROXY_STAGE',
     defaultValue: 'prod',
@@ -62,6 +72,14 @@ class LlmConfig {
   static bool get hasOpenAiApiKey => openAiApiKey.trim().isNotEmpty;
 
   static bool get hasOpenAiModel => openAiModel.trim().isNotEmpty;
+
+  static String get mixResolvePath {
+    final configured = _proxyMixResolvePath.trim().isNotEmpty
+        ? _proxyMixResolvePath
+        : _legacyMixResolvePath;
+    final trimmed = configured.trim();
+    return trimmed.isEmpty ? '/v1/mix/resolve' : trimmed;
+  }
 
   static bool get canUseDirectOpenAi =>
       hasOpenAiApiKey &&

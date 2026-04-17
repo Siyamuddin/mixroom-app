@@ -603,10 +603,75 @@ public:
     virtual ~TimelineClipProcessorBase() = default;
     virtual void setTimeline(double startSec, double lengthSec, double inFileOffsetSec = 0.0) = 0;
     virtual void setMuted(bool m) = 0;
+    virtual void setGainUi(float gainUi) = 0;
+    virtual void setPanNormalized(float panNormalized) = 0;
     virtual void setPitchSemitones(float semitones) = 0;
     virtual void setReversed(bool shouldReverse) = 0;
     virtual void setStretchOptions(double tempoRatio, bool preservePitch) = 0;
 };
+
+inline float mixroomUiGainToLinear(float gainUi)
+{
+    const float userGain = std::clamp(gainUi,
+                                      SimpleGainProcessor::kUiMin,
+                                      SimpleGainProcessor::kUiMax);
+    float db = 0.0f;
+
+    if (userGain <= SimpleGainProcessor::kUiUnity)
+    {
+        const float t = (SimpleGainProcessor::kUiUnity <= SimpleGainProcessor::kUiMin)
+                            ? 0.0f
+                            : (userGain - SimpleGainProcessor::kUiMin) /
+                                  (SimpleGainProcessor::kUiUnity - SimpleGainProcessor::kUiMin);
+        db = SimpleGainProcessor::kDbMin +
+             ((0.0f - SimpleGainProcessor::kDbMin) * std::clamp(t, 0.0f, 1.0f));
+    }
+    else
+    {
+        const float t = (SimpleGainProcessor::kUiMax <= SimpleGainProcessor::kUiUnity)
+                            ? 0.0f
+                            : (userGain - SimpleGainProcessor::kUiUnity) /
+                                  (SimpleGainProcessor::kUiMax - SimpleGainProcessor::kUiUnity);
+        db = (SimpleGainProcessor::kDbMax - 0.0f) * std::clamp(t, 0.0f, 1.0f);
+    }
+
+    return (db <= SimpleGainProcessor::kDbMin + 0.001f)
+               ? 0.0f
+               : std::pow(10.0f, db / 20.0f);
+}
+
+inline void applyMixroomGainAndPan(juce::AudioBuffer<float> &buffer,
+                                   float gainUi,
+                                   float panNormalized)
+{
+    const int numChannels = buffer.getNumChannels();
+    if (numChannels <= 0)
+        return;
+
+    const float linearGain = mixroomUiGainToLinear(gainUi);
+    if (linearGain <= 0.0f)
+    {
+        buffer.clear();
+        return;
+    }
+
+    buffer.applyGain(linearGain);
+
+    if (numChannels < 2)
+        return;
+
+    const float p = std::clamp(panNormalized, -1.0f, 1.0f);
+    const float leftGain = (p <= 0.0f) ? 1.0f : (1.0f - p);
+    const float rightGain = (p >= 0.0f) ? 1.0f : (1.0f + p);
+    auto *left = buffer.getWritePointer(0);
+    auto *right = buffer.getWritePointer(1);
+    const int numSamples = buffer.getNumSamples();
+    for (int i = 0; i < numSamples; ++i)
+    {
+        left[i] *= leftGain;
+        right[i] *= rightGain;
+    }
+}
 
 class TimelineClipProcessor : public juce::AudioProcessor, public TimelineClipProcessorBase
 {
@@ -648,6 +713,18 @@ public:
     }
 
     void setMuted(bool m) override { muted.store(m, std::memory_order_relaxed); }
+    void setGainUi(float gainUi) override
+    {
+        clipGainUi.store(std::clamp(gainUi,
+                                    SimpleGainProcessor::kUiMin,
+                                    SimpleGainProcessor::kUiMax),
+                         std::memory_order_relaxed);
+    }
+    void setPanNormalized(float panNormalized) override
+    {
+        clipPanNormalized.store(std::clamp(panNormalized, -1.0f, 1.0f),
+                                std::memory_order_relaxed);
+    }
     void setPitchSemitones(float semitones) override
     {
         pitchSemitones.store(juce::jlimit(-24.0f, 24.0f, semitones),
@@ -816,6 +893,9 @@ public:
                 return;
 
             applyRequestedPitchShift(temp);
+            applyMixroomGainAndPan(temp,
+                                   clipGainUi.load(std::memory_order_relaxed),
+                                   clipPanNormalized.load(std::memory_order_relaxed));
 
             for (int ch = 0; ch < juce::jmin(2, buffer.getNumChannels()); ++ch)
                 buffer.copyFrom(ch, writeStart, temp, ch, 0, framesToRead);
@@ -848,6 +928,9 @@ public:
         resampler->getNextAudioBlock(info);
 
         applyRequestedPitchShift(temp);
+        applyMixroomGainAndPan(temp,
+                               clipGainUi.load(std::memory_order_relaxed),
+                               clipPanNormalized.load(std::memory_order_relaxed));
 
         for (int ch = 0; ch < juce::jmin(2, buffer.getNumChannels()); ++ch)
             buffer.copyFrom(ch, writeStart, temp, ch, 0, framesToRead);
@@ -1027,6 +1110,8 @@ private:
     std::atomic<double> clipStartSec{0.0};
     std::atomic<double> clipLengthSec{0.0};
     std::atomic<double> fileOffsetSec{0.0};
+    std::atomic<float> clipGainUi{SimpleGainProcessor::kUiUnity};
+    std::atomic<float> clipPanNormalized{0.0f};
     std::atomic<float> pitchSemitones{0.0f};
     std::atomic<bool> reversed{false};
     std::atomic<double> tempoPlaybackRatio{1.0};
@@ -1069,6 +1154,18 @@ public:
     }
 
     void setMuted(bool m) override { muted.store(m, std::memory_order_relaxed); }
+    void setGainUi(float gainUi) override
+    {
+        clipGainUi.store(std::clamp(gainUi,
+                                    SimpleGainProcessor::kUiMin,
+                                    SimpleGainProcessor::kUiMax),
+                         std::memory_order_relaxed);
+    }
+    void setPanNormalized(float panNormalized) override
+    {
+        clipPanNormalized.store(std::clamp(panNormalized, -1.0f, 1.0f),
+                                std::memory_order_relaxed);
+    }
 
     void setPitchSemitones(float semitones) override
     {
@@ -1124,6 +1221,18 @@ public:
             pendingState = next;
             pendingVersion++;
         }
+    }
+
+    static bool canResolveSampledInstrument(const juce::String &instrumentId,
+                                            const juce::String &instrumentName)
+    {
+        const juce::String assetPath =
+            sfzAssetPathForInstrument(instrumentId, instrumentName);
+        if (assetPath.isEmpty())
+            return true;
+
+        const auto definition = sampledDefinitionForAsset(assetPath);
+        return definition != nullptr && !definition->regions.empty();
     }
 
     void enqueueLiveMidiEvent(bool noteOn, int channel, int pitch, float velocity)
@@ -1188,7 +1297,10 @@ public:
         const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
         const double releaseSec = juce::jmax(0.02, cachedPreset.releaseMs / 1000.0);
         const float driveGain =
-            sampledMode ? 1.0f : (float)(1.0 + cachedPreset.drive * 5.0);
+            sampledMode
+                ? 1.0f
+                : (float)(1.0 + cachedPreset.drive *
+                                      (cachedPreset.family == InstrumentFamily::bass ? 3.0 : 5.0));
         const bool stereo = outChannels >= 2;
         auto *outL = buffer.getWritePointer(0);
         auto *outR = stereo ? buffer.getWritePointer(1) : nullptr;
@@ -1390,7 +1502,12 @@ public:
         }
 
         if (activeLiveNotes.empty())
+        {
+            applyMixroomGainAndPan(buffer,
+                                   clipGainUi.load(std::memory_order_relaxed),
+                                   clipPanNormalized.load(std::memory_order_relaxed));
             return;
+        }
 
         const double invSr = 1.0 / sr;
         for (int i = 0; i < numSamples; ++i)
@@ -1537,6 +1654,10 @@ public:
                     return voice.releasing && voice.releaseAgeSec >= voiceReleaseSec;
                 }),
             activeLiveNotes.end());
+
+        applyMixroomGainAndPan(buffer,
+                               clipGainUi.load(std::memory_order_relaxed),
+                               clipPanNormalized.load(std::memory_order_relaxed));
     }
 
     const juce::String getName() const override { return "TimelineMidiClipProcessor"; }
@@ -1585,6 +1706,7 @@ private:
         double transient = 0.08;
         double pitchDropSemitones = 0.0;
         double noise = 0.02;
+        double padDetuneOffset = 0.008;
     };
 
     struct DecodedSamplePcm
@@ -1721,7 +1843,10 @@ private:
             id == "sfz.vsco_2_ce_1_1_0_mixroomdrumstarter" ||
             id == "sfz.vsco_2_ce_1_1_0_mixroomdrydrumkit" ||
             id == "sfz.vsco_2_ce_1_1_0_mixroomacousticdrumkit" ||
-            id == "sfz.vsco_2_ce_1_1_0_mixroomelectropunchkit";
+            id == "sfz.vsco_2_ce_1_1_0_mixroomelectropunchkit" ||
+            id.contains("mixroomdrumstarter.sfz") ||
+            id.contains("mixroomdrydrumkit.sfz") ||
+            id.contains("mixroomacousticdrumkit.sfz");
         if (!drumKit)
             return safePitch;
 
@@ -1763,6 +1888,15 @@ private:
         default:
             return (float)(p < 0.5 ? (-1.0 + 4.0 * p) : (3.0 - 4.0 * p));
         }
+    }
+
+    static double softSaturate(double input, double amount)
+    {
+        const double drive = juce::jmax(1.0, amount);
+        const double norm = std::tanh(drive);
+        if (norm <= 1.0e-6)
+            return input;
+        return std::tanh(input * drive) / norm;
     }
 
     using SfzOpcodeMap = std::unordered_map<std::string, juce::String>;
@@ -1816,20 +1950,28 @@ private:
         if (assetPath.isEmpty())
             return {};
 
+        juce::StringArray candidateAssetPaths;
+        candidateAssetPaths.addIfNotAlreadyThere(assetPath);
+        candidateAssetPaths.addIfNotAlreadyThere(
+            assetPath.replace("#", "%23"));
+
         {
             const juce::ScopedLock lock(flutterAssetRootLock());
             const juce::String rootPath = flutterAssetRoot();
             if (rootPath.isNotEmpty())
             {
                 const juce::File root(rootPath);
-                const juce::File rootDirect = root.getChildFile(assetPath);
-                if (rootDirect.existsAsFile())
-                    return rootDirect;
+                for (const auto &candidatePath : candidateAssetPaths)
+                {
+                    const juce::File rootDirect = root.getChildFile(candidatePath);
+                    if (rootDirect.existsAsFile())
+                        return rootDirect;
 
-                const juce::File nested = root.getChildFile("flutter_assets")
-                                              .getChildFile(assetPath);
-                if (nested.existsAsFile())
-                    return nested;
+                    const juce::File nested = root.getChildFile("flutter_assets")
+                                                  .getChildFile(candidatePath);
+                    if (nested.existsAsFile())
+                        return nested;
+                }
             }
         }
 
@@ -1848,14 +1990,17 @@ private:
         {
             if (!root.exists())
                 continue;
-            const auto direct = root.getChildFile(assetPath);
-            if (direct.existsAsFile())
-                return direct;
+            for (const auto &candidatePath : candidateAssetPaths)
+            {
+                const auto direct = root.getChildFile(candidatePath);
+                if (direct.existsAsFile())
+                    return direct;
 
-            const auto nested = root.getChildFile("flutter_assets")
-                                    .getChildFile(assetPath);
-            if (nested.existsAsFile())
-                return nested;
+                const auto nested = root.getChildFile("flutter_assets")
+                                        .getChildFile(candidatePath);
+                if (nested.existsAsFile())
+                    return nested;
+            }
         }
 
         return appBundle.getChildFile("Frameworks")
@@ -2357,109 +2502,10 @@ private:
     static juce::String sfzAssetPathForInstrument(const juce::String &instrumentId,
                                                   const juce::String &instrumentName)
     {
+        juce::ignoreUnused(instrumentName);
         const juce::String id = instrumentId.toLowerCase().trim();
         if (id.startsWith("sfz_asset:"))
             return normalizeAssetPath(instrumentId.substring(10));
-
-        static const std::unordered_map<std::string, std::string> knownMap = {
-            {"sfz.vsco.mixroom_acoustic_drum_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz"},
-            {"sfz.vsco.mixroom_dry_drum_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz"},
-            {"sfz.vsco.mixroom_drum_starter", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz"},
-            {"sfz.vsco.mixroom_electro_punch_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomElectroPunchKit.sfz"},
-            {"sfz.vsco.mixroom_synthwave_kit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomSynthwaveKit.sfz"},
-            {"sfz.vsco.tictokmen_moogdrums1", "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenMoogdrums1.sfz"},
-            {"sfz.vsco.tictokmen_retrodrums1", "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenRetroDrums1.sfz"},
-            {"mixroom.drum_808_starter", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz"},
-            {"mixroom.drum_house", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz"},
-            {"mixroom.drum_breakbeat", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz"},
-            {"mixroom.drum_trap", "assets/instruments/VSCO-2-CE-1.1.0/MixroomElectroPunchKit.sfz"},
-            {"mixroom.horn_stack", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
-            // IDs generated from assets/instruments/index.json.
-            {"sfz.vsco_2_ce_1_1_0_mixroomdrumstarter", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz"},
-            {"sfz.vsco_2_ce_1_1_0_mixroomacousticdrumkit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz"},
-            {"sfz.vsco_2_ce_1_1_0_mixroomdrydrumkit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz"},
-            {"sfz.vsco_2_ce_1_1_0_tictokmenmoogdrums1", "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenMoogdrums1.sfz"},
-            {"sfz.vsco_2_ce_1_1_0_tictokmenretrodrums1", "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenRetroDrums1.sfz"},
-            {"sfz.vsco_2_ce_1_1_0_mixroomelectropunchkit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomElectroPunchKit.sfz"},
-            {"sfz.vsco_2_ce_1_1_0_mixroomsynthwavekit", "assets/instruments/VSCO-2-CE-1.1.0/MixroomSynthwaveKit.sfz"},
-            {"sfz.vsco.violin_ens_pizz", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz"},
-            {"sfz.vsco.trumpet_stac", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
-            {"sfz.vsco.tuba_stac", "assets/instruments/VSCO-2-CE-1.1.0/TubaStac.sfz"},
-            {"sfz.vsco.flute_stac", "assets/instruments/VSCO-2-CE-1.1.0/FluteStac.sfz"},
-            {"sfz.vsco.clarinet_stac", "assets/instruments/VSCO-2-CE-1.1.0/ClarinetStac.sfz"},
-            {"sfz.vsco.bassoon_stac", "assets/instruments/VSCO-2-CE-1.1.0/BassoonStac.sfz"},
-            {"sfz.vsco.oboe_stac", "assets/instruments/VSCO-2-CE-1.1.0/OboeStac.sfz"},
-            {"sfz.vsco.piccolo_sus", "assets/instruments/VSCO-2-CE-1.1.0/PiccoloSus.sfz"},
-            {"sfz.vsco.piccolo_stac", "assets/instruments/VSCO-2-CE-1.1.0/PiccoloStac.sfz"},
-            {"sfz.vsco.organ_quiet", "assets/instruments/VSCO-2-CE-1.1.0/OrganQuiet.sfz"},
-            {"sfz.vsco.organ_loud", "assets/instruments/VSCO-2-CE-1.1.0/OrganLoud.sfz"},
-            {"sfz.vsco.marimba", "assets/instruments/VSCO-2-CE-1.1.0/Marimba.sfz"},
-            {"sfz.vsco.glockenspiel", "assets/instruments/VSCO-2-CE-1.1.0/Glockenspiel.sfz"},
-            {"sfz.vsco.xylophone", "assets/instruments/VSCO-2-CE-1.1.0/Xylophone.sfz"},
-            {"sfz.vsco.tubular_bells", "assets/instruments/VSCO-2-CE-1.1.0/TubularBells.sfz"},
-            // Legacy aliases kept for backward compatibility with older projects.
-            {"sfz.vsco.violin_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz"},
-            {"sfz.vsco.cello_ens_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz"},
-            {"sfz.vsco.trumpet_sus", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
-            {"sfz.vsco.fhorn_sus", "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz"},
-            {"sfz.vsco.flute_sus_vib", "assets/instruments/VSCO-2-CE-1.1.0/FluteStac.sfz"},
-            {"sfz.vsco.clarinet_sus", "assets/instruments/VSCO-2-CE-1.1.0/ClarinetStac.sfz"},
-        };
-        if (auto found = knownMap.find(id.toStdString()); found != knownMap.end())
-            return found->second.c_str();
-
-        const juce::String text = (id + " " + instrumentName.toLowerCase());
-        auto contains = [&](const char *needle) { return text.contains(needle); };
-        if (contains("moogdrums"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenMoogdrums1.sfz";
-        if (contains("retrodrums"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/TicTokMenRetroDrums1.sfz";
-        if (contains("electro punch"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomElectroPunchKit.sfz";
-        if (contains("synthwave"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomSynthwaveKit.sfz";
-        if (contains("drum starter"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomDrumStarter.sfz";
-        if (contains("acoustic drum"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz";
-        if (contains("dry drum"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomDryDrumKit.sfz";
-        if (contains("drum"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/MixroomAcousticDrumKit.sfz";
-        if (contains("violin"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz";
-        if (contains("cello"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/ViolinEnsPizz.sfz";
-        if (contains("trumpet"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz";
-        if (contains("horn"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/TrumpetStac.sfz";
-        if (contains("tuba"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/TubaStac.sfz";
-        if (contains("flute"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/FluteStac.sfz";
-        if (contains("clarinet"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/ClarinetStac.sfz";
-        if (contains("bassoon"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/BassoonStac.sfz";
-        if (contains("oboe"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/OboeStac.sfz";
-        if (contains("piccolo sustain"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/PiccoloSus.sfz";
-        if (contains("piccolo"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/PiccoloStac.sfz";
-        if (contains("organ quiet"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/OrganQuiet.sfz";
-        if (contains("organ"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/OrganLoud.sfz";
-        if (contains("marimba"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/Marimba.sfz";
-        if (contains("glock"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/Glockenspiel.sfz";
-        if (contains("xylo"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/Xylophone.sfz";
-        if (contains("tubular") || contains("bell"))
-            return "assets/instruments/VSCO-2-CE-1.1.0/TubularBells.sfz";
         return {};
     }
 
@@ -2663,34 +2709,34 @@ private:
     {
         static const std::unordered_map<std::string, InstrumentPreset> map = {
             {"mixroom.basic_synth", {InstrumentFamily::basic, 1, 3200.0, 18.0, 180.0, 0.08, 0.36, 0.002, 0.12, 0.56, 0.08, 0.0, 0.02}},
-            {"mixroom.bass_mono", {InstrumentFamily::bass, 2, 900.0, 8.0, 220.0, 0.14, 0.31, 0.0, 0.0, 0.38, 0.10, 4.0, 0.01}},
+            {"mixroom.bass_mono", {InstrumentFamily::bass, 2, 760.0, 4.0, 260.0, 0.03, 0.31, 0.0, 0.0, 0.32, 0.02, 1.25, 0.0}},
             {"mixroom.soft_pad", {InstrumentFamily::pad, 3, 1800.0, 80.0, 620.0, 0.02, 0.31, 0.004, 0.10, 0.40, 0.04, 0.0, 0.01}},
             {"mixroom.figbug_wavetable", {InstrumentFamily::wavetable, 1, 5200.0, 6.0, 240.0, 0.18, 0.33, 0.006, 0.16, 0.72, 0.14, 0.0, 0.03}},
-            {"mixroom.sarah_harmonic", {InstrumentFamily::harmonic, 3, 2800.0, 34.0, 540.0, 0.1, 0.32, 0.008, 0.20, 0.54, 0.08, 0.0, 0.03}},
-            {"mixroom.vanilla_poly", {InstrumentFamily::keys, 0, 3600.0, 12.0, 260.0, 0.05, 0.33, 0.004, 0.13, 0.58, 0.10, 0.0, 0.02}},
-            {"mixroom.duck_synth", {InstrumentFamily::bass, 2, 1600.0, 2.0, 140.0, 0.26, 0.35, 0.002, 0.06, 0.62, 0.20, 8.0, 0.03}},
+            {"mixroom.sarah_harmonic", {InstrumentFamily::pad, 3, 1980.0, 72.0, 760.0, 0.03, 0.30, 0.0, 0.10, 0.34, 0.02, 0.0, 0.02, 0.0}},
+            {"mixroom.vanilla_poly", {InstrumentFamily::keys, 0, 3680.0, 5.0, 220.0, 0.03, 0.36, 0.001, 0.03, 0.58, 0.26, 0.0, 0.01}},
+            {"mixroom.duck_synth", {InstrumentFamily::bass, 2, 1780.0, 2.0, 130.0, 0.28, 0.35, 0.003, 0.02, 0.78, 0.24, 9.0, 0.05}},
             {"mixroom.chow_kick", {InstrumentFamily::drum, 0, 900.0, 0.0, 90.0, 0.24, 0.38, 0.0, 0.0, 0.44, 0.24, 16.0, 0.04}},
-            {"mixroom.warm_keys", {InstrumentFamily::keys, 0, 3000.0, 14.0, 320.0, 0.06, 0.32, 0.005, 0.12, 0.52, 0.12, 0.0, 0.02}},
+            {"mixroom.warm_keys", {InstrumentFamily::keys, 1, 1880.0, 20.0, 480.0, 0.06, 0.34, 0.004, 0.07, 0.18, 0.08, 0.0, 0.02}},
             {"mixroom.super_saw", {InstrumentFamily::lead, 1, 6200.0, 4.0, 180.0, 0.22, 0.34, 0.01, 0.20, 0.75, 0.11, 0.0, 0.03}},
             {"mixroom.gentle_pluck", {InstrumentFamily::pluck, 3, 4800.0, 2.0, 130.0, 0.08, 0.33, 0.004, 0.11, 0.68, 0.24, 0.0, 0.03}},
-            {"mixroom.sub_bass", {InstrumentFamily::bass, 2, 760.0, 3.0, 200.0, 0.10, 0.31, 0.0, 0.0, 0.34, 0.06, 5.0, 0.0}},
-            {"mixroom.analog_brass", {InstrumentFamily::brass, 1, 2600.0, 25.0, 300.0, 0.14, 0.33, 0.003, 0.12, 0.55, 0.08, 0.0, 0.02}},
+            {"mixroom.sub_bass", {InstrumentFamily::bass, 2, 560.0, 3.0, 300.0, 0.015, 0.33, 0.0, 0.0, 0.18, 0.01, 0.85, 0.0}},
+            {"mixroom.analog_brass", {InstrumentFamily::brass, 2, 2140.0, 32.0, 340.0, 0.18, 0.35, 0.007, 0.06, 0.34, 0.12, 0.0, 0.06}},
             {"mixroom.drum_acoustic_easy", {InstrumentFamily::drum, 1, 2300.0, 0.0, 120.0, 0.18, 0.41, 0.0, 0.0, 0.52, 0.26, 10.0, 0.15}},
             {"mixroom.drum_808_starter", {InstrumentFamily::drum, 0, 1100.0, 0.0, 190.0, 0.36, 0.44, 0.0, 0.0, 0.60, 0.35, 24.0, 0.18}},
             {"mixroom.drum_lofi", {InstrumentFamily::drum, 3, 1700.0, 1.0, 150.0, 0.28, 0.41, 0.0, 0.0, 0.45, 0.20, 12.0, 0.20}},
             {"mixroom.drum_house", {InstrumentFamily::drum, 1, 2600.0, 0.0, 95.0, 0.16, 0.42, 0.0, 0.0, 0.46, 0.18, 14.0, 0.08}},
             {"mixroom.night_bell", {InstrumentFamily::harmonic, 0, 5600.0, 1.0, 540.0, 0.06, 0.30, 0.002, 0.22, 0.76, 0.16, 0.0, 0.01}},
-            {"mixroom.fm_keys", {InstrumentFamily::harmonic, 0, 4100.0, 5.0, 340.0, 0.07, 0.32, 0.004, 0.14, 0.66, 0.14, 0.0, 0.02}},
+            {"mixroom.fm_keys", {InstrumentFamily::harmonic, 0, 4700.0, 3.0, 320.0, 0.05, 0.31, 0.002, 0.10, 0.78, 0.18, 0.0, 0.01}},
             {"mixroom.vintage_strings", {InstrumentFamily::pad, 1, 1850.0, 32.0, 640.0, 0.04, 0.31, 0.005, 0.10, 0.42, 0.07, 0.0, 0.01}},
-            {"mixroom.neo_brass", {InstrumentFamily::brass, 1, 3100.0, 16.0, 250.0, 0.15, 0.33, 0.004, 0.14, 0.61, 0.08, 0.0, 0.02}},
+            {"mixroom.neo_brass", {InstrumentFamily::brass, 0, 4320.0, 8.0, 210.0, 0.22, 0.36, 0.014, 0.18, 0.84, 0.18, 0.0, 0.03}},
             {"mixroom.reese_bass", {InstrumentFamily::bass, 1, 1050.0, 4.0, 200.0, 0.16, 0.32, 0.006, 0.02, 0.40, 0.10, 5.0, 0.02}},
             {"mixroom.air_pluck", {InstrumentFamily::pluck, 3, 5200.0, 1.0, 210.0, 0.08, 0.33, 0.008, 0.14, 0.72, 0.20, 0.0, 0.05}},
             {"mixroom.cinematic_pad", {InstrumentFamily::pad, 3, 1650.0, 95.0, 760.0, 0.05, 0.30, 0.005, 0.12, 0.36, 0.05, 0.0, 0.01}},
-            {"mixroom.velvet_ep", {InstrumentFamily::keys, 0, 3700.0, 7.0, 380.0, 0.07, 0.32, 0.005, 0.16, 0.66, 0.18, 0.0, 0.02}},
+            {"mixroom.velvet_ep", {InstrumentFamily::keys, 3, 5400.0, 3.0, 520.0, 0.12, 0.36, 0.022, 0.22, 0.88, 0.32, 0.0, 0.03}},
             {"mixroom.house_organ", {InstrumentFamily::keys, 2, 3400.0, 0.0, 210.0, 0.11, 0.33, 0.003, 0.10, 0.62, 0.12, 0.0, 0.02}},
             {"mixroom.glass_pluck", {InstrumentFamily::pluck, 3, 5600.0, 1.0, 170.0, 0.09, 0.33, 0.007, 0.14, 0.74, 0.24, 0.0, 0.03}},
             {"mixroom.neon_lead", {InstrumentFamily::lead, 1, 6400.0, 3.0, 210.0, 0.24, 0.34, 0.012, 0.18, 0.78, 0.13, 0.0, 0.03}},
-            {"mixroom.mellow_sub", {InstrumentFamily::bass, 2, 760.0, 4.0, 260.0, 0.08, 0.35, 0.0, 0.0, 0.30, 0.05, 3.0, 0.0}},
+            {"mixroom.mellow_sub", {InstrumentFamily::bass, 2, 420.0, 6.0, 420.0, 0.008, 0.32, 0.0, 0.0, 0.10, 0.0, 0.35, 0.0}},
             {"mixroom.wide_air_pad", {InstrumentFamily::pad, 3, 1850.0, 74.0, 700.0, 0.04, 0.30, 0.006, 0.14, 0.42, 0.05, 0.0, 0.01}},
             {"mixroom.horn_stack", {InstrumentFamily::brass, 0, 2100.0, 20.0, 280.0, 0.06, 0.33, 0.001, 0.02, 0.44, 0.05, 0.0, 0.01}},
             {"mixroom.drum_trap", {InstrumentFamily::drum, 0, 2100.0, 0.0, 110.0, 0.18, 0.42, 0.0, 0.0, 0.48, 0.18, 18.0, 0.08}},
@@ -2759,6 +2805,8 @@ private:
             preset.transient = juce::jlimit(0.0, 1.0, readParam(params, "transient", preset.transient));
         if (params.contains(juce::Identifier("noise")))
             preset.noise = juce::jlimit(0.0, 0.45, readParam(params, "noise", preset.noise));
+        if (params.contains(juce::Identifier("padDetuneOffset")))
+            preset.padDetuneOffset = juce::jlimit(0.0, 0.03, readParam(params, "padDetuneOffset", preset.padDetuneOffset));
         if (params.contains(juce::Identifier("pitchDropSemitones")))
             preset.pitchDropSemitones = juce::jlimit(0.0, 36.0, readParam(params, "pitchDropSemitones", preset.pitchDropSemitones));
     }
@@ -2790,15 +2838,52 @@ private:
         {
         case InstrumentFamily::bass:
         {
-            const float sub = waveFromType(0, phaseA) * 0.86f;
-            const float body = waveFromType(3, phaseB) * 0.18f;
-            const float overtone = waveFromType(0, phaseFor(frequencyHz * 2.0)) * 0.06f;
-            const float transient = (float)((0.004 + preset.transient * 0.025) * std::exp(-36.0 * noteProgress) * noise(17));
-            return (sub + body + overtone + transient) * (float)(brightness * juce::jlimit(0.34, 0.92, 0.88 - noteProgress * 0.30));
+            const double toneShape = juce::jlimit(0.0, 1.0, preset.tone);
+            const double driveShape = juce::jlimit(0.0, 1.0, preset.drive);
+            const double det = juce::jlimit(0.0, 0.012, preset.detune);
+            const double punch = std::exp(-18.0 * noteProgress);
+            const double pitchRatio = std::pow(
+                2.0,
+                juce::jlimit(0.0, 6.0, preset.pitchDropSemitones) *
+                    punch / 12.0);
+            const double tunedFreq = frequencyHz * pitchRatio;
+            const double bodyMix =
+                juce::jlimit(0.05, 0.16, 0.06 + toneShape * 0.07);
+            const double secondMix =
+                juce::jlimit(0.03, 0.16, 0.04 + toneShape * 0.07 + driveShape * 0.05);
+            const double thirdMix =
+                juce::jlimit(0.01, 0.10, 0.01 + toneShape * 0.04 + driveShape * 0.05);
+            const double airMix =
+                juce::jlimit(0.0, 0.05, toneShape * 0.02 + driveShape * 0.02);
+            const float sub = waveFromType(0, phaseFor(tunedFreq));
+            const float body = waveFromType(3, phaseFor(tunedFreq * (1.0 + det * 0.35)) + 0.125) *
+                               (float)bodyMix;
+            const float second = waveFromType(0, phaseFor(tunedFreq * 2.0)) *
+                                 (float)secondMix;
+            const float third = waveFromType(0, phaseFor(tunedFreq * 3.0)) *
+                                (float)thirdMix;
+            const float air = waveFromType(3, phaseFor(tunedFreq * 4.0)) *
+                              (float)airMix;
+            const float grit = (float)((preset.noise * (0.002 + toneShape * 0.02)) *
+                                       punch * noise(23));
+            const float transient = (float)((0.001 + preset.transient * 0.012 + toneShape * 0.003) *
+                                            std::exp(-60.0 * noteProgress) * noise(17));
+            const double core =
+                sub * juce::jlimit(0.76, 0.92, 0.90 - toneShape * 0.08) +
+                body + second + third + air + grit + transient;
+            const double saturated =
+                softSaturate(core, 1.05 + driveShape * 1.5 + toneShape * 0.35);
+            const double cleanBlend =
+                juce::jlimit(0.62, 0.84, 0.80 - toneShape * 0.10);
+            const double shapeBlend =
+                juce::jlimit(0.18, 0.40, 0.22 + toneShape * 0.10 + driveShape * 0.08);
+            const double bassLevel = juce::jlimit(
+                0.46, 0.98, 0.56 + brightness * 0.28 + toneShape * 0.08 + punch * 0.08);
+            return (float)((sub * cleanBlend + saturated * shapeBlend) * bassLevel);
         }
         case InstrumentFamily::pad:
         {
-            const double det = juce::jlimit(0.0002, 0.004, preset.detune + 0.0008);
+            const double det = juce::jlimit(0.0, 0.004, preset.detune + preset.padDetuneOffset);
             const float foundation = waveFromType(0, phaseFor(frequencyHz * (1.0 - det))) * 0.54f;
             const float bloom = waveFromType(0, phaseFor(frequencyHz * (1.0 + det))) * 0.26f;
             const float octave = waveFromType(3, phaseFor(frequencyHz * 0.5) + 0.125) * 0.08f;
@@ -2827,24 +2912,55 @@ private:
         {
             const int style = juce::jlimit(0, 3, preset.oscillator);
             const double keyOpen = juce::jlimit(0.6, 1.7, 0.75 + preset.tone * 0.75 + (1.0 - noteProgress) * 0.2);
+            const double warmth = juce::jlimit(0.0, 1.0, 1.0 - preset.tone);
+            const double tineAmount = juce::jlimit(0.04, 0.34, 0.05 + preset.transient * 0.42 + preset.tone * 0.08);
+            const double chorusDepth = juce::jlimit(0.0, 0.035, preset.detune + 0.006);
 
             if (style == 2)
             {
-                const float fundamental = waveFromType(2, phaseA) * 0.48f;
-                const float octave = waveFromType(2, phaseFor(frequencyHz * 2.0)) * 0.28f;
-                const float twelfth = waveFromType(2, phaseFor(frequencyHz * 3.0)) * 0.16f;
-                const float chorus = waveFromType(1, phaseFor(frequencyHz * (2.0 + preset.detune * 14.0 + 0.011))) * 0.11f;
-                const float click = (float)((0.04 + preset.transient * 0.18) * std::exp(-52.0 * noteProgress) * noise(83));
-                return (fundamental + octave + twelfth + chorus + click) * (float)(brightness * keyOpen);
+                const double swirl = std::sin(juce::MathConstants<double>::twoPi * ageSec * 5.2) * chorusDepth;
+                const float drawbar1 = waveFromType(2, phaseA) * 0.42f;
+                const float drawbar2 = waveFromType(2, phaseFor(frequencyHz * (2.0 + swirl))) * 0.24f;
+                const float drawbar3 = waveFromType(2, phaseFor(frequencyHz * 3.0)) * 0.16f;
+                const float drawbar4 = waveFromType(1, phaseFor(frequencyHz * (4.0 - swirl))) * 0.07f;
+                const float leak = waveFromType(3, phaseFor(frequencyHz * 8.0)) * 0.03f;
+                const float click = (float)((0.01 + preset.transient * 0.05) * std::exp(-72.0 * noteProgress) * noise(83));
+                return (drawbar1 + drawbar2 + drawbar3 + drawbar4 + leak + click) *
+                       (float)(brightness * juce::jlimit(0.72, 1.08, 0.86 + preset.tone * 0.22));
             }
 
-            const double inharmonic = 1.0 + juce::jlimit(0.0, 0.005, (double)pitch * 0.00005);
-            const float hammer = (float)((0.09 + preset.transient * 0.30) * std::exp(-36.0 * noteProgress) * noise(79));
-            const float body = waveFromType(0, phaseA) * 0.58f;
-            const float second = waveFromType(0, phaseFor(frequencyHz * 2.0 * inharmonic)) * 0.26f;
-            const float third = waveFromType(style == 1 ? 1 : 0, phaseFor(frequencyHz * 3.0 * inharmonic)) * 0.15f;
-            const float tine = waveFromType(style == 3 ? 3 : 0, phaseFor(frequencyHz * (4.8 + style * 0.5))) * 0.11f;
-            return (body + second + third + tine + hammer) * (float)(brightness * keyOpen);
+            if (style == 3)
+            {
+                const float body = waveFromType(0, phaseA) * 0.34f;
+                const float tine1 = waveFromType(0, phaseFor(frequencyHz * 2.0)) * 0.22f;
+                const float tine2 = waveFromType(0, phaseFor(frequencyHz * (6.2 + preset.tone * 1.6))) * (float)tineAmount;
+                const float bark = waveFromType(3, phaseFor(frequencyHz * (3.0 + chorusDepth * 9.0))) * 0.10f;
+                const float chorus = waveFromType(0, phaseFor(frequencyHz * (1.0 + chorusDepth))) * 0.10f;
+                const float thump = (float)((0.04 + preset.transient * 0.20) * std::exp(-34.0 * noteProgress) * noise(79));
+                return (body + tine1 + tine2 + bark + chorus + thump) *
+                       (float)(brightness * juce::jlimit(0.76, 1.18, 0.90 + preset.tone * 0.18));
+            }
+
+            if (style == 1)
+            {
+                const float body = waveFromType(0, phaseA) * 0.42f;
+                const float felt = waveFromType(3, phaseFor(frequencyHz * 0.5) + 0.125) * (float)(0.14 + warmth * 0.10);
+                const float reed = waveFromType(1, phaseFor(frequencyHz * 2.0)) * 0.12f;
+                const float bloom = waveFromType(0, phaseFor(frequencyHz * (1.0 + chorusDepth))) * 0.14f;
+                const float hammer = (float)((0.06 + preset.transient * 0.16) * std::exp(-30.0 * noteProgress) * noise(75));
+                return (body + felt + reed + bloom + hammer) *
+                       (float)(brightness * juce::jlimit(0.74, 1.12, 0.88 + warmth * 0.16));
+            }
+
+            const double inharmonic = 1.0 + juce::jlimit(0.0, 0.008, frequencyHz * 0.0000012 + preset.transient * 0.002);
+            const float hammer = (float)((0.08 + preset.transient * 0.24) * std::exp(-34.0 * noteProgress) * noise(79));
+            const float body = waveFromType(0, phaseA) * (float)(0.48 + warmth * 0.10);
+            const float bloom = waveFromType(3, phaseFor(frequencyHz * 0.5) + 0.125) * (float)(0.06 + warmth * 0.10);
+            const float second = waveFromType(0, phaseFor(frequencyHz * 2.0 * inharmonic)) * (float)(0.18 + preset.tone * 0.10);
+            const float third = waveFromType(3, phaseFor(frequencyHz * 3.0 * inharmonic)) * (float)(0.06 + preset.drive * 0.14);
+            const float tine = waveFromType(0, phaseFor(frequencyHz * (4.6 + preset.tone * 2.1))) * (float)tineAmount;
+            return (body + bloom + second + third + tine + hammer) *
+                   (float)(brightness * juce::jlimit(0.72, 1.14, 0.84 + preset.tone * 0.16));
         }
         case InstrumentFamily::brass:
         {
@@ -2874,18 +2990,40 @@ private:
         case InstrumentFamily::harmonic:
         {
             const int style = juce::jlimit(0, 3, preset.oscillator);
-            const double modRatio = style <= 1 ? 2.0 : 3.0;
-            const double modDepth = 0.05 + preset.tone * 0.13 + style * 0.02;
+            if (style == 3)
+            {
+                const double det = juce::jlimit(0.001, 0.018, preset.detune + 0.006);
+                const double drift = std::sin(juce::MathConstants<double>::twoPi * ageSec * 0.18) * det;
+                const double modA = std::sin(juce::MathConstants<double>::twoPi * phaseFor(frequencyHz * 1.5));
+                const double modB = std::sin(juce::MathConstants<double>::twoPi * phaseFor(frequencyHz * 2.51));
+                const double carrierA = wrapPhase(phaseA + modA * (0.035 + preset.tone * 0.05) + drift);
+                const double carrierB = wrapPhase(phaseFor(frequencyHz * (1.0 + det)) + modB * (0.025 + preset.tone * 0.04) - drift);
+                const float foundation = (float)std::sin(juce::MathConstants<double>::twoPi * carrierA) * 0.36f;
+                const float bloom = (float)std::sin(juce::MathConstants<double>::twoPi * carrierB) * 0.24f;
+                const float glass = (float)std::sin(2.0 * juce::MathConstants<double>::twoPi * carrierA) * 0.12f;
+                const float sub = waveFromType(0, phaseFor(frequencyHz * 0.5)) * 0.10f;
+                const float air = (float)((preset.noise * 0.16 + 0.01) * noise(111));
+                return (foundation + bloom + glass + sub + air) *
+                       (float)(brightness * juce::jlimit(0.72, 1.04, 0.80 + (1.0 - noteProgress) * 0.18));
+            }
+
+            const double modRatio = style == 0 ? 2.0 : style <= 1 ? 2.4
+                                                                   : 3.0;
+            const double modDepth = (style == 0 ? 0.09 : 0.05) + preset.tone * 0.13 + style * 0.02 + preset.transient * 0.04;
             const double mod = std::sin(juce::MathConstants<double>::twoPi * phaseFor(frequencyHz * modRatio));
             const double carrier = wrapPhase(phaseA + mod * modDepth);
             const double p = juce::MathConstants<double>::twoPi * carrier;
-            const float body = (float)std::sin(p) * 0.50f;
-            const float even = (float)std::sin(2.0 * p) * 0.26f;
-            const float odd = (float)std::sin(3.0 * p) * 0.18f;
-            const float air = (float)std::sin(5.0 * p) * 0.10f;
-            const float sheen = waveFromType(style == 3 ? 1 : 3, phaseB) * 0.12f;
+            const float body = (float)std::sin(p) * 0.46f;
+            const float even = (float)std::sin(2.0 * p) * 0.22f;
+            const float odd = (float)std::sin(3.0 * p) * 0.16f;
+            const float air = (float)std::sin(5.0 * p) * 0.08f;
+            const float bell = (style == 0)
+                                   ? (float)std::sin(6.0 * p) * (float)(0.06 + preset.transient * 0.16 + preset.tone * 0.04)
+                                   : 0.0f;
+            const float sheen = waveFromType(style == 0 ? 2 : 3, phaseB) * (style == 0 ? 0.09f : 0.12f);
             const float transient = (float)((0.02 + preset.transient * 0.12) * std::exp(-24.0 * noteProgress) * noise(111));
-            return (body + even + odd + air + sheen + transient) * (float)(brightness * (0.92 + (1.0 - noteProgress) * 0.22));
+            return (body + even + odd + air + bell + sheen + transient) *
+                   (float)(brightness * juce::jlimit(0.82, 1.16, 0.92 + (1.0 - noteProgress) * 0.22));
         }
         case InstrumentFamily::drum:
         {
@@ -3135,6 +3273,8 @@ private:
     std::atomic<double> clipStartSec{0.0};
     std::atomic<double> clipLengthSec{0.0};
     std::atomic<double> fileOffsetSec{0.0};
+    std::atomic<float> clipGainUi{SimpleGainProcessor::kUiUnity};
+    std::atomic<float> clipPanNormalized{0.0f};
     std::atomic<float> pitchSemitones{0.0f};
     std::atomic<double> tempoPlaybackRatio{1.0};
     std::atomic<bool> preserveTempoPitch{false};
@@ -3226,6 +3366,8 @@ public:
                       double startSec,
                       double lengthSec,
                       double inFileOffsetSec = 0.0);
+    void beginProjectClipLoadTransaction();
+    void endProjectClipLoadTransaction();
     bool updateMidiClipEvents(int clipId,
                               const juce::String &instrumentId,
                               const juce::String &instrumentName,
@@ -3263,9 +3405,9 @@ public:
     }
     void setBlockTransportStartFromCurrent()
     {
-        blockTransportStartSec.store(
-            transportSec.load(std::memory_order_relaxed),
-            std::memory_order_relaxed);
+        const double current = transportSec.load(std::memory_order_relaxed);
+        blockTransportStartSec.store(current, std::memory_order_relaxed);
+        mixroom::fx::setGlobalTransportSeconds(current);
     }
     void setBlockPlayingState(bool playing)
     {
@@ -3283,9 +3425,10 @@ public:
             return;
 
         const double delta = (double)numSamples / sr;
-        transportSec.store(
-            transportSec.load(std::memory_order_relaxed) + delta,
-            std::memory_order_relaxed);
+        const double next =
+            transportSec.load(std::memory_order_relaxed) + delta;
+        transportSec.store(next, std::memory_order_relaxed);
+        mixroom::fx::setGlobalTransportSeconds(next);
     }
     // (deprecated/unused) special functions for "video audio" lane
     void loadVideoAudio(const juce::File &file);
@@ -3371,8 +3514,16 @@ public:
     void setMetronomeTransportMs(double);
 
     std::vector<float> decodeAudioMono16k(const juce::File &file, int maxOutputSamples = -1);
-    std::vector<std::vector<float>> sampleAudioMono16kWindows(const juce::File &file, int windowOutputSamples, int windowCount);
-    juce::NamedValueSet analyzeAudioPrompt16k(const juce::File &file);
+    std::vector<std::vector<float>> sampleAudioMono16kWindows(
+        const juce::File &file,
+        int windowOutputSamples,
+        int windowCount,
+        double trimStartMs = 0.0,
+        double trimEndMs = -1.0);
+    juce::NamedValueSet analyzeAudioPrompt16k(
+        const juce::File &file,
+        double trimStartMs = 0.0,
+        double trimEndMs = -1.0);
     juce::NamedValueSet analyzeAudioStereo16k(const juce::File &file);
 
     // Device info
@@ -3439,6 +3590,10 @@ public:
     double getHostSampleRate() const;
     std::vector<float> getRowEqWaveform(int row, int effectIndex, int sampleCount);
     std::vector<float> getMasterEqWaveform(int effectIndex, int sampleCount);
+    std::vector<float> getRowStereoScope(int row, int effectIndex, int pointCount);
+    std::vector<float> getMasterStereoScope(int effectIndex, int pointCount);
+    std::vector<float> getRowShaperPreview(int row, int effectIndex, int pointCount);
+    std::vector<float> getMasterShaperPreview(int effectIndex, int pointCount);
     void handleIncomingMidiMessage(juce::MidiInput *source,
                                    const juce::MidiMessage &message) override;
     void changeListenerCallback(juce::ChangeBroadcaster *source) override;
@@ -3555,12 +3710,6 @@ private:
 
         // nodes/processors
         juce::AudioProcessorGraph::Node::Ptr playerNode; // TimelineClipProcessor / TimelineMidiClipProcessor
-        SimpleGainProcessor *gainProc = nullptr;
-        juce::AudioProcessorGraph::Node::Ptr gainNode;
-
-        StereoPanProcessor *panProc = nullptr;
-        juce::AudioProcessorGraph::Node::Ptr panNode;
-
         juce::Array<juce::AudioProcessorGraph::NodeID> fxChain; // clip-level legacy FX
         int lastRowInputNodeUid = 0;                            // cached destination for fast rewires
     };
@@ -3680,9 +3829,10 @@ private:
     // row storage
     std::vector<RowState> rows;
     std::unordered_map<int, int> rowIdToIndex;
+    std::unordered_map<int, juce::Array<int>> rowIdToClipIds;
     std::atomic<int> nextRowId{1};
 
-    // MASTER bus: [FX...] → gain → pan → output
+    // MASTER bus: rows → master input → [FX...] → gain → pan → output
     juce::Array<juce::AudioProcessorGraph::NodeID> *masterEffectChain = nullptr;
     juce::StringArray masterEffectIds;
     std::vector<RowState::TrackEffectAutomationLane> masterEffectAutomationLanes;
@@ -3691,6 +3841,9 @@ private:
     float lastAppliedMasterGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
     float lastAppliedMasterPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 
+    TrackInputProcessor *masterInputProcessor = nullptr;
+    juce::AudioProcessorGraph::Node::Ptr masterInputNode;
+
     SimpleGainProcessor *masterGainProcessor = nullptr;
     juce::AudioProcessorGraph::Node::Ptr masterGainNode;
 
@@ -3698,6 +3851,7 @@ private:
     juce::AudioProcessorGraph::Node::Ptr masterPanNode;
 
     bool busGraphInitialised = false;
+    int projectClipLoadTransactionDepth = 0;
 
     std::unique_ptr<MetronomeAudioCallback> metronomeCallback;
 
@@ -3737,6 +3891,7 @@ private:
         juce::GenericScopedLock<juce::CriticalSection> callbackLock;
         std::unique_lock<std::recursive_mutex> renderLock;
     };
+    bool isProjectClipLoadTransactionActive() const noexcept { return projectClipLoadTransactionDepth > 0; }
 
     void rebuildBusesAndRewireClips();
     void attachRowBusNodes(RowState &r);
@@ -3748,6 +3903,10 @@ private:
     void applyTrackEffectAutomationAtTimeSeconds(double timeSeconds);
     void resetTrackEffectAutomationLatches();
     void resetTrackEffectAutomationLatchesForRow(int row);
+    void addClipToRowIndex(int rowId, int clipId);
+    void removeClipFromRowIndex(int rowId, int clipId);
+    void clearClipGraphNodes(int clipId,
+                             juce::AudioProcessorGraph::UpdateKind updateKind);
     void compactRowFxChain(int row);
     void compactMasterFxChain();
     bool isGraphConnectionPresent(juce::AudioProcessorGraph::NodeID src,

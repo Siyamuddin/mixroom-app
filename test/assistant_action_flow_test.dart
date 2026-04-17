@@ -24,8 +24,10 @@ class _FakeCloudLlmService extends CloudLlmService {
     required String userText,
     required String projectSnapshot,
     String selectionSnapshot = '',
+    String librarySnapshot = '',
     String? projectId,
     String? aiFeature,
+    String? promptTraceId,
     MixingResult? pendingMix,
   }) async {
     seenUserText = userText;
@@ -49,8 +51,10 @@ class _QueuedFakeCloudLlmService extends CloudLlmService {
     required String userText,
     required String projectSnapshot,
     String selectionSnapshot = '',
+    String librarySnapshot = '',
     String? projectId,
     String? aiFeature,
+    String? promptTraceId,
     MixingResult? pendingMix,
   }) async {
     seenConversations.add(
@@ -69,10 +73,20 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
   _FakeProjectStateBuilder({
     this.rows = 5,
     this.masterEffects = const <EffectState>[],
+    this.rowEffects = const <int, List<EffectState>>{},
+    this.rowAudioStats = const <int, Map<String, double>>{},
+    this.rowInterpretations = const <int, RowInterpretationState>{},
+    this.rowApproxRms = const <int, double>{},
+    this.rowApproxCrest = const <int, double>{},
   }) : super(classifier: InstrumentClassifier(), maxRows: rows);
 
   final int rows;
   final List<EffectState> masterEffects;
+  final Map<int, List<EffectState>> rowEffects;
+  final Map<int, Map<String, double>> rowAudioStats;
+  final Map<int, RowInterpretationState> rowInterpretations;
+  final Map<int, double> rowApproxRms;
+  final Map<int, double> rowApproxCrest;
 
   @override
   Future<ProjectState> build({
@@ -103,8 +117,8 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
       return RowState(
         rowIndex: row,
         clips: clips,
-        approxRms: rowTracks.isEmpty ? 0.0 : 0.2,
-        approxCrest: rowTracks.isEmpty ? 0.0 : 1.5,
+        approxRms: rowTracks.isEmpty ? 0.0 : (rowApproxRms[row] ?? 0.2),
+        approxCrest: rowTracks.isEmpty ? 0.0 : (rowApproxCrest[row] ?? 1.5),
         roleProbs: const {
           'vocals': 0.1,
           'drums': 0.2,
@@ -115,16 +129,18 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
         },
         roleConsistency: 1.0,
         clipTopRoles: const ['other'],
-        audioStats: const {
-          'centroid_hz': 1200.0,
-          'zcr': 0.1,
-          'hf_rms': 0.1,
-          'sibilance': 0.1,
-          'bassiness': 0.1,
-        },
+        audioStats: rowAudioStats[row] ??
+            const {
+              'centroid_hz': 1200.0,
+              'zcr': 0.1,
+              'hf_rms': 0.1,
+              'sibilance': 0.1,
+              'bassiness': 0.1,
+            },
+        interpretation: rowInterpretations[row] ?? RowInterpretationState.empty,
         gain0to3: row < rowGain.length ? rowGain[row] : 1.0,
         pan0To1: row < rowPan.length ? rowPan[row] : 0.5,
-        effects: const [],
+        effects: rowEffects[row] ?? const <EffectState>[],
         volumeAutomation: row < rowAutomation.length
             ? rowAutomation[row]
             : const <AutomationPoint>[],
@@ -202,6 +218,27 @@ void main() {
           {
             'assistant_message': 'Stubbed assistant response.',
             'actions': [
+              {
+                'type': 'project_edit',
+                'data': {
+                  'operation': 'set_tempo',
+                  'tempo_bpm': 156,
+                },
+              },
+              {
+                'type': 'sample_insert',
+                'data': {
+                  'operation': 'insert_audio_clips',
+                  'items': [
+                    {
+                      'library_path':
+                          'Starter Kit v1/Processed Drums/Kick-01.flac',
+                      'row_index': 0,
+                      'start_measure': 1,
+                    },
+                  ],
+                },
+              },
               {
                 'type': 'tutorial',
                 'data': {
@@ -314,10 +351,12 @@ void main() {
       );
 
       expect(result.hasAssistantActions, isTrue);
-      expect(result.assistantActions.length, 8);
+      expect(result.assistantActions.length, 10);
       expect(
         result.assistantActions.map((a) => a.type).toSet(),
         equals(const {
+          'project_edit',
+          'sample_insert',
           'tutorial',
           'clarify',
           'clip_edit',
@@ -1021,6 +1060,117 @@ void main() {
       expect(result.meta?['mode'], 'execute');
     });
 
+    test(
+        'mix replies do not append local diagnostic notes to visible chat text',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'mix_model_request',
+          {
+            'mode': 'execute',
+            'assistant_message': 'Pushing the mix toward the reference now.',
+            'actions': [
+              {
+                'goal': {
+                  'type': 'mix_request',
+                  'intensity': 0.75,
+                  'target': {
+                    'scope': 'auto',
+                    'confidence': 0.9,
+                  },
+                  'intents': [
+                    {
+                      'kind': 'balance',
+                      'confidence': 0.95,
+                    }
+                  ],
+                  'reference_target': {
+                    'row_index': 1,
+                    'confidence': 0.95,
+                  },
+                  'reference_mode': 'full_mix',
+                  'reference_closeness': 'balanced',
+                }
+              }
+            ],
+          },
+          text: 'Pushing the mix toward the reference now.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(
+          rows: 2,
+          rowApproxRms: const <int, double>{0: 0.11, 1: 0.28},
+          rowAudioStats: const <int, Map<String, double>>{
+            0: <String, double>{
+              'centroid_hz': 1200.0,
+              'spectral_rolloff_hz': 2200.0,
+              'spectral_slope': -0.45,
+              'hf_rms': 0.10,
+              'bassiness': 0.16,
+              'sibilance': 0.07,
+              'side_ratio': 0.08,
+              'phase_corr': 0.95,
+              'stereo_imbalance': 0.03,
+              'integrated_lufs_est': -18.0,
+              'true_peak_dbfs': -6.0,
+              'lra_est': 7.0,
+              'transient_density': 0.52,
+              'clip_ratio': 0.02,
+              'st_rms_std': 0.12,
+            },
+            1: <String, double>{
+              'centroid_hz': 3200.0,
+              'spectral_rolloff_hz': 5600.0,
+              'spectral_slope': -0.12,
+              'hf_rms': 0.38,
+              'bassiness': 0.32,
+              'sibilance': 0.10,
+              'side_ratio': 0.58,
+              'phase_corr': 0.48,
+              'stereo_imbalance': 0.02,
+              'integrated_lufs_est': -10.5,
+              'true_peak_dbfs': -1.8,
+              'lra_est': 3.5,
+              'transient_density': 0.28,
+              'clip_ratio': 0.08,
+              'st_rms_std': 0.06,
+            },
+          },
+        ),
+        mixModel: LocalMixingModel(),
+      );
+
+      final subject =
+          await _makeAudioTrack(path: '/tmp/test_subject.wav', row: 0);
+      final reference =
+          await _makeAudioTrack(path: '/tmp/test_reference.wav', row: 1);
+      final result = await pipeline.handleUserText(
+        text: 'Match this closer to the reference.',
+        audioTracks: <AudioTrack>[subject, reference],
+        rowGain: const [1, 1],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          2,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1),
+            AutomationPoint(x: 1000, volume: 1),
+          ],
+        ),
+        bpmFallback: 120,
+      );
+
+      expect(result.hasMix, isTrue);
+      expect(result.mixing, isNotNull);
+      expect(result.mixing!.notes, isNotEmpty);
+      expect(result.message, 'Pushing the mix toward the reference now.');
+      expect(
+        result.message,
+        isNot(contains('The reference looks more like a single element')),
+      );
+    });
+
     test('unwraps wrapped mix_model_request calls and still produces a mix',
         () async {
       final fakeLlm = _FakeCloudLlmService(
@@ -1410,14 +1560,251 @@ void main() {
       expect(
         fakeLlm.seenProjectSnapshot,
         contains(
-          'automation_targets=[gain | pan | fx0:Master Comp{Threshold[threshold]}]',
+          'automation_targets=[gain | pan | fx0:Master Comp{Threshold}]',
         ),
       );
       expect(
         fakeLlm.seenSelectionSnapshot,
         contains(
-          'master_automation_targets=gain | pan | fx0:Master Comp{Threshold[threshold]}',
+          'master_automation_targets=gain | pan | fx0:Master Comp{Threshold}',
         ),
+      );
+    });
+
+    test('runtime snapshots expose human-readable row identity cues', () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          {'message': 'Captured.'},
+          text: 'Captured.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 4),
+        mixModel: LocalMixingModel(),
+      );
+
+      final koreanTrack = await _makeAudioTrack(
+        path: '/tmp/서울_korean_guide.wav',
+        row: 0,
+        label: 'Korean Guide',
+      );
+      final midiTrack = await _makeMidiTrack(
+        path: '/tmp/bright_plucks.mid',
+        row: 1,
+        label: 'Bright Plucks',
+      );
+      final referenceTrack = await AudioTrack.create(
+        file: File('/tmp/reference_mix.wav'),
+        originalFile: File('/tmp/reference_mix.wav'),
+        audioDuration: const Duration(seconds: 90),
+        trimStart: Duration.zero,
+        trimEnd: const Duration(seconds: 90),
+        offset: 0.0,
+        rowIndex: 2,
+        rowId: 2,
+        label: 'Reference Mix',
+        clipKind: ClipKind.audio,
+      );
+
+      await pipeline.handleUserText(
+        text: 'Match the project closer to the reference.',
+        audioTracks: <AudioTrack>[koreanTrack, midiTrack, referenceTrack],
+        rowNames: const <String>[
+          'Korean Vox',
+          'Pluck Bus',
+          'Reference',
+          '',
+        ],
+        rowGain: const [1.0, 1.0, 1.0, 1.0],
+        rowPan: const [0.5, 0.5, 0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          4,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1.0),
+            AutomationPoint(x: 1000, volume: 1.0),
+          ],
+        ),
+        bpmFallback: 120.0,
+        selectedRowIndex: 1,
+        selectedClipIndices: const <int>[1],
+        primarySelectedClipIndex: 1,
+      );
+
+      expect(fakeLlm.seenProjectSnapshot, contains('occupied_tracks=1,2,3'));
+      expect(fakeLlm.seenProjectSnapshot, contains('bottom_occupied_track=3'));
+      expect(fakeLlm.seenProjectSnapshot, contains('row_position=top-most'));
+      expect(fakeLlm.seenProjectSnapshot, contains('row_name="Korean Vox"'));
+      expect(fakeLlm.seenProjectSnapshot, contains('labels=[Korean Guide]'));
+      expect(
+        fakeLlm.seenProjectSnapshot,
+        contains('files=[서울_korean_guide.wav]'),
+      );
+      expect(
+        fakeLlm.seenProjectSnapshot,
+        contains('instruments=[Sub Bass<mixroom.sub_bass>]'),
+      );
+      expect(
+        fakeLlm.seenProjectSnapshot,
+        contains(
+          'Track 3: row_name="Reference" row_position=middle occupied_row_position=bottom-most-occupied',
+        ),
+      );
+      expect(
+        fakeLlm.seenProjectSnapshot,
+        contains('reference_hints=[single_long_clip, long_form_audio]'),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains(
+            'selected_row_context{row_index=1,track_number=2,row_name="Pluck Bus",row_position=middle'),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('midi_state={none}'),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('fx_chain=[none]'),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('occupied_row_position=middle-occupied'),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('master_context{gain=1.00,pan=0.50,fx_count=0'),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('instrument_name=Sub Bass'),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('clip_kind=midi'),
+      );
+    });
+
+    test('runtime snapshots include concise fx chain state for AI planning',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          {'message': 'Captured.'},
+          text: 'Captured.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(
+          rows: 3,
+          rowEffects: {
+            1: const <EffectState>[
+              EffectState(
+                effectIndex: 0,
+                name: 'Delay',
+                isBypassed: false,
+                parameters: <EffectParameterState>[
+                  EffectParameterState(
+                    id: 'mix',
+                    name: 'Mix',
+                    type: 'float',
+                    value: 0.21,
+                  ),
+                  EffectParameterState(
+                    id: 'feedback',
+                    name: 'Feedback',
+                    type: 'float',
+                    value: 0.37,
+                  ),
+                ],
+              ),
+              EffectState(
+                effectIndex: 1,
+                name: 'Distortion',
+                isBypassed: true,
+                parameters: <EffectParameterState>[
+                  EffectParameterState(
+                    id: 'drive',
+                    name: 'Drive',
+                    type: 'float',
+                    value: 0.64,
+                  ),
+                ],
+              ),
+            ],
+          },
+          masterEffects: const <EffectState>[
+            EffectState(
+              effectIndex: 0,
+              name: 'Limiter',
+              isBypassed: false,
+              parameters: <EffectParameterState>[
+                EffectParameterState(
+                  id: 'ceiling',
+                  name: 'Ceiling',
+                  type: 'float',
+                  value: -0.3,
+                ),
+              ],
+            ),
+          ],
+        ),
+        mixModel: LocalMixingModel(),
+      );
+
+      final track = await _makeAudioTrack(
+        path: '/tmp/guitar_loop.wav',
+        row: 1,
+        label: 'Guitar Loop',
+      );
+
+      await pipeline.handleUserText(
+        text: 'make the guitar harder',
+        audioTracks: <AudioTrack>[track],
+        rowGain: const [1.0, 1.0, 1.0],
+        rowPan: const [0.5, 0.5, 0.5],
+        rowAutomation: const <List<AutomationPoint>>[
+          <AutomationPoint>[],
+          <AutomationPoint>[],
+          <AutomationPoint>[],
+        ],
+        bpmFallback: 120.0,
+        selectedRowIndex: 1,
+        selectedClipIndices: const <int>[0],
+        primarySelectedClipIndex: 0,
+      );
+
+      expect(fakeLlm.seenProjectSnapshot,
+          contains('fx_count=2 active_fx_count=1'));
+      expect(
+        fakeLlm.seenProjectSnapshot,
+        contains(
+          'fx_chain=[fx0:Delay(on){Mix=0.21, Feedback=0.37} | fx1:Distortion(byp){Drive=0.64}]',
+        ),
+      );
+      expect(
+        fakeLlm.seenProjectSnapshot,
+        contains(
+          'Master: gain=1.00 pan=0.50 fx_count=1 active_fx_count=1 fx_chain=[fx0:Limiter(on){Ceiling=-0.30}]',
+        ),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains(
+          'selected_row_context{row_index=1,track_number=2,row_position=middle,occupied_row_position=top-most-occupied,clip_count=1,clip_kinds=[audio:1]',
+        ),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains(
+          'fx_count=2,active_fx_count=1,fx_chain=[fx0:Delay(on){Mix=0.21, Feedback=0.37} | fx1:Distortion(byp){Drive=0.64}]',
+        ),
+      );
+      expect(
+        fakeLlm.seenProjectSnapshot,
+        contains('arrangement={audio_hits=1,bars≈1,onsets=m1:b1.00}'),
       );
     });
 

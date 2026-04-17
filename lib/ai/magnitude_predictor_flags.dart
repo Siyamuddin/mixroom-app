@@ -3,6 +3,11 @@ const bool kUseLearnedMagnitudePredictor = bool.fromEnvironment(
   defaultValue: true,
 );
 
+const bool kUseRemoteLearnedMagnitudePredictor = bool.fromEnvironment(
+  'MIXROOM_USE_REMOTE_LEARNED_MAGNITUDES',
+  defaultValue: true,
+);
+
 const String kMixApplyClassifierAsset = String.fromEnvironment(
   'MIXROOM_MIX_APPLY_MODEL_ASSET',
   defaultValue:

@@ -292,6 +292,7 @@ class _LoginScreenState extends State<LoginScreen> {
   ) {
     final safeUsername = _signupUsernameController.text.trim().toLowerCase();
     final displayName = _composeSignupDisplayName();
+    final localeCode = Localizations.localeOf(context).languageCode;
     return appUserService.stageSignupConsents(
       email: safeEmail,
       username: safeUsername.isEmpty ? null : safeUsername,
@@ -300,6 +301,7 @@ class _LoginScreenState extends State<LoginScreen> {
       familyName: _trimmedLastName(),
       birthdate: _birthdateController.text.trim(),
       newsletterOptIn: _newsletterOptIn,
+      localeCode: localeCode,
     );
   }
 

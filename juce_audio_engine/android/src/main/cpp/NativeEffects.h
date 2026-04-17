@@ -2,8 +2,11 @@
 #include "JuceHeader.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
+#include <vector>
 
 #define numOutputs 2
 
@@ -23,6 +26,38 @@ inline void setGlobalTempoBpm(double bpm)
 inline double getGlobalTempoBpm()
 {
     return juce::jlimit(1.0, 400.0, globalTempoBpm().load(std::memory_order_relaxed));
+}
+
+inline std::atomic<double> &globalTransportSeconds()
+{
+    static std::atomic<double> seconds{0.0};
+    return seconds;
+}
+
+inline void setGlobalTransportSeconds(double seconds)
+{
+    globalTransportSeconds().store(juce::jmax(0.0, seconds), std::memory_order_relaxed);
+}
+
+inline double getGlobalTransportSeconds()
+{
+    return juce::jmax(0.0, globalTransportSeconds().load(std::memory_order_relaxed));
+}
+
+inline std::atomic<bool> &globalTransportPlaying()
+{
+    static std::atomic<bool> playing{false};
+    return playing;
+}
+
+inline void setGlobalTransportPlaying(bool playing)
+{
+    globalTransportPlaying().store(playing, std::memory_order_relaxed);
+}
+
+inline bool getGlobalTransportPlaying()
+{
+    return globalTransportPlaying().load(std::memory_order_relaxed);
 }
 } // namespace mixroom::fx
 
@@ -1310,6 +1345,287 @@ private:
     const juce::StringArray distortionTypes{"Mode 1", "Mode 2", "Mode 3", "Mode 4"};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DistortionAudioProcessor)
+};
+
+// ****DEGRADE****
+
+struct DegradeParameters
+{
+    float toneHz{6000.0f};
+    float depthPercent{35.0f};
+    float spreadPercent{40.0f};
+    int modeIndex{0};
+};
+
+class DegradeModule
+{
+public:
+    void prepare(double newSampleRate, int)
+    {
+        sampleRate = sanitiseEffectSampleRate(newSampleRate);
+        maxDelaySamples = juce::jmax(
+            8,
+            (int)std::ceil(sampleRate * kMaxModDelayMs * 0.001) + 6);
+
+        int desiredRingSize = 1;
+        while (desiredRingSize < (maxDelaySamples + 8))
+            desiredRingSize <<= 1;
+
+        ringMask = desiredRingSize - 1;
+        for (auto &ring : delayRings)
+            ring.assign((size_t)desiredRingSize, 0.0f);
+
+        reset();
+    }
+
+    void reset()
+    {
+        for (auto &ring : delayRings)
+            std::fill(ring.begin(), ring.end(), 0.0f);
+
+        for (auto &filter : noiseFilters)
+            filter.reset();
+
+        writePos = 0;
+        sinePhase = 0.0;
+        lastToneHz = -1.0f;
+        lastSpreadPercent = -1.0f;
+    }
+
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        params.modeIndex = juce::jlimit(
+            0, 2,
+            (int)std::round(apvts.getRawParameterValue("mode")->load()));
+        params.toneHz = juce::jlimit(
+            20.0f,
+            static_cast<float>(sampleRate * 0.45),
+            apvts.getRawParameterValue("tone")->load());
+        params.depthPercent = juce::jlimit(
+            0.0f, 100.0f,
+            apvts.getRawParameterValue("depth")->load());
+        params.spreadPercent = juce::jlimit(
+            0.0f, 100.0f,
+            apvts.getRawParameterValue("spread")->load());
+
+        updateNoiseFilters();
+    }
+
+    void process(juce::AudioBuffer<float> &buffer)
+    {
+        const int channels = juce::jmin(buffer.getNumChannels(), numOutputs);
+        const int numSamples = buffer.getNumSamples();
+        if (channels <= 0 || numSamples <= 0 || ringMask <= 0)
+            return;
+
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            const float sharedMod =
+                params.modeIndex == 1 ? 0.0f : nextSharedModSample();
+
+            for (int channel = 0; channel < channels; ++channel)
+            {
+                const float input = buffer.getSample(channel, sample);
+                delayRings[(size_t)channel][(size_t)writePos] = input;
+
+                const float mod = params.modeIndex == 1
+                                      ? nextWideNoiseModSample(channel)
+                                      : sharedMod;
+                const float delaySamples = computeDelaySamples(mod);
+                buffer.setSample(
+                    channel,
+                    sample,
+                    readDelayedSample(
+                        delayRings[(size_t)channel],
+                        writePos,
+                        ringMask,
+                        delaySamples));
+            }
+
+            writePos = (writePos + 1) & ringMask;
+        }
+    }
+
+private:
+    static constexpr float kMaxModDelayMs = 5.0f;
+
+    static float spreadPercentToOctaves(float spreadPercent)
+    {
+        const float norm =
+            juce::jlimit(0.0f, 1.0f, spreadPercent * 0.01f);
+        return 0.15f + (7.85f * norm * norm);
+    }
+
+    static float bandwidthOctavesToQ(double sampleRate,
+                                     float centreHz,
+                                     float bandwidthOctaves)
+    {
+        const double clampedCentre = juce::jlimit(
+            20.0,
+            sampleRate * 0.45,
+            static_cast<double>(centreHz));
+        const double omega = juce::MathConstants<double>::twoPi * clampedCentre /
+                             sampleRate;
+        const double sine = juce::jmax(1.0e-6, std::sin(omega));
+        const double spread = std::sinh(
+            (std::log(2.0) * 0.5) * bandwidthOctaves * (omega / sine));
+
+        if (!std::isfinite(spread) || spread <= 1.0e-6)
+            return 12.0f;
+
+        return juce::jlimit(
+            0.05f,
+            24.0f,
+            static_cast<float>(1.0 / (2.0 * spread)));
+    }
+
+    void updateNoiseFilters()
+    {
+        if (std::abs(params.toneHz - lastToneHz) < 0.01f &&
+            std::abs(params.spreadPercent - lastSpreadPercent) < 0.01f)
+            return;
+
+        const float q = bandwidthOctavesToQ(
+            sampleRate,
+            params.toneHz,
+            spreadPercentToOctaves(params.spreadPercent));
+
+        for (auto &filter : noiseFilters)
+            filter.setCoefficients(
+                juce::IIRCoefficients::makeBandPass(sampleRate, params.toneHz, q));
+
+        lastToneHz = params.toneHz;
+        lastSpreadPercent = params.spreadPercent;
+    }
+
+    float nextSharedModSample()
+    {
+        if (params.modeIndex == 2)
+            return nextSineSample();
+
+        return nextNoiseSample(0);
+    }
+
+    float nextWideNoiseModSample(int channel)
+    {
+        return nextNoiseSample(channel);
+    }
+
+    float nextSineSample()
+    {
+        const auto sample = static_cast<float>(std::sin(sinePhase));
+        sinePhase += juce::MathConstants<double>::twoPi *
+                     static_cast<double>(params.toneHz) / sampleRate;
+        while (sinePhase >= juce::MathConstants<double>::twoPi)
+            sinePhase -= juce::MathConstants<double>::twoPi;
+        return sample;
+    }
+
+    float nextNoiseSample(int channel)
+    {
+        const float white = (noiseRandoms[(size_t)channel].nextFloat() * 2.0f) - 1.0f;
+        return juce::jlimit(
+            -1.0f,
+            1.0f,
+            noiseFilters[(size_t)channel].processSingleSampleRaw(white));
+    }
+
+    float computeDelaySamples(float modSample) const
+    {
+        const float depthNorm = std::pow(
+            juce::jlimit(0.0f, 1.0f, params.depthPercent * 0.01f),
+            1.35f);
+        const float maxDelay =
+            static_cast<float>(juce::jmax(0, maxDelaySamples - 4)) * depthNorm;
+        const float unipolar =
+            0.5f * (juce::jlimit(-1.0f, 1.0f, modSample) + 1.0f);
+        return maxDelay * unipolar;
+    }
+
+    static float readDelayedSample(const std::vector<float> &ring,
+                                   int writeIndex,
+                                   int mask,
+                                   float delaySamples)
+    {
+        const float readPos =
+            static_cast<float>(writeIndex) -
+            juce::jlimit(0.0f, static_cast<float>(mask - 4), delaySamples);
+        const int baseIndex = (int)std::floor(readPos);
+        const float frac = readPos - static_cast<float>(baseIndex);
+
+        const auto sampleAt = [&](int index)
+        {
+            return ring[(size_t)(index & mask)];
+        };
+
+        const float ym1 = sampleAt(baseIndex - 1);
+        const float y0 = sampleAt(baseIndex);
+        const float y1 = sampleAt(baseIndex + 1);
+        const float y2 = sampleAt(baseIndex + 2);
+
+        const float c0 = y0;
+        const float c1 = 0.5f * (y1 - ym1);
+        const float c2 = ym1 - (2.5f * y0) + (2.0f * y1) - (0.5f * y2);
+        const float c3 =
+            (0.5f * (y2 - ym1)) + (1.5f * (y0 - y1));
+        return ((c3 * frac + c2) * frac + c1) * frac + c0;
+    }
+
+    double sampleRate{44100.0};
+    int maxDelaySamples{0};
+    int ringMask{0};
+    int writePos{0};
+    double sinePhase{0.0};
+    float lastToneHz{-1.0f};
+    float lastSpreadPercent{-1.0f};
+    DegradeParameters params;
+    std::array<std::vector<float>, numOutputs> delayRings;
+    std::array<juce::IIRFilter, numOutputs> noiseFilters;
+    std::array<juce::Random, numOutputs> noiseRandoms;
+};
+
+class DegradeAudioProcessor : public juce::AudioProcessor
+{
+public:
+    DegradeAudioProcessor();
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    void processBlockBypassed(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+    std::vector<float> getRecentWaveform(int sampleCount) const;
+
+    ~DegradeAudioProcessor() override = default;
+    const juce::String getName() const override { return "Degrade"; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+    bool hasEditor() const override { return false; }
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    static constexpr int kWaveformRingSize = 4096;
+    void pushWaveformSamples(const juce::AudioBuffer<float> &buffer) noexcept;
+
+    DegradeModule degrade;
+    std::array<float, kWaveformRingSize> waveformRing{};
+    std::atomic<int> waveformWritePos{0};
+    const juce::StringArray degradeModes{"Noise", "Wide Noise", "Sine"};
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DegradeAudioProcessor)
 };
 
 // ****DE-ESSER****
@@ -2913,4 +3229,1264 @@ private:
     VibratoModule vibratoFx;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VibratoAudioProcessor)
+};
+
+// ****STEREO****
+
+struct StereoParameters
+{
+    float widthPercent;
+    float lowBypassHz;
+    bool monoCheck;
+};
+
+class StereoModule
+{
+public:
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        params.widthPercent = apvts.getRawParameterValue("width")->load();
+        params.lowBypassHz = clampFilterFrequencyForSampleRate(
+            apvts.getRawParameterValue("lowBypass")->load(),
+            sampleRate,
+            20.0f,
+            20.0f);
+        params.monoCheck = apvts.getRawParameterValue("mono")->load() >= 0.5f;
+    }
+
+    void syncParameters()
+    {
+        const float widthAmount =
+            juce::jlimit(0.0f, 2.0f, params.widthPercent * 0.01f);
+        const float lowBypassHz = clampFilterFrequencyForSampleRate(
+            params.lowBypassHz,
+            sampleRate,
+            20.0f,
+            20.0f);
+        widthSmoothed.setCurrentAndTargetValue(widthAmount);
+        monoSmoothed.setCurrentAndTargetValue(params.monoCheck ? 1.0f : 0.0f);
+        lowBypassSmoothed.setCurrentAndTargetValue(lowBypassHz);
+        updateFilters(lowBypassHz);
+    }
+
+    void prepare(double inputSampleRate, int maxBlockSize)
+    {
+        sampleRate = sanitiseEffectSampleRate(inputSampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        dryBuffer.setSize(numOutputs, bufferSize);
+        lowBuffer.setSize(numOutputs, bufferSize);
+        highBuffer.setSize(numOutputs, bufferSize);
+        prepareFilters();
+        prepareDecorrelators();
+        widthSmoothed.reset(sampleRate, 0.02);
+        monoSmoothed.reset(sampleRate, 0.02);
+        lowBypassSmoothed.reset(sampleRate, 0.04);
+        widthSmoothed.setCurrentAndTargetValue(1.0f);
+        monoSmoothed.setCurrentAndTargetValue(0.0f);
+        lowBypassSmoothed.setCurrentAndTargetValue(160.0f);
+        lastLowBypassHz = -1.0f;
+        reset();
+    }
+
+    void reset()
+    {
+        dryBuffer.clear();
+        lowBuffer.clear();
+        highBuffer.clear();
+        lowpass.reset();
+        highpass.reset();
+        resetDecorrelators();
+    }
+
+    void process(juce::AudioBuffer<float> &buffer)
+    {
+        const int blockSamples = buffer.getNumSamples();
+        if (blockSamples <= 0)
+            return;
+
+        ensureCapacity(blockSamples);
+        copyToFixedStereoBuffer(buffer, dryBuffer);
+        copyToFixedStereoBuffer(buffer, lowBuffer);
+        copyToFixedStereoBuffer(buffer, highBuffer);
+
+        const float targetWidthAmount =
+            juce::jlimit(0.0f, 2.0f, params.widthPercent * 0.01f);
+        const float targetLowBypassHz = clampFilterFrequencyForSampleRate(
+            params.lowBypassHz,
+            sampleRate,
+            20.0f,
+            20.0f);
+        widthSmoothed.setTargetValue(targetWidthAmount);
+        monoSmoothed.setTargetValue(params.monoCheck ? 1.0f : 0.0f);
+        lowBypassSmoothed.setTargetValue(targetLowBypassHz);
+        updateFilters(lowBypassSmoothed.skip(blockSamples));
+
+        auto lowBlock = juce::dsp::AudioBlock<float>(lowBuffer)
+                            .getSubBlock(0, (size_t)blockSamples);
+        auto highBlock = juce::dsp::AudioBlock<float>(highBuffer)
+                             .getSubBlock(0, (size_t)blockSamples);
+        juce::dsp::ProcessContextReplacing<float> lowContext(lowBlock);
+        juce::dsp::ProcessContextReplacing<float> highContext(highBlock);
+        lowpass.process(lowContext);
+        highpass.process(highContext);
+
+        const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
+        for (int sample = 0; sample < blockSamples; ++sample)
+        {
+            const float widthAmount = widthSmoothed.getNextValue();
+            const float sideGain = 1.0f + (0.55f * widthAmount);
+            const float synthGain = 0.85f * widthAmount;
+            const float lowL = lowBuffer.getSample(0, sample);
+            const float lowR = lowBuffer.getSample(1, sample);
+            const float highL = highBuffer.getSample(0, sample);
+            const float highR = highBuffer.getSample(1, sample);
+
+            const float mid = 0.5f * (highL + highR);
+            const float side = 0.5f * (highL - highR);
+            const float decorL = processDecorBranch(0, mid);
+            const float decorR = processDecorBranch(1, mid);
+            const float syntheticSide = 0.5f * (decorL - decorR);
+            const float widenedSide = side * sideGain + syntheticSide * synthGain;
+
+            float outL = lowL + mid + widenedSide;
+            float outR = lowR + mid - widenedSide;
+
+            const float monoMix = monoSmoothed.getNextValue();
+            const float mono = 0.5f * (outL + outR);
+            outL = juce::jmap(monoMix, outL, mono);
+            outR = juce::jmap(monoMix, outR, mono);
+
+            if (channels > 0)
+                buffer.setSample(0, sample, outL);
+            if (channels > 1)
+                buffer.setSample(1, sample, outR);
+        }
+    }
+
+private:
+    using StereoFilter = juce::dsp::ProcessorDuplicator<
+        juce::dsp::IIR::Filter<float>,
+        juce::dsp::IIR::Coefficients<float>>;
+
+    static bool nearlyEqual(float a, float b, float epsilon = 1.0e-3f)
+    {
+        return std::abs(a - b) <= epsilon;
+    }
+
+    void prepareFilters()
+    {
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = (juce::uint32)bufferSize;
+        spec.numChannels = (juce::uint32)numOutputs;
+        lowpass.prepare(spec);
+        highpass.prepare(spec);
+        lowpass.reset();
+        highpass.reset();
+    }
+
+    void prepareDecorrelators()
+    {
+        const int maxDelaySamples =
+            juce::jmax(128, (int)std::ceil(sampleRate * 0.02));
+        decorrelatorSize = maxDelaySamples + 4;
+        for (auto &ring : decorrelatorRings)
+            ring.assign((size_t)decorrelatorSize, 0.0f);
+        resetDecorrelators();
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        dryBuffer.setSize(numOutputs, bufferSize);
+        lowBuffer.setSize(numOutputs, bufferSize);
+        highBuffer.setSize(numOutputs, bufferSize);
+        prepareFilters();
+        lastLowBypassHz = -1.0f;
+    }
+
+    void updateFilters(float cutoffHz)
+    {
+        const float safeCutoff = clampFilterFrequencyForSampleRate(
+            cutoffHz,
+            sampleRate,
+            20.0f,
+            20.0f);
+        if (nearlyEqual(safeCutoff, lastLowBypassHz))
+            return;
+
+        *lowpass.state = *juce::dsp::IIR::Coefficients<float>::makeLowPass(
+            sampleRate, safeCutoff);
+        *highpass.state = *juce::dsp::IIR::Coefficients<float>::makeHighPass(
+            sampleRate, safeCutoff);
+        lastLowBypassHz = safeCutoff;
+    }
+
+    void resetDecorrelators()
+    {
+        for (auto &ring : decorrelatorRings)
+            std::fill(ring.begin(), ring.end(), 0.0f);
+        decorrelatorWritePos.fill(0);
+        decorPrevInput.fill(0.0f);
+        decorPrevOutput.fill(0.0f);
+    }
+
+    float processDecorBranch(int branch, float input)
+    {
+        if (decorrelatorSize <= 1)
+            return input;
+
+        auto &ring = decorrelatorRings[(size_t)branch];
+        int &writePos = decorrelatorWritePos[(size_t)branch];
+        ring[(size_t)writePos] = input;
+
+        const float delayMs = branch == 0 ? 7.3f : 11.1f;
+        const float delayed = readDelayedSample(
+            ring,
+            writePos,
+            (float)(sampleRate * delayMs * 0.001));
+        writePos = (writePos + 1) % decorrelatorSize;
+
+        const float coeff = branch == 0 ? 0.58f : -0.58f;
+        const float output = -coeff * delayed + decorPrevInput[(size_t)branch] +
+                             coeff * decorPrevOutput[(size_t)branch];
+        decorPrevInput[(size_t)branch] = delayed;
+        decorPrevOutput[(size_t)branch] = output;
+        return output;
+    }
+
+    static float readDelayedSample(const std::vector<float> &ring,
+                                   int writeIndex,
+                                   float delaySamples)
+    {
+        const int size = (int)ring.size();
+        if (size <= 1)
+            return 0.0f;
+
+        float readPos = (float)writeIndex - delaySamples;
+        readPos = std::fmod(readPos, (float)size);
+        if (readPos < 0.0f)
+            readPos += (float)size;
+
+        const int i0 = juce::jlimit(0, size - 1, (int)readPos);
+        const int i1 = (i0 + 1 < size) ? (i0 + 1) : 0;
+        const float frac = readPos - (float)i0;
+        return ring[(size_t)i0] + (ring[(size_t)i1] - ring[(size_t)i0]) * frac;
+    }
+
+    StereoParameters params{100.0f, 160.0f, false};
+    double sampleRate{44100.0};
+    int bufferSize{0};
+    int decorrelatorSize{0};
+    float lastLowBypassHz{-1.0f};
+    juce::AudioBuffer<float> dryBuffer, lowBuffer, highBuffer;
+    StereoFilter lowpass, highpass;
+    juce::LinearSmoothedValue<float> widthSmoothed;
+    juce::LinearSmoothedValue<float> monoSmoothed;
+    juce::LinearSmoothedValue<float> lowBypassSmoothed;
+    std::array<std::vector<float>, 2> decorrelatorRings;
+    std::array<int, 2> decorrelatorWritePos{0, 0};
+    std::array<float, 2> decorPrevInput{0.0f, 0.0f};
+    std::array<float, 2> decorPrevOutput{0.0f, 0.0f};
+};
+
+class StereoAudioProcessor : public juce::AudioProcessor
+{
+public:
+    StereoAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    void processBlockBypassed(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Stereo"; }
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    enum class BypassRampDirection
+    {
+        none,
+        toDry,
+        toWet,
+    };
+
+    void ensureBypassBufferCapacity(int numSamples);
+    void beginBypassRamp(BypassRampDirection direction);
+    void applyBypassRamp(juce::AudioBuffer<float> &output,
+                         const juce::AudioBuffer<float> &dry,
+                         const juce::AudioBuffer<float> &wet);
+
+    StereoModule stereoFx;
+    double bypassSampleRate{44100.0};
+    int bypassRampSamples{1};
+    int bypassRampRemaining{0};
+    BypassRampDirection bypassRampDirection{BypassRampDirection::none};
+    bool lastBlockWasBypassed{false};
+    juce::AudioBuffer<float> bypassDryBuffer;
+    juce::AudioBuffer<float> bypassWetBuffer;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(StereoAudioProcessor)
+};
+
+// ****STEREO PRO****
+
+struct StereoProParameters
+{
+    float gainDb;
+    float widthPercent;
+    float asymmetryPercent;
+    float rotationDegrees;
+};
+
+class StereoProModule
+{
+public:
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        params.gainDb = apvts.getRawParameterValue("gain")->load();
+        params.widthPercent = apvts.getRawParameterValue("width")->load();
+        params.asymmetryPercent = apvts.getRawParameterValue("asymmetry")->load();
+        params.rotationDegrees = apvts.getRawParameterValue("rotation")->load();
+    }
+
+    void syncParameters()
+    {
+        gainSmoothed.setCurrentAndTargetValue(
+            juce::Decibels::decibelsToGain(params.gainDb));
+        widthSmoothed.setCurrentAndTargetValue(
+            juce::jlimit(0.0f, 3.0f, params.widthPercent * 0.01f));
+        asymmetrySmoothed.setCurrentAndTargetValue(
+            juce::jlimit(-0.95f, 0.95f, params.asymmetryPercent * 0.01f));
+        rotationSmoothed.setCurrentAndTargetValue(
+            juce::jlimit(-1.0f, 1.0f, params.rotationDegrees / 90.0f));
+    }
+
+    void prepare(double inputSampleRate, int maxBlockSize)
+    {
+        sampleRate = sanitiseEffectSampleRate(inputSampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        workBuffer.setSize(numOutputs, bufferSize);
+        gainSmoothed.reset(sampleRate, 0.02);
+        widthSmoothed.reset(sampleRate, 0.02);
+        asymmetrySmoothed.reset(sampleRate, 0.02);
+        rotationSmoothed.reset(sampleRate, 0.02);
+        gainSmoothed.setCurrentAndTargetValue(1.0f);
+        widthSmoothed.setCurrentAndTargetValue(1.0f);
+        asymmetrySmoothed.setCurrentAndTargetValue(0.0f);
+        rotationSmoothed.setCurrentAndTargetValue(0.0f);
+        reset();
+    }
+
+    void reset()
+    {
+        workBuffer.clear();
+    }
+
+    void process(juce::AudioBuffer<float> &buffer)
+    {
+        const int blockSamples = buffer.getNumSamples();
+        if (blockSamples <= 0)
+            return;
+
+        ensureCapacity(blockSamples);
+        copyToFixedStereoBuffer(buffer, workBuffer);
+
+        gainSmoothed.setTargetValue(
+            juce::Decibels::decibelsToGain(params.gainDb));
+        widthSmoothed.setTargetValue(
+            juce::jlimit(0.0f, 3.0f, params.widthPercent * 0.01f));
+        asymmetrySmoothed.setTargetValue(
+            juce::jlimit(-0.95f, 0.95f, params.asymmetryPercent * 0.01f));
+        rotationSmoothed.setTargetValue(
+            juce::jlimit(-1.0f, 1.0f, params.rotationDegrees / 90.0f));
+        const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
+
+        for (int sample = 0; sample < blockSamples; ++sample)
+        {
+            const float gain = gainSmoothed.getNextValue();
+            const float width = widthSmoothed.getNextValue();
+            const float asymmetry = asymmetrySmoothed.getNextValue();
+            const float rotation = rotationSmoothed.getNextValue();
+            float midGainL = 0.0f;
+            float midGainR = 0.0f;
+            float sideGainL = 0.0f;
+            float sideGainR = 0.0f;
+            float matrixNormalise = 1.0f;
+            resolveStereoMatrix(width,
+                                asymmetry,
+                                rotation,
+                                midGainL,
+                                midGainR,
+                                sideGainL,
+                                sideGainR,
+                                matrixNormalise);
+            const float inL = workBuffer.getSample(0, sample);
+            const float inR = workBuffer.getSample(1, sample);
+            const float mid = 0.5f * (inL + inR);
+            const float side = 0.5f * (inL - inR);
+
+            const float rawL =
+                ((mid * midGainL) + (side * sideGainL)) * matrixNormalise;
+            const float rawR =
+                ((mid * midGainR) - (side * sideGainR)) * matrixNormalise;
+            const float outL = applyOutputSafety(gain * rawL);
+            const float outR = applyOutputSafety(gain * rawR);
+
+            if (channels > 0)
+                buffer.setSample(0, sample, outL);
+            if (channels > 1)
+                buffer.setSample(1, sample, outR);
+        }
+    }
+
+private:
+    static void resolveStereoMatrix(float width,
+                                    float asymmetry,
+                                    float rotation,
+                                    float &midGainL,
+                                    float &midGainR,
+                                    float &sideGainL,
+                                    float &sideGainR,
+                                    float &matrixNormalise)
+    {
+        const float angle = (rotation + 1.0f) * 0.25f * juce::float_Pi;
+        midGainL = std::sqrt(2.0f) * std::cos(angle);
+        midGainR = std::sqrt(2.0f) * std::sin(angle);
+        sideGainL = width * (1.0f + asymmetry);
+        sideGainR = width * (1.0f - asymmetry);
+
+        const float peakL = std::abs(midGainL) + std::abs(sideGainL);
+        const float peakR = std::abs(midGainR) + std::abs(sideGainR);
+        const float matrixPeak = juce::jmax(1.0f, juce::jmax(peakL, peakR));
+        matrixNormalise = 1.0f / matrixPeak;
+    }
+
+    static float applyOutputSafety(float sample)
+    {
+        if (!std::isfinite(sample))
+            return 0.0f;
+
+        constexpr float ceiling = 1.25f;
+        return ceiling * std::tanh(sample / ceiling);
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        workBuffer.setSize(numOutputs, bufferSize);
+    }
+
+    StereoProParameters params{0.0f, 100.0f, 0.0f, 0.0f};
+    double sampleRate{44100.0};
+    int bufferSize{0};
+    juce::AudioBuffer<float> workBuffer;
+    juce::LinearSmoothedValue<float> gainSmoothed;
+    juce::LinearSmoothedValue<float> widthSmoothed;
+    juce::LinearSmoothedValue<float> asymmetrySmoothed;
+    juce::LinearSmoothedValue<float> rotationSmoothed;
+};
+
+class StereoProAudioProcessor : public juce::AudioProcessor
+{
+public:
+    StereoProAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    void processBlockBypassed(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Stereo Pro"; }
+    std::vector<float> getRecentScope(int pointCount) const;
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    enum class BypassRampDirection
+    {
+        none,
+        toDry,
+        toWet,
+    };
+
+    static constexpr int kScopeRingSize = 2048;
+    void ensureBypassBufferCapacity(int numSamples);
+    void beginBypassRamp(BypassRampDirection direction);
+    void applyBypassRamp(juce::AudioBuffer<float> &output,
+                         const juce::AudioBuffer<float> &dry,
+                         const juce::AudioBuffer<float> &wet);
+    void pushScopeSamples(const juce::AudioBuffer<float> &buffer) noexcept;
+    StereoProModule stereoProFx;
+    double bypassSampleRate{44100.0};
+    int bypassRampSamples{1};
+    int bypassRampRemaining{0};
+    BypassRampDirection bypassRampDirection{BypassRampDirection::none};
+    bool lastBlockWasBypassed{false};
+    juce::AudioBuffer<float> bypassDryBuffer;
+    juce::AudioBuffer<float> bypassWetBuffer;
+    std::array<float, kScopeRingSize * 2> scopeRing{};
+    std::atomic<int> scopeWritePos{0};
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(StereoProAudioProcessor)
+};
+
+// ****VOLUME SHAPER****
+
+struct VolumeShaperParameters
+{
+    float depthPercent;
+    float mixPercent;
+    float smoothPercent;
+    float swingPercent;
+    int rateIndex;
+    int shapeIndex;
+};
+
+class VolumeShaperModule
+{
+public:
+    static constexpr std::array<double, 8> rateBeats{
+        8.0,
+        4.0,
+        2.0,
+        1.0,
+        0.5,
+        0.25,
+        (2.0 / 3.0),
+        1.5,
+    };
+
+    static const juce::StringArray rateChoices()
+    {
+        return {"2 Bars", "1 Bar", "1/2 Bar", "1 Beat", "1/2 Beat",
+                "1/4 Beat", "Beat Triplet", "Beat Dotted"};
+    }
+
+    static const juce::StringArray shapeChoices()
+    {
+        return {"Duck", "Pump", "Gate", "Trance", "Chop", "Sine"};
+    }
+
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        params.depthPercent = apvts.getRawParameterValue("depth")->load();
+        params.mixPercent = apvts.getRawParameterValue("mix")->load();
+        params.smoothPercent = apvts.getRawParameterValue("smooth")->load();
+        params.swingPercent = apvts.getRawParameterValue("swing")->load();
+        params.rateIndex = juce::jlimit(
+            0,
+            (int)rateBeats.size() - 1,
+            (int)apvts.getRawParameterValue("rate")->load());
+        params.shapeIndex = juce::jlimit(
+            0,
+            shapeChoices().size() - 1,
+            (int)apvts.getRawParameterValue("shape")->load());
+    }
+
+    void syncParameters()
+    {
+        depthSmoothed.setCurrentAndTargetValue(
+            juce::jlimit(0.0f, 1.0f, params.depthPercent * 0.01f));
+        mixSmoothed.setCurrentAndTargetValue(
+            juce::jlimit(0.0f, 1.0f, params.mixPercent * 0.01f));
+        currentGain = computeGainForDisplay(
+            params.shapeIndex,
+            0.0f,
+            params.depthPercent,
+            params.smoothPercent,
+            params.swingPercent);
+    }
+
+    void prepare(double inputSampleRate, int maxBlockSize)
+    {
+        sampleRate = sanitiseEffectSampleRate(inputSampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        dryBuffer.setSize(numOutputs, bufferSize);
+        depthSmoothed.reset(sampleRate, 0.02);
+        mixSmoothed.reset(sampleRate, 0.02);
+        depthSmoothed.setCurrentAndTargetValue(1.0f);
+        mixSmoothed.setCurrentAndTargetValue(1.0f);
+        reset();
+    }
+
+    void reset()
+    {
+        dryBuffer.clear();
+        currentGain = 1.0f;
+    }
+
+    void process(juce::AudioBuffer<float> &buffer,
+                 double blockTransportStartSec,
+                 std::atomic<float> &phaseOut,
+                 std::atomic<float> &gainOut)
+    {
+        const int blockSamples = buffer.getNumSamples();
+        if (blockSamples <= 0)
+            return;
+
+        ensureCapacity(blockSamples);
+        copyToFixedStereoBuffer(buffer, dryBuffer);
+
+        depthSmoothed.setTargetValue(
+            juce::jlimit(0.0f, 1.0f, params.depthPercent * 0.01f));
+        mixSmoothed.setTargetValue(
+            juce::jlimit(0.0f, 1.0f, params.mixPercent * 0.01f));
+
+        const double bpm = mixroom::fx::getGlobalTempoBpm();
+        const double cycleBeats =
+            rateBeats[(size_t)juce::jlimit(0, (int)rateBeats.size() - 1, params.rateIndex)];
+        const float swingAmount = juce::jlimit(0.0f, 1.0f, params.swingPercent * 0.01f);
+        const float smoothingAlpha =
+            computeSmoothingAlpha(params.smoothPercent, sampleRate);
+        const int channels = juce::jmin(buffer.getNumChannels(), numOutputs);
+        float lastDisplayPhase = 0.0f;
+
+        for (int sample = 0; sample < blockSamples; ++sample)
+        {
+            const double transportSec =
+                blockTransportStartSec + ((double)sample / sampleRate);
+            const float rawPhase =
+                resolveCyclePhase(transportSec, bpm, cycleBeats);
+            const float displayPhase = applySwing(rawPhase, swingAmount);
+            const float targetGain = computeGainForDisplay(
+                params.shapeIndex,
+                rawPhase,
+                params.depthPercent,
+                params.smoothPercent,
+                params.swingPercent);
+
+            if (smoothingAlpha >= 1.0f)
+                currentGain = targetGain;
+            else
+                currentGain += (targetGain - currentGain) * smoothingAlpha;
+
+            const float mix = mixSmoothed.getNextValue();
+            lastDisplayPhase = displayPhase;
+
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                const float dry = dryBuffer.getSample(ch, sample);
+                const float wet = dry * currentGain;
+                buffer.setSample(ch, sample, dry + ((wet - dry) * mix));
+            }
+        }
+
+        phaseOut.store(lastDisplayPhase, std::memory_order_relaxed);
+        gainOut.store(currentGain, std::memory_order_relaxed);
+    }
+
+    static std::vector<float> buildPreviewCurve(int pointCount,
+                                                int shapeIndex,
+                                                float depthPercent,
+                                                float smoothPercent,
+                                                float swingPercent,
+                                                float displayPhase)
+    {
+        const int count = juce::jlimit(32, 512, pointCount);
+        std::vector<float> out((size_t)(count + 1), 1.0f);
+        out[0] = juce::jlimit(0.0f, 1.0f, displayPhase);
+
+        const float swingAmount = juce::jlimit(0.0f, 1.0f, swingPercent * 0.01f);
+        const float alpha = computeSmoothingAlpha(smoothPercent, 2000.0);
+        float current = computeGainForDisplay(shapeIndex, 0.0f, depthPercent,
+                                              smoothPercent, swingPercent);
+        for (int i = 0; i < count; ++i)
+        {
+            const float x = (count <= 1) ? 0.0f : (float)i / (float)(count - 1);
+            const float rawPhase = invertSwing(x, swingAmount);
+            const float target = computeGainForDisplay(
+                shapeIndex,
+                rawPhase,
+                depthPercent,
+                smoothPercent,
+                swingPercent);
+            if (alpha >= 1.0f)
+                current = target;
+            else
+                current += (target - current) * alpha;
+            out[(size_t)(i + 1)] = juce::jlimit(0.0f, 1.0f, current);
+        }
+        return out;
+    }
+
+private:
+    static float computeSmoothingAlpha(float smoothPercent, double rate)
+    {
+        const float smooth = juce::jlimit(0.0f, 1.0f, smoothPercent * 0.01f);
+        if (smooth <= 0.0001f || rate <= 0.0)
+            return 1.0f;
+
+        const double timeSeconds = 0.0005 + (double)smooth * 0.03;
+        return (float)(1.0 - std::exp(-1.0 / (timeSeconds * rate)));
+    }
+
+    static float resolveCyclePhase(double transportSec, double bpm, double cycleBeats)
+    {
+        const double safeBpm = juce::jlimit(1.0, 400.0, bpm);
+        const double safeCycleBeats = juce::jmax(0.125, cycleBeats);
+        const double beatPos = juce::jmax(0.0, transportSec) * safeBpm / 60.0;
+        const double cyclePos = std::fmod(beatPos / safeCycleBeats, 1.0);
+        return (float)(cyclePos >= 0.0 ? cyclePos : cyclePos + 1.0);
+    }
+
+    static float applySwing(float rawPhase, float swingAmount)
+    {
+        if (swingAmount <= 0.0001f)
+            return juce::jlimit(0.0f, 1.0f, rawPhase);
+
+        const float split =
+            juce::jlimit(0.25f, 0.75f, 0.5f + (swingAmount * 0.22f));
+        if (rawPhase < split)
+            return 0.5f * (rawPhase / split);
+        return 0.5f + 0.5f * ((rawPhase - split) / (1.0f - split));
+    }
+
+    static float invertSwing(float displayPhase, float swingAmount)
+    {
+        if (swingAmount <= 0.0001f)
+            return juce::jlimit(0.0f, 1.0f, displayPhase);
+
+        const float split =
+            juce::jlimit(0.25f, 0.75f, 0.5f + (swingAmount * 0.22f));
+        if (displayPhase < 0.5f)
+            return split * (displayPhase / 0.5f);
+        return split +
+               (1.0f - split) * ((displayPhase - 0.5f) / 0.5f);
+    }
+
+    static float evaluateEnvelope(int shapeIndex, float phase)
+    {
+        const float x = juce::jlimit(0.0f, 1.0f, phase);
+        const float twoPi = juce::MathConstants<float>::twoPi;
+        switch (juce::jlimit(0, shapeChoices().size() - 1, shapeIndex))
+        {
+            case 0:
+                return 1.0f - std::pow(1.0f - x, 2.6f);
+            case 1:
+                return 0.5f - 0.5f * std::cos(twoPi * x);
+            case 2:
+                return x < 0.5f ? 1.0f : 0.0f;
+            case 3:
+            {
+                const float sub = std::fmod(x * 4.0f, 1.0f);
+                return sub < 0.45f ? 1.0f : 0.0f;
+            }
+            case 4:
+            {
+                const float sub = std::fmod(x * 8.0f, 1.0f);
+                return sub < 0.32f ? 1.0f : 0.0f;
+            }
+            case 5:
+            default:
+                return 0.5f + 0.5f * std::sin((twoPi * x) - (0.5f * juce::MathConstants<float>::pi));
+        }
+    }
+
+    static float computeGainForDisplay(int shapeIndex,
+                                       float rawPhase,
+                                       float depthPercent,
+                                       float smoothPercent,
+                                       float swingPercent)
+    {
+        juce::ignoreUnused(smoothPercent);
+        const float swingAmount = juce::jlimit(0.0f, 1.0f, swingPercent * 0.01f);
+        const float displayPhase = applySwing(rawPhase, swingAmount);
+        const float envelope = evaluateEnvelope(shapeIndex, displayPhase);
+        const float depth = juce::jlimit(0.0f, 1.0f, depthPercent * 0.01f);
+        const float minGain = 1.0f - depth;
+        return juce::jlimit(0.0f, 1.0f, minGain + (envelope * depth));
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        dryBuffer.setSize(numOutputs, bufferSize);
+    }
+
+    VolumeShaperParameters params{100.0f, 100.0f, 18.0f, 0.0f, 3, 0};
+    double sampleRate{44100.0};
+    int bufferSize{0};
+    float currentGain{1.0f};
+    juce::AudioBuffer<float> dryBuffer;
+    juce::LinearSmoothedValue<float> depthSmoothed;
+    juce::LinearSmoothedValue<float> mixSmoothed;
+};
+
+class VolumeShaperAudioProcessor : public juce::AudioProcessor
+{
+public:
+    VolumeShaperAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    void processBlockBypassed(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Volume Shaper"; }
+    std::vector<float> getPreviewCurve(int pointCount) const;
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    VolumeShaperModule shaper;
+    std::atomic<float> previewPhase{0.0f};
+    std::atomic<float> previewGain{1.0f};
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VolumeShaperAudioProcessor)
+};
+
+// ****TIME SHAPER****
+
+struct TimeShaperParameters
+{
+    float amountPercent;
+    float mixPercent;
+    float smoothPercent;
+    int rateIndex;
+    int patternIndex;
+};
+
+class TimeShaperModule
+{
+public:
+    static constexpr std::array<double, 7> rateBeats{
+        8.0,
+        4.0,
+        2.0,
+        1.0,
+        0.5,
+        0.25,
+        (2.0 / 3.0),
+    };
+
+    static const juce::StringArray rateChoices()
+    {
+        return {"2 Bars", "1 Bar", "1/2 Bar", "1 Beat",
+                "1/2 Beat", "1/4 Beat", "Beat Triplet"};
+    }
+
+    static const juce::StringArray patternChoices()
+    {
+        return {"Repeat", "Half Speed", "Reverse", "Stutter",
+                "Tape Stop", "Glide", "Scratch"};
+    }
+
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        params.amountPercent = apvts.getRawParameterValue("amount")->load();
+        params.mixPercent = apvts.getRawParameterValue("mix")->load();
+        params.smoothPercent = apvts.getRawParameterValue("smooth")->load();
+        params.rateIndex = juce::jlimit(
+            0,
+            (int)rateBeats.size() - 1,
+            (int)apvts.getRawParameterValue("rate")->load());
+        params.patternIndex = juce::jlimit(
+            0,
+            patternChoices().size() - 1,
+            (int)apvts.getRawParameterValue("pattern")->load());
+    }
+
+    void syncParameters()
+    {
+        amountSmoothed.setCurrentAndTargetValue(
+            juce::jlimit(0.0f, 1.0f, params.amountPercent * 0.01f));
+        mixSmoothed.setCurrentAndTargetValue(
+            juce::jlimit(0.0f, 1.0f, params.mixPercent * 0.01f));
+        smoothedOffsetNorm = 0.0f;
+    }
+
+    void prepare(double inputSampleRate, int maxBlockSize)
+    {
+        sampleRate = sanitiseEffectSampleRate(inputSampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        dryBuffer.setSize(numOutputs, bufferSize);
+        const double maxWindowSeconds = (8.0 * 60.0) / 30.0;
+        ringSize = juce::jmax(
+            bufferSize + 8,
+            (int)std::ceil(sampleRate * maxWindowSeconds) + 8);
+        ringBuffer.setSize(numOutputs, ringSize);
+        amountSmoothed.reset(sampleRate, 0.02);
+        mixSmoothed.reset(sampleRate, 0.02);
+        amountSmoothed.setCurrentAndTargetValue(1.0f);
+        mixSmoothed.setCurrentAndTargetValue(1.0f);
+        reset();
+    }
+
+    void reset()
+    {
+        dryBuffer.clear();
+        ringBuffer.clear();
+        writePos = 0;
+        filledSamples = 0;
+        smoothedOffsetNorm = 0.0f;
+    }
+
+    void process(juce::AudioBuffer<float> &buffer,
+                 double blockTransportStartSec,
+                 std::atomic<float> &phaseOut,
+                 std::atomic<float> &readNormOut)
+    {
+        const int blockSamples = buffer.getNumSamples();
+        if (blockSamples <= 0)
+            return;
+
+        ensureCapacity(blockSamples);
+        copyToFixedStereoBuffer(buffer, dryBuffer);
+
+        amountSmoothed.setTargetValue(
+            juce::jlimit(0.0f, 1.0f, params.amountPercent * 0.01f));
+        mixSmoothed.setTargetValue(
+            juce::jlimit(0.0f, 1.0f, params.mixPercent * 0.01f));
+
+        const double bpm = juce::jlimit(30.0, 400.0, mixroom::fx::getGlobalTempoBpm());
+        const double cycleBeats =
+            rateBeats[(size_t)juce::jlimit(0, (int)rateBeats.size() - 1, params.rateIndex)];
+        const int windowSamples = juce::jlimit(
+            8,
+            juce::jmax(8, ringSize - 4),
+            (int)std::round(sampleRate * cycleBeats * 60.0 / bpm));
+        const float smoothingAlpha =
+            computeSmoothingAlpha(params.smoothPercent, sampleRate);
+        const int channels = juce::jmin(buffer.getNumChannels(), numOutputs);
+        float lastPhase = 0.0f;
+
+        for (int sample = 0; sample < blockSamples; ++sample)
+        {
+            const float inL = dryBuffer.getSample(0, sample);
+            const float inR = dryBuffer.getSample(1, sample);
+            ringBuffer.setSample(0, writePos, inL);
+            ringBuffer.setSample(1, writePos, inR);
+            filledSamples = juce::jmin(ringSize, filledSamples + 1);
+
+            const double transportSec =
+                blockTransportStartSec + ((double)sample / sampleRate);
+            const float phase = resolveCyclePhase(transportSec, bpm, cycleBeats);
+            const float amount = amountSmoothed.getNextValue();
+            const float mix = mixSmoothed.getNextValue();
+            const float targetOffsetNorm =
+                amount * evaluateOffsetNorm(params.patternIndex, phase);
+
+            if (smoothingAlpha >= 1.0f)
+                smoothedOffsetNorm = targetOffsetNorm;
+            else
+                smoothedOffsetNorm +=
+                    (targetOffsetNorm - smoothedOffsetNorm) * smoothingAlpha;
+
+            const float availableHistory =
+                (float)juce::jmax(0, filledSamples - 2);
+            const float offsetSamples = juce::jlimit(
+                0.0f,
+                availableHistory,
+                smoothedOffsetNorm *
+                    (float)juce::jmax(1, windowSamples - 2));
+
+            const float wetL = readInterpolatedSample(0, offsetSamples);
+            const float wetR = readInterpolatedSample(1, offsetSamples);
+
+            if (channels > 0)
+                buffer.setSample(0, sample, inL + ((wetL - inL) * mix));
+            if (channels > 1)
+                buffer.setSample(1, sample, inR + ((wetR - inR) * mix));
+
+            writePos = (writePos + 1) % juce::jmax(1, ringSize);
+            lastPhase = phase;
+        }
+
+        phaseOut.store(lastPhase, std::memory_order_relaxed);
+        readNormOut.store(1.0f - smoothedOffsetNorm, std::memory_order_relaxed);
+    }
+
+    void updateHistory(const juce::AudioBuffer<float> &buffer,
+                       double blockTransportStartSec,
+                       std::atomic<float> &phaseOut,
+                       std::atomic<float> &readNormOut)
+    {
+        const int blockSamples = buffer.getNumSamples();
+        if (blockSamples <= 0)
+            return;
+
+        ensureCapacity(blockSamples);
+        copyToFixedStereoBuffer(buffer, dryBuffer);
+
+        const double bpm = juce::jlimit(30.0, 400.0, mixroom::fx::getGlobalTempoBpm());
+        const double cycleBeats =
+            rateBeats[(size_t)juce::jlimit(0, (int)rateBeats.size() - 1, params.rateIndex)];
+        float lastPhase = 0.0f;
+
+        for (int sample = 0; sample < blockSamples; ++sample)
+        {
+            ringBuffer.setSample(0, writePos, dryBuffer.getSample(0, sample));
+            ringBuffer.setSample(1, writePos, dryBuffer.getSample(1, sample));
+            filledSamples = juce::jmin(ringSize, filledSamples + 1);
+            writePos = (writePos + 1) % juce::jmax(1, ringSize);
+            const double transportSec =
+                blockTransportStartSec + ((double)sample / sampleRate);
+            lastPhase = resolveCyclePhase(transportSec, bpm, cycleBeats);
+        }
+
+        phaseOut.store(lastPhase, std::memory_order_relaxed);
+        readNormOut.store(1.0f, std::memory_order_relaxed);
+        smoothedOffsetNorm = 0.0f;
+    }
+
+    static std::vector<float> buildPreviewCurve(int pointCount,
+                                                int patternIndex,
+                                                float amountPercent,
+                                                float smoothPercent,
+                                                float phase)
+    {
+        const int count = juce::jlimit(32, 512, pointCount);
+        std::vector<float> out((size_t)(count + 1), 1.0f);
+        out[0] = juce::jlimit(0.0f, 1.0f, phase);
+
+        const float amount = juce::jlimit(0.0f, 1.0f, amountPercent * 0.01f);
+        const float alpha = computeSmoothingAlpha(smoothPercent, 2000.0);
+        float current = 1.0f;
+        for (int i = 0; i < count; ++i)
+        {
+            const float x = (count <= 1) ? 0.0f : (float)i / (float)(count - 1);
+            const float target =
+                1.0f - (amount * evaluateOffsetNorm(patternIndex, x));
+            if (alpha >= 1.0f)
+                current = target;
+            else
+                current += (target - current) * alpha;
+            out[(size_t)(i + 1)] = juce::jlimit(0.0f, 1.0f, current);
+        }
+        return out;
+    }
+
+private:
+    static float computeSmoothingAlpha(float smoothPercent, double rate)
+    {
+        const float smooth = juce::jlimit(0.0f, 1.0f, smoothPercent * 0.01f);
+        if (smooth <= 0.0001f || rate <= 0.0)
+            return 1.0f;
+
+        const double timeSeconds = 0.0005 + (double)smooth * 0.05;
+        return (float)(1.0 - std::exp(-1.0 / (timeSeconds * rate)));
+    }
+
+    static float resolveCyclePhase(double transportSec, double bpm, double cycleBeats)
+    {
+        const double safeBpm = juce::jlimit(1.0, 400.0, bpm);
+        const double safeCycleBeats = juce::jmax(0.125, cycleBeats);
+        const double beatPos = juce::jmax(0.0, transportSec) * safeBpm / 60.0;
+        const double cyclePos = std::fmod(beatPos / safeCycleBeats, 1.0);
+        return (float)(cyclePos >= 0.0 ? cyclePos : cyclePos + 1.0);
+    }
+
+    static float wrapUnitPhase(float value)
+    {
+        if (!std::isfinite(value))
+            return 0.0f;
+
+        value = std::fmod(value, 1.0f);
+        if (value < 0.0f)
+            value += 1.0f;
+        return juce::jlimit(0.0f, 1.0f, value);
+    }
+
+    static float evaluatePlaybackPhase(int patternIndex, float phase)
+    {
+        const float x = juce::jlimit(0.0f, 1.0f, phase);
+        switch (juce::jlimit(0, patternChoices().size() - 1, patternIndex))
+        {
+            case 0:
+            {
+                const float local = wrapUnitPhase(x * 4.0f);
+                return local * 0.25f;
+            }
+            case 1:
+                return x * 0.5f;
+            case 2:
+                return 1.0f - x;
+            case 3:
+            {
+                const float segment = std::floor(x * 4.0f) * 0.25f;
+                const float local = wrapUnitPhase(x * 16.0f);
+                return juce::jlimit(0.0f, 1.0f, segment + (local * 0.0625f));
+            }
+            case 4:
+                return x / (1.0f + (2.5f * x));
+            case 5:
+                return x * x;
+            case 6:
+            default:
+            {
+                const float segment = std::floor(x * 2.0f) * 0.5f;
+                const float local = wrapUnitPhase(x * 2.0f);
+                const float triangle =
+                    local < 0.5f ? (local * 2.0f) : (2.0f - (local * 2.0f));
+                return juce::jlimit(0.0f, 1.0f, segment + (triangle * 0.5f));
+            }
+        }
+    }
+
+    static float evaluateOffsetNorm(int patternIndex, float phase)
+    {
+        const float playbackPhase = evaluatePlaybackPhase(patternIndex, phase);
+        return wrapUnitPhase(phase - playbackPhase);
+    }
+
+    float readInterpolatedSample(int channel, float offsetSamples) const
+    {
+        const int size = juce::jmax(1, ringSize);
+        float readPos = (float)writePos - juce::jlimit(0.0f, (float)(size - 2), offsetSamples);
+        while (readPos < 0.0f)
+            readPos += (float)size;
+        while (readPos >= (float)size)
+            readPos -= (float)size;
+
+        const int i0 = juce::jlimit(0, size - 1, (int)readPos);
+        const int i1 = (i0 + 1 < size) ? (i0 + 1) : 0;
+        const float frac = readPos - (float)i0;
+        const float a = ringBuffer.getSample(channel, i0);
+        const float b = ringBuffer.getSample(channel, i1);
+        return a + ((b - a) * frac);
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+
+        bufferSize = requiredSamples;
+        dryBuffer.setSize(numOutputs, bufferSize);
+    }
+
+    TimeShaperParameters params{100.0f, 100.0f, 18.0f, 1, 0};
+    double sampleRate{44100.0};
+    int bufferSize{0};
+    int ringSize{0};
+    int writePos{0};
+    int filledSamples{0};
+    float smoothedOffsetNorm{0.0f};
+    juce::AudioBuffer<float> dryBuffer;
+    juce::AudioBuffer<float> ringBuffer;
+    juce::LinearSmoothedValue<float> amountSmoothed;
+    juce::LinearSmoothedValue<float> mixSmoothed;
+};
+
+class TimeShaperAudioProcessor : public juce::AudioProcessor
+{
+public:
+    TimeShaperAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    void processBlockBypassed(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Time Shaper"; }
+    std::vector<float> getPreviewCurve(int pointCount) const;
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    bool handleStoppedTransport(bool transportPlaying,
+                                float heldPhase,
+                                float heldReadNorm);
+
+    TimeShaperModule shaper;
+    std::atomic<float> previewPhase{0.0f};
+    std::atomic<float> previewReadNorm{1.0f};
+    bool transportWasPlaying{false};
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TimeShaperAudioProcessor)
 };

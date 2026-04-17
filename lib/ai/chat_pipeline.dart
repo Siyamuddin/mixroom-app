@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'ai_debug.dart';
+import 'assistant_action_utils.dart';
 import 'cloud_llm_service.dart';
 import 'project_state_builder.dart';
 import 'local_mixing_model.dart';
@@ -13,6 +14,7 @@ import 'package:mixroom/models/project_state.dart';
 class ChatPipeline {
   static const int _kMaxConversationMessages = 24;
   static const int _kMaxConversationCharacters = 12000;
+  static const int _kMaxMidiSnapshotNotes = 64;
 
   final CloudLlmService llm;
   final ProjectStateBuilder projectBuilder;
@@ -61,6 +63,8 @@ class ChatPipeline {
     required List<double> rowPan,
     required List<List<AutomationPoint>> rowAutomation,
     required double bpmFallback,
+    List<String> rowNames = const [],
+    String librarySnapshot = '',
     double masterGain0to3 = 1.0,
     double masterPan0to1 = 0.5,
     List<int> selectedClipIndices = const [],
@@ -112,10 +116,15 @@ class ChatPipeline {
       projectBuildStopwatch.stop();
       projectStatsMs = projectBuildStopwatch.elapsedMilliseconds;
 
-      final snapshot = _projectSnapshot(project);
+      final snapshot = _projectSnapshot(
+        project,
+        audioTracks,
+        rowNames: rowNames,
+      );
       final selectionSnapshot = _selectionSnapshot(
         project: project,
         audioTracks: audioTracks,
+        rowNames: rowNames,
         selectedClipIndices: selectedClipIndices,
         primarySelectedClipIndex: primarySelectedClipIndex,
         selectedRowIndex: selectedRowIndex,
@@ -135,6 +144,7 @@ class ChatPipeline {
         userText: userText,
         projectSnapshot: snapshot,
         selectionSnapshot: selectionSnapshot,
+        librarySnapshot: librarySnapshot,
         promptTraceId: promptTraceId,
         projectId: projectId,
         aiFeature: aiFeature,
@@ -270,35 +280,6 @@ class ChatPipeline {
         );
       }
 
-      // 2.2) Style preset request (bypass mix logic entirely)
-      /*
-      if (llmRes.toolName == 'style_request') {
-        final args = Map<String, dynamic>.from(llmRes.toolArgs ?? {});
-        final style = args['style']?.toString();
-
-        // Defensive guard: malformed style request → ignore and fall back
-        if (style == null || style.isEmpty) {
-          // Do NOT apply anything, just continue into normal mix handling
-        } else {
-          _push('user', userText);
-
-          final targets = (args['targets'] as List?)?.map((e) => Map<String, dynamic>.from(e)).toList();
-
-          final mix = mixModel.runStylePreset(
-            project: project,
-            style: style,
-            targets: targets,
-          );
-
-          final msg = "${_prettyStyle(style)} style has been applied across the project.";
-
-          _pendingMix = null;
-          _push('assistant', msg);
-          return ChatPipelineResult.mix(mix, msg);
-        }
-      }
-      */
-
       if (!hasAudio && llmRes.toolName == 'mix_model_request') {
         final args = Map<String, dynamic>.from(llmRes.toolArgs!);
         final assistantMsg =
@@ -377,6 +358,7 @@ class ChatPipeline {
       // Collect a merged mix result across all calls
       final List<MixAction> mergedActions = [];
       final List<String> mergedNotes = [];
+      final List<String> noOpSummaries = [];
       bool fallbackUsed = false;
       final Set<String> fallbackReasons = <String>{};
 
@@ -391,7 +373,14 @@ class ChatPipeline {
 
         GoalVector goal;
         try {
-          final goalJson = Map<String, dynamic>.from(action['goal'] as Map);
+          final goalJson = _resolveReferenceGoalJson(
+            Map<String, dynamic>.from(action['goal'] as Map),
+            project: project,
+            audioTracks: audioTracks,
+            selectedRowIndex: selectedRowIndex,
+            selectedClipIndices: selectedClipIndices,
+            primarySelectedClipIndex: primarySelectedClipIndex,
+          );
           goal = GoalVector.fromJson(goalJson);
         } catch (_) {
           continue; // skip malformed action
@@ -399,7 +388,7 @@ class ChatPipeline {
 
         aiDebugLog(
           'mix-plan',
-          'goal intensity=${goal.intensity.toStringAsFixed(2)} scope=${goal.target.scope} intents=${_intentSummary(goal)}',
+          'goal intensity=${goal.intensity.toStringAsFixed(2)} profile=${goal.executionProfile.wireValue} audibility=${goal.audibility.wireValue} scope=${goal.target.scope} ref=${goal.referenceTarget?.rowIndex ?? '-'}:${goal.referenceMode?.wireValue ?? '-'}:${goal.referenceCloseness?.wireValue ?? '-'} intents=${_intentSummary(goal)}',
         );
 
         final heuristicStopwatch = Stopwatch()..start();
@@ -447,6 +436,7 @@ class ChatPipeline {
               goal: goal,
               actions: resolvedActions,
               strict: strict,
+              projectId: projectId,
             );
             refineStopwatch.stop();
             mixModelOnnxMs =
@@ -484,6 +474,22 @@ class ChatPipeline {
               if ((goal.target.role ?? '').trim().isNotEmpty)
                 'role': goal.target.role,
               'intensity': goal.intensity,
+              'execution_profile': goal.executionProfile.wireValue,
+              'audibility': goal.audibility.wireValue,
+              'style_tags': goal.styleTags,
+              'destructive_ok': goal.destructiveOk,
+              if (goal.referenceTarget != null)
+                'reference_target': <String, dynamic>{
+                  if (goal.referenceTarget!.rowIndex != null)
+                    'row_index': goal.referenceTarget!.rowIndex,
+                  if (goal.referenceTarget!.preferSelected)
+                    'prefer_selected': true,
+                  'confidence': goal.referenceTarget!.confidence,
+                },
+              if (goal.referenceMode != null)
+                'reference_mode': goal.referenceMode!.wireValue,
+              if (goal.referenceCloseness != null)
+                'reference_closeness': goal.referenceCloseness!.wireValue,
               'intents': goal.intents
                   .map(
                     (intent) => <String, dynamic>{
@@ -509,6 +515,9 @@ class ChatPipeline {
           });
         }
 
+        if (resolvedActions.isEmpty && mix.summary.trim().isNotEmpty) {
+          noOpSummaries.add(mix.summary.trim());
+        }
         if (resolvedActions.isNotEmpty) {
           mergedActions.addAll(resolvedActions);
         }
@@ -544,9 +553,13 @@ class ChatPipeline {
       _push('user', userText);
 
       if (mergedActions.isEmpty) {
-        final msg = assistantMessage.isNotEmpty
-            ? _appendNotes(assistantMessage, mergedNotes)
-            : "No mix changes were applied.";
+        final fallbackSummary =
+            noOpSummaries.isNotEmpty ? noOpSummaries.first : '';
+        final msg = fallbackSummary.isNotEmpty
+            ? fallbackSummary
+            : assistantMessage.isNotEmpty
+                ? assistantMessage
+                : "No mix changes were applied.";
 
         aiDebugLog('pipeline', 'no-op result');
         _push('assistant', msg);
@@ -569,9 +582,8 @@ class ChatPipeline {
       if (strict) {
         _pendingMix = null;
 
-        final msg = assistantMessage.isNotEmpty
-            ? _appendNotes(assistantMessage, mergedMix.notes)
-            : mergedMix.summary;
+        final msg =
+            assistantMessage.isNotEmpty ? assistantMessage : mergedMix.summary;
 
         aiDebugLog(
             'pipeline', 'execute result actions=${mergedMix.actions.length}');
@@ -585,9 +597,8 @@ class ChatPipeline {
 
       // Otherwise this is a PROPOSAL (store pending + ask permission)
       if (autoApplyProposals) {
-        final msg = _appendNotes(
-            assistantMessage.isNotEmpty ? assistantMessage : mergedMix.summary,
-            mergedMix.notes);
+        final msg =
+            assistantMessage.isNotEmpty ? assistantMessage : mergedMix.summary;
 
         aiDebugLog('pipeline',
             'auto-apply proposal actions=${mergedMix.actions.length}');
@@ -604,8 +615,6 @@ class ChatPipeline {
       // Centralized proposal phrasing
       String msg =
           assistantMessage.isNotEmpty ? assistantMessage : mergedMix.summary;
-
-      msg = _appendNotes(msg, mergedMix.notes);
 
       msg = _appendApprovalHint(msg);
 
@@ -627,6 +636,81 @@ class ChatPipeline {
         .map((i) =>
             '${i.kind}:${(i.confidence * 100.0).toStringAsFixed(0)}${i.direction != null ? "/${i.direction}" : ""}${i.descriptor != null ? "/${i.descriptor}" : ""}')
         .join(', ');
+  }
+
+  Map<String, dynamic> _resolveReferenceGoalJson(
+    Map<String, dynamic> goalJson, {
+    required ProjectState project,
+    required List<AudioTrack> audioTracks,
+    required int? selectedRowIndex,
+    required List<int> selectedClipIndices,
+    required int primarySelectedClipIndex,
+  }) {
+    final rawReferenceTarget = goalJson['reference_target'];
+    if (rawReferenceTarget is! Map) return goalJson;
+
+    final referenceTarget = Map<String, dynamic>.from(rawReferenceTarget);
+    int? resolvedRowIndex;
+    final rawRowIndex = referenceTarget['row_index'];
+    if (rawRowIndex is num) {
+      resolvedRowIndex = rawRowIndex.toInt();
+    } else if (referenceTarget['prefer_selected'] == true) {
+      resolvedRowIndex = _selectedReferenceRowIndex(
+        project: project,
+        audioTracks: audioTracks,
+        selectedRowIndex: selectedRowIndex,
+        selectedClipIndices: selectedClipIndices,
+        primarySelectedClipIndex: primarySelectedClipIndex,
+      );
+    }
+
+    if (resolvedRowIndex == null ||
+        resolvedRowIndex < 0 ||
+        resolvedRowIndex >= project.rows.length) {
+      goalJson.remove('reference_target');
+      goalJson.remove('reference_mode');
+      goalJson.remove('reference_closeness');
+      return goalJson;
+    }
+
+    referenceTarget
+      ..remove('prefer_selected')
+      ..['row_index'] = resolvedRowIndex
+      ..['confidence'] =
+          ((referenceTarget['confidence'] ?? 0.5) as num).toDouble().clamp(
+                0.0,
+                1.0,
+              );
+    goalJson['reference_target'] = referenceTarget;
+    return goalJson;
+  }
+
+  int? _selectedReferenceRowIndex({
+    required ProjectState project,
+    required List<AudioTrack> audioTracks,
+    required int? selectedRowIndex,
+    required List<int> selectedClipIndices,
+    required int primarySelectedClipIndex,
+  }) {
+    if (selectedRowIndex != null &&
+        selectedRowIndex >= 0 &&
+        selectedRowIndex < project.rows.length) {
+      return selectedRowIndex;
+    }
+
+    final orderedClipIndices = <int>[
+      if (primarySelectedClipIndex >= 0) primarySelectedClipIndex,
+      ...selectedClipIndices
+          .where((index) => index != primarySelectedClipIndex),
+    ];
+    for (final clipIndex in orderedClipIndices) {
+      if (clipIndex < 0 || clipIndex >= audioTracks.length) continue;
+      final rowIndex = audioTracks[clipIndex].rowIndex;
+      if (rowIndex >= 0 && rowIndex < project.rows.length) {
+        return rowIndex;
+      }
+    }
+    return null;
   }
 
   /// Call this AFTER your UI successfully applies a mix,
@@ -767,38 +851,6 @@ class ChatPipeline {
     return '${text.substring(0, maxCharacters - 1)}…';
   }
 
-  bool _isEmptyToolGoal(Map<String, dynamic> args) {
-    final goal = args['goal'];
-    if (goal is! Map) return true;
-
-    final intensity = (goal['intensity'] is num)
-        ? (goal['intensity'] as num).toDouble()
-        : 0.0;
-
-    double bestConf = 0.0;
-    final intents = goal['intents'];
-    if (intents is List) {
-      for (final it in intents) {
-        if (it is Map && it['confidence'] is num) {
-          bestConf = math.max(bestConf, (it['confidence'] as num).toDouble());
-        }
-      }
-    }
-
-    return intensity < 0.05 && bestConf < 0.20;
-  }
-
-  String _appendNotes(String base, List<String> notes) {
-    if (notes.isEmpty) return base;
-    final b = StringBuffer()
-      ..writeln(base.trim())
-      ..writeln('\n—');
-    for (final n in notes.take(3)) {
-      b.writeln('• $n');
-    }
-    return b.toString().trim();
-  }
-
   String _appendApprovalHint(String base) {
     final trimmed = base.trim();
     if (trimmed.isEmpty) {
@@ -820,6 +872,8 @@ class ChatPipeline {
   bool _hasDirectProjectEditAction(List<AssistantAction> actions) {
     for (final action in actions) {
       switch (action.type.trim().toLowerCase()) {
+        case 'project_edit':
+        case 'sample_insert':
         case 'clip_edit':
         case 'effect_edit':
         case 'automation_edit':
@@ -832,35 +886,11 @@ class ChatPipeline {
     return false;
   }
 
-  String _prettyStyle(String s) {
-    switch (s) {
-      case 'electronic':
-        return 'Electronic';
-      case 'indie_rock':
-        return 'Indie Rock';
-      case 'pop_rock_blues':
-        return 'Pop Rock / Blues';
-      case 'jazz':
-        return 'Jazz';
-      default:
-        return s;
-    }
-  }
-
-  String _appendAssistantMessage(String base, String newMsg) {
-    if (newMsg.isEmpty) return base;
-    final b = StringBuffer()
-      ..writeln(base.trim())
-      ..writeln('──────────────');
-    b.writeln('$newMsg');
-    return b.toString().trim();
-  }
-
   String _automationTargetsSnapshotForEffects(
     List<EffectState> effects, {
     List<String> mixTargets = const <String>[],
     int maxFx = 6,
-    int maxParamsPerFx = 8,
+    int maxParamsPerFx = 4,
   }) {
     final chunks = <String>[
       for (final target in mixTargets)
@@ -874,9 +904,9 @@ class ChatPipeline {
       if (floatParams.isEmpty) continue;
       final params = floatParams
           .map((p) {
-            final pid = p.id.trim().isEmpty ? p.name.trim() : p.id.trim();
-            final pname = p.name.trim().isEmpty ? pid : p.name.trim();
-            return '$pname[$pid]';
+            final pname = p.name.trim();
+            final pid = p.id.trim();
+            return pname.isNotEmpty ? pname : pid;
           })
           .where((s) => s.trim().isNotEmpty)
           .join(', ');
@@ -912,18 +942,97 @@ class ChatPipeline {
     );
   }
 
-  String _projectSnapshot(ProjectState p) {
+  String _effectChainSnapshot(
+    List<EffectState> effects, {
+    int maxFx = 4,
+    int maxParamsPerFx = 2,
+  }) {
+    if (effects.isEmpty) return 'none';
+    final chunks = <String>[];
+    for (final fx in effects.take(maxFx)) {
+      final paramChunks = <String>[];
+      for (final param in fx.parameters.take(maxParamsPerFx)) {
+        final name =
+            param.name.trim().isNotEmpty ? param.name.trim() : param.id;
+        if (name.trim().isEmpty) continue;
+        paramChunks.add('$name=${_effectParamValueSnapshot(param)}');
+      }
+      final state = fx.isBypassed ? 'byp' : 'on';
+      if (paramChunks.isEmpty) {
+        chunks.add('fx${fx.effectIndex}:${fx.name}($state)');
+      } else {
+        final omittedParamCount =
+            math.max(0, fx.parameters.length - maxParamsPerFx);
+        final paramsSummary = omittedParamCount > 0
+            ? '${paramChunks.join(', ')}, +$omittedParamCount more'
+            : paramChunks.join(', ');
+        chunks.add(
+          'fx${fx.effectIndex}:${fx.name}($state){$paramsSummary}',
+        );
+      }
+    }
+    final omittedFxCount = math.max(0, effects.length - maxFx);
+    if (omittedFxCount > 0) {
+      chunks.add('+$omittedFxCount more_fx');
+    }
+    return chunks.join(' | ');
+  }
+
+  String _effectParamValueSnapshot(EffectParameterState param) {
+    final value = param.value;
+    if (value is num) {
+      final asDouble = value.toDouble();
+      if (!asDouble.isFinite) return '0';
+      if (asDouble.abs() >= 10) return asDouble.toStringAsFixed(1);
+      return asDouble.toStringAsFixed(2);
+    }
+    if (value is bool) {
+      return value ? 'on' : 'off';
+    }
+    final text = value?.toString().trim() ?? '';
+    return text.isEmpty ? '—' : text;
+  }
+
+  String _projectSnapshot(
+    ProjectState p,
+    List<AudioTrack> audioTracks, {
+    List<String> rowNames = const [],
+  }) {
     final b = StringBuffer();
     b.writeln('bpm=${p.bpm.toStringAsFixed(2)}');
+    final tracksByRow = <int, List<AudioTrack>>{};
+    for (final track in audioTracks) {
+      final rowIndex = track.rowIndex;
+      if (rowIndex < 0) continue;
+      tracksByRow.putIfAbsent(rowIndex, () => <AudioTrack>[]).add(track);
+    }
+    for (final rowTracks in tracksByRow.values) {
+      rowTracks.sort((a, b) {
+        final byOffset = a.offset.compareTo(b.offset);
+        if (byOffset != 0) return byOffset;
+        return a.label.compareTo(b.label);
+      });
+    }
+    final occupiedRows = tracksByRow.keys.toList()..sort();
+    b.writeln(
+      'occupied_tracks=${occupiedRows.isEmpty ? "none" : occupiedRows.map((row) => row + 1).join(",")}',
+    );
+    if (occupiedRows.isNotEmpty) {
+      b.writeln(
+        'top_occupied_track=${occupiedRows.first + 1} bottom_occupied_track=${occupiedRows.last + 1}',
+      );
+    }
 
     for (final r in p.rows) {
+      final rowTracks = tracksByRow[r.rowIndex] ?? const <AudioTrack>[];
       final roles = r.roleProbs.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
       final top = roles
           .take(3)
           .map((e) => '${e.key}:${(e.value * 100).round()}%')
           .join(', ');
-      final fx = r.effects.map((e) => e.name).join(', ');
+      final activeFxCount = r.effects.where((e) => !e.isBypassed).length;
+      final fxChain = _effectChainSnapshot(r.effects);
       final automationTargets = _automationTargetsSnapshotForRow(r);
 
       final overlaps = <String>[];
@@ -949,11 +1058,34 @@ class ChatPipeline {
       final interpretation = r.interpretation;
       final interpretationFlags = interpretation.flags.take(8).join(', ');
       final interpretationNotes = interpretation.notes.take(2).join(' | ');
+      final clipKinds = _rowClipKindSummary(rowTracks);
+      final rowLabels = _rowLabelSummary(rowTracks);
+      final fileHints = _rowFileSummary(rowTracks);
+      final instrumentHints = _rowInstrumentSummary(rowTracks);
+      final sampleHints = _rowSampleHintSummary(rowTracks);
+      final arrangementSketch = _rowArrangementSketch(rowTracks, p.bpm);
+      final midiState = _rowMidiStateSummary(rowTracks);
+      final coverageSummary = _rowCoverageSummary(rowTracks);
+      final referenceHints = _rowReferenceHintSummary(
+          interpretation: interpretation, rowTracks: rowTracks);
+      final rowPosition = _rowPositionSummary(r.rowIndex, p.rows.length);
+      final rowName = _rowNameForSnapshot(r.rowIndex, rowNames);
 
       b.writeln(
         'Track ${r.rowIndex + 1}: '
-        'isEmpty = ${r.clips.isEmpty} '
-        'fileName(s)=${r.clips.isEmpty ? '—' : r.clips.map((c) => c.fileName).join(', ')} '
+        '${rowName.isEmpty ? '' : 'row_name="$rowName" '}'
+        'row_position=$rowPosition '
+        'occupied_row_position=${_occupiedRowPositionSummary(r.rowIndex, occupiedRows)} '
+        'clip_count=${rowTracks.length} '
+        'has_audio=${r.hasAudio} '
+        'clip_kinds=[$clipKinds] '
+        'labels=[$rowLabels] '
+        'files=[$fileHints] '
+        'instruments=[$instrumentHints] '
+        'sample_hints=[$sampleHints] '
+        'arrangement={$arrangementSketch} '
+        'midi_state={$midiState} '
+        'coverage{$coverageSummary} '
         'rms=${r.approxRms.toStringAsFixed(3)} crest=${r.approxCrest.toStringAsFixed(2)} '
         'gain=${r.gain0to3.toStringAsFixed(2)} pan=${r.pan0To1.toStringAsFixed(2)} '
         'roles=[$top] role_consistency=${r.roleConsistency.toStringAsFixed(2)} '
@@ -974,19 +1106,24 @@ class ChatPipeline {
         'flags=[${interpretationFlags.isEmpty ? 'none' : interpretationFlags}]'
         '} '
         '${interpretationNotes.isEmpty ? '' : 'notes="$interpretationNotes" '}'
+        'reference_hints=[$referenceHints] '
         'overlaps=${overlaps.isEmpty ? "none" : overlaps.join(",")} '
-        'fx=[$fx] '
+        'fx_count=${r.effects.length} active_fx_count=$activeFxCount '
+        'fx_chain=[$fxChain] '
         'automation_targets=[$automationTargets]',
       );
     }
 
-    final masterFx = p.masterEffects.map((e) => e.name).join(', ');
+    final activeMasterFxCount =
+        p.masterEffects.where((e) => !e.isBypassed).length;
+    final masterFxChain = _effectChainSnapshot(p.masterEffects);
     final masterAutomationTargets = _automationTargetsSnapshotForMaster(p);
     b.writeln(
       'Master: '
       'gain=${p.masterGain0to3.toStringAsFixed(2)} '
       'pan=${p.masterPan0to1.toStringAsFixed(2)} '
-      'fx=[${masterFx.isEmpty ? '—' : masterFx}] '
+      'fx_count=${p.masterEffects.length} active_fx_count=$activeMasterFxCount '
+      'fx_chain=[$masterFxChain] '
       'automation_targets=[$masterAutomationTargets]',
     );
 
@@ -996,6 +1133,7 @@ class ChatPipeline {
   String _selectionSnapshot({
     required ProjectState project,
     required List<AudioTrack> audioTracks,
+    List<String> rowNames = const [],
     required List<int> selectedClipIndices,
     required int primarySelectedClipIndex,
     required int? selectedRowIndex,
@@ -1004,17 +1142,53 @@ class ChatPipeline {
     final out = StringBuffer();
     final validClipIndices =
         selectedClipIndices.where((i) => i >= 0).toSet().toList()..sort();
+    final tracksByRow = <int, List<AudioTrack>>{};
+    for (final track in audioTracks) {
+      final rowIndex = track.rowIndex;
+      if (rowIndex < 0) continue;
+      tracksByRow.putIfAbsent(rowIndex, () => <AudioTrack>[]).add(track);
+    }
+    final occupiedRows = tracksByRow.keys.toList()..sort();
 
     out.writeln('selected_row_index=${selectedRowIndex ?? -1}');
     out.writeln('selected_clip_indices=${validClipIndices.join(",")}');
     out.writeln('primary_selected_clip_index=$primarySelectedClipIndex');
     out.writeln(
+      'occupied_tracks=${occupiedRows.isEmpty ? "none" : occupiedRows.map((row) => row + 1).join(",")}',
+    );
+    if (occupiedRows.isNotEmpty) {
+      out.writeln(
+        'top_occupied_track=${occupiedRows.first + 1} bottom_occupied_track=${occupiedRows.last + 1}',
+      );
+    }
+    out.writeln(
       'master_automation_targets=${_automationTargetsSnapshotForMaster(project)}',
+    );
+    final masterActiveFxCount =
+        project.masterEffects.where((e) => !e.isBypassed).length;
+    final masterFxChain = _effectChainSnapshot(project.masterEffects);
+    out.writeln(
+      'master_context{gain=${project.masterGain0to3.toStringAsFixed(2)},pan=${project.masterPan0to1.toStringAsFixed(2)},fx_count=${project.masterEffects.length},active_fx_count=$masterActiveFxCount,fx_chain=[$masterFxChain]}',
     );
     if (selectedRowIndex != null &&
         selectedRowIndex >= 0 &&
         selectedRowIndex < project.rows.length) {
       final row = project.rows[selectedRowIndex];
+      final rowTracks = tracksByRow[selectedRowIndex] ?? const <AudioTrack>[];
+      final selectedFxChain = _effectChainSnapshot(row.effects);
+      final selectedActiveFxCount =
+          row.effects.where((e) => !e.isBypassed).length;
+      final flags = row.interpretation.flags.take(6).join(', ');
+      final coverageSummary = _rowCoverageSummary(rowTracks);
+      final arrangementSketch = _rowArrangementSketch(rowTracks, project.bpm);
+      final referenceHints = _rowReferenceHintSummary(
+        interpretation: row.interpretation,
+        rowTracks: rowTracks,
+      );
+      final rowName = _rowNameForSnapshot(selectedRowIndex, rowNames);
+      out.writeln(
+        'selected_row_context{row_index=$selectedRowIndex,track_number=${selectedRowIndex + 1},${rowName.isEmpty ? '' : 'row_name="$rowName",'}row_position=${_rowPositionSummary(selectedRowIndex, project.rows.length)},occupied_row_position=${_occupiedRowPositionSummary(selectedRowIndex, occupiedRows)},clip_count=${rowTracks.length},clip_kinds=[${_rowClipKindSummary(rowTracks)}],labels=[${_rowLabelSummary(rowTracks)}],files=[${_rowFileSummary(rowTracks)}],instruments=[${_rowInstrumentSummary(rowTracks)}],sample_hints=[${_rowSampleHintSummary(rowTracks)}],arrangement={$arrangementSketch},midi_state={${_rowMidiStateSummary(rowTracks)}},coverage={$coverageSummary},reference_hints=[$referenceHints],fx_count=${row.effects.length},active_fx_count=$selectedActiveFxCount,fx_chain=[$selectedFxChain],top_role=${row.interpretation.topRole},source_type=${row.interpretation.sourceType},flags=[${flags.isEmpty ? 'none' : flags}]}',
+      );
       out.writeln(
           'selected_row_automation_targets=${_automationTargetsSnapshotForRow(row)}');
     }
@@ -1036,10 +1210,296 @@ class ChatPipeline {
           (clip.trimEnd - clip.trimStart).inMilliseconds.toDouble();
       final fileName = clip.file.path.split('/').last;
       out.writeln(
-        'selected_clip[$clipIndex]{row=${clip.rowIndex},clip_kind=${clip.clipKind.wireName},start_ms=${rawStartMs.toStringAsFixed(1)},end_ms=${rawEndMs.toStringAsFixed(1)},file=$fileName,label=${clip.label}}',
+        'selected_clip[$clipIndex]{row_index=${clip.rowIndex},track_number=${clip.rowIndex + 1},row_position=${_rowPositionSummary(clip.rowIndex, project.rows.length)},occupied_row_position=${_occupiedRowPositionSummary(clip.rowIndex, occupiedRows)},clip_kind=${clip.clipKind.wireName},start_ms=${rawStartMs.toStringAsFixed(1)},end_ms=${rawEndMs.toStringAsFixed(1)},duration_ms=${(rawEndMs - rawStartMs).toStringAsFixed(1)},file=$fileName,label=${clip.label},instrument_id=${clip.instrumentId.isEmpty ? '—' : clip.instrumentId},instrument_name=${clip.instrumentName.isEmpty ? '—' : clip.instrumentName},sample_hints=[${_clipSampleHintSummary(clip)}]}',
       );
+      final midiSnapshot = _selectedMidiClipSnapshot(clipIndex, clip);
+      if (midiSnapshot.isNotEmpty) {
+        out.writeln(midiSnapshot);
+      }
     }
 
     return out.toString().trim();
+  }
+
+  String _selectedMidiClipSnapshot(int clipIndex, AudioTrack clip) {
+    if (!clip.isMidi || clip.midiNotes.isEmpty) return '';
+    final notes = clip.midiNotes.map((n) => n.copy()).toList(growable: false)
+      ..sort((a, b) {
+        final byStart = a.startBeat.compareTo(b.startBeat);
+        if (byStart != 0) return byStart;
+        return a.pitch.compareTo(b.pitch);
+      });
+    final minPitch = notes.map((n) => n.pitch).reduce(math.min);
+    final maxPitch = notes.map((n) => n.pitch).reduce(math.max);
+    final spanBeats = notes
+        .map((n) => n.startBeat + n.lengthBeats)
+        .fold<double>(0.0, math.max);
+    final polyphonic = <int, int>{};
+    var hasPolyphony = false;
+    for (final note in notes) {
+      final bucket = (note.startBeat * 1000.0).round();
+      final nextCount = (polyphonic[bucket] ?? 0) + 1;
+      polyphonic[bucket] = nextCount;
+      if (nextCount >= 2) {
+        hasPolyphony = true;
+      }
+    }
+    final dominantLengthBeats = _dominantMidiLengthBeats(notes);
+    final preview = notes.take(_kMaxMidiSnapshotNotes).map((n) {
+      final pitch = _midiPitchLabel(n.pitch);
+      final start = n.startBeat.toStringAsFixed(2);
+      final len = n.lengthBeats.toStringAsFixed(2);
+      return '$pitch@$start+$len';
+    }).join('|');
+    final truncated =
+        notes.length > _kMaxMidiSnapshotNotes ? ',truncated=true' : '';
+    return 'selected_clip_midi[$clipIndex]{note_count=${notes.length},span_beats=${spanBeats.toStringAsFixed(2)},pitch_range=${_midiPitchLabel(minPitch)}..${_midiPitchLabel(maxPitch)},polyphonic=$hasPolyphony,dominant_length_beats=${dominantLengthBeats.toStringAsFixed(2)},notes_preview=$preview$truncated}';
+  }
+
+  double _dominantMidiLengthBeats(List<MidiNote> notes) {
+    final counts = <int, int>{};
+    for (final note in notes) {
+      final bucket = (note.lengthBeats * 100.0).round();
+      counts[bucket] = (counts[bucket] ?? 0) + 1;
+    }
+    final ordered = counts.entries.toList()
+      ..sort((a, b) {
+        final byCount = b.value.compareTo(a.value);
+        if (byCount != 0) return byCount;
+        return a.key.compareTo(b.key);
+      });
+    if (ordered.isEmpty) return 0.0;
+    return ordered.first.key / 100.0;
+  }
+
+  String _rowNameForSnapshot(int rowIndex, List<String> rowNames) {
+    if (rowIndex < 0 || rowIndex >= rowNames.length) return '';
+    return rowNames[rowIndex].trim().replaceAll('"', "'");
+  }
+
+  String _rowPositionSummary(int rowIndex, int totalRows) {
+    if (rowIndex < 0 || totalRows <= 0) return 'unknown';
+    if (rowIndex == 0) return 'top-most';
+    if (rowIndex == totalRows - 1) return 'bottom-most';
+    return 'middle';
+  }
+
+  String _occupiedRowPositionSummary(int rowIndex, List<int> occupiedRows) {
+    if (rowIndex < 0) return 'unknown';
+    if (!occupiedRows.contains(rowIndex)) return 'not_occupied';
+    if (occupiedRows.isEmpty) return 'unknown';
+    if (rowIndex == occupiedRows.first) return 'top-most-occupied';
+    if (rowIndex == occupiedRows.last) return 'bottom-most-occupied';
+    return 'middle-occupied';
+  }
+
+  String _rowClipKindSummary(List<AudioTrack> rowTracks) {
+    if (rowTracks.isEmpty) return 'none';
+    final audioCount = rowTracks.where((t) => !t.isMidi).length;
+    final midiCount = rowTracks.where((t) => t.isMidi).length;
+    final out = <String>[];
+    if (audioCount > 0) out.add('audio:$audioCount');
+    if (midiCount > 0) out.add('midi:$midiCount');
+    return out.join(', ');
+  }
+
+  String _clipSampleHintSummary(AudioTrack clip) {
+    final hints = <String>{};
+    if (!clip.isMidi) {
+      hints.addAll(
+        AssistantActionUtils.sampleRoleHintsFromText(
+          '${clip.file.path.split('/').last} ${clip.label}',
+        ),
+      );
+    }
+    return hints.isEmpty ? 'none' : hints.join(',');
+  }
+
+  String _rowSampleHintSummary(List<AudioTrack> rowTracks) {
+    if (rowTracks.isEmpty) return 'none';
+    final counts = <String, int>{};
+    for (final clip in rowTracks) {
+      final summary = _clipSampleHintSummary(clip);
+      if (summary == 'none') continue;
+      for (final hint in summary
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)) {
+        counts[hint] = (counts[hint] ?? 0) + 1;
+      }
+    }
+    if (counts.isEmpty) return 'none';
+    final ordered = counts.entries.toList()
+      ..sort((a, b) {
+        final byCount = b.value.compareTo(a.value);
+        if (byCount != 0) return byCount;
+        return a.key.compareTo(b.key);
+      });
+    return ordered.map((entry) => '${entry.key}:${entry.value}').join(', ');
+  }
+
+  String _rowLabelSummary(List<AudioTrack> rowTracks) {
+    final labels = rowTracks
+        .map((t) => t.label.trim())
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .take(4)
+        .toList(growable: false);
+    return labels.isEmpty ? '—' : labels.join(', ');
+  }
+
+  String _rowFileSummary(List<AudioTrack> rowTracks) {
+    final fileNames = rowTracks
+        .map((t) => t.file.path.split('/').last.trim())
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .take(4)
+        .toList(growable: false);
+    return fileNames.isEmpty ? '—' : fileNames.join(', ');
+  }
+
+  String _rowInstrumentSummary(List<AudioTrack> rowTracks) {
+    final instrumentHints = rowTracks
+        .where((t) => t.isMidi)
+        .map((t) {
+          final name = t.instrumentName.trim();
+          final id = t.instrumentId.trim();
+          if (name.isNotEmpty && id.isNotEmpty) return '$name<$id>';
+          if (name.isNotEmpty) return name;
+          if (id.isNotEmpty) return id;
+          return '';
+        })
+        .where((s) => s.isNotEmpty)
+        .toSet()
+        .take(4)
+        .toList(growable: false);
+    return instrumentHints.isEmpty ? '—' : instrumentHints.join(', ');
+  }
+
+  String _rowMidiStateSummary(List<AudioTrack> rowTracks) {
+    final midiTracks = rowTracks
+        .where((track) => track.isMidi && track.midiNotes.isNotEmpty)
+        .toList(growable: false);
+    if (midiTracks.isEmpty) return 'none';
+    final notes = <MidiNote>[
+      for (final track in midiTracks) ...track.midiNotes.map((n) => n.copy()),
+    ]..sort((a, b) {
+        final byStart = a.startBeat.compareTo(b.startBeat);
+        if (byStart != 0) return byStart;
+        return a.pitch.compareTo(b.pitch);
+      });
+    final minPitch = notes.map((n) => n.pitch).reduce(math.min);
+    final maxPitch = notes.map((n) => n.pitch).reduce(math.max);
+    final spanBeats = notes
+        .map((n) => n.startBeat + n.lengthBeats)
+        .fold<double>(0.0, math.max);
+    final polyphonicCounts = <int, int>{};
+    var polyphonic = false;
+    for (final note in notes) {
+      final bucket = (note.startBeat * 1000.0).round();
+      final nextCount = (polyphonicCounts[bucket] ?? 0) + 1;
+      polyphonicCounts[bucket] = nextCount;
+      if (nextCount >= 2) polyphonic = true;
+    }
+    final dominantLengthBeats = _dominantMidiLengthBeats(notes);
+    final preview = notes.take(6).map((n) {
+      final pitch = _midiPitchLabel(n.pitch);
+      final start = n.startBeat.toStringAsFixed(2);
+      final len = n.lengthBeats.toStringAsFixed(2);
+      return '$pitch@$start+$len';
+    }).join('|');
+    final previewSuffix = notes.length > 6 ? ',preview_truncated=true' : '';
+    return 'clips=${midiTracks.length},note_count=${notes.length},span_beats=${spanBeats.toStringAsFixed(2)},pitch_range=${_midiPitchLabel(minPitch)}..${_midiPitchLabel(maxPitch)},polyphonic=$polyphonic,dominant_length_beats=${dominantLengthBeats.toStringAsFixed(2)},preview=$preview$previewSuffix';
+  }
+
+  String _rowCoverageSummary(List<AudioTrack> rowTracks) {
+    if (rowTracks.isEmpty) return 'start_ms=— end_ms=— longest_ms=0';
+    double minStartMs = double.infinity;
+    double maxEndMs = 0.0;
+    double longestMs = 0.0;
+    for (final track in rowTracks) {
+      final startMs = track.offset * 1000.0;
+      final durationMs =
+          (track.trimEnd - track.trimStart).inMilliseconds.toDouble();
+      final endMs = startMs + durationMs;
+      if (startMs < minStartMs) minStartMs = startMs;
+      if (endMs > maxEndMs) maxEndMs = endMs;
+      if (durationMs > longestMs) longestMs = durationMs;
+    }
+    return 'start_ms=${minStartMs.toStringAsFixed(1)} end_ms=${maxEndMs.toStringAsFixed(1)} longest_ms=${longestMs.toStringAsFixed(1)}';
+  }
+
+  String _rowArrangementSketch(List<AudioTrack> rowTracks, double bpm) {
+    final audioTracks = rowTracks.where((track) => !track.isMidi).toList()
+      ..sort((a, b) {
+        final byOffset = a.offset.compareTo(b.offset);
+        if (byOffset != 0) return byOffset;
+        return a.label.compareTo(b.label);
+      });
+    if (audioTracks.isEmpty) return 'none';
+    final preview = audioTracks.take(8).map((clip) {
+      final startBeat = (clip.offset * bpm) / 60.0;
+      return _timelineBeatLabel(startBeat);
+    }).join('|');
+    final maxStartBeat =
+        audioTracks.map((clip) => (clip.offset * bpm) / 60.0).fold<double>(
+              0.0,
+              math.max,
+            );
+    final estimatedBars = math.max(1, (maxStartBeat / 4.0).ceil());
+    final truncated = audioTracks.length > 8 ? ',truncated=true' : '';
+    return 'audio_hits=${audioTracks.length},bars≈$estimatedBars,onsets=$preview$truncated';
+  }
+
+  String _rowReferenceHintSummary({
+    required RowInterpretationState interpretation,
+    required List<AudioTrack> rowTracks,
+  }) {
+    if (rowTracks.isEmpty) return 'none';
+    final hints = <String>[];
+    final nonMidiTracks =
+        rowTracks.where((t) => !t.isMidi).toList(growable: false);
+    final singleLongClip = nonMidiTracks.length == 1 &&
+        (nonMidiTracks.first.trimEnd - nonMidiTracks.first.trimStart)
+                .inMilliseconds >=
+            45000;
+    final longFormAudio = nonMidiTracks.any(
+      (t) => (t.trimEnd - t.trimStart).inMilliseconds >= 45000,
+    );
+    if (singleLongClip) hints.add('single_long_clip');
+    if (longFormAudio) hints.add('long_form_audio');
+    if (interpretation.fullMixLikely) hints.add('full_mix_like');
+    if (interpretation.busLikeLikely) hints.add('bus_like');
+    if (interpretation.wideStereoLikely) hints.add('wide_stereo');
+    if (interpretation.alreadyLoudLikely) hints.add('already_loud');
+    return hints.isEmpty ? 'none' : hints.join(', ');
+  }
+
+  String _midiPitchLabel(int midi) {
+    const names = <String>[
+      'C',
+      'C#',
+      'D',
+      'D#',
+      'E',
+      'F',
+      'F#',
+      'G',
+      'G#',
+      'A',
+      'A#',
+      'B',
+    ];
+    final safe = midi.clamp(0, 127);
+    final name = names[safe % 12];
+    final octave = (safe ~/ 12) - 1;
+    return '$name$octave';
+  }
+
+  String _timelineBeatLabel(double startBeat) {
+    if (!startBeat.isFinite || startBeat < 0) return 'm1:b1.00';
+    final measure = (startBeat ~/ 4) + 1;
+    final beatInMeasure = (startBeat % 4.0) + 1.0;
+    return 'm$measure:b${beatInMeasure.toStringAsFixed(2)}';
   }
 }

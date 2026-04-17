@@ -12,16 +12,6 @@
 		<array>
 			<dict>
 				<key>CFBundleTypeName</key>
-				<string>Audio File</string>
-				<key>LSHandlerRank</key>
-				<string>Owner</string>
-				<key>LSItemContentTypes</key>
-				<array>
-					<string>public.audio</string>
-				</array>
-			</dict>
-			<dict>
-				<key>CFBundleTypeName</key>
 				<string>Mixroom Project</string>
 				<key>LSHandlerRank</key>
 				<string>Owner</string>

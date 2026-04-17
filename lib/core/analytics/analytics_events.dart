@@ -50,12 +50,22 @@ class AnalyticsEvents {
   static const String remoteAnnouncementShownName = 'remote_announcement_shown';
   static const String remoteAnnouncementInteractedName =
       'remote_announcement_interacted';
+  static const String appUpdatePromptShownName = 'app_update_prompt_shown';
+  static const String appUpdatePromptInteractedName =
+      'app_update_prompt_interacted';
   static const String aiToolCalledName = 'ai_tool_called';
   static const String aiFeatureViewedName = 'ai_feature_viewed';
   static const String subscriptionStartedName = 'subscription_started';
   static const String purchaseFailedName = 'purchase_failed';
   static const String aiUsageLimitHitName = 'ai_usage_limit_hit';
   static const String uploadFailedName = 'upload_failed';
+  static const String dawPanelOpenedName = 'daw_panel_opened';
+  static const String dawPanelClosedName = 'daw_panel_closed';
+  static const String pluginInsertedName = 'plugin_inserted';
+  static const String pluginRemovedName = 'plugin_removed';
+  static const String pluginParameterCommittedName =
+      'plugin_parameter_committed';
+  static const String uiClickName = 'ui_click';
 
   static AnalyticsEvent appOpened({
     required String sessionId,
@@ -167,6 +177,40 @@ class AnalyticsEvents {
       uploadFailedName,
       properties: _compact(<String, Object?>{
         'file_size': fileSize,
+        'error_code': errorCode,
+      }),
+    );
+  }
+
+  static AnalyticsEvent appUpdatePromptShown({
+    required String promptType,
+    required String currentVersion,
+    required String latestVersion,
+  }) {
+    return AnalyticsEvent(
+      appUpdatePromptShownName,
+      properties: _compact(<String, Object?>{
+        'prompt_type': promptType,
+        'current_version': currentVersion,
+        'latest_version': latestVersion,
+      }),
+    );
+  }
+
+  static AnalyticsEvent appUpdatePromptInteracted({
+    required String action,
+    required String promptType,
+    required String currentVersion,
+    required String latestVersion,
+    String? errorCode,
+  }) {
+    return AnalyticsEvent(
+      appUpdatePromptInteractedName,
+      properties: _compact(<String, Object?>{
+        'action': action,
+        'prompt_type': promptType,
+        'current_version': currentVersion,
+        'latest_version': latestVersion,
         'error_code': errorCode,
       }),
     );
@@ -574,6 +618,13 @@ class AnalyticsEvents {
   static AnalyticsEvent aiToolCalled({
     required String toolName,
     required String projectId,
+    String? aiFeature,
+    String? toolFamily,
+    String? toolVariant,
+    String? primaryActionType,
+    String? actionTypes,
+    int? actionCount,
+    bool? producerCaptureEnabled,
     String? promptTraceId,
   }) {
     return AnalyticsEvent(
@@ -581,6 +632,13 @@ class AnalyticsEvents {
       properties: _compact(<String, Object?>{
         'tool_name': toolName,
         'project_id': projectId,
+        'ai_feature': aiFeature,
+        'tool_family': toolFamily,
+        'tool_variant': toolVariant,
+        'primary_action_type': primaryActionType,
+        'action_types': actionTypes,
+        'action_count': actionCount,
+        'producer_capture_enabled': producerCaptureEnabled,
         'prompt_trace_id': promptTraceId,
       }),
     );
@@ -619,6 +677,112 @@ class AnalyticsEvents {
       purchaseFailedName,
       properties: _compact(<String, Object?>{
         'error_code': errorCode,
+      }),
+    );
+  }
+
+  static AnalyticsEvent dawPanelOpened({
+    required String panelId,
+    String? projectId,
+  }) {
+    return AnalyticsEvent(
+      dawPanelOpenedName,
+      properties: _compact(<String, Object?>{
+        'panel_id': panelId,
+        'project_id': projectId,
+      }),
+    );
+  }
+
+  static AnalyticsEvent dawPanelClosed({
+    required String panelId,
+    required int durationMs,
+    String? projectId,
+  }) {
+    return AnalyticsEvent(
+      dawPanelClosedName,
+      properties: _compact(<String, Object?>{
+        'panel_id': panelId,
+        'duration_ms': durationMs,
+        'project_id': projectId,
+      }),
+    );
+  }
+
+  static AnalyticsEvent pluginInserted({
+    required String pluginName,
+    required String scope,
+    String? projectId,
+    int? rowIndex,
+  }) {
+    return AnalyticsEvent(
+      pluginInsertedName,
+      properties: _compact(<String, Object?>{
+        'plugin_name': pluginName,
+        'scope': scope,
+        'project_id': projectId,
+        'row_index': rowIndex,
+      }),
+    );
+  }
+
+  static AnalyticsEvent pluginRemoved({
+    required String pluginName,
+    required String scope,
+    String? projectId,
+    int? rowIndex,
+  }) {
+    return AnalyticsEvent(
+      pluginRemovedName,
+      properties: _compact(<String, Object?>{
+        'plugin_name': pluginName,
+        'scope': scope,
+        'project_id': projectId,
+        'row_index': rowIndex,
+      }),
+    );
+  }
+
+  static AnalyticsEvent pluginParameterCommitted({
+    required String pluginName,
+    required String paramId,
+    required String scope,
+    String? projectId,
+    int? rowIndex,
+    Object? oldValue,
+    Object? newValue,
+  }) {
+    return AnalyticsEvent(
+      pluginParameterCommittedName,
+      properties: _compact(<String, Object?>{
+        'plugin_name': pluginName,
+        'param_id': paramId,
+        'scope': scope,
+        'project_id': projectId,
+        'row_index': rowIndex,
+        'old_value': oldValue,
+        'new_value': newValue,
+      }),
+    );
+  }
+
+  static AnalyticsEvent uiClick({
+    required String controlId,
+    required String surface,
+    required String controlType,
+    String? projectId,
+    Object? value,
+    Map<String, Object?> extra = const <String, Object?>{},
+  }) {
+    return AnalyticsEvent(
+      uiClickName,
+      properties: _compact(<String, Object?>{
+        'control_id': controlId,
+        'surface': surface,
+        'control_type': controlType,
+        'project_id': projectId,
+        'value': value,
+        ...extra,
       }),
     );
   }

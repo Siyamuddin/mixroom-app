@@ -812,10 +812,49 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> beginProjectClipLoad() async {
+    try {
+      await _ch.invokeMethod('beginProjectClipLoad');
+    } on PlatformException catch (e) {
+      _logError('beginProjectClipLoad', e);
+    }
+  }
+
+  static Future<void> endProjectClipLoad() async {
+    try {
+      await _ch.invokeMethod('endProjectClipLoad');
+    } on PlatformException catch (e) {
+      _logError('endProjectClipLoad', e);
+    }
+  }
+
+  static Future<String?> getBundledInstrumentRootPath() async {
+    try {
+      return await _ch.invokeMethod<String>('getBundledInstrumentRootPath');
+    } on PlatformException catch (e) {
+      _logError('getBundledInstrumentRootPath', e);
+      return null;
+    }
+  }
+
+  static Future<List<String>> mountBundledSamplePacks() async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>('mountBundledSamplePacks');
+      if (raw == null) return const <String>[];
+      return raw
+          .map((entry) => entry?.toString().trim() ?? '')
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('mountBundledSamplePacks', e);
+      return const <String>[];
+    }
+  }
+
   // ===============================
   // NEW CLIP-LEVEL API
   // ===============================
-  static Future<void> loadClip(
+  static Future<bool> loadClip(
     int clipIndex,
     int rowId,
     String path, {
@@ -824,7 +863,7 @@ class JuceAudioEngine {
     double inFileOffsetSec = 0.0,
   }) async {
     try {
-      await _ch.invokeMethod('loadClip', {
+      final ok = await _ch.invokeMethod<bool>('loadClip', {
         'clip': clipIndex,
         'rowId': rowId,
         'row': rowId, // backward compatibility
@@ -833,8 +872,10 @@ class JuceAudioEngine {
         'lengthSec': lengthSec,
         'inFileOffsetSec': inFileOffsetSec,
       });
+      return ok ?? false;
     } on PlatformException catch (e) {
       _logError('loadClip', e);
+      return false;
     }
   }
 
@@ -1053,23 +1094,19 @@ class JuceAudioEngine {
   // ===============================
   // NEW ROW (TRACK BUS) API
   // ===============================
-  static Future<void> insertTrackEffect(int row, String path) async {
+  static Future<bool> insertTrackEffect(int row, String path) async {
     try {
       final ok = await _ch.invokeMethod<bool>('insertTrackEffect', {
         'row': row,
         'path': path,
       });
-      if (ok == false) {
-        throw PlatformException(
-          code: 'insert_track_effect_failed',
-          message: 'Native insertTrackEffect returned false',
-          details: {'row': row, 'path': path},
-        );
-      }
+      return ok ?? false;
     } on MissingPluginException catch (e) {
       _logError('insertTrackEffect', e);
+      return false;
     } on PlatformException catch (e) {
       _logError('insertTrackEffect', e);
+      return false;
     }
   }
 
@@ -1321,21 +1358,17 @@ class JuceAudioEngine {
   // ===============================
   // MASTER BUS API
   // ===============================
-  static Future<void> insertMasterEffect(String path) async {
+  static Future<bool> insertMasterEffect(String path) async {
     try {
       final ok =
           await _ch.invokeMethod<bool>('insertMasterEffect', {'path': path});
-      if (ok == false) {
-        throw PlatformException(
-          code: 'insert_master_effect_failed',
-          message: 'Native insertMasterEffect returned false',
-          details: {'path': path},
-        );
-      }
+      return ok ?? false;
     } on MissingPluginException catch (e) {
       _logError('insertMasterEffect', e);
+      return false;
     } on PlatformException catch (e) {
       _logError('insertMasterEffect', e);
+      return false;
     }
   }
 
@@ -1632,11 +1665,19 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<Map<String, dynamic>> analyzeAudioForPrompt(String path) async {
+  static Future<Map<String, dynamic>> analyzeAudioForPrompt(
+    String path, {
+    double trimStartMs = 0.0,
+    double? trimEndMs,
+  }) async {
     try {
       final raw = await _ch.invokeMapMethod<String, dynamic>(
         'analyzeAudioForPrompt',
-        {'path': path},
+        {
+          'path': path,
+          'trimStartMs': trimStartMs,
+          if (trimEndMs != null) 'trimEndMs': trimEndMs,
+        },
       );
       return raw == null
           ? const <String, dynamic>{}
@@ -2015,6 +2056,76 @@ class JuceAudioEngine {
       return raw.map((e) => (e as num).toDouble()).toList(growable: false);
     } on PlatformException catch (e) {
       _logError('getMasterEqWaveform', e);
+      return const <double>[];
+    }
+  }
+
+  static Future<List<double>> getRowStereoScope(
+    int row,
+    int effect, {
+    int pointCount = 256,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getRowStereoScope',
+        {'row': row, 'effect': effect, 'pointCount': pointCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getRowStereoScope', e);
+      return const <double>[];
+    }
+  }
+
+  static Future<List<double>> getMasterStereoScope(
+    int effect, {
+    int pointCount = 256,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getMasterStereoScope',
+        {'effect': effect, 'pointCount': pointCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getMasterStereoScope', e);
+      return const <double>[];
+    }
+  }
+
+  static Future<List<double>> getRowShaperPreview(
+    int row,
+    int effect, {
+    int pointCount = 192,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getRowShaperPreview',
+        {'row': row, 'effect': effect, 'pointCount': pointCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getRowShaperPreview', e);
+      return const <double>[];
+    }
+  }
+
+  static Future<List<double>> getMasterShaperPreview(
+    int effect, {
+    int pointCount = 192,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getMasterShaperPreview',
+        {'effect': effect, 'pointCount': pointCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getMasterShaperPreview', e);
       return const <double>[];
     }
   }

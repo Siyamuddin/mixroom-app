@@ -725,7 +725,7 @@ class _VideoSequencerEditorScreenState
   Future<Duration?> _probeMediaDuration(String path) async {
     try {
       final escaped = _ff(path);
-      final session = await FFprobeKit.execute(
+      final session = await executeQuietFfprobe(
           '-v quiet -print_format json -show_format "$escaped"');
       final output = await session.getOutput();
       if (output == null || output.trim().isEmpty) return null;
@@ -745,7 +745,7 @@ class _VideoSequencerEditorScreenState
   Future<bool> _probeHasAudioStream(String path) async {
     try {
       final escaped = _ff(path);
-      final session = await FFprobeKit.execute(
+      final session = await executeQuietFfprobe(
           '-v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$escaped"');
       final output = await session.getOutput();
       if (output == null) return false;

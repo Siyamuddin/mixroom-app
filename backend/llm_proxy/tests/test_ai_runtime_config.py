@@ -94,6 +94,22 @@ class AiRuntimeConfigTests(unittest.TestCase):
         self.assertEqual(runtime["prompt_cache_retention"], "24h")
         self.assertEqual(runtime["source"], "default")
 
+    def test_default_runtime_uses_none_reasoning_for_gpt54_models(self) -> None:
+        runtime = ai_runtime_config.get_ai_feature_runtime(
+            "ai_chat",
+            fallback_model="gpt-5.4-nano",
+        )
+
+        self.assertEqual(runtime["reasoning"], {"effort": "none"})
+
+    def test_default_runtime_uses_low_reasoning_for_gpt54_mini(self) -> None:
+        runtime = ai_runtime_config.get_ai_feature_runtime(
+            "ai_chat",
+            fallback_model="gpt-5.4-mini",
+        )
+
+        self.assertEqual(runtime["reasoning"], {"effort": "low"})
+
 
 if __name__ == "__main__":
     unittest.main()

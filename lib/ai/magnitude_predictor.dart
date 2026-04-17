@@ -38,6 +38,26 @@ class MagnitudeActionDebugEntry {
       'dropped': dropped,
     };
   }
+
+  factory MagnitudeActionDebugEntry.fromJson(Map<String, dynamic> json) {
+    final before = json['before'];
+    final after = json['after'];
+    return MagnitudeActionDebugEntry(
+      actionIndex: (json['action_index'] as num?)?.toInt() ?? 0,
+      actionType: json['action_type']?.toString() ?? '',
+      before: before is Map<String, dynamic>
+          ? before
+          : (before is Map ? Map<String, dynamic>.from(before) : const {}),
+      after: after is Map<String, dynamic>
+          ? after
+          : (after is Map ? Map<String, dynamic>.from(after) : null),
+      applyScore: (json['apply_score'] as num?)?.toDouble(),
+      rawMagnitude: (json['raw_magnitude'] as num?)?.toDouble(),
+      finalScale: (json['final_scale'] as num?)?.toDouble(),
+      decision: json['decision']?.toString() ?? '',
+      dropped: json['dropped'] == true,
+    );
+  }
 }
 
 class MagnitudeRefineResult {
@@ -45,12 +65,14 @@ class MagnitudeRefineResult {
   final bool fallbackUsed;
   final String? fallbackReason;
   final List<MagnitudeActionDebugEntry> debugEntries;
+  final Map<String, dynamic> observability;
 
   const MagnitudeRefineResult({
     required this.actions,
     required this.fallbackUsed,
     this.fallbackReason,
     this.debugEntries = const [],
+    this.observability = const {},
   });
 }
 
@@ -68,6 +90,7 @@ abstract class MixingMagnitudePredictor {
     required GoalVector goal,
     required List<MixAction> actions,
     required bool strict,
+    String? projectId,
   });
 }
 
@@ -98,6 +121,7 @@ class NoopMixingMagnitudePredictor implements MixingMagnitudePredictor {
     required GoalVector goal,
     required List<MixAction> actions,
     required bool strict,
+    String? projectId,
   }) async {
     return MagnitudeRefineResult(
       actions: actions,

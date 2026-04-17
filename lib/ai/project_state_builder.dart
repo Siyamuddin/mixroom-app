@@ -1,8 +1,6 @@
 import 'dart:collection';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
@@ -11,6 +9,10 @@ import '../models/project_state.dart';
 import 'instrument_classifier.dart';
 
 const int _kProjectAnalysisMaxMono16kSamples = 16000 * 30;
+const int _kPromptStatsWindowOutputSamples = 12000;
+const int _kPromptStatsWindowCount = 6;
+const int _kPromptStatsMaxSamples =
+    _kPromptStatsWindowOutputSamples * _kPromptStatsWindowCount;
 const Map<String, double> _kFallbackPromptRoleProbs = <String, double>{
   'vocals': 0.17,
   'drums': 0.17,
@@ -22,11 +24,14 @@ const Map<String, double> _kFallbackPromptRoleProbs = <String, double>{
 
 class ProjectStateBuilder {
   static const int _kMaxPersistentNativePromptAnalysisEntries = 256;
+  static const int _kMaxPersistentClipAnalysisEntries = 256;
 
   final InstrumentClassifier classifier;
   final int maxRows;
   final LinkedHashMap<String, _CachedNativePromptAnalysis>
       _persistentNativePromptAnalysis = LinkedHashMap();
+  final LinkedHashMap<String, _CachedClipPromptAnalysis>
+      _persistentClipPromptAnalysis = LinkedHashMap();
 
   ProjectStateBuilder({required this.classifier, this.maxRows = 0});
 
@@ -38,6 +43,15 @@ class ProjectStateBuilder {
       return '$path|unavailable';
     }
   }
+
+  String _promptAnalysisCacheKey(AudioTrack track) =>
+      '${track.file.path}|${track.trimStart.inMilliseconds}|${track.trimEnd.inMilliseconds}';
+
+  String _promptAnalysisSignature(
+    String baseSignature,
+    AudioTrack track,
+  ) =>
+      '$baseSignature|${track.trimStart.inMilliseconds}|${track.trimEnd.inMilliseconds}';
 
   Map<String, dynamic>? _loadPersistentNativePromptAnalysis(
     String path,
@@ -68,6 +82,39 @@ class ProjectStateBuilder {
     }
   }
 
+  _CachedClipPromptAnalysis? _loadPersistentClipPromptAnalysis(
+    String path,
+    String signature,
+  ) {
+    final cached = _persistentClipPromptAnalysis.remove(path);
+    if (cached == null) return null;
+    if (cached.signature != signature) return null;
+    _persistentClipPromptAnalysis[path] = cached;
+    return cached;
+  }
+
+  void _storePersistentClipPromptAnalysis(
+    String path,
+    String signature, {
+    required Map<String, double> roleProbs,
+    required Map<String, double> audioStats,
+    required Map<String, double> stereoStats,
+  }) {
+    _persistentClipPromptAnalysis.remove(path);
+    _persistentClipPromptAnalysis[path] = _CachedClipPromptAnalysis(
+      signature: signature,
+      roleProbs: Map<String, double>.from(roleProbs),
+      audioStats: Map<String, double>.from(audioStats),
+      stereoStats: Map<String, double>.from(stereoStats),
+    );
+    while (_persistentClipPromptAnalysis.length >
+        _kMaxPersistentClipAnalysisEntries) {
+      _persistentClipPromptAnalysis.remove(
+        _persistentClipPromptAnalysis.keys.first,
+      );
+    }
+  }
+
   Future<ProjectState> build({
     required List<AudioTrack> audioTracks,
     required double bpmFallback,
@@ -81,14 +128,16 @@ class ProjectStateBuilder {
     int inferredRows = 0;
     if (rowGain.length > inferredRows) inferredRows = rowGain.length;
     if (rowPan.length > inferredRows) inferredRows = rowPan.length;
-    if (rowAutomation.length > inferredRows)
+    if (rowAutomation.length > inferredRows) {
       inferredRows = rowAutomation.length;
+    }
     if (roleOverrides.isNotEmpty) {
       final overrideMax = roleOverrides.keys
           .where((k) => k >= 0)
           .fold<int>(-1, (acc, v) => math.max(acc, v));
-      if (overrideMax >= 0)
+      if (overrideMax >= 0) {
         inferredRows = math.max(inferredRows, overrideMax + 1);
+      }
     }
     for (final t in audioTracks) {
       if (t.rowIndex >= 0) {
@@ -267,29 +316,33 @@ class ProjectStateBuilder {
       for (int i = 0; i < rowTracks.length; i++) {
         final clip = rowTracks[i];
         final clipPath = clip.file.path;
+        final analysisKey = _promptAnalysisCacheKey(clip);
         final durMs =
             (i < clipDurMsByRow[row].length) ? clipDurMsByRow[row][i] : 0.0;
         final w = durMs.clamp(
             100.0, 30000.0); // weight by duration, clamp to avoid extremes
 
-        Map<String, double>? probs = roleProbCache[clipPath];
+        Map<String, double>? probs = roleProbCache[analysisKey];
         Map<String, double>? stereoStats = stereoStatsCache[clipPath];
-        Map<String, double>? stats = monoStatsCache[clipPath];
+        Map<String, double>? stats = monoStatsCache[analysisKey];
         if (defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS) {
-          var nativeAnalysis = nativePromptAnalysisCache[clipPath];
+          var nativeAnalysis = nativePromptAnalysisCache[analysisKey];
           if (nativeAnalysis == null) {
-            final signature = clipPathSignatureCache.putIfAbsent(
+            final baseSignature = clipPathSignatureCache.putIfAbsent(
               clipPath,
               () => _clipPathSignature(clipPath),
             );
+            final signature = _promptAnalysisSignature(baseSignature, clip);
             nativeAnalysis =
-                _loadPersistentNativePromptAnalysis(clipPath, signature);
+                _loadPersistentNativePromptAnalysis(analysisKey, signature);
           }
           if (nativeAnalysis == null) {
             try {
               nativeAnalysis = await JuceAudioEngine.analyzeAudioForPrompt(
                 clipPath,
+                trimStartMs: clip.trimStart.inMilliseconds.toDouble(),
+                trimEndMs: clip.trimEnd.inMilliseconds.toDouble(),
               );
             } catch (error) {
               debugPrint(
@@ -297,34 +350,53 @@ class ProjectStateBuilder {
               );
               nativeAnalysis = const <String, dynamic>{};
             }
-            final signature = clipPathSignatureCache.putIfAbsent(
+            final baseSignature = clipPathSignatureCache.putIfAbsent(
               clipPath,
               () => _clipPathSignature(clipPath),
             );
+            final signature = _promptAnalysisSignature(baseSignature, clip);
             _storePersistentNativePromptAnalysis(
-              clipPath,
+              analysisKey,
               signature,
               nativeAnalysis,
             );
           }
-          nativePromptAnalysisCache[clipPath] = nativeAnalysis;
+          nativePromptAnalysisCache[analysisKey] = nativeAnalysis;
 
           probs = probs ?? _mapToDoubleMap(nativeAnalysis['roleProbs']);
           if (probs.isEmpty) {
             probs = _kFallbackPromptRoleProbs;
           }
-          roleProbCache[clipPath] = probs;
+          roleProbCache[analysisKey] = probs;
 
           stats = stats ?? _mapToDoubleMap(nativeAnalysis['audioStats']);
           if (stats.isEmpty) {
             stats = _analyzePcm16k(const <double>[]);
           }
-          monoStatsCache[clipPath] = stats;
+          monoStatsCache[analysisKey] = stats;
           stereoStats = const <String, double>{};
           stereoStatsCache[clipPath] = stereoStats;
         } else {
+          final baseSignature = clipPathSignatureCache.putIfAbsent(
+            clipPath,
+            () => _clipPathSignature(clipPath),
+          );
+          final signature = _promptAnalysisSignature(baseSignature, clip);
+          final persistentAnalysis = _loadPersistentClipPromptAnalysis(
+            analysisKey,
+            signature,
+          );
+          if (persistentAnalysis != null) {
+            probs = persistentAnalysis.roleProbs;
+            stats = persistentAnalysis.audioStats;
+            stereoStats = persistentAnalysis.stereoStats;
+            roleProbCache[analysisKey] = probs;
+            monoStatsCache[analysisKey] = stats;
+            stereoStatsCache[clipPath] = stereoStats;
+          }
+
           List<double>? pcm = monoPcmCache[clipPath];
-          if (pcm == null) {
+          if (pcm == null && (probs == null || stats == null)) {
             try {
               final pcmRaw =
                   await JuceAudioEngine.decodeAudioMono16kForAnalysis(
@@ -342,11 +414,16 @@ class ProjectStateBuilder {
           }
 
           if (probs == null) {
+            final pcmForAnalysis = _sparsePromptAnalysisSlice(
+              pcm ?? const <double>[],
+              trimStartMs: clip.trimStart.inMilliseconds.toDouble(),
+              trimEndMs: clip.trimEnd.inMilliseconds.toDouble(),
+            );
             final Float32List pcmF32 = Float32List.fromList(
-              pcm.map((x) => x.toDouble()).toList(growable: false),
+              pcmForAnalysis.map((x) => x.toDouble()).toList(growable: false),
             );
             probs = await classifier.classifyAudio(pcmF32);
-            roleProbCache[clipPath] = probs;
+            roleProbCache[analysisKey] = probs;
           }
 
           if (stereoStats == null) {
@@ -363,9 +440,24 @@ class ProjectStateBuilder {
           }
 
           if (stats == null) {
-            stats = _analyzePcm16k(pcm, stereoStats: stereoStats);
-            monoStatsCache[clipPath] = stats;
+            stats = _analyzePcm16k(
+              _sparsePromptAnalysisSlice(
+                pcm ?? const <double>[],
+                trimStartMs: clip.trimStart.inMilliseconds.toDouble(),
+                trimEndMs: clip.trimEnd.inMilliseconds.toDouble(),
+              ),
+              stereoStats: stereoStats,
+            );
+            monoStatsCache[analysisKey] = stats;
           }
+
+          _storePersistentClipPromptAnalysis(
+            analysisKey,
+            signature,
+            roleProbs: probs,
+            audioStats: stats,
+            stereoStats: stereoStats,
+          );
         }
 
         probs.forEach((k, v) {
@@ -975,8 +1067,7 @@ Map<String, double> _analyzePcm16k(
     };
   }
 
-  // Use at most ~1.5 sec for speed
-  final n = math.min(pcm.length, 24000);
+  final n = math.min(pcm.length, _kPromptStatsMaxSamples);
   final x = pcm.sublist(0, n);
 
   double sumSq = 0.0;
@@ -1087,6 +1178,53 @@ Map<String, double> _analyzePcm16k(
     'sibilance': sibilance,
     'bassiness': bassiness,
   };
+}
+
+List<double> _sparsePromptAnalysisSlice(
+  List<double> pcm, {
+  required double trimStartMs,
+  required double trimEndMs,
+}) {
+  if (pcm.isEmpty) return const <double>[];
+
+  const samplesPerMs = 16.0;
+  final safeStartMs = trimStartMs.isFinite ? math.max(0.0, trimStartMs) : 0.0;
+  final safeEndMs = trimEndMs.isFinite ? math.max(safeStartMs, trimEndMs) : 0.0;
+
+  final startSample = math.min(
+    pcm.length,
+    math.max(0, (safeStartMs * samplesPerMs).round()),
+  );
+  var endSample = safeEndMs > safeStartMs
+      ? math.min(
+          pcm.length,
+          math.max(startSample, (safeEndMs * samplesPerMs).round()),
+        )
+      : pcm.length;
+  if (endSample <= startSample) {
+    endSample = pcm.length;
+  }
+  final available = endSample - startSample;
+  if (available <= 0) return const <double>[];
+  if (available <= _kPromptStatsWindowOutputSamples) {
+    return pcm.sublist(startSample, endSample);
+  }
+
+  final maxOffset = available - _kPromptStatsWindowOutputSamples;
+  final sparse = <double>[];
+  for (int i = 0; i < _kPromptStatsWindowCount; i++) {
+    final t = _kPromptStatsWindowCount <= 1
+        ? 0.5
+        : i / (_kPromptStatsWindowCount - 1);
+    final offset = startSample + (t * maxOffset).round();
+    final windowEnd = math.min(
+      endSample,
+      offset + _kPromptStatsWindowOutputSamples,
+    );
+    if (windowEnd <= offset) continue;
+    sparse.addAll(pcm.sublist(offset, windowEnd));
+  }
+  return sparse.isEmpty ? pcm.sublist(startSample, endSample) : sparse;
 }
 
 double _goertzelMag(List<double> x, double fs, double freq) {
@@ -1408,5 +1546,19 @@ class _CachedNativePromptAnalysis {
   const _CachedNativePromptAnalysis({
     required this.signature,
     required this.payload,
+  });
+}
+
+class _CachedClipPromptAnalysis {
+  final String signature;
+  final Map<String, double> roleProbs;
+  final Map<String, double> audioStats;
+  final Map<String, double> stereoStats;
+
+  const _CachedClipPromptAnalysis({
+    required this.signature,
+    required this.roleProbs,
+    required this.audioStats,
+    required this.stereoStats,
   });
 }

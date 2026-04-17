@@ -775,6 +775,224 @@ class UsersApiHandlerTests(unittest.TestCase):
         payload = json.loads(result["body"])
         self.assertEqual(payload.get("onboarding_state"), "signup_complete_welcome_seen")
 
+    def test_patch_me_syncs_stibee_before_persisting_profile(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-1",
+            "email": "user@example.com",
+            "email_lc": "user@example.com",
+            "display_name": "User Example",
+            "email_verified": True,
+            "cognito_username": "user@example.com",
+            "auth_provider": "email",
+            "username": "mixroomer",
+            "username_lc": "mixroomer",
+            "birthdate": "1998-08-09",
+            "music_profile": None,
+            "profile_status": "active",
+            "onboarding_state": "profile_ready",
+            "accepted_terms_version": None,
+            "accepted_privacy_version": None,
+            "accepted_at": None,
+            "newsletter_opt_in": False,
+            "newsletter_opt_in_at": None,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "last_seen_at": "2026-01-01T00:00:00+00:00",
+            "schema_version": 4,
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {
+            "sub": "user-1",
+            "email": "user@example.com",
+            "email_verified": "true",
+            "cognito:username": "user@example.com",
+        }
+
+        def _assert_sync(*, previous_profile, next_profile, locale_code):
+            self.assertEqual(locale_code, "ko")
+            self.assertEqual(previous_profile["onboarding_state"], "profile_ready")
+            self.assertEqual(next_profile["onboarding_state"], "signup_complete")
+            self.assertEqual(next_profile["newsletter_opt_in"], True)
+            self.assertEqual(repo.upsert_calls, [])
+
+        with mock.patch.object(
+            users_module,
+            "sync_user_profile",
+            side_effect=_assert_sync,
+        ) as sync_mock:
+            result = users_module.handler(
+                {
+                    "rawPath": "/v1/users/me",
+                    "requestContext": {"http": {"method": "PATCH"}},
+                    "body": json.dumps(
+                        {
+                            "accepted_terms_version": "2026-03-10",
+                            "accepted_privacy_version": "2026-03-10",
+                            "newsletter_opt_in": True,
+                            "locale_code": "ko",
+                        }
+                    ),
+                },
+                object(),
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        sync_mock.assert_called_once()
+        self.assertEqual(len(repo.upsert_calls), 1)
+        self.assertEqual(repo.upsert_calls[0]["profile"]["newsletter_opt_in"], True)
+
+    def test_patch_me_persists_locale_code(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-1",
+            "email": "user@example.com",
+            "email_lc": "user@example.com",
+            "display_name": "User Example",
+            "email_verified": True,
+            "cognito_username": "user@example.com",
+            "auth_provider": "email",
+            "username": "mixroomer",
+            "username_lc": "mixroomer",
+            "music_profile": None,
+            "profile_status": "active",
+            "onboarding_state": "signup_complete",
+            "accepted_terms_version": "2026-03-10",
+            "accepted_privacy_version": "2026-03-10",
+            "accepted_at": "2026-03-10T00:00:00+00:00",
+            "newsletter_opt_in": False,
+            "newsletter_opt_in_at": None,
+            "locale_code": "en",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "last_seen_at": "2026-01-01T00:00:00+00:00",
+            "schema_version": 4,
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {
+            "sub": "user-1",
+            "email": "user@example.com",
+            "email_verified": "true",
+            "cognito:username": "user@example.com",
+        }
+
+        with mock.patch.object(users_module, "sync_user_profile") as sync_mock:
+            result = users_module.handler(
+                {
+                    "rawPath": "/v1/users/me",
+                    "requestContext": {"http": {"method": "PATCH"}},
+                    "body": '{"locale_code":"ko-KR"}',
+                },
+                object(),
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(repo.upsert_calls[-1]["profile"]["locale_code"], "ko")
+        sync_mock.assert_called_once()
+
+    def test_patch_me_persists_profile_when_stibee_sync_fails(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-1",
+            "email": "user@example.com",
+            "email_lc": "user@example.com",
+            "display_name": "User Example",
+            "email_verified": True,
+            "cognito_username": "user@example.com",
+            "auth_provider": "email",
+            "username": "mixroomer",
+            "username_lc": "mixroomer",
+            "music_profile": None,
+            "profile_status": "active",
+            "onboarding_state": "signup_complete",
+            "accepted_terms_version": "2026-03-10",
+            "accepted_privacy_version": "2026-03-10",
+            "accepted_at": "2026-03-10T00:00:00+00:00",
+            "newsletter_opt_in": False,
+            "newsletter_opt_in_at": None,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "last_seen_at": "2026-01-01T00:00:00+00:00",
+            "schema_version": 4,
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {
+            "sub": "user-1",
+            "email": "user@example.com",
+            "email_verified": "true",
+            "cognito:username": "user@example.com",
+        }
+
+        with mock.patch.object(
+            users_module,
+            "sync_user_profile",
+            side_effect=users_module.StibeeSyncError("boom"),
+        ):
+            result = users_module.handler(
+                {
+                    "rawPath": "/v1/users/me",
+                    "requestContext": {"http": {"method": "PATCH"}},
+                    "body": '{"newsletter_opt_in":true,"locale_code":"en"}',
+                },
+                object(),
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(len(repo.upsert_calls), 1)
+        self.assertEqual(repo.upsert_calls[0]["profile"]["newsletter_opt_in"], True)
+
+    def test_patch_me_persists_locale_when_stibee_is_unconfigured(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-1",
+            "email": "user@example.com",
+            "email_lc": "user@example.com",
+            "display_name": "User Example",
+            "email_verified": True,
+            "cognito_username": "user@example.com",
+            "auth_provider": "email",
+            "username": "mixroomer",
+            "username_lc": "mixroomer",
+            "music_profile": None,
+            "profile_status": "active",
+            "onboarding_state": "signup_complete",
+            "accepted_terms_version": "2026-03-10",
+            "accepted_privacy_version": "2026-03-10",
+            "accepted_at": "2026-03-10T00:00:00+00:00",
+            "newsletter_opt_in": False,
+            "newsletter_opt_in_at": None,
+            "locale_code": "en",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "last_seen_at": "2026-01-01T00:00:00+00:00",
+            "schema_version": 4,
+        }
+        users_module.repo = repo
+        users_module.extract_claims_from_event = lambda event: {
+            "sub": "user-1",
+            "email": "user@example.com",
+            "email_verified": "true",
+            "cognito:username": "user@example.com",
+        }
+
+        with mock.patch.object(
+            users_module,
+            "sync_user_profile",
+            side_effect=users_module.StibeeConfigError("not configured"),
+        ):
+            result = users_module.handler(
+                {
+                    "rawPath": "/v1/users/me",
+                    "requestContext": {"http": {"method": "PATCH"}},
+                    "body": '{"locale_code":"ko-KR"}',
+                },
+                object(),
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(len(repo.upsert_calls), 1)
+        self.assertEqual(repo.upsert_calls[0]["profile"]["locale_code"], "ko")
+
     def test_delete_me_removes_account_for_free_user(self):
         repo = _FakeRepo()
         repo._auth_account = {

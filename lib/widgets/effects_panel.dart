@@ -1,9 +1,9 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:fftea/fftea.dart';
 
 import 'package:flutter/material.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
-import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'dart:math' as math;
 import 'package:provider/provider.dart';
@@ -26,6 +26,20 @@ const Color _kFxWarmAccent = Color(0xFFC89762);
 const Color _kFxWarmAccentBorder = Color(0xFFE0B27F);
 const Color _kFxCoolAccent = Color(0xFFBBD3E4);
 const Color _kFxCoolAccentSoft = Color(0xFFA7C4D9);
+
+bool _previewFramesChanged(
+  List<double> previous,
+  List<double> next, {
+  double tolerance = 0.001,
+}) {
+  if (identical(previous, next)) return false;
+  if (previous.length != next.length) return true;
+
+  for (int i = 0; i < next.length; i++) {
+    if ((previous[i] - next[i]).abs() > tolerance) return true;
+  }
+  return false;
+}
 
 BoxDecoration _mixroomFxSurfaceDecoration({
   double radius = 24,
@@ -72,6 +86,26 @@ BoxDecoration _mixroomFxInsetDecoration({
   );
 }
 
+BoxDecoration _mixroomFxReturnHighlightDecoration({
+  double radius = 14,
+}) {
+  return BoxDecoration(
+    color: const Color(0xFF9FD9FF).withValues(alpha: 0.028),
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(
+      color: const Color(0xFFD9F1FF).withValues(alpha: 0.18),
+      width: 0.9,
+    ),
+    boxShadow: <BoxShadow>[
+      BoxShadow(
+        color: const Color(0xFF8DD6FF).withValues(alpha: 0.075),
+        blurRadius: 10,
+        spreadRadius: 0.4,
+      ),
+    ],
+  );
+}
+
 ButtonStyle _mixroomFxGhostButtonStyle({
   bool emphasized = false,
 }) {
@@ -87,6 +121,299 @@ ButtonStyle _mixroomFxGhostButtonStyle({
       side: BorderSide(
         color: Colors.white.withValues(alpha: emphasized ? 0.18 : 0.12),
       ),
+    ),
+  );
+}
+
+Future<String?> _showMixroomChoiceDialog({
+  required BuildContext context,
+  required String title,
+  required List<String> choices,
+  String? currentChoice,
+}) {
+  if (choices.isEmpty) return Future<String?>.value(null);
+
+  unawaited(AppHaptics.impact(AppHapticImpact.medium));
+
+  final maxHeight = math.min(choices.length * 58.0 + 24.0, 360.0);
+  return showDialog<String>(
+    context: context,
+    useRootNavigator: true,
+    builder: (ctx) {
+      return AlertDialog(
+        backgroundColor: const Color(0xFF5F666D),
+        surfaceTintColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+        titlePadding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+        contentPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+        actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+        ),
+        title: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: _mixroomFxInsetDecoration(radius: 18, selected: true),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _kFxPanelText,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: () => Navigator.pop(ctx),
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.12),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      size: 18,
+                      color: _kFxPanelText,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: choices.length,
+              separatorBuilder: (_, __) => Divider(
+                height: 1,
+                thickness: 1,
+                color: Colors.white.withValues(alpha: 0.07),
+              ),
+              itemBuilder: (ctx, index) {
+                final choice = choices[index];
+                final isSelected = choice == currentChoice;
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => Navigator.pop(ctx, choice),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              choice,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13.4,
+                                fontWeight: isSelected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          if (isSelected) ...[
+                            const SizedBox(width: 10),
+                            const Icon(
+                              Icons.check_rounded,
+                              size: 18,
+                              color: _kFxCoolAccentSoft,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            style: _mixroomFxGhostButtonStyle(),
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(L10n.translate(context, 'Cancel')),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+Widget _buildMixroomChoiceField({
+  required BuildContext context,
+  required String value,
+  required VoidCallback onTap,
+  bool compact = false,
+}) {
+  final horizontal = compact ? 10.0 : 12.0;
+  final vertical = compact ? 7.0 : 10.0;
+  final radius = compact ? 12.0 : 14.0;
+
+  return Material(
+    color: Colors.transparent,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(radius),
+      onTap: onTap,
+      child: Container(
+        padding:
+            EdgeInsets.symmetric(horizontal: horizontal, vertical: vertical),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Expanded(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.94),
+                  fontSize: compact ? 12.0 : 13.0,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              Icons.expand_more_rounded,
+              size: compact ? 18 : 20,
+              color: Colors.white.withValues(alpha: 0.72),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildMixroomChoiceSettingTile({
+  required BuildContext context,
+  required String label,
+  required String value,
+  required VoidCallback onTap,
+}) {
+  return Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: _kFxPanelText,
+                    ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.92),
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              Icons.expand_more_rounded,
+              size: 20,
+              color: Colors.white.withValues(alpha: 0.68),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildDegradeModeSelectorTile({
+  required BuildContext context,
+  required String label,
+  required String value,
+  required List<String> choices,
+  required ValueChanged<String> onSelected,
+}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: _kFxPanelText,
+              ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: choices.map((choice) {
+            final isSelected = choice == value;
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: () => onSelected(choice),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 140),
+                  curve: Curves.easeOutCubic,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: _mixroomFxInsetDecoration(
+                    radius: 999,
+                    selected: isSelected,
+                  ),
+                  child: Text(
+                    choice,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: isSelected
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.82),
+                          fontWeight:
+                              isSelected ? FontWeight.w700 : FontWeight.w600,
+                        ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
     ),
   );
 }
@@ -233,6 +560,20 @@ bool _showsDynamicsReductionMeter(String effectName) {
       effectName == 'Mixroom Clipper';
 }
 
+bool _showsStereoScope(String effectName) {
+  return effectName == 'Stereo Pro';
+}
+
+bool _showsSpectrumPreview(String effectName) {
+  return effectName == 'EQ Parametric' ||
+      effectName == 'EQ 3-Band' ||
+      effectName == 'Degrade';
+}
+
+bool _showsShaperPreview(String effectName) {
+  return effectName == 'Volume Shaper' || effectName == 'Time Shaper';
+}
+
 String _dynamicsReductionMeterTitle(String effectName) {
   switch (effectName) {
     case 'Limiter':
@@ -327,6 +668,8 @@ class RowEffectsPanel extends StatefulWidget {
       getRowCompressorMeter;
   final Future<List<double>> Function(int row, int effectIndex, int sampleCount)
       getRowEqWaveform;
+  final Future<List<double>> Function(int row, int effectIndex, int pointCount)
+      getRowStereoScope;
   final MixChangeHighlighter? tutorialHighlighter;
 
   const RowEffectsPanel({
@@ -358,6 +701,7 @@ class RowEffectsPanel extends StatefulWidget {
     required this.meters,
     required this.getRowCompressorMeter,
     required this.getRowEqWaveform,
+    required this.getRowStereoScope,
     this.tutorialHighlighter,
     this.onCopyRowEffects,
     this.onPasteRowEffects,
@@ -390,6 +734,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   int? _selectedEffectIndex;
   List<Map<String, dynamic>> _currentParams = [];
   bool _paramsLoading = false;
+  int? _returnHighlightedEffectIndex;
+  Timer? _returnHighlightTimer;
   double? _lastReportedHeight; // since height is dynamic
 
   // for undo state
@@ -407,6 +753,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   bool _eqWaveformRunning = false;
   List<double> _eqWaveform = const <double>[];
   List<double> _eqSpectrumDb = const <double>[];
+  Timer? _stereoScopeTimer;
+  bool _stereoScopeRunning = false;
+  List<double> _stereoScope = const <double>[];
+  Timer? _shaperPreviewTimer;
+  bool _shaperPreviewRunning = false;
+  List<double> _shaperPreview = const <double>[];
   double _eqAnalyzerSampleRate = 44100.0;
   int _eqParametricTabIndex = 0;
   bool _playbackRefreshBusy = false;
@@ -532,6 +884,36 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         .toList(growable: false);
     if (mapped.isEmpty) return;
     highlighter.trigger(mapped, duration: duration);
+  }
+
+  void _setReturnHighlight(int? effectIndex) {
+    _returnHighlightTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _returnHighlightedEffectIndex = effectIndex;
+    });
+    if (effectIndex == null) return;
+    _returnHighlightTimer = Timer(const Duration(milliseconds: 420), () {
+      if (!mounted || _returnHighlightedEffectIndex != effectIndex) return;
+      setState(() {
+        _returnHighlightedEffectIndex = null;
+      });
+    });
+  }
+
+  Future<void> _returnToEffectsList({required int effectIndex}) async {
+    _stopCompressorMetering();
+    _stopEqWaveformPolling();
+    _stopStereoScopePolling();
+    _stopShaperPreviewPolling();
+    setState(() {
+      _selectedEffectIndex = null;
+      _currentParams = [];
+    });
+    widget.onHeightChanged(widget.minHeight);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || _selectedEffectIndex != null) return;
+    _setReturnHighlight(effectIndex);
   }
 
   Future<void> _showAutomateParameterSheet({
@@ -755,10 +1137,13 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
 
   @override
   void dispose() {
+    _returnHighlightTimer?.cancel();
     _deferredParamRefreshTimer?.cancel();
     _pendingParamOverrides.clear();
     _stopCompressorMetering();
     _stopEqWaveformPolling();
+    _stopStereoScopePolling();
+    _stopShaperPreviewPolling();
     super.dispose();
   }
 
@@ -911,6 +1296,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         _currentParams = [];
       });
       _stopEqWaveformPolling();
+      _stopStereoScopePolling();
+      _stopShaperPreviewPolling();
     } else if (!hadSelection) {
       if (showLoading) {
         setState(() {
@@ -918,6 +1305,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         });
       }
       _stopEqWaveformPolling();
+      _stopStereoScopePolling();
+      _stopShaperPreviewPolling();
     }
     final names = await widget.getEffectsForRow(widget.rowIndex);
     var ids = await widget.getEffectIdsForRow(widget.rowIndex);
@@ -943,6 +1332,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         _selectedEffectIndex = null;
         _currentParams = [];
         _stopEqWaveformPolling();
+        _stopStereoScopePolling();
+        _stopShaperPreviewPolling();
       }
     });
   }
@@ -1031,8 +1422,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   }) {
     final msValue = (param['value'] as num).toDouble();
     final detectedIdx = _detectDelayDivision(msValue, bpm);
+    final customLabel = L10n.translate(context, 'Custom');
     final presetLabel =
-        detectedIdx == null ? 'Custom' : kDelayDivisions[detectedIdx].label;
+        detectedIdx == null ? customLabel : kDelayDivisions[detectedIdx].label;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
@@ -1047,44 +1439,52 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               const Spacer(),
 
               // ---- PRESET DROPDOWN ----
-              DropdownButton<String>(
-                value: presetLabel,
-                dropdownColor: kMixroomGlassDropdownMenuColor,
-                underline: const SizedBox(),
-                items: [
-                  DropdownMenuItem(
-                    value: 'Custom',
-                    child: Text(L10n.translate(context, 'Custom')),
-                  ),
-                  ...kDelayDivisions.map((d) =>
-                      DropdownMenuItem(value: d.label, child: Text(d.label))),
-                ],
-                onChanged: (label) {
-                  if (label == null || label == 'Custom') return;
+              SizedBox(
+                width: 136,
+                child: _buildMixroomChoiceField(
+                  context: context,
+                  value: presetLabel,
+                  compact: true,
+                  onTap: () async {
+                    final labels = <String>[
+                      customLabel,
+                      ...kDelayDivisions.map((d) => d.label),
+                    ];
+                    final picked = await _showMixroomChoiceDialog(
+                      context: context,
+                      title:
+                          '${L10n.translate(context, 'Select ')}${param['name']}',
+                      choices: labels,
+                      currentChoice: presetLabel,
+                    );
+                    if (picked == null || picked == customLabel) {
+                      return;
+                    }
 
-                  final division =
-                      kDelayDivisions.firstWhere((d) => d.label == label);
-                  final newMs = beatsToMs(division.beats, bpm);
+                    final division =
+                        kDelayDivisions.firstWhere((d) => d.label == picked);
+                    final newMs = beatsToMs(division.beats, bpm);
 
-                  _paramDragStartValue = msValue;
+                    _paramDragStartValue = msValue;
 
-                  setState(() {
-                    param['value'] = newMs;
-                  });
+                    setState(() {
+                      param['value'] = newMs;
+                    });
 
-                  _setTrackEffectParam(widget.rowIndex, effectIndex,
-                      param['name'] as String, newMs);
+                    _setTrackEffectParam(widget.rowIndex, effectIndex,
+                        param['name'] as String, newMs);
 
-                  _commitTrackEffectParam(
-                    widget.rowIndex,
-                    effectIndex,
-                    param['name'] as String,
-                    _paramDragStartValue!,
-                    newMs,
-                  );
+                    _commitTrackEffectParam(
+                      widget.rowIndex,
+                      effectIndex,
+                      param['name'] as String,
+                      _paramDragStartValue!,
+                      newMs,
+                    );
 
-                  _paramDragStartValue = null;
-                },
+                    _paramDragStartValue = null;
+                  },
+                ),
               ),
             ],
           ),
@@ -1452,6 +1852,66 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     _eqSpectrumDb = const <double>[];
   }
 
+  void _startStereoScopePolling({required int effectIndex}) {
+    _stopStereoScopePolling();
+    _stereoScopeRunning = true;
+
+    _stereoScopeTimer =
+        Timer.periodic(const Duration(milliseconds: 40), (_) async {
+      if (!mounted || !_stereoScopeRunning) return;
+
+      try {
+        final arr =
+            await widget.getRowStereoScope(widget.rowIndex, effectIndex, 256);
+        if (!mounted || !_stereoScopeRunning) return;
+        setState(() {
+          _stereoScope = arr;
+        });
+      } catch (_) {
+        // ignore transient bridge errors while polling
+      }
+    });
+  }
+
+  void _stopStereoScopePolling() {
+    _stereoScopeRunning = false;
+    _stereoScopeTimer?.cancel();
+    _stereoScopeTimer = null;
+    _stereoScope = const <double>[];
+  }
+
+  void _startShaperPreviewPolling({required int effectIndex}) {
+    _stopShaperPreviewPolling();
+    _shaperPreviewRunning = true;
+
+    _shaperPreviewTimer =
+        Timer.periodic(const Duration(milliseconds: 40), (_) async {
+      if (!mounted || !_shaperPreviewRunning) return;
+
+      try {
+        final arr = await JuceAudioEngine.getRowShaperPreview(
+          widget.rowIndex,
+          effectIndex,
+          pointCount: 192,
+        );
+        if (!mounted || !_shaperPreviewRunning) return;
+        if (!_previewFramesChanged(_shaperPreview, arr)) return;
+        setState(() {
+          _shaperPreview = arr;
+        });
+      } catch (_) {
+        // ignore transient bridge errors while polling
+      }
+    });
+  }
+
+  void _stopShaperPreviewPolling() {
+    _shaperPreviewRunning = false;
+    _shaperPreviewTimer?.cancel();
+    _shaperPreviewTimer = null;
+    _shaperPreview = const <double>[];
+  }
+
   Future<void> _refreshEqAnalyzerSampleRate() async {
     try {
       final sr = await JuceAudioEngine.getHostSampleRate();
@@ -1546,10 +2006,41 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           return ['Low Gain', 'Mid Gain', 'High Gain'].contains(n);
         }).toList();
 
+      case 'Degrade':
+        return params.where((p) {
+          final n = p['name']?.toString() ?? '';
+          return ['Mode', 'Tone', 'Depth', 'Spread'].contains(n);
+        }).toList();
+
       case 'Delay':
         return params.where((p) {
           final n = p['name']?.toString() ?? '';
           return ['Delay Time', 'Feedback', 'Mix'].contains(n);
+        }).toList();
+
+      case 'Stereo':
+        return params.where((p) {
+          final n = p['name']?.toString() ?? '';
+          return ['Width', 'Low Bypass', 'Mono'].contains(n);
+        }).toList();
+
+      case 'Stereo Pro':
+        return params.where((p) {
+          final n = p['name']?.toString() ?? '';
+          return ['Gain', 'Width', 'Asymmetry', 'Rotation'].contains(n);
+        }).toList();
+
+      case 'Volume Shaper':
+        return params.where((p) {
+          final n = p['name']?.toString() ?? '';
+          return ['Shape', 'Rate', 'Depth', 'Smooth', 'Swing', 'Mix']
+              .contains(n);
+        }).toList();
+
+      case 'Time Shaper':
+        return params.where((p) {
+          final n = p['name']?.toString() ?? '';
+          return ['Pattern', 'Rate', 'Amount', 'Smooth', 'Mix'].contains(n);
         }).toList();
 
       case 'Gain':
@@ -2255,12 +2746,16 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
 
   Widget _buildEffectTile(int idx) {
     final isDragging = _draggingEffectIndex == idx;
-    final tile = Container(
+    final showReturnHighlight = _returnHighlightedEffectIndex == idx;
+    final tile = AnimatedContainer(
       key: ValueKey("effect_${_effectKeys[idx]}"),
+      duration: const Duration(milliseconds: 170),
       margin: const EdgeInsets.only(bottom: 8),
       decoration: isDragging
           ? _mixroomFxInsetDecoration(radius: 14, selected: true)
-          : const BoxDecoration(color: Colors.transparent),
+          : showReturnHighlight
+              ? _mixroomFxReturnHighlightDecoration(radius: 14)
+              : const BoxDecoration(color: Colors.transparent),
       child: ListTile(
         dense: true,
         minLeadingWidth: 22,
@@ -2444,31 +2939,41 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     // const allowedInBasic = ['Reverb', 'EQ Parametric', 'EQ 3-Band', 'Delay', 'Distortion', 'De-Esser', 'Compressor'];
     const allowedInBasic = [
       "Gain",
-      "EQ 3-Band",
-      "Compressor",
-      "Limiter",
-      "Clipper",
-      "De-Esser",
-      "Distortion",
-      "Delay",
       "Reverb",
+      "EQ 3-Band",
       "EQ Parametric",
+      "Delay",
+      "Compressor",
+      "Clipper",
+      "Limiter",
+      "Distortion",
+      "Degrade",
       "Pitch Shift",
+      "De-Esser",
+      "Stereo",
+      "Stereo Pro",
+      "Volume Shaper",
+      "Time Shaper",
       "Chorus",
       "Vibrato",
     ];
     const fxChoices = [
       "Gain",
-      "EQ 3-Band",
-      "Compressor",
-      "Limiter",
-      "Clipper",
-      "De-Esser",
-      "Distortion",
-      "Delay",
       "Reverb",
+      "EQ 3-Band",
       "EQ Parametric",
+      "Delay",
+      "Compressor",
+      "Clipper",
+      "Limiter",
+      "Distortion",
+      "Degrade",
       "Pitch Shift",
+      "De-Esser",
+      "Stereo",
+      "Stereo Pro",
+      "Volume Shaper",
+      "Time Shaper",
       "Chorus",
       "Vibrato",
     ];
@@ -2682,6 +3187,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       _selectedEffectIndex = idx;
       _paramsLoading = true;
       _currentParams = [];
+      _returnHighlightedEffectIndex = null;
     });
 
     // Turn on dynamics reduction metering if it is about to be opened
@@ -2690,10 +3196,20 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     } else {
       _stopCompressorMetering();
     }
-    if (_effects[idx] == 'EQ Parametric' || _effects[idx] == 'EQ 3-Band') {
+    if (_showsSpectrumPreview(_effects[idx])) {
       _startEqWaveformPolling(effectIndex: idx);
     } else {
       _stopEqWaveformPolling();
+    }
+    if (_showsStereoScope(_effects[idx])) {
+      _startStereoScopePolling(effectIndex: idx);
+    } else {
+      _stopStereoScopePolling();
+    }
+    if (_showsShaperPreview(_effects[idx])) {
+      _startShaperPreviewPolling(effectIndex: idx);
+    } else {
+      _stopShaperPreviewPolling();
     }
 
     var params = await widget.getTrackPluginParameters(widget.rowIndex, idx);
@@ -2713,9 +3229,16 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         ? 760.0
         : (effectName == 'EQ 3-Band')
             ? 560.0
-            : (220.0 + (math.max(0, params.length) * 74.0))
-                .clamp(widget.minHeight, 1200.0)
-                .toDouble();
+            : (effectName == 'Degrade')
+                ? 660.0
+                : (effectName == 'Stereo Pro')
+                    ? 520.0
+                    : (effectName == 'Volume Shaper' ||
+                            effectName == 'Time Shaper')
+                        ? 540.0
+                        : (220.0 + (math.max(0, params.length) * 74.0))
+                            .clamp(widget.minHeight, 1200.0)
+                            .toDouble();
 
     if (!mounted) return;
     setState(() {
@@ -3040,14 +3563,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 _buildFxParamsHeader(
                   context: context,
                   title: effectName,
-                  onBack: () {
-                    _stopEqWaveformPolling();
-                    setState(() {
-                      _selectedEffectIndex = null;
-                      _currentParams = [];
-                    });
-                    widget.onHeightChanged(widget.minHeight);
-                  },
+                  onBack: () => _returnToEffectsList(effectIndex: idx),
                   onReset: () async {
                     final changes = <Map<String, dynamic>>[];
                     for (final p in _currentParams) {
@@ -3156,14 +3672,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 _buildFxParamsHeader(
                   context: context,
                   title: effectName,
-                  onBack: () {
-                    _stopEqWaveformPolling();
-                    setState(() {
-                      _selectedEffectIndex = null;
-                      _currentParams = [];
-                    });
-                    widget.onHeightChanged(widget.minHeight);
-                  },
+                  onBack: () => _returnToEffectsList(effectIndex: idx),
                 ),
                 const SizedBox(height: 10),
                 LayoutBuilder(
@@ -3442,17 +3951,78 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               _buildFxParamsHeader(
                 context: context,
                 title: effectName,
-                onBack: () {
-                  _stopCompressorMetering();
-                  _stopEqWaveformPolling();
-                  setState(() {
-                    _selectedEffectIndex = null;
-                    _currentParams = [];
-                  });
-                  widget.onHeightChanged(widget.minHeight);
-                },
+                onBack: () => _returnToEffectsList(effectIndex: idx),
               ),
               const SizedBox(height: 10),
+
+              if (effectName == 'Stereo Pro' && _currentParams.isNotEmpty) ...[
+                _StereoProPreview(
+                  scopeFrames: _stereoScope,
+                  gainDb:
+                      (_paramByName(_currentParams, 'Gain')?['value'] as num?)
+                              ?.toDouble() ??
+                          0.0,
+                  widthPercent:
+                      (_paramByName(_currentParams, 'Width')?['value'] as num?)
+                              ?.toDouble() ??
+                          100.0,
+                  asymmetryPercent:
+                      (_paramByName(_currentParams, 'Asymmetry')?['value']
+                                  as num?)
+                              ?.toDouble() ??
+                          0.0,
+                  rotationDegrees:
+                      (_paramByName(_currentParams, 'Rotation')?['value']
+                                  as num?)
+                              ?.toDouble() ??
+                          0.0,
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              if (effectName == 'Degrade' && _currentParams.isNotEmpty) ...[
+                _DegradePreview(
+                  spectrumDb: _eqSpectrumDb,
+                  analyzerSampleRate: _eqAnalyzerSampleRate,
+                  mode: (_paramByName(_currentParams, 'Mode')?['value']
+                              ?.toString() ??
+                          'Noise')
+                      .trim(),
+                  toneHz:
+                      (_paramByName(_currentParams, 'Tone')?['value'] as num?)
+                              ?.toDouble() ??
+                          6000.0,
+                  depthPercent:
+                      (_paramByName(_currentParams, 'Depth')?['value'] as num?)
+                              ?.toDouble() ??
+                          35.0,
+                  spreadPercent:
+                      (_paramByName(_currentParams, 'Spread')?['value'] as num?)
+                              ?.toDouble() ??
+                          40.0,
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              if (_showsShaperPreview(effectName) &&
+                  _currentParams.isNotEmpty) ...[
+                _ShaperPreviewCard(
+                  kind: effectName == 'Time Shaper'
+                      ? _ShaperPreviewKind.time
+                      : _ShaperPreviewKind.volume,
+                  previewFrames: _shaperPreview,
+                  title: ((_paramByName(
+                            _currentParams,
+                            effectName == 'Time Shaper' ? 'Pattern' : 'Shape',
+                          )?['value']) ??
+                          (effectName == 'Time Shaper' ? 'Pattern' : 'Shape'))
+                      .toString(),
+                  detail: ((_paramByName(_currentParams, 'Rate')?['value']) ??
+                          'Rate')
+                      .toString(),
+                ),
+                const SizedBox(height: 12),
+              ],
 
               if (_showsDynamicsReductionMeter(effectName)) ...[
                 // _buildCompressorMeterStrip(),
@@ -3522,9 +4092,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                           Row(
                             children: [
                               Text(
-                                (param['min'] as num)
-                                    .toDouble()
-                                    .toStringAsFixed(2),
+                                _formatParamValueForDisplay(
+                                  param,
+                                  (param['min'] as num).toDouble(),
+                                ),
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                               // const SizedBox(width: 8),
@@ -3549,6 +4120,11 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                     final rawV = (param['value'] as num)
                                         .toDouble()
                                         .clamp(minV, maxV);
+                                    final valueText =
+                                        _formatParamValueForDisplay(
+                                      param,
+                                      rawV,
+                                    );
 
                                     final skew = _getParamSkew(
                                         effectName, paramName); // null = linear
@@ -3601,7 +4177,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                         min: 0.0,
                                         max: 1.0,
                                         divisions: 200,
-                                        label: rawV.toStringAsFixed(2),
+                                        label: valueText,
                                         onChangeStart: (_) {
                                           _paramDragStartValue = rawV;
                                         },
@@ -3647,9 +4223,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                               ),
                               // const SizedBox(width: 8),
                               Text(
-                                (param['max'] as num)
-                                    .toDouble()
-                                    .toStringAsFixed(2),
+                                _formatParamValueForDisplay(
+                                  param,
+                                  (param['max'] as num).toDouble(),
+                                ),
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
@@ -3699,35 +4276,49 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                         effectName: effectName,
                         param: param,
                         borderRadius: BorderRadius.circular(10),
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(param['name'] as String),
-                          trailing: Text(current,
-                              style: Theme.of(context).textTheme.bodyLarge),
-                          onTap: () async {
-                            final picked = await showDialog<String>(
-                              context: context,
-                              useRootNavigator: true,
-                              builder: (ctx) => SimpleDialog(
-                                title: Text(
-                                    "${L10n.translate(context, 'Select ')}${param['name']}"),
-                                children: choices.map((c) {
-                                  return SimpleDialogOption(
-                                      child: Text(c),
-                                      onPressed: () => Navigator.pop(ctx, c));
-                                }).toList(),
+                        child: effectName == 'Degrade' &&
+                                param['name'] == 'Mode'
+                            ? _buildDegradeModeSelectorTile(
+                                context: context,
+                                label: param['name'] as String,
+                                value: current,
+                                choices: choices,
+                                onSelected: (picked) {
+                                  if (picked == current) return;
+                                  final oldVal = param['value'];
+                                  setState(() => param['value'] = picked);
+                                  _setTrackEffectParam(widget.rowIndex, idx,
+                                      param['name'] as String, picked);
+                                  _commitTrackEffectParam(widget.rowIndex, idx,
+                                      param['name'] as String, oldVal, picked);
+                                },
+                              )
+                            : _buildMixroomChoiceSettingTile(
+                                context: context,
+                                label: param['name'] as String,
+                                value: current,
+                                onTap: () async {
+                                  final picked = await _showMixroomChoiceDialog(
+                                    context: context,
+                                    title:
+                                        '${L10n.translate(context, 'Select ')}${param['name']}',
+                                    choices: choices,
+                                    currentChoice: current,
+                                  );
+                                  if (picked != null) {
+                                    final oldVal = param['value'];
+                                    setState(() => param['value'] = picked);
+                                    _setTrackEffectParam(widget.rowIndex, idx,
+                                        param['name'] as String, picked);
+                                    _commitTrackEffectParam(
+                                        widget.rowIndex,
+                                        idx,
+                                        param['name'] as String,
+                                        oldVal,
+                                        picked);
+                                  }
+                                },
                               ),
-                            );
-                            if (picked != null) {
-                              final oldVal = param['value'];
-                              setState(() => param['value'] = picked);
-                              _setTrackEffectParam(widget.rowIndex, idx,
-                                  param['name'] as String, picked);
-                              _commitTrackEffectParam(widget.rowIndex, idx,
-                                  param['name'] as String, oldVal, picked);
-                            }
-                          },
-                        ),
                       ),
                     );
                   })(),
@@ -3797,6 +4388,8 @@ class MasterEffectsPanel extends StatefulWidget {
   final Future<List<double>> Function(int effectIndex) getMasterCompressorMeter;
   final Future<List<double>> Function(int effectIndex, int sampleCount)
       getMasterEqWaveform;
+  final Future<List<double>> Function(int effectIndex, int pointCount)
+      getMasterStereoScope;
   final MixChangeHighlighter? highlighter;
   final void Function(
     Future<void> Function(int effectIndex, String paramId) reveal,
@@ -3828,6 +4421,7 @@ class MasterEffectsPanel extends StatefulWidget {
     required this.meters,
     required this.getMasterCompressorMeter,
     required this.getMasterEqWaveform,
+    required this.getMasterStereoScope,
     this.highlighter,
     this.registerParameterRevealer,
   }) : super(key: key);
@@ -3846,6 +4440,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   int? _selectedEffectIndex;
   List<Map<String, dynamic>> _currentParams = [];
   bool _paramsLoading = false;
+  int? _returnHighlightedEffectIndex;
+  Timer? _returnHighlightTimer;
 
   // for undo state
   double? _paramDragStartValue;
@@ -3862,6 +4458,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   bool _eqWaveformRunning = false;
   List<double> _eqWaveform = const <double>[];
   List<double> _eqSpectrumDb = const <double>[];
+  Timer? _stereoScopeTimer;
+  bool _stereoScopeRunning = false;
+  List<double> _stereoScope = const <double>[];
+  Timer? _shaperPreviewTimer;
+  bool _shaperPreviewRunning = false;
+  List<double> _shaperPreview = const <double>[];
   double _eqAnalyzerSampleRate = 44100.0;
   int _eqParametricTabIndex = 0;
 
@@ -3941,6 +4543,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     required Widget child,
     required List<String> haloKeys,
     BorderRadius? borderRadius,
+    Key? key,
   }) {
     final highlighter = widget.highlighter;
     if (highlighter == null || haloKeys.isEmpty) return child;
@@ -3951,6 +4554,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         .toList(growable: false);
     if (mapped.isEmpty) return child;
     return MultiHalo(
+      key: key,
       highlighter: highlighter,
       haloKeys: mapped,
       borderRadius: borderRadius,
@@ -3971,6 +4575,35 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         .toList(growable: false);
     if (mapped.isEmpty) return;
     highlighter.trigger(mapped, duration: duration);
+  }
+
+  void _setReturnHighlight(int? effectIndex) {
+    _returnHighlightTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _returnHighlightedEffectIndex = effectIndex;
+    });
+    if (effectIndex == null) return;
+    _returnHighlightTimer = Timer(const Duration(milliseconds: 420), () {
+      if (!mounted || _returnHighlightedEffectIndex != effectIndex) return;
+      setState(() {
+        _returnHighlightedEffectIndex = null;
+      });
+    });
+  }
+
+  Future<void> _returnToEffectsList({required int effectIndex}) async {
+    _stopCompressorMetering();
+    _stopEqWaveformPolling();
+    _stopStereoScopePolling();
+    _stopShaperPreviewPolling();
+    setState(() {
+      _selectedEffectIndex = null;
+      _currentParams = [];
+    });
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || _selectedEffectIndex != null) return;
+    _setReturnHighlight(effectIndex);
   }
 
   Future<void> _showAutomateParameterSheet({
@@ -4250,13 +4883,18 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 
   @override
   void dispose() {
+    _returnHighlightTimer?.cancel();
     _stopCompressorMetering();
     _stopEqWaveformPolling();
+    _stopStereoScopePolling();
+    _stopShaperPreviewPolling();
     super.dispose();
   }
 
   Future<void> _loadEffects() async {
     _stopEqWaveformPolling();
+    _stopStereoScopePolling();
+    _stopShaperPreviewPolling();
     final names = await widget.getMasterEffects();
     var ids = await widget.getMasterEffectIds();
     if (ids.length != names.length) {
@@ -4346,8 +4984,9 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   }) {
     final msValue = (param['value'] as num).toDouble();
     final detectedIdx = _detectDelayDivision(msValue, bpm);
+    final customLabel = L10n.translate(context, 'Custom');
     final presetLabel =
-        detectedIdx == null ? 'Custom' : kDelayDivisions[detectedIdx].label;
+        detectedIdx == null ? customLabel : kDelayDivisions[detectedIdx].label;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
@@ -4362,43 +5001,49 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               const Spacer(),
 
               // ---- PRESET DROPDOWN ----
-              DropdownButton<String>(
-                value: presetLabel,
-                dropdownColor: kMixroomGlassDropdownMenuColor,
-                underline: const SizedBox(),
-                items: [
-                  DropdownMenuItem(
-                    value: 'Custom',
-                    child: Text(L10n.translate(context, 'Custom')),
-                  ),
-                  ...kDelayDivisions.map((d) =>
-                      DropdownMenuItem(value: d.label, child: Text(d.label))),
-                ],
-                onChanged: (label) {
-                  if (label == null || label == 'Custom') return;
+              SizedBox(
+                width: 136,
+                child: _buildMixroomChoiceField(
+                  context: context,
+                  value: presetLabel,
+                  compact: true,
+                  onTap: () async {
+                    final labels = <String>[
+                      customLabel,
+                      ...kDelayDivisions.map((d) => d.label),
+                    ];
+                    final picked = await _showMixroomChoiceDialog(
+                      context: context,
+                      title:
+                          '${L10n.translate(context, 'Select ')}${param['name']}',
+                      choices: labels,
+                      currentChoice: presetLabel,
+                    );
+                    if (picked == null || picked == customLabel) return;
 
-                  final division =
-                      kDelayDivisions.firstWhere((d) => d.label == label);
-                  final newMs = beatsToMs(division.beats, bpm);
+                    final division =
+                        kDelayDivisions.firstWhere((d) => d.label == picked);
+                    final newMs = beatsToMs(division.beats, bpm);
 
-                  _paramDragStartValue = msValue;
+                    _paramDragStartValue = msValue;
 
-                  setState(() {
-                    param['value'] = newMs;
-                  });
+                    setState(() {
+                      param['value'] = newMs;
+                    });
 
-                  widget.setMasterEffectParam(
-                      effectIndex, param['name'] as String, newMs);
+                    widget.setMasterEffectParam(
+                        effectIndex, param['name'] as String, newMs);
 
-                  widget.onMasterPluginParamCommit?.call(
-                    effectIndex,
-                    param['name'] as String,
-                    _paramDragStartValue!,
-                    newMs,
-                  );
+                    widget.onMasterPluginParamCommit?.call(
+                      effectIndex,
+                      param['name'] as String,
+                      _paramDragStartValue!,
+                      newMs,
+                    );
 
-                  _paramDragStartValue = null;
-                },
+                    _paramDragStartValue = null;
+                  },
+                ),
               ),
             ],
           ),
@@ -4670,6 +5315,64 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     _eqWaveformTimer = null;
     _eqWaveform = const <double>[];
     _eqSpectrumDb = const <double>[];
+  }
+
+  void _startStereoScopePolling({required int effectIndex}) {
+    _stopStereoScopePolling();
+    _stereoScopeRunning = true;
+
+    _stereoScopeTimer =
+        Timer.periodic(const Duration(milliseconds: 40), (_) async {
+      if (!mounted || !_stereoScopeRunning) return;
+
+      try {
+        final arr = await widget.getMasterStereoScope(effectIndex, 256);
+        if (!mounted || !_stereoScopeRunning) return;
+        setState(() {
+          _stereoScope = arr;
+        });
+      } catch (_) {
+        // ignore transient bridge errors while polling
+      }
+    });
+  }
+
+  void _stopStereoScopePolling() {
+    _stereoScopeRunning = false;
+    _stereoScopeTimer?.cancel();
+    _stereoScopeTimer = null;
+    _stereoScope = const <double>[];
+  }
+
+  void _startShaperPreviewPolling({required int effectIndex}) {
+    _stopShaperPreviewPolling();
+    _shaperPreviewRunning = true;
+
+    _shaperPreviewTimer =
+        Timer.periodic(const Duration(milliseconds: 40), (_) async {
+      if (!mounted || !_shaperPreviewRunning) return;
+
+      try {
+        final arr = await JuceAudioEngine.getMasterShaperPreview(
+          effectIndex,
+          pointCount: 192,
+        );
+        if (!mounted || !_shaperPreviewRunning) return;
+        if (!_previewFramesChanged(_shaperPreview, arr)) return;
+        setState(() {
+          _shaperPreview = arr;
+        });
+      } catch (_) {
+        // ignore transient bridge errors while polling
+      }
+    });
+  }
+
+  void _stopShaperPreviewPolling() {
+    _shaperPreviewRunning = false;
+    _shaperPreviewTimer?.cancel();
+    _shaperPreviewTimer = null;
+    _shaperPreview = const <double>[];
   }
 
   Future<void> _refreshEqAnalyzerSampleRate() async {
@@ -5226,10 +5929,14 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   // =========================
 
   Widget _buildMasterEffectTile(int idx) {
-    return Container(
+    final showReturnHighlight = _returnHighlightedEffectIndex == idx;
+    final tile = AnimatedContainer(
       key: ValueKey("master_effect_${_effectKeys[idx]}"),
+      duration: const Duration(milliseconds: 170),
       margin: const EdgeInsets.only(bottom: 8),
-      decoration: const BoxDecoration(color: Colors.transparent),
+      decoration: showReturnHighlight
+          ? _mixroomFxReturnHighlightDecoration(radius: 14)
+          : const BoxDecoration(color: Colors.transparent),
       child: ListTile(
         dense: true,
         minLeadingWidth: 22,
@@ -5305,6 +6012,14 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 
         onTap: () => _openPluginParams(idx),
       ),
+    );
+    return _wrapWithHalos(
+      key: ValueKey("master_effect_${_effectKeys[idx]}"),
+      child: tile,
+      haloKeys: <String>[
+        ..._effectHaloKeys(effectIndex: idx, effectName: _effects[idx]),
+      ],
+      borderRadius: BorderRadius.circular(10),
     );
   }
 
@@ -5387,31 +6102,41 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     }
     const allowedInBasic = [
       "Gain",
-      "EQ 3-Band",
-      "Compressor",
-      "Limiter",
-      "Clipper",
-      "De-Esser",
-      "Distortion",
-      "Delay",
       "Reverb",
+      "EQ 3-Band",
       "EQ Parametric",
+      "Delay",
+      "Compressor",
+      "Clipper",
+      "Limiter",
+      "Distortion",
+      "Degrade",
       "Pitch Shift",
+      "De-Esser",
+      "Stereo",
+      "Stereo Pro",
+      "Volume Shaper",
+      "Time Shaper",
       "Chorus",
       "Vibrato",
     ];
     const fxChoices = [
       "Gain",
-      "EQ 3-Band",
-      "Compressor",
-      "Limiter",
-      "Clipper",
-      "De-Esser",
-      "Distortion",
-      "Delay",
       "Reverb",
+      "EQ 3-Band",
       "EQ Parametric",
+      "Delay",
+      "Compressor",
+      "Clipper",
+      "Limiter",
+      "Distortion",
+      "Degrade",
       "Pitch Shift",
+      "De-Esser",
+      "Stereo",
+      "Stereo Pro",
+      "Volume Shaper",
+      "Time Shaper",
       "Chorus",
       "Vibrato",
     ];
@@ -5596,6 +6321,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       _selectedEffectIndex = idx;
       _paramsLoading = true;
       _currentParams = [];
+      _returnHighlightedEffectIndex = null;
     });
 
     if (_showsDynamicsReductionMeter(_effects[idx])) {
@@ -5603,10 +6329,20 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     } else {
       _stopCompressorMetering();
     }
-    if (_effects[idx] == 'EQ Parametric' || _effects[idx] == 'EQ 3-Band') {
+    if (_showsSpectrumPreview(_effects[idx])) {
       _startEqWaveformPolling(effectIndex: idx);
     } else {
       _stopEqWaveformPolling();
+    }
+    if (_showsStereoScope(_effects[idx])) {
+      _startStereoScopePolling(effectIndex: idx);
+    } else {
+      _stopStereoScopePolling();
+    }
+    if (_showsShaperPreview(_effects[idx])) {
+      _startShaperPreviewPolling(effectIndex: idx);
+    } else {
+      _stopShaperPreviewPolling();
     }
 
     var params = await widget.getMasterPluginParameters(idx);
@@ -5674,10 +6410,47 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           }).toList();
           break;
 
+        case 'Degrade':
+          params = params.where((param) {
+            final name = param['name']?.toString() ?? '';
+            return ['Mode', 'Tone', 'Depth', 'Spread'].contains(name);
+          }).toList();
+          break;
+
         case 'Delay':
           params = params.where((param) {
             final name = param['name']?.toString() ?? '';
             return ['Delay Time', 'Feedback', 'Mix'].contains(name);
+          }).toList();
+          break;
+
+        case 'Stereo':
+          params = params.where((param) {
+            final name = param['name']?.toString() ?? '';
+            return ['Width', 'Low Bypass', 'Mono'].contains(name);
+          }).toList();
+          break;
+
+        case 'Stereo Pro':
+          params = params.where((param) {
+            final name = param['name']?.toString() ?? '';
+            return ['Gain', 'Width', 'Asymmetry', 'Rotation'].contains(name);
+          }).toList();
+          break;
+
+        case 'Volume Shaper':
+          params = params.where((param) {
+            final name = param['name']?.toString() ?? '';
+            return ['Shape', 'Rate', 'Depth', 'Smooth', 'Swing', 'Mix']
+                .contains(name);
+          }).toList();
+          break;
+
+        case 'Time Shaper':
+          params = params.where((param) {
+            final name = param['name']?.toString() ?? '';
+            return ['Pattern', 'Rate', 'Amount', 'Smooth', 'Mix']
+                .contains(name);
           }).toList();
           break;
       }
@@ -5988,13 +6761,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             _buildFxParamsHeader(
               context: context,
               title: effectName,
-              onBack: () {
-                _stopEqWaveformPolling();
-                setState(() {
-                  _selectedEffectIndex = null;
-                  _currentParams = [];
-                });
-              },
+              onBack: () => _returnToEffectsList(effectIndex: idx),
               onReset: () async {
                 final changes = <Map<String, dynamic>>[];
                 for (final p in _currentParams) {
@@ -6097,13 +6864,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             _buildFxParamsHeader(
               context: context,
               title: effectName,
-              onBack: () {
-                _stopEqWaveformPolling();
-                setState(() {
-                  _selectedEffectIndex = null;
-                  _currentParams = [];
-                });
-              },
+              onBack: () => _returnToEffectsList(effectIndex: idx),
             ),
             const SizedBox(height: 10),
             LayoutBuilder(
@@ -6366,14 +7127,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                     const BoxConstraints.tightFor(width: 26, height: 26),
                 splashRadius: 14,
                 icon: const Icon(Icons.arrow_back, size: 18),
-                onPressed: () {
-                  _stopCompressorMetering();
-                  _stopEqWaveformPolling();
-                  setState(() {
-                    _selectedEffectIndex = null;
-                    _currentParams = [];
-                  });
-                },
+                onPressed: () => _returnToEffectsList(effectIndex: idx),
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -6396,6 +7150,70 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             color: Color.fromARGB(213, 104, 104, 104),
           ),
           const SizedBox(height: 6),
+
+          if (effectName == 'Stereo Pro' && _currentParams.isNotEmpty) ...[
+            _StereoProPreview(
+              scopeFrames: _stereoScope,
+              gainDb: (_paramByName(_currentParams, 'Gain')?['value'] as num?)
+                      ?.toDouble() ??
+                  0.0,
+              widthPercent:
+                  (_paramByName(_currentParams, 'Width')?['value'] as num?)
+                          ?.toDouble() ??
+                      100.0,
+              asymmetryPercent:
+                  (_paramByName(_currentParams, 'Asymmetry')?['value'] as num?)
+                          ?.toDouble() ??
+                      0.0,
+              rotationDegrees:
+                  (_paramByName(_currentParams, 'Rotation')?['value'] as num?)
+                          ?.toDouble() ??
+                      0.0,
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          if (effectName == 'Degrade' && _currentParams.isNotEmpty) ...[
+            _DegradePreview(
+              spectrumDb: _eqSpectrumDb,
+              analyzerSampleRate: _eqAnalyzerSampleRate,
+              mode:
+                  (_paramByName(_currentParams, 'Mode')?['value']?.toString() ??
+                          'Noise')
+                      .trim(),
+              toneHz: (_paramByName(_currentParams, 'Tone')?['value'] as num?)
+                      ?.toDouble() ??
+                  6000.0,
+              depthPercent:
+                  (_paramByName(_currentParams, 'Depth')?['value'] as num?)
+                          ?.toDouble() ??
+                      35.0,
+              spreadPercent:
+                  (_paramByName(_currentParams, 'Spread')?['value'] as num?)
+                          ?.toDouble() ??
+                      40.0,
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          if (_showsShaperPreview(effectName) && _currentParams.isNotEmpty) ...[
+            _ShaperPreviewCard(
+              kind: effectName == 'Time Shaper'
+                  ? _ShaperPreviewKind.time
+                  : _ShaperPreviewKind.volume,
+              previewFrames: _shaperPreview,
+              title: ((_paramByName(
+                        _currentParams,
+                        effectName == 'Time Shaper' ? 'Pattern' : 'Shape',
+                      )?['value']) ??
+                      (effectName == 'Time Shaper' ? 'Pattern' : 'Shape'))
+                  .toString(),
+              detail:
+                  ((_paramByName(_currentParams, 'Rate')?['value']) ?? 'Rate')
+                      .toString(),
+            ),
+            const SizedBox(height: 12),
+          ],
 
           if (_showsDynamicsReductionMeter(effectName)) ...[
             // _buildCompressorMeterStrip(),
@@ -6463,7 +7281,10 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                       Row(
                         children: [
                           Text(
-                            (param['min'] as num).toDouble().toStringAsFixed(2),
+                            _formatParamValueForDisplay(
+                              param,
+                              (param['min'] as num).toDouble(),
+                            ),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           Expanded(
@@ -6484,6 +7305,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                 final rawV = (param['value'] as num)
                                     .toDouble()
                                     .clamp(minV, maxV);
+                                final valueText =
+                                    _formatParamValueForDisplay(param, rawV);
 
                                 final skew =
                                     _getParamSkew(effectName, paramName);
@@ -6531,7 +7354,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                     min: 0.0,
                                     max: 1.0,
                                     divisions: 200,
-                                    label: rawV.toStringAsFixed(2),
+                                    label: valueText,
                                     onChangeStart: (_) {
                                       _paramDragStartValue = rawV;
                                     },
@@ -6570,7 +7393,10 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                             ),
                           ),
                           Text(
-                            (param['max'] as num).toDouble().toStringAsFixed(2),
+                            _formatParamValueForDisplay(
+                              param,
+                              (param['max'] as num).toDouble(),
+                            ),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
@@ -6618,35 +7444,44 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                     effectName: effectName,
                     param: param,
                     borderRadius: BorderRadius.circular(10),
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(param['name'] as String),
-                      trailing: Text(current,
-                          style: Theme.of(context).textTheme.bodyLarge),
-                      onTap: () async {
-                        final picked = await showDialog<String>(
-                          context: context,
-                          useRootNavigator: true,
-                          builder: (ctx) => SimpleDialog(
-                            title: Text(
-                                "${L10n.translate(context, 'Select ')}${param['name']}"),
-                            children: choices.map((c) {
-                              return SimpleDialogOption(
-                                  child: Text(c),
-                                  onPressed: () => Navigator.pop(ctx, c));
-                            }).toList(),
+                    child: effectName == 'Degrade' && param['name'] == 'Mode'
+                        ? _buildDegradeModeSelectorTile(
+                            context: context,
+                            label: param['name'] as String,
+                            value: current,
+                            choices: choices,
+                            onSelected: (picked) {
+                              if (picked == current) return;
+                              final oldVal = param['value'];
+                              setState(() => param['value'] = picked);
+                              widget.setMasterEffectParam(
+                                  idx, param['name'] as String, picked);
+                              widget.onMasterPluginParamCommit?.call(
+                                  idx, param['name'] as String, oldVal, picked);
+                            },
+                          )
+                        : _buildMixroomChoiceSettingTile(
+                            context: context,
+                            label: param['name'] as String,
+                            value: current,
+                            onTap: () async {
+                              final picked = await _showMixroomChoiceDialog(
+                                context: context,
+                                title:
+                                    '${L10n.translate(context, 'Select ')}${param['name']}',
+                                choices: choices,
+                                currentChoice: current,
+                              );
+                              if (picked != null) {
+                                final oldVal = param['value'];
+                                setState(() => param['value'] = picked);
+                                widget.setMasterEffectParam(
+                                    idx, param['name'] as String, picked);
+                                widget.onMasterPluginParamCommit?.call(idx,
+                                    param['name'] as String, oldVal, picked);
+                              }
+                            },
                           ),
-                        );
-                        if (picked != null) {
-                          final oldVal = param['value'];
-                          setState(() => param['value'] = picked);
-                          widget.setMasterEffectParam(
-                              idx, param['name'] as String, picked);
-                          widget.onMasterPluginParamCommit?.call(
-                              idx, param['name'] as String, oldVal, picked);
-                        }
-                      },
-                    ),
                   ),
                 );
               })(),
@@ -6931,41 +7766,19 @@ Widget _buildEqChoiceSelector({
           ),
         ),
         Flexible(
-          child: PopupMenuButton<String>(
-            initialValue: currentChoice,
-            tooltip: '',
-            padding: EdgeInsets.zero,
-            onSelected: onChanged,
-            itemBuilder: (_) => choices
-                .map((choice) => PopupMenuItem<String>(
-                      value: choice,
-                      child: Text(choice),
-                    ))
-                .toList(growable: false),
-            child: Container(
-              alignment: Alignment.centerLeft,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0x1F000000),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0x33888888)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Expanded(
-                    child: Text(
-                      currentChoice,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.expand_more, size: 16),
-                ],
-              ),
-            ),
+          child: _buildMixroomChoiceField(
+            context: context,
+            value: currentChoice,
+            compact: true,
+            onTap: () async {
+              final picked = await _showMixroomChoiceDialog(
+                context: context,
+                title: '${L10n.translate(context, 'Select ')}$label',
+                choices: choices,
+                currentChoice: currentChoice,
+              );
+              if (picked != null) onChanged(picked);
+            },
           ),
         ),
       ],
@@ -7061,38 +7874,19 @@ Widget _buildEqFilterControlRow({
           const SizedBox(width: 4),
           SizedBox(
             width: 84,
-            child: PopupMenuButton<String>(
-              initialValue: selectedSlope,
-              tooltip: '',
-              padding: EdgeInsets.zero,
-              onSelected: onSlopeChanged,
-              itemBuilder: (_) => slopeChoices
-                  .map((choice) =>
-                      PopupMenuItem<String>(value: choice, child: Text(choice)))
-                  .toList(growable: false),
-              child: Container(
-                alignment: Alignment.centerLeft,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0x1F000000),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: const Color(0x33888888)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        selectedSlope,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.expand_more, size: 16),
-                  ],
-                ),
-              ),
+            child: _buildMixroomChoiceField(
+              context: context,
+              value: selectedSlope,
+              compact: true,
+              onTap: () async {
+                final picked = await _showMixroomChoiceDialog(
+                  context: context,
+                  title: '${L10n.translate(context, 'Select ')}$label Slope',
+                  choices: slopeChoices,
+                  currentChoice: selectedSlope,
+                );
+                if (picked != null) onSlopeChanged(picked);
+              },
             ),
           ),
         ],
@@ -7378,8 +8172,14 @@ const Map<String, Map<String, double>> kEffectParamSkew = {
     "HPF Frequency": 0.25,
     "LPF Frequency": 0.25,
   },
+  "Degrade": {
+    "Tone": 0.25,
+  },
   "Delay": {
     "HPF Frequency": 0.35,
+  },
+  "Stereo": {
+    "Low Bypass": 0.35,
   },
 };
 
@@ -7398,6 +8198,1252 @@ String _fmtHz(double hz) {
     return k < 10 ? '${k.toStringAsFixed(1)}k' : '${k.toStringAsFixed(0)}k';
   }
   return hz.round().toString();
+}
+
+String _normalizeParamUnit(dynamic rawUnit) {
+  final unit = (rawUnit?.toString() ?? '').trim();
+  if (unit.isEmpty) return '';
+  if (unit == 'deg') return '°';
+  return unit;
+}
+
+String _formatParamValueForDisplay(Map<String, dynamic> param, double value) {
+  final unit = _normalizeParamUnit(param['unit']);
+  if (unit == 'Hz') return '${_fmtHz(value)} Hz';
+  if (unit == 'dB') return '${value.toStringAsFixed(1)} dB';
+  if (unit == '%') return '${value.toStringAsFixed(0)}%';
+  if (unit == '°') return '${value.toStringAsFixed(0)}°';
+  if (unit == 'ms') return '${value.toStringAsFixed(1)} ms';
+  if (unit.isNotEmpty) return '${value.toStringAsFixed(2)} $unit';
+  return value.toStringAsFixed(2);
+}
+
+class _StereoStageMarker {
+  final String label;
+  final double xNorm;
+  final double yNorm;
+  final double emphasis;
+  final Color color;
+
+  const _StereoStageMarker({
+    required this.label,
+    required this.xNorm,
+    required this.yNorm,
+    required this.emphasis,
+    required this.color,
+  });
+}
+
+const double _kStereoProPreviewCeiling = 1.25;
+
+double _tanhApprox(double x) {
+  final ex = math.exp(x);
+  final inv = math.exp(-x);
+  return (ex - inv) / (ex + inv);
+}
+
+double _softLimitStereoProPreviewSample(double sample) {
+  if (!sample.isFinite) return 0.0;
+  return _kStereoProPreviewCeiling *
+      _tanhApprox(sample / _kStereoProPreviewCeiling);
+}
+
+(double, double) _transformStereoProPreviewFrame({
+  required double gainDb,
+  required double widthPercent,
+  required double asymmetryPercent,
+  required double rotationDegrees,
+  required double inputL,
+  required double inputR,
+}) {
+  final gain = math.pow(10.0, gainDb / 20.0).toDouble();
+  final width = (widthPercent / 100.0).clamp(0.0, 3.0);
+  final asymmetry = (asymmetryPercent / 100.0).clamp(-0.95, 0.95);
+  final rotation = (rotationDegrees / 90.0).clamp(-1.0, 1.0);
+  final angle = (rotation + 1.0) * math.pi * 0.25;
+  final midGainL = math.sqrt(2.0) * math.cos(angle);
+  final midGainR = math.sqrt(2.0) * math.sin(angle);
+  final sideGainL = width * (1.0 + asymmetry);
+  final sideGainR = width * (1.0 - asymmetry);
+  final matrixPeak = math.max(
+    1.0,
+    math.max(
+        midGainL.abs() + sideGainL.abs(), midGainR.abs() + sideGainR.abs()),
+  );
+  final matrixNormalise = 1.0 / matrixPeak;
+
+  final mid = 0.5 * (inputL + inputR);
+  final side = 0.5 * (inputL - inputR);
+  final outL = _softLimitStereoProPreviewSample(
+    gain * (((mid * midGainL) + (side * sideGainL)) * matrixNormalise),
+  );
+  final outR = _softLimitStereoProPreviewSample(
+    gain * (((mid * midGainR) - (side * sideGainR)) * matrixNormalise),
+  );
+  return (outL, outR);
+}
+
+List<_StereoStageMarker> _buildStereoProStageMarkers({
+  required double gainDb,
+  required double widthPercent,
+  required double asymmetryPercent,
+  required double rotationDegrees,
+}) {
+  _StereoStageMarker marker(
+    String label,
+    Color color,
+    double inputL,
+    double inputR,
+  ) {
+    final (outL, outR) = _transformStereoProPreviewFrame(
+      gainDb: gainDb,
+      widthPercent: widthPercent,
+      asymmetryPercent: asymmetryPercent,
+      rotationDegrees: rotationDegrees,
+      inputL: inputL,
+      inputR: inputR,
+    );
+    final xNorm =
+        ((((outR - outL) * 0.5) / _kStereoProPreviewCeiling).clamp(-1.0, 1.0))
+            .toDouble();
+    final yNorm =
+        ((((outL + outR) * 0.5) / _kStereoProPreviewCeiling).clamp(-1.0, 1.0))
+            .toDouble();
+    final emphasis =
+        (math.max(outL.abs(), outR.abs()) / _kStereoProPreviewCeiling)
+            .clamp(0.35, 1.0);
+    return _StereoStageMarker(
+      label: label,
+      xNorm: xNorm,
+      yNorm: yNorm,
+      emphasis: emphasis,
+      color: color,
+    );
+  }
+
+  return <_StereoStageMarker>[
+    marker('L', const Color(0xFF78BFFF), 1.0, 0.0),
+    marker('C', const Color(0xFFAEDAFF), 1.0, 1.0),
+    marker('R', const Color(0xFF4E9FFF), 0.0, 1.0),
+  ];
+}
+
+class _StereoProPreview extends StatelessWidget {
+  final List<double> scopeFrames;
+  final double gainDb;
+  final double widthPercent;
+  final double asymmetryPercent;
+  final double rotationDegrees;
+
+  const _StereoProPreview({
+    required this.scopeFrames,
+    required this.gainDb,
+    required this.widthPercent,
+    required this.asymmetryPercent,
+    required this.rotationDegrees,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: Container(
+        height: 156,
+        decoration: BoxDecoration(
+          color: _kFxPanelFill,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _kFxPanelBorder),
+        ),
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: CustomPaint(
+          painter: _StereoProPreviewPainter(
+            scopeFrames: scopeFrames,
+            markers: _buildStereoProStageMarkers(
+              gainDb: gainDb,
+              widthPercent: widthPercent,
+              asymmetryPercent: asymmetryPercent,
+              rotationDegrees: rotationDegrees,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StereoProPreviewPainter extends CustomPainter {
+  final List<double> scopeFrames;
+  final List<_StereoStageMarker> markers;
+
+  const _StereoProPreviewPainter({
+    required this.scopeFrames,
+    required this.markers,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final plotRect = Rect.fromLTWH(
+      4.0,
+      6.0,
+      math.max(0.0, size.width - 8.0),
+      math.max(0.0, size.height - 18.0),
+    );
+    final center = plotRect.center;
+    final xExtent = plotRect.width * 0.46;
+    final yExtent = plotRect.height * 0.42;
+    final grid = Paint()
+      ..color = _kFxCoolAccent.withValues(alpha: 0.14)
+      ..strokeWidth = 1.0;
+    final border = Paint()
+      ..color = _kFxCoolAccentSoft.withValues(alpha: 0.22)
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+    final fill = Paint()
+      ..shader = ui.Gradient.linear(
+        plotRect.topCenter,
+        plotRect.bottomCenter,
+        [
+          _kFxCoolAccent.withValues(alpha: 0.05),
+          _kFxCoolAccentSoft.withValues(alpha: 0.02),
+        ],
+        const [0.0, 1.0],
+      );
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(plotRect, const Radius.circular(16)),
+      fill,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(plotRect, const Radius.circular(16)),
+      border,
+    );
+
+    canvas.drawLine(
+      Offset(plotRect.left, center.dy),
+      Offset(plotRect.right, center.dy),
+      grid,
+    );
+    canvas.drawLine(
+      Offset(center.dx, plotRect.top),
+      Offset(center.dx, plotRect.bottom),
+      grid,
+    );
+    canvas.drawLine(plotRect.topLeft, plotRect.bottomRight, grid);
+    canvas.drawLine(plotRect.bottomLeft, plotRect.topRight, grid);
+
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: center,
+        width: xExtent * 1.7,
+        height: yExtent * 1.7,
+      ),
+      Paint()
+        ..color = _kFxCoolAccent.withValues(alpha: 0.08)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: center,
+        width: xExtent * 0.9,
+        height: yExtent * 0.9,
+      ),
+      Paint()
+        ..color = _kFxCoolAccentSoft.withValues(alpha: 0.10)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0,
+    );
+
+    final scopeVectors = <Offset>[];
+    var scopePeak = 0.0;
+    for (int i = 0; i + 1 < scopeFrames.length; i += 2) {
+      final leftSample = scopeFrames[i]
+          .clamp(-_kStereoProPreviewCeiling, _kStereoProPreviewCeiling)
+          .toDouble();
+      final rightSample = scopeFrames[i + 1]
+          .clamp(-_kStereoProPreviewCeiling, _kStereoProPreviewCeiling)
+          .toDouble();
+      final xComponent = (rightSample - leftSample) * 0.5;
+      final yComponent = (leftSample + rightSample) * 0.5;
+      scopePeak = math.max(
+        scopePeak,
+        math.max(xComponent.abs(), yComponent.abs()),
+      );
+      scopeVectors.add(Offset(xComponent, yComponent));
+    }
+
+    final displayCeiling = (scopePeak * 1.08).clamp(
+      0.18,
+      _kStereoProPreviewCeiling,
+    );
+    final scopePoints = <Offset>[];
+    for (final vector in scopeVectors) {
+      final xNorm = (vector.dx / displayCeiling).clamp(-1.0, 1.0);
+      final yNorm = (vector.dy / displayCeiling).clamp(-1.0, 1.0);
+      final x = center.dx + (xNorm * xExtent * 0.94);
+      final y = center.dy - (yNorm * yExtent * 0.94);
+      scopePoints.add(Offset(x, y));
+    }
+
+    if (scopePoints.length > 1) {
+      final scopePaint = Paint()
+        ..color = _kFxCoolAccentSoft.withValues(alpha: 0.38)
+        ..strokeWidth = 1.55
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+      final scopePath = Path()
+        ..moveTo(scopePoints.first.dx, scopePoints.first.dy);
+      for (int i = 1; i < scopePoints.length; i++) {
+        scopePath.lineTo(scopePoints[i].dx, scopePoints[i].dy);
+      }
+      canvas.drawPath(scopePath, scopePaint);
+      canvas.drawPoints(
+        ui.PointMode.points,
+        scopePoints,
+        Paint()
+          ..color = _kFxCoolAccent.withValues(alpha: 0.12)
+          ..strokeWidth = 1.25
+          ..strokeCap = StrokeCap.round,
+      );
+      final lastPoint = scopePoints.last;
+      canvas.drawCircle(
+        lastPoint,
+        3.6,
+        Paint()..color = _kFxCoolAccentSoft.withValues(alpha: 0.9),
+      );
+      canvas.drawCircle(
+        lastPoint,
+        6.8,
+        Paint()..color = _kFxCoolAccentSoft.withValues(alpha: 0.16),
+      );
+    }
+
+    for (final marker in markers) {
+      final x = center.dx + (marker.xNorm * xExtent * 0.82);
+      final y = center.dy - (marker.yNorm * yExtent * 0.82);
+      final radius = 5.0 + (marker.emphasis * 3.2);
+      final fill = Paint()..color = marker.color;
+      final glow = Paint()..color = marker.color.withValues(alpha: 0.16);
+      canvas.drawCircle(Offset(x, y), radius * 1.9, glow);
+      canvas.drawCircle(Offset(x, y), radius, fill);
+      canvas.drawCircle(
+        Offset(x, y),
+        radius,
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.22)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0,
+      );
+
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: marker.label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      textPainter.paint(
+        canvas,
+        Offset(x - textPainter.width * 0.5, y + radius + 5),
+      );
+    }
+
+    void drawEdgeLabel(String text, Offset offset,
+        {TextAlign align = TextAlign.center}) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.62),
+            fontSize: 10.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+        textAlign: align,
+      )..layout();
+      tp.paint(canvas, offset);
+    }
+
+    drawEdgeLabel(
+      'MONO',
+      Offset(center.dx - 18, plotRect.top - 2),
+    );
+    drawEdgeLabel(
+      'WIDE',
+      Offset(center.dx - 14, plotRect.bottom - 12),
+    );
+    drawEdgeLabel(
+      'L',
+      Offset(plotRect.left + 4, center.dy - 8),
+    );
+    drawEdgeLabel(
+      'R',
+      Offset(plotRect.right - 10, center.dy - 8),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _StereoProPreviewPainter oldDelegate) {
+    return oldDelegate.scopeFrames != scopeFrames ||
+        oldDelegate.markers != markers;
+  }
+}
+
+double _degradeSpreadPercentToOctaves(double spreadPercent) {
+  final norm = ((spreadPercent / 100.0).clamp(0.0, 1.0)).toDouble();
+  return 0.15 + (7.85 * norm * norm);
+}
+
+(double, double) _degradeBandEdgesHz({
+  required double toneHz,
+  required double spreadPercent,
+  required double nyquistHz,
+}) {
+  final centre = toneHz.clamp(20.0, nyquistHz).toDouble();
+  final octaves = _degradeSpreadPercentToOctaves(spreadPercent);
+  final halfRatio = math.pow(2.0, octaves * 0.5).toDouble();
+  final low = (centre / halfRatio).clamp(20.0, nyquistHz).toDouble();
+  final high = (centre * halfRatio).clamp(20.0, nyquistHz).toDouble();
+  return (low, math.max(low, high).toDouble());
+}
+
+double _degradeLogFrequencyX({
+  required double hz,
+  required Rect plotRect,
+  required double maxHz,
+}) {
+  const minHz = 20.0;
+  final safeMax = maxHz <= minHz ? 20000.0 : maxHz;
+  final clampedHz = hz.clamp(minHz, safeMax).toDouble();
+  final minLog = math.log(minHz);
+  final maxLog = math.log(safeMax);
+  final t = (math.log(clampedHz) - minLog) / (maxLog - minLog);
+  return plotRect.left + (plotRect.width * t);
+}
+
+double _degradeSampleSpectrumAtHz({
+  required List<double> spectrumDb,
+  required double hz,
+  required double binHz,
+  required double nyquist,
+}) {
+  if (spectrumDb.length < 2 || hz <= 0.0 || binHz <= 0.0 || hz > nyquist) {
+    return -120.0;
+  }
+
+  final idx = hz / binHz;
+  final maxIdx = spectrumDb.length - 1;
+  if (idx <= 1.0) return spectrumDb[1];
+  if (idx >= maxIdx) return spectrumDb[maxIdx];
+
+  final i0 = idx.floor();
+  final i1 = math.min(maxIdx, i0 + 1);
+  final t = idx - i0;
+  return spectrumDb[i0] * (1.0 - t) + spectrumDb[i1] * t;
+}
+
+double _degradeFocusProfileLevel({
+  required String mode,
+  required double hz,
+  required double toneHz,
+  required double spreadPercent,
+  required double maxHz,
+}) {
+  final safeHz = hz.clamp(20.0, maxHz).toDouble();
+  final centreHz = toneHz.clamp(20.0, maxHz).toDouble();
+
+  double octaveDistanceFrom(double edgeHz) {
+    return (math.log(safeHz / edgeHz) / math.ln2).abs();
+  }
+
+  if (mode == 'Sine') {
+    const sigmaOctaves = 0.12;
+    final distanceOctaves =
+        (math.log(safeHz / centreHz) / math.ln2).abs().toDouble();
+    return math.exp(
+      -0.5 * math.pow(distanceOctaves / sigmaOctaves, 2.0).toDouble(),
+    );
+  }
+
+  final (lowHz, highHz) = _degradeBandEdgesHz(
+    toneHz: toneHz,
+    spreadPercent: spreadPercent,
+    nyquistHz: maxHz,
+  );
+
+  if (safeHz >= lowHz && safeHz <= highHz) {
+    return 1.0;
+  }
+
+  final edgeHz = safeHz < lowHz ? lowHz : highHz;
+  final featherOctaves = mode == 'Wide Noise' ? 0.55 : 0.28;
+  final distanceOctaves = octaveDistanceFrom(edgeHz);
+  return math.exp(
+    -0.5 * math.pow(distanceOctaves / featherOctaves, 2.0).toDouble(),
+  );
+}
+
+class _DegradePreview extends StatelessWidget {
+  final List<double> spectrumDb;
+  final double analyzerSampleRate;
+  final String mode;
+  final double toneHz;
+  final double depthPercent;
+  final double spreadPercent;
+
+  const _DegradePreview({
+    required this.spectrumDb,
+    required this.analyzerSampleRate,
+    required this.mode,
+    required this.toneHz,
+    required this.depthPercent,
+    required this.spreadPercent,
+  });
+
+  Widget _chip(String label) {
+    return Container(
+      height: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Center(
+        child: SizedBox(
+          width: double.infinity,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.82),
+                fontSize: 11.0,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nyquist =
+        analyzerSampleRate > 1000.0 ? analyzerSampleRate * 0.5 : 22050.0;
+    final bandText = mode == 'Sine'
+        ? 'Tone ${_fmtHz(toneHz)}'
+        : (() {
+            final (low, high) = _degradeBandEdgesHz(
+              toneHz: toneHz,
+              spreadPercent: spreadPercent,
+              nyquistHz: nyquist,
+            );
+            return '${_fmtHz(low)}-${_fmtHz(high)} focus';
+          })();
+
+    return SizedBox(
+      width: double.infinity,
+      child: Container(
+        decoration: BoxDecoration(
+          color: _kFxPanelFill,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _kFxPanelBorder),
+        ),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: _chip(mode)),
+                const SizedBox(width: 8),
+                Expanded(child: _chip('${depthPercent.round()}% depth')),
+                const SizedBox(width: 8),
+                Expanded(flex: 2, child: _chip(bandText)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 146,
+              child: CustomPaint(
+                painter: _DegradePreviewPainter(
+                  spectrumDb: spectrumDb,
+                  analyzerSampleRate: analyzerSampleRate,
+                  mode: mode,
+                  toneHz: toneHz,
+                  depthPercent: depthPercent,
+                  spreadPercent: spreadPercent,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DegradePreviewPainter extends CustomPainter {
+  final List<double> spectrumDb;
+  final double analyzerSampleRate;
+  final String mode;
+  final double toneHz;
+  final double depthPercent;
+  final double spreadPercent;
+
+  const _DegradePreviewPainter({
+    required this.spectrumDb,
+    required this.analyzerSampleRate,
+    required this.mode,
+    required this.toneHz,
+    required this.depthPercent,
+    required this.spreadPercent,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final plotRect = Rect.fromLTWH(
+      4.0,
+      4.0,
+      math.max(0.0, size.width - 8.0),
+      math.max(0.0, size.height - 12.0),
+    );
+    final rrect = RRect.fromRectAndRadius(plotRect, const Radius.circular(16));
+    final maxHz = math
+        .min(
+          20000.0,
+          analyzerSampleRate > 1000.0 ? analyzerSampleRate * 0.5 : 22050.0,
+        )
+        .toDouble();
+    final depthNorm = ((depthPercent / 100.0).clamp(0.0, 1.0)).toDouble();
+
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          plotRect.topCenter,
+          plotRect.bottomCenter,
+          [
+            _kFxCoolAccent.withValues(alpha: 0.05),
+            _kFxCoolAccentSoft.withValues(alpha: 0.02),
+          ],
+          const [0.0, 1.0],
+        ),
+    );
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = _kFxCoolAccent.withValues(alpha: 0.16)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0,
+    );
+
+    double yForNorm(double norm) {
+      return plotRect.bottom - (plotRect.height * norm.clamp(0.0, 1.0));
+    }
+
+    for (final hz in <double>[40, 100, 250, 500, 1000, 2500, 5000, 10000]) {
+      if (hz >= maxHz) break;
+      final x = _degradeLogFrequencyX(hz: hz, plotRect: plotRect, maxHz: maxHz);
+      canvas.drawLine(
+        Offset(x, plotRect.top),
+        Offset(x, plotRect.bottom),
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.06)
+          ..strokeWidth = 1.0,
+      );
+    }
+
+    for (final norm in <double>[0.2, 0.4, 0.6, 0.8]) {
+      final y = yForNorm(norm);
+      canvas.drawLine(
+        Offset(plotRect.left, y),
+        Offset(plotRect.right, y),
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.05)
+          ..strokeWidth = 1.0,
+      );
+    }
+
+    final centreX = _degradeLogFrequencyX(
+      hz: toneHz,
+      plotRect: plotRect,
+      maxHz: maxHz,
+    );
+    final focusColor =
+        mode == 'Wide Noise' ? _kFxCoolAccentSoft : _kFxCoolAccent;
+    final responseSamples = math.max(96, plotRect.width.floor());
+    final responsePath = Path();
+    for (int px = 0; px < responseSamples; px++) {
+      final t = responseSamples <= 1 ? 0.0 : px / (responseSamples - 1);
+      final hz = 20.0 * math.pow(maxHz / 20.0, t).toDouble();
+      final response = _degradeFocusProfileLevel(
+        mode: mode,
+        hz: hz,
+        toneHz: toneHz,
+        spreadPercent: spreadPercent,
+        maxHz: maxHz,
+      ).clamp(0.0, 1.0);
+      final lift = 0.10 + ((0.22 + (0.46 * depthNorm)) * response);
+      final x = plotRect.left + (plotRect.width * t);
+      final y = yForNorm(lift);
+      if (px == 0) {
+        responsePath.moveTo(x, y);
+      } else {
+        responsePath.lineTo(x, y);
+      }
+    }
+
+    final responseFill = Path.from(responsePath)
+      ..lineTo(plotRect.right, plotRect.bottom)
+      ..lineTo(plotRect.left, plotRect.bottom)
+      ..close();
+    canvas.drawPath(
+      responseFill,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          plotRect.topCenter,
+          plotRect.bottomCenter,
+          [
+            focusColor.withValues(alpha: 0.24 + (0.10 * depthNorm)),
+            focusColor.withValues(alpha: 0.03),
+          ],
+          const [0.0, 1.0],
+        ),
+    );
+    canvas.drawPath(
+      responsePath,
+      Paint()
+        ..color = focusColor.withValues(alpha: 0.85)
+        ..strokeWidth = 1.4
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+
+    if (mode == 'Sine') {
+      canvas.drawLine(
+        Offset(centreX, plotRect.top),
+        Offset(centreX, plotRect.bottom),
+        Paint()
+          ..color = focusColor.withValues(alpha: 0.12 + (0.10 * depthNorm))
+          ..strokeWidth = 4.0 + (2.0 * depthNorm),
+      );
+      canvas.drawLine(
+        Offset(centreX, plotRect.top),
+        Offset(centreX, plotRect.bottom),
+        Paint()
+          ..color = focusColor.withValues(alpha: 0.78)
+          ..strokeWidth = 1.2 + (1.0 * depthNorm),
+      );
+    } else {
+      final (lowHz, highHz) = _degradeBandEdgesHz(
+        toneHz: toneHz,
+        spreadPercent: spreadPercent,
+        nyquistHz: maxHz,
+      );
+      final leftX = _degradeLogFrequencyX(
+        hz: lowHz,
+        plotRect: plotRect,
+        maxHz: maxHz,
+      );
+      final rightX = _degradeLogFrequencyX(
+        hz: highHz,
+        plotRect: plotRect,
+        maxHz: maxHz,
+      );
+      final bandRect =
+          Rect.fromLTRB(leftX, plotRect.top, rightX, plotRect.bottom);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(bandRect, const Radius.circular(12)),
+        Paint()
+          ..shader = ui.Gradient.linear(
+            bandRect.topLeft,
+            bandRect.topRight,
+            [
+              focusColor.withValues(alpha: 0.04 + (0.10 * depthNorm)),
+              focusColor.withValues(alpha: 0.14 + (0.16 * depthNorm)),
+              focusColor.withValues(alpha: 0.04 + (0.10 * depthNorm)),
+            ],
+            const [0.0, 0.5, 1.0],
+          ),
+      );
+      canvas.drawLine(
+        Offset(leftX, plotRect.top),
+        Offset(leftX, plotRect.bottom),
+        Paint()
+          ..color = focusColor.withValues(alpha: 0.32)
+          ..strokeWidth = 1.0,
+      );
+      canvas.drawLine(
+        Offset(rightX, plotRect.top),
+        Offset(rightX, plotRect.bottom),
+        Paint()
+          ..color = focusColor.withValues(alpha: 0.32)
+          ..strokeWidth = 1.0,
+      );
+      canvas.drawLine(
+        Offset(centreX, plotRect.top),
+        Offset(centreX, plotRect.bottom),
+        Paint()
+          ..color = focusColor.withValues(alpha: 0.65)
+          ..strokeWidth = 1.2 + (1.2 * depthNorm),
+      );
+    }
+
+    if (spectrumDb.length > 2) {
+      final fftSize = (spectrumDb.length - 1) * 2;
+      final sr = analyzerSampleRate > 1000.0 ? analyzerSampleRate : 44100.0;
+      final nyquist = sr * 0.5;
+      final binHz = fftSize > 0 ? sr / fftSize : 0.0;
+      if (fftSize > 0 && binHz > 0.0) {
+        var peakDb = -120.0;
+        for (int i = 1; i < spectrumDb.length; i++) {
+          peakDb = math.max(peakDb, spectrumDb[i]);
+        }
+
+        if (peakDb > -110.0) {
+          final floorDb = math.max(-110.0, peakDb - 72.0);
+          final ceilDb = math.max(floorDb + 8.0, peakDb + 2.0);
+
+          double yForSpectrumDb(double db) {
+            final norm = ((db - floorDb) / (ceilDb - floorDb)).clamp(0.0, 1.0);
+            return yForNorm(0.06 + (0.80 * norm));
+          }
+
+          final spectrumPath = Path();
+          final spectrumSamples = math.max(96, plotRect.width.floor());
+          for (int px = 0; px < spectrumSamples; px++) {
+            final t = spectrumSamples <= 1 ? 0.0 : px / (spectrumSamples - 1);
+            final hz = 20.0 * math.pow(maxHz / 20.0, t).toDouble();
+            final db = _degradeSampleSpectrumAtHz(
+              spectrumDb: spectrumDb,
+              hz: hz,
+              binHz: binHz,
+              nyquist: nyquist,
+            );
+            final x = plotRect.left + (plotRect.width * t);
+            final y = yForSpectrumDb(db);
+            if (px == 0) {
+              spectrumPath.moveTo(x, y);
+            } else {
+              spectrumPath.lineTo(x, y);
+            }
+          }
+
+          final fillPath = Path.from(spectrumPath)
+            ..lineTo(plotRect.right, plotRect.bottom)
+            ..lineTo(plotRect.left, plotRect.bottom)
+            ..close();
+          canvas.drawPath(
+            fillPath,
+            Paint()
+              ..shader = ui.Gradient.linear(
+                plotRect.topCenter,
+                plotRect.bottomCenter,
+                [
+                  Colors.white.withValues(alpha: 0.18),
+                  Colors.white.withValues(alpha: 0.02),
+                ],
+                const [0.0, 1.0],
+              ),
+          );
+          canvas.drawPath(
+            spectrumPath,
+            Paint()
+              ..color = Colors.white.withValues(alpha: 0.92)
+              ..strokeWidth = 1.6
+              ..style = PaintingStyle.stroke
+              ..strokeCap = StrokeCap.round
+              ..strokeJoin = StrokeJoin.round,
+          );
+        }
+      }
+    }
+
+    final depthBarRect = Rect.fromLTWH(
+      plotRect.left + 10,
+      plotRect.bottom - 10,
+      plotRect.width - 20,
+      4,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(depthBarRect, const Radius.circular(999)),
+      Paint()..color = Colors.white.withValues(alpha: 0.08),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(
+          depthBarRect.left,
+          depthBarRect.top,
+          depthBarRect.width * depthNorm,
+          depthBarRect.height,
+        ),
+        const Radius.circular(999),
+      ),
+      Paint()
+        ..shader = ui.Gradient.linear(
+          depthBarRect.centerLeft,
+          depthBarRect.centerRight,
+          [
+            focusColor.withValues(alpha: 0.58),
+            focusColor.withValues(alpha: 0.92),
+          ],
+          const [0.0, 1.0],
+        ),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _DegradePreviewPainter oldDelegate) {
+    return oldDelegate.spectrumDb != spectrumDb ||
+        oldDelegate.analyzerSampleRate != analyzerSampleRate ||
+        oldDelegate.mode != mode ||
+        oldDelegate.toneHz != toneHz ||
+        oldDelegate.depthPercent != depthPercent ||
+        oldDelegate.spreadPercent != spreadPercent;
+  }
+}
+
+enum _ShaperPreviewKind {
+  volume,
+  time,
+}
+
+class _ShaperPreviewCard extends StatelessWidget {
+  final _ShaperPreviewKind kind;
+  final List<double> previewFrames;
+  final String title;
+  final String detail;
+
+  const _ShaperPreviewCard({
+    required this.kind,
+    required this.previewFrames,
+    required this.title,
+    required this.detail,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = kind == _ShaperPreviewKind.volume
+        ? const Color(0xFFFB923C)
+        : const Color(0xFF38BDF8);
+    final icon = kind == _ShaperPreviewKind.volume
+        ? Icons.show_chart_rounded
+        : Icons.timeline_rounded;
+
+    return Container(
+      height: 156,
+      decoration: BoxDecoration(
+        color: _kFxPanelFill,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _kFxPanelBorder),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
+              child: CustomPaint(
+                painter: _ShaperPreviewPainter(
+                  kind: kind,
+                  previewFrames: previewFrames,
+                  accent: accent,
+                ),
+              ),
+            ),
+            Positioned(
+              left: 10,
+              top: 10,
+              child: _ShaperPreviewChip(
+                accent: accent,
+                icon: icon,
+                label: title,
+              ),
+            ),
+            Positioned(
+              right: 10,
+              top: 10,
+              child: _ShaperPreviewChip(
+                accent: accent,
+                label: detail,
+                compact: true,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ShaperPreviewChip extends StatelessWidget {
+  final Color accent;
+  final IconData? icon;
+  final String label;
+  final bool compact;
+
+  const _ShaperPreviewChip({
+    required this.accent,
+    required this.label,
+    this.icon,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: compact ? 112 : 164,
+      ),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 10 : 11,
+          vertical: compact ? 6 : 7,
+        ),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F1722).withValues(alpha: 0.76),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: accent.withValues(alpha: 0.26)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 14, color: accent),
+              const SizedBox(width: 6),
+            ],
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: compact ? 0.80 : 0.92),
+                  fontSize: compact ? 11.0 : 11.6,
+                  fontWeight: compact ? FontWeight.w600 : FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ShaperPreviewPainter extends CustomPainter {
+  final _ShaperPreviewKind kind;
+  final List<double> previewFrames;
+  final Color accent;
+
+  const _ShaperPreviewPainter({
+    required this.kind,
+    required this.previewFrames,
+    required this.accent,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final plotLeft = 6.0;
+    final plotTop = 12.0;
+    final plotRight = size.width - 6.0;
+    final plotBottom = size.height - 22.0;
+    final plotWidth = plotRight - plotLeft;
+    final plotHeight = plotBottom - plotTop;
+    final plotRect = Rect.fromLTRB(plotLeft, plotTop, plotRight, plotBottom);
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(plotRect, const Radius.circular(16)),
+      Paint()
+        ..shader = ui.Gradient.linear(
+          Offset(plotLeft, plotTop),
+          Offset(plotRight, plotBottom),
+          <Color>[
+            Colors.white.withValues(alpha: 0.04),
+            accent.withValues(alpha: 0.08),
+          ],
+          const [0.0, 1.0],
+        ),
+    );
+
+    final gridPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..strokeWidth = 1.0;
+    for (final yStep in const <double>[0.0, 0.5, 1.0]) {
+      final y = plotTop + ((1.0 - yStep) * plotHeight);
+      canvas.drawLine(Offset(plotLeft, y), Offset(plotRight, y), gridPaint);
+    }
+    for (final xStep in const <double>[0.0, 0.25, 0.5, 0.75, 1.0]) {
+      final x = plotLeft + (xStep * plotWidth);
+      canvas.drawLine(
+        Offset(x, plotTop),
+        Offset(x, plotBottom),
+        Paint()
+          ..color = Colors.white
+              .withValues(alpha: xStep == 0.0 || xStep == 1.0 ? 0.08 : 0.04)
+          ..strokeWidth = 1.0,
+      );
+    }
+
+    final phase = previewFrames.isNotEmpty
+        ? previewFrames.first.clamp(0.0, 1.0).toDouble()
+        : 0.0;
+    final curve = previewFrames.length > 1
+        ? previewFrames
+            .skip(1)
+            .map((e) => e.clamp(0.0, 1.0).toDouble())
+            .toList(growable: false)
+        : const <double>[1.0, 1.0];
+
+    final path = Path();
+    final fillPath = Path();
+    for (int i = 0; i < curve.length; i++) {
+      final t = curve.length <= 1 ? 0.0 : i / (curve.length - 1);
+      final x = plotLeft + (t * plotWidth);
+      final y = plotTop + ((1.0 - curve[i]) * plotHeight);
+      if (i == 0) {
+        path.moveTo(x, y);
+        fillPath
+          ..moveTo(x, plotBottom)
+          ..lineTo(x, y);
+      } else {
+        path.lineTo(x, y);
+        fillPath.lineTo(x, y);
+      }
+    }
+    fillPath
+      ..lineTo(plotRight, plotBottom)
+      ..close();
+
+    canvas.drawPath(
+      fillPath,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          Offset(plotLeft, plotTop),
+          Offset(plotRight, plotBottom),
+          <Color>[
+            accent.withValues(alpha: 0.26),
+            accent.withValues(alpha: 0.08),
+          ],
+          const [0.0, 1.0],
+        )
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = accent
+        ..strokeWidth = 2.3
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke,
+    );
+
+    final playheadX = plotLeft + (phase * plotWidth);
+    canvas.drawLine(
+      Offset(playheadX, plotTop - 2),
+      Offset(playheadX, plotBottom + 2),
+      Paint()
+        ..color = accent.withValues(alpha: 0.88)
+        ..strokeWidth = 1.5,
+    );
+    final playheadIndex = curve.isEmpty
+        ? 0
+        : ((curve.length - 1) * phase).round().clamp(0, curve.length - 1);
+    final playheadY = plotTop + ((1.0 - curve[playheadIndex]) * plotHeight);
+    canvas.drawCircle(
+      Offset(playheadX, playheadY),
+      4.5,
+      Paint()..color = accent,
+    );
+    canvas.drawCircle(
+      Offset(playheadX, playheadY),
+      4.5,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.3)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0,
+    );
+
+    final footerLabelStyle = TextStyle(
+      color: Colors.white.withValues(alpha: 0.66),
+      fontSize: 10.5,
+      fontWeight: FontWeight.w500,
+    );
+    final leftLabelPainter = TextPainter(
+      text: TextSpan(
+        text: kind == _ShaperPreviewKind.volume ? 'Start' : 'Now',
+        style: footerLabelStyle,
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final rightLabelPainter = TextPainter(
+      text: TextSpan(
+        text: kind == _ShaperPreviewKind.volume ? 'End' : 'Ahead',
+        style: footerLabelStyle,
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final labelY = plotBottom + 2.0;
+    leftLabelPainter.paint(canvas, Offset(plotLeft, labelY));
+    final rightLabelX = plotRight - rightLabelPainter.width;
+    rightLabelPainter.paint(
+      canvas,
+      Offset(rightLabelX, labelY),
+    );
+
+    final directionPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.14)
+      ..strokeWidth = 1.1
+      ..strokeCap = StrokeCap.butt
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+    final labelHeight = math.max(
+      leftLabelPainter.height,
+      rightLabelPainter.height,
+    );
+    final directionY = labelY + (labelHeight * 0.5);
+    final directionStartX = plotLeft + leftLabelPainter.width + 14.0;
+    final directionEndX = rightLabelX - 10.0;
+    if (directionEndX > directionStartX + 8.0) {
+      final directionStart = Offset(directionStartX, directionY);
+      final arrowTip = Offset(directionEndX, directionY);
+      final arrowBaseX = arrowTip.dx - 6.0;
+      canvas.drawLine(
+        directionStart,
+        Offset(arrowBaseX - 0.5, directionY),
+        directionPaint,
+      );
+      final arrowHead = Path()
+        ..moveTo(arrowBaseX, directionY - 4.0)
+        ..lineTo(arrowTip.dx, arrowTip.dy)
+        ..lineTo(arrowBaseX, directionY + 4.0);
+      canvas.drawPath(arrowHead, directionPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ShaperPreviewPainter oldDelegate) {
+    return oldDelegate.kind != kind ||
+        oldDelegate.previewFrames != previewFrames ||
+        oldDelegate.accent != accent;
+  }
 }
 
 class _EqSpectrumAnalyzer {

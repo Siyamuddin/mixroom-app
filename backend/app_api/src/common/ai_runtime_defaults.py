@@ -23,7 +23,15 @@ def video_default_temperature() -> float:
 
 def default_reasoning_effort(model_name: str) -> str:
     normalized = _safe_str(model_name).lower()
-    return "minimal" if normalized.startswith("gpt-5") else ""
+    if normalized.startswith("gpt-5.4-mini"):
+        return "low"
+    if normalized.startswith(("gpt-5-pro", "gpt-5.2-pro", "gpt-5.4-pro")):
+        return "high"
+    if normalized.startswith(("gpt-5.4", "gpt-5.2", "gpt-5.1")):
+        return "none"
+    if normalized.startswith("gpt-5"):
+        return "minimal"
+    return ""
 
 
 def default_prompt_cache_retention(model_name: str) -> str:

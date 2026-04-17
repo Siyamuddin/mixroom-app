@@ -574,6 +574,11 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
             d[@"id"]   = [NSString stringWithUTF8String:cid] ?: @"";
             d[@"name"] = [NSString stringWithUTF8String:cname] ?: @"";
             d[@"type"] = [NSString stringWithUTF8String:ctype] ?: @"";
+            if (e.contains("unit"))
+            {
+                const char* cunit = e["unit"].toString().toRawUTF8();
+                d[@"unit"] = [NSString stringWithUTF8String:cunit] ?: @"";
+            }
             if (e.contains("min"))     d[@"min"] = @(static_cast<float>(e["min"]));
             if (e.contains("max"))     d[@"max"] = @(static_cast<float>(e["max"]));
 
@@ -637,6 +642,11 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
             d[@"id"]   = [NSString stringWithUTF8String:cid] ?: @"";
             d[@"name"] = [NSString stringWithUTF8String:cname] ?: @"";
             d[@"type"] = [NSString stringWithUTF8String:ctype] ?: @"";
+            if (e.contains("unit"))
+            {
+                const char* cunit = e["unit"].toString().toRawUTF8();
+                d[@"unit"] = [NSString stringWithUTF8String:cunit] ?: @"";
+            }
 
             if (e.contains("min"))  d[@"min"] = @(static_cast<float>(e["min"]));
             if (e.contains("max"))  d[@"max"] = @(static_cast<float>(e["max"]));
@@ -698,6 +708,11 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
             d[@"id"]   = [NSString stringWithUTF8String:cid] ?: @"";
             d[@"name"] = [NSString stringWithUTF8String:cname] ?: @"";
             d[@"type"] = [NSString stringWithUTF8String:ctype] ?: @"";
+            if (e.contains("unit"))
+            {
+                const char* cunit = e["unit"].toString().toRawUTF8();
+                d[@"unit"] = [NSString stringWithUTF8String:cunit] ?: @"";
+            }
 
             if (e.contains("min"))  d[@"min"] = @(static_cast<float>(e["min"]));
             if (e.contains("max"))  d[@"max"] = @(static_cast<float>(e["max"]));
@@ -1252,7 +1267,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 #pragma mark - Clip-level control
 
-+ (void)loadClipObjC:(NSInteger)clipIndex
++ (BOOL)loadClipObjC:(NSInteger)clipIndex
                rowId:(NSInteger)rowId
                 path:(NSString *)path
             startSec:(double)startSec
@@ -1260,12 +1275,22 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
      inFileOffsetSec:(double)inFileOffsetSec
 {
     juce::String jucePath = juceStringFromNSString(path);
-    JuceEngine::get().loadClip((int)clipIndex,
-                               (int)rowId,
-                               juce::File(jucePath),
-                               startSec,
-                               lengthSec,
-                               inFileOffsetSec);
+    return JuceEngine::get().loadClip((int)clipIndex,
+                                      (int)rowId,
+                                      juce::File(jucePath),
+                                      startSec,
+                                      lengthSec,
+                                      inFileOffsetSec);
+}
+
++ (void)beginProjectClipLoadObjC
+{
+    JuceEngine::get().beginProjectClipLoad();
+}
+
++ (void)endProjectClipLoadObjC
+{
+    JuceEngine::get().endProjectClipLoad();
 }
 
 + (BOOL)supportsLiveMidiClipPlaybackObjC
@@ -1862,10 +1887,12 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 }
 
 + (NSDictionary<NSString *, id> *)analyzeAudioForPromptObjC:(NSString *)path
+                                                trimStartMs:(double)trimStartMs
+                                                  trimEndMs:(double)trimEndMs
 {
     juce::File file = juceFileFromNSString(path);
-    auto stats = JuceEngine::get().analyzeAudioPrompt16k(file);
-    auto windows = JuceEngine::get().sampleAudioMono16kWindows(file, 15600, 3);
+    auto stats = JuceEngine::get().analyzeAudioPrompt16k(file, trimStartMs, trimEndMs);
+    auto windows = JuceEngine::get().sampleAudioMono16kWindows(file, 15600, 3, trimStartMs, trimEndMs);
     NSLog(@"[MixroomPromptAnalysis] analyzeAudioForPrompt path=%@ windows=%lu", path, (unsigned long)windows.size());
     NSDictionary<NSString *, NSNumber *> *roleProbs =
         [[MixroomPromptAnalysisService sharedService] classifyWindows:windows];
@@ -2058,6 +2085,42 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 + (NSArray<NSNumber*>*)getMasterEqWaveformObjC:(NSInteger)effectIndex sampleCount:(NSInteger)sampleCount
 {
     const auto v = JuceEngine::get().getMasterEqWaveform((int)effectIndex, (int)sampleCount);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
++ (NSArray<NSNumber*>*)getRowStereoScopeObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex pointCount:(NSInteger)pointCount
+{
+    const auto v = JuceEngine::get().getRowStereoScope((int)row, (int)effectIndex, (int)pointCount);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
++ (NSArray<NSNumber*>*)getMasterStereoScopeObjC:(NSInteger)effectIndex pointCount:(NSInteger)pointCount
+{
+    const auto v = JuceEngine::get().getMasterStereoScope((int)effectIndex, (int)pointCount);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
++ (NSArray<NSNumber*>*)getRowShaperPreviewObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex pointCount:(NSInteger)pointCount
+{
+    const auto v = JuceEngine::get().getRowShaperPreview((int)row, (int)effectIndex, (int)pointCount);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
++ (NSArray<NSNumber*>*)getMasterShaperPreviewObjC:(NSInteger)effectIndex pointCount:(NSInteger)pointCount
+{
+    const auto v = JuceEngine::get().getMasterShaperPreview((int)effectIndex, (int)pointCount);
     NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
     for (float s : v)
         [arr addObject:@(s)];

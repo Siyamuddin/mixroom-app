@@ -203,7 +203,9 @@ class AdminAiRuntimeRepositoryTests(unittest.TestCase):
         )
         repository._table = object()
 
-        with self.assertRaisesRegex(ValueError, "minimal, low, medium, high"):
+        with self.assertRaisesRegex(
+            ValueError, "none, minimal, low, medium, high, xhigh"
+        ):
             repository.update_feature_runtime(
                 feature="ai_chat",
                 model_override="",
@@ -265,7 +267,7 @@ class AdminAiRuntimeRepositoryTests(unittest.TestCase):
         with mock.patch.object(
             runtime_defaults_module.config,
             "AI_RUNTIME_DEFAULT_MODEL",
-            "gpt-5.2",
+            "gpt-5.4-nano",
         ), mock.patch.object(
             runtime_defaults_module.config,
             "AI_CHAT_DEFAULT_TEMPERATURE",
@@ -273,14 +275,28 @@ class AdminAiRuntimeRepositoryTests(unittest.TestCase):
         ), mock.patch.object(
             runtime_defaults_module.config,
             "AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS",
-            frozenset({"gpt-5.2"}),
+            frozenset({"gpt-5.4-nano"}),
         ):
             serialized = repository._serialize_feature("ai_chat", {})
 
-        self.assertEqual(serialized["default_runtime"]["model"], "gpt-5.2")
+        self.assertEqual(serialized["default_runtime"]["model"], "gpt-5.4-nano")
         self.assertEqual(serialized["default_runtime"]["temperature"], 0.35)
-        self.assertEqual(serialized["default_runtime"]["reasoning_effort"], "minimal")
+        self.assertEqual(serialized["default_runtime"]["reasoning_effort"], "none")
         self.assertEqual(serialized["default_runtime"]["prompt_cache_retention"], "24h")
+
+    def test_serialized_default_runtime_uses_low_reasoning_for_gpt54_mini(self):
+        repository = runtime_repo_module.AdminAiRuntimeRepository.__new__(
+            runtime_repo_module.AdminAiRuntimeRepository
+        )
+
+        with mock.patch.object(
+            runtime_defaults_module.config,
+            "AI_RUNTIME_DEFAULT_MODEL",
+            "gpt-5.4-mini",
+        ):
+            serialized = repository._serialize_feature("ai_chat", {})
+
+        self.assertEqual(serialized["default_runtime"]["reasoning_effort"], "low")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,103 @@ import '../models/goal_vector.dart';
 import '../models/mixing_result.dart';
 import '../models/project_state.dart';
 
+class _MixExecutionPolicy {
+  const _MixExecutionPolicy({
+    required this.executionProfile,
+    required this.audibility,
+    required this.destructiveOk,
+    required this.intensityMultiplier,
+    required this.maxIntensity,
+    required this.ceilingMultiplier,
+  });
+
+  final MixExecutionProfile executionProfile;
+  final MixAudibility audibility;
+  final bool destructiveOk;
+  final double intensityMultiplier;
+  final double maxIntensity;
+  final double ceilingMultiplier;
+
+  double scaleIntensity(double raw) {
+    return (raw.clamp(0.0, 1.0) * intensityMultiplier).clamp(0.0, maxIntensity);
+  }
+
+  double blend(
+    double raw, {
+    double floor = 0.35,
+    double ceiling = 1.0,
+  }) {
+    final boostedCeiling = ceiling * ceilingMultiplier;
+    return (floor + ((ceiling - floor) * scaleIntensity(raw))).clamp(
+      floor,
+      boostedCeiling,
+    );
+  }
+
+  double audibleFloor({
+    required double subtle,
+    required double noticeable,
+    required double obvious,
+    required double extreme,
+  }) {
+    switch (audibility) {
+      case MixAudibility.subtle:
+        return subtle;
+      case MixAudibility.noticeable:
+        return noticeable;
+      case MixAudibility.obvious:
+        return obvious;
+      case MixAudibility.extreme:
+        return extreme;
+    }
+  }
+
+  bool get skipDisagreementGuard =>
+      destructiveOk ||
+      executionProfile != MixExecutionProfile.producerSafe ||
+      audibility.index >= MixAudibility.obvious.index;
+
+  bool get prefersLongDelay =>
+      executionProfile != MixExecutionProfile.producerSafe ||
+      audibility.index >= MixAudibility.obvious.index;
+
+  static _MixExecutionPolicy fromGoal(GoalVector goal) {
+    final effectiveDestructive = goal.effectiveDestructive;
+    final profileMultiplier = switch (goal.executionProfile) {
+      MixExecutionProfile.producerSafe => 1.0,
+      MixExecutionProfile.creativeBold => 1.25,
+      MixExecutionProfile.experimentalExtreme =>
+        effectiveDestructive ? 1.6 : 1.4,
+    };
+    final audibilityMultiplier = switch (goal.audibility) {
+      MixAudibility.subtle => 0.7,
+      MixAudibility.noticeable => 1.0,
+      MixAudibility.obvious => 1.25,
+      MixAudibility.extreme => effectiveDestructive ? 1.6 : 1.35,
+    };
+    final ceilingMultiplier = switch (goal.executionProfile) {
+      MixExecutionProfile.producerSafe => 1.0,
+      MixExecutionProfile.creativeBold => 1.15,
+      MixExecutionProfile.experimentalExtreme =>
+        effectiveDestructive ? 1.35 : 1.2,
+    };
+    final maxIntensity = switch (goal.executionProfile) {
+      MixExecutionProfile.producerSafe => 1.1,
+      MixExecutionProfile.creativeBold => 1.45,
+      MixExecutionProfile.experimentalExtreme =>
+        effectiveDestructive ? 1.8 : 1.55,
+    };
+    return _MixExecutionPolicy(
+      executionProfile: goal.executionProfile,
+      audibility: goal.audibility,
+      destructiveOk: effectiveDestructive,
+      intensityMultiplier: profileMultiplier * audibilityMultiplier,
+      maxIntensity: maxIntensity,
+      ceilingMultiplier: ceilingMultiplier,
+    );
+  }
+}
+
 /// LocalMixingModel
 /// - Produces MixAction list (gain/pan/fx) from GoalVector + ProjectState
 /// - Includes safety rails for UI-exposed FX params only
@@ -174,6 +271,12 @@ class LocalMixingModel {
       intents: normIntents.take(4).toList(),
       target: goal.target,
       intensity: goal.intensity,
+      executionProfile: goal.executionProfile,
+      audibility: goal.audibility,
+      destructiveOk: goal.destructiveOk,
+      referenceTarget: goal.referenceTarget,
+      referenceMode: goal.referenceMode,
+      referenceCloseness: goal.referenceCloseness,
       resetFx: goal.resetFx,
     );
   }
@@ -233,24 +336,60 @@ class LocalMixingModel {
         confidence: normGoal.target.confidence,
       ),
       intensity: normGoal.intensity,
+      executionProfile: normGoal.executionProfile,
+      audibility: normGoal.audibility,
+      destructiveOk: normGoal.destructiveOk,
+      referenceTarget: normGoal.referenceTarget,
+      referenceMode: normGoal.referenceMode,
+      referenceCloseness: normGoal.referenceCloseness,
       resetFx: normGoal.resetFx,
     );
 
     // NOW resolve targets
     final targets = _resolveTargets(project, normGoal.target, roleOverrides);
+    final referenceRow =
+        _resolveReferenceRow(project, normGoal.referenceTarget);
+    final effectiveTargets = _excludeReferenceRow(targets, referenceRow);
+
+    if (normGoal.referenceTarget != null && referenceRow == null) {
+      return const MixingResult(
+        actions: [],
+        summary:
+            "I couldn't find the reference track. Select it or point me to a valid row and try again.",
+        isNoOp: true,
+      );
+    }
+
+    if (normGoal.referenceTarget != null && _isMasterTarget(normGoal.target)) {
+      return const MixingResult(
+        actions: [],
+        summary:
+            "I can't reference-match on the master bus while the reference lives in this project. Target the other rows instead.",
+        isNoOp: true,
+      );
+    }
+
+    final referenceScopeRows = referenceRow == null
+        ? const <RowState>[]
+        : _rowsForReferenceMatch(
+            project: project,
+            resolvedTargets: effectiveTargets,
+            target: normGoal.target,
+            referenceRow: referenceRow,
+          );
 
     // 1.5) If user targets a role (vocals/guitar/etc) and multiple rows match:
     if (!_isMasterTarget(normGoal.target) &&
         normGoal.target.role != null &&
         normGoal.target.rowIndex == null &&
-        targets.length >= 2) {
-      final overlaps = _anyOverlap(project, targets);
+        effectiveTargets.length >= 2) {
+      final overlaps = _anyOverlap(project, effectiveTargets);
 
       // Interpretive: ask which one if they overlap (avoid making lead/backing wrong)
       if (!strict && overlaps) {
         final roleName = normGoal.target.role!;
         final rowsStr =
-            targets.map((r) => 'Track ${r.rowIndex + 1}').join(', ');
+            effectiveTargets.map((r) => 'Track ${r.rowIndex + 1}').join(', ');
         return MixingResult(
           actions: const [],
           summary:
@@ -272,8 +411,26 @@ class LocalMixingModel {
           intents: normGoal.intents,
           target: normGoal.target,
           intensity: (normGoal.intensity * 0.75).clamp(0.0, 1.0),
+          executionProfile: normGoal.executionProfile,
+          audibility: normGoal.audibility,
+          destructiveOk: normGoal.destructiveOk,
+          referenceTarget: normGoal.referenceTarget,
+          referenceMode: normGoal.referenceMode,
+          referenceCloseness: normGoal.referenceCloseness,
+          resetFx: normGoal.resetFx,
         );
       }
+    }
+
+    final policy = _MixExecutionPolicy.fromGoal(normGoal);
+
+    if (normGoal.referenceTarget != null && referenceScopeRows.isEmpty) {
+      return const MixingResult(
+        actions: [],
+        summary:
+            "I don't adjust the reference row itself. Target the rest of the project or a different row.",
+        isNoOp: true,
+      );
     }
 
     // 2) If role is known but confidence is low, ask to clarify (prevents wrong-row edits).
@@ -292,7 +449,7 @@ class LocalMixingModel {
     // 3) If explicit target and we can't resolve, don't guess.
     if (_isExplicitTarget(normGoal.target) &&
         !_isMasterTarget(normGoal.target) &&
-        targets.isEmpty) {
+        effectiveTargets.isEmpty) {
       return const MixingResult(
         actions: [],
         summary:
@@ -302,10 +459,17 @@ class LocalMixingModel {
     }
 
     final actions = <MixAction>[];
+    var referencePlanApplied = false;
 
     // FX RESET PHASE (authoritative)
     if (normGoal.resetFx) {
-      actions.addAll(_planHardReset(project));
+      actions.addAll(
+        _planHardReset(
+          project,
+          target: normGoal.target,
+          resolvedTargets: effectiveTargets,
+        ),
+      );
     }
 
     final notes = <String>[];
@@ -323,19 +487,54 @@ class LocalMixingModel {
       }
     }
     // 0) Headroom safety (always ok)
-    final safetyRows =
-        strict ? (targets.isNotEmpty ? targets : project.rows) : project.rows;
+    final safetyPool = referenceRow == null
+        ? project.rows
+        : project.rows
+            .where((r) => r.rowIndex != referenceRow.rowIndex)
+            .toList(growable: false);
+    final safetyRows = strict
+        ? (effectiveTargets.isNotEmpty ? effectiveTargets : safetyPool)
+        : safetyPool;
 
     // If user intent is to bring something forward, do NOT pre-attenuate it
     final wantsUpFront = resolvedIntents.any((i) =>
         (i.kind == 'gain' || i.kind == 'balance') && i.direction == 'up');
 
-    final safetyLimit = wantsUpFront && targets.isNotEmpty
-        ? project.rows.where((r) => !targets.contains(r)).toList()
+    final safetyLimit = wantsUpFront && effectiveTargets.isNotEmpty
+        ? safetyPool.where((r) => !effectiveTargets.contains(r)).toList()
         : safetyRows;
     if (!_isMasterTarget(normGoal.target)) {
       actions.addAll(_planHeadroomSafety(project,
-          intensity: normGoal.intensity, limitTo: safetyLimit));
+          intensity: policy.scaleIntensity(normGoal.intensity).clamp(0.0, 1.0),
+          limitTo: safetyLimit));
+    }
+
+    final onlyBalanceIntents =
+        resolvedIntents.every((intent) => intent.kind == 'balance');
+    if (referenceRow != null) {
+      final referencePlan = _planReferenceGuidedMix(
+        project: project,
+        referenceRow: referenceRow,
+        subjectRows: referenceScopeRows,
+        goal: normGoal,
+        roleOverrides: roleOverrides,
+        strict: strict,
+        policy: policy,
+      );
+      if (referencePlan.actions.isNotEmpty) {
+        actions.addAll(referencePlan.actions);
+        notes.addAll(referencePlan.notes);
+        referencePlanApplied = true;
+      } else if (referencePlan.noOpSummary != null && onlyBalanceIntents) {
+        return MixingResult(
+          actions: const [],
+          summary: referencePlan.noOpSummary!,
+          isNoOp: true,
+          notes: referencePlan.notes,
+        );
+      } else if (referencePlan.noOpSummary != null) {
+        notes.add(referencePlan.noOpSummary!);
+      }
     }
 
     // 1) Apply intents
@@ -347,33 +546,39 @@ class LocalMixingModel {
         target: normGoal.target,
         kind: kind,
         strict: strict,
+        referenceActive: referenceRow != null,
       );
 
-      // rows to operate on
-      // final rows = targets.isNotEmpty ? targets : _fallbackRows(project, kind, desc, roleOverrides);
       final rows = _rowsForIntent(
-          project: project, resolvedTargets: targets, target: normGoal.target);
+        project: project,
+        resolvedTargets: effectiveTargets,
+        target: normGoal.target,
+      )
+          .where((row) =>
+              referenceRow == null || row.rowIndex != referenceRow.rowIndex)
+          .toList(growable: false);
 
       if (kind == 'gain') {
-        /*
-          shouldn't need since possible output from LLM is up | down
-          final up = dir == 'up';
-          final down = dir == 'down';
-        */
-        final up =
-            _dirAny(dir, const ['up', 'add', 'louder', 'raise', 'increase']);
-        final down = _dirAny(
-            dir, const ['down', 'remove', 'quieter', 'lower', 'decrease']);
+        final up = dir == 'up';
+        final down = dir == 'down';
 
         if (!up && !down) continue;
 
         for (final r in rows) {
           actions.addAll(_planSmartGain(project, r, ref,
-              intensity: normGoal.intensity, up: up, strict: strict));
+              intensity: normGoal.intensity,
+              up: up,
+              strict: strict,
+              policy: policy));
         }
         if (shouldPlanMaster) {
-          actions
-              .addAll(_planMasterGain(up: up, intensity: normGoal.intensity));
+          actions.addAll(
+            _planMasterGain(
+              up: up,
+              intensity: normGoal.intensity,
+              policy: policy,
+            ),
+          );
         }
         continue;
       }
@@ -381,31 +586,54 @@ class LocalMixingModel {
       if (kind == 'pan') {
         actions.addAll(
           _planPan(project, rows, dir ?? 'widen',
-              intensity: normGoal.intensity, roleOverrides: roleOverrides),
+              intensity: normGoal.intensity,
+              roleOverrides: roleOverrides,
+              policy: policy),
         );
         if (shouldPlanMaster) {
-          actions.addAll(
-              _planMasterPan(dir ?? 'center', intensity: normGoal.intensity));
+          actions.addAll(_planMasterPan(
+            dir ?? 'center',
+            intensity: normGoal.intensity,
+            policy: policy,
+          ));
         }
         continue;
       }
 
       if (kind == 'reverb') {
         actions.addAll(
-            _planReverb(rows, dir ?? 'up', intensity: normGoal.intensity));
+          _planReverb(
+            rows,
+            dir ?? 'up',
+            intensity: normGoal.intensity,
+            policy: policy,
+          ),
+        );
         if (shouldPlanMaster) {
-          actions.addAll(
-              _planMasterReverb(dir ?? 'up', intensity: normGoal.intensity));
+          actions.addAll(_planMasterReverb(
+            dir ?? 'up',
+            intensity: normGoal.intensity,
+            policy: policy,
+          ));
         }
         continue;
       }
 
       if (kind == 'delay') {
-        actions.addAll(_planDelay(project, rows, dir ?? 'up',
-            intensity: normGoal.intensity));
+        actions.addAll(_planDelay(
+          project,
+          rows,
+          dir ?? 'up',
+          intensity: normGoal.intensity,
+          policy: policy,
+        ));
         if (shouldPlanMaster) {
-          actions.addAll(_planMasterDelay(project, dir ?? 'up',
-              intensity: normGoal.intensity));
+          actions.addAll(_planMasterDelay(
+            project,
+            dir ?? 'up',
+            intensity: normGoal.intensity,
+            policy: policy,
+          ));
         }
         continue;
       }
@@ -420,30 +648,53 @@ class LocalMixingModel {
             roleOverrides: roleOverrides,
             strict: strict,
             notesOut: notes,
+            policy: policy,
           ),
         );
         if (shouldPlanMaster) {
-          actions.addAll(_planMasterEq(desc, intensity: normGoal.intensity));
+          actions.addAll(
+            _planMasterEq(
+              desc,
+              intensity: normGoal.intensity,
+              policy: policy,
+            ),
+          );
         }
         continue;
       }
 
       if (kind == 'deesser' || kind == 'de-esser') {
-        actions.addAll(_planDeEsser(project, rows, dir ?? 'up',
-            intensity: normGoal.intensity, notesOut: notes));
+        actions.addAll(_planDeEsser(
+          project,
+          rows,
+          dir ?? 'up',
+          intensity: normGoal.intensity,
+          notesOut: notes,
+          policy: policy,
+        ));
         if (shouldPlanMaster) {
-          actions.addAll(
-              _planMasterDeEsser(dir ?? 'up', intensity: normGoal.intensity));
+          actions.addAll(_planMasterDeEsser(
+            dir ?? 'up',
+            intensity: normGoal.intensity,
+            policy: policy,
+          ));
         }
         continue;
       }
 
       if (kind == 'distortion') {
-        actions.addAll(
-            _planDistortion(rows, dir ?? 'up', intensity: normGoal.intensity));
+        actions.addAll(_planDistortion(
+          rows,
+          dir ?? 'up',
+          intensity: normGoal.intensity,
+          policy: policy,
+        ));
         if (shouldPlanMaster) {
-          actions.addAll(_planMasterDistortion(dir ?? 'up',
-              intensity: normGoal.intensity));
+          actions.addAll(_planMasterDistortion(
+            dir ?? 'up',
+            intensity: normGoal.intensity,
+            policy: policy,
+          ));
         }
         continue;
       }
@@ -457,83 +708,101 @@ class LocalMixingModel {
             roleOverrides: roleOverrides,
             strict: strict,
             notesOut: notes,
+            policy: policy,
           ),
         );
         if (shouldPlanMaster) {
           actions.addAll(_planMasterCompressor(
-              intensity: normGoal.intensity, strict: strict));
+              intensity: normGoal.intensity, strict: strict, policy: policy));
         }
         continue;
       }
 
       if (kind == 'limiter') {
-        actions.addAll(
-            _planLimiter(rows, dir ?? 'up', intensity: normGoal.intensity));
+        actions.addAll(_planLimiter(
+          rows,
+          dir ?? 'up',
+          intensity: normGoal.intensity,
+          policy: policy,
+        ));
         if (shouldPlanMaster) {
-          actions.addAll(
-              _planMasterLimiter(dir ?? 'up', intensity: normGoal.intensity));
+          actions.addAll(_planMasterLimiter(
+            dir ?? 'up',
+            intensity: normGoal.intensity,
+            policy: policy,
+          ));
         }
         continue;
       }
 
       if (kind == 'clipper') {
-        actions.addAll(
-            _planClipper(rows, dir ?? 'up', intensity: normGoal.intensity));
+        actions.addAll(_planClipper(
+          rows,
+          dir ?? 'up',
+          intensity: normGoal.intensity,
+          policy: policy,
+        ));
         if (shouldPlanMaster) {
-          actions.addAll(
-              _planMasterClipper(dir ?? 'up', intensity: normGoal.intensity));
+          actions.addAll(_planMasterClipper(
+            dir ?? 'up',
+            intensity: normGoal.intensity,
+            policy: policy,
+          ));
         }
         continue;
       }
 
       if (kind == 'balance') {
+        if (referencePlanApplied) {
+          continue;
+        }
         if (!_isMasterTarget(normGoal.target)) {
-          actions.addAll(
-              _planBalance(project, ref, intensity: normGoal.intensity));
+          actions.addAll(_planBalance(
+            project,
+            ref,
+            intensity: normGoal.intensity,
+            policy: policy,
+          ));
         }
 
         // interpretive extras
         if (!strict) {
           if (!_isMasterTarget(normGoal.target)) {
             actions.addAll(_planGlueCompression(project,
-                intensity: normGoal.intensity, roleOverrides: roleOverrides));
+                intensity: policy.scaleIntensity(normGoal.intensity),
+                roleOverrides: roleOverrides,
+                policy: policy));
             actions.addAll(_planMaskingFixes(project,
-                intensity: normGoal.intensity, roleOverrides: roleOverrides));
+                intensity: policy.scaleIntensity(normGoal.intensity),
+                roleOverrides: roleOverrides));
             actions.addAll(_planVocalDominance(project,
-                intensity: normGoal.intensity, roleOverrides: roleOverrides));
+                intensity: policy.scaleIntensity(normGoal.intensity),
+                roleOverrides: roleOverrides));
             actions.addAll(_planBassVsKick(project,
-                intensity: normGoal.intensity, roleOverrides: roleOverrides));
+                intensity: policy.scaleIntensity(normGoal.intensity),
+                roleOverrides: roleOverrides));
             actions.addAll(_planHarshnessFixes(project,
-                intensity: normGoal.intensity, roleOverrides: roleOverrides));
+                intensity: policy.scaleIntensity(normGoal.intensity),
+                roleOverrides: roleOverrides));
           }
         }
 
         if (shouldPlanMaster) {
           actions.addAll(_planMasterFinishing(
-              intensity: normGoal.intensity, strict: strict));
+              intensity: normGoal.intensity, strict: strict, policy: policy));
         }
         continue;
       }
     }
 
-    // Disagreement logic (“already good”) — ONLY during proposal phase
-    // if (!strict) {
-    //   final alreadyGood = _isAlreadyGood(project, merged, ref, intensity: normGoal.intensity);
-    //   if (alreadyGood) {
-    //     return MixingResult(
-    //       actions: const [],
-    //       summary: "I think it's already in a good place — changing things would make a marginal difference.",
-    //       isNoOp: true,
-    //       notes: notes,
-    //     );
-    //   }
-    // }
-
-    if (!strict && !_isMasterTarget(normGoal.target)) {
+    if (!strict &&
+        !policy.skipDisagreementGuard &&
+        !_isMasterTarget(normGoal.target)) {
       for (final intent in resolvedIntents) {
-        final targets =
-            _resolveTargets(project, normGoal.target, roleOverrides);
-        final reason = detectDisagreement(
+        final targets = _excludeReferenceRow(
+            _resolveTargets(project, normGoal.target, roleOverrides),
+            referenceRow);
+        final reason = _detectDisagreement(
             project: project, intent: intent, targets: targets, ref: ref);
 
         if (reason != null) {
@@ -1036,7 +1305,9 @@ class LocalMixingModel {
     required MixTarget target,
     required String kind,
     required bool strict,
+    required bool referenceActive,
   }) {
+    if (referenceActive) return false;
     if (target.scope == 'master') return true;
     if (target.scope == 'row') return false;
     if (!strict && kind == 'balance') return true;
@@ -1063,6 +1334,44 @@ class LocalMixingModel {
 
     // ❌ Explicit but unresolved → handled elsewhere as no-op / clarification
     return const [];
+  }
+
+  RowState? _resolveReferenceRow(
+    ProjectState project,
+    MixReferenceTarget? referenceTarget,
+  ) {
+    final rowIndex = referenceTarget?.rowIndex;
+    if (rowIndex == null || rowIndex < 0 || rowIndex >= project.rows.length) {
+      return null;
+    }
+    return project.rows[rowIndex];
+  }
+
+  List<RowState> _excludeReferenceRow(
+    List<RowState> rows,
+    RowState? referenceRow,
+  ) {
+    if (referenceRow == null) return rows;
+    return rows
+        .where((row) => row.rowIndex != referenceRow.rowIndex)
+        .toList(growable: false);
+  }
+
+  List<RowState> _rowsForReferenceMatch({
+    required ProjectState project,
+    required List<RowState> resolvedTargets,
+    required MixTarget target,
+    required RowState referenceRow,
+  }) {
+    final rows = _rowsForIntent(
+      project: project,
+      resolvedTargets: resolvedTargets,
+      target: target,
+    );
+    return rows
+        .where(
+            (row) => row.rowIndex != referenceRow.rowIndex && _rowUsable(row))
+        .toList(growable: false);
   }
 
   // -----------------------------
@@ -1106,58 +1415,6 @@ class LocalMixingModel {
     return const [];
   }
 
-  List<RowState> _fallbackRows(ProjectState p, String kind, String? desc,
-      Map<int, String> roleOverrides) {
-    final usable = p.rows.where(_rowUsable).toList();
-    if (usable.isEmpty) return const [];
-
-    final d = (desc ?? '').toLowerCase();
-
-    if (kind == 'de-esser' || d.contains('sibil') || d.contains('ess')) {
-      return _rowsForRole(p, 'vocals', roleOverrides);
-    }
-
-    if (kind == 'reverb' || kind == 'delay') {
-      return _rowsForRole(p, 'vocals', roleOverrides);
-    }
-
-    if (kind == 'distortion') {
-      final g = _rowsForRole(p, 'guitar', roleOverrides);
-      return g.isNotEmpty ? g : _rowsForRole(p, 'bass', roleOverrides);
-    }
-
-    if (kind == 'eq') {
-      switch (desc) {
-        case 'mud_cut':
-        case 'box_cut':
-        case 'boom_cut':
-          return {
-            ..._rowsForRole(p, 'bass', roleOverrides),
-            ..._rowsForRole(p, 'guitar', roleOverrides),
-            ..._rowsForRole(p, 'synth', roleOverrides),
-            ..._rowsForRole(p, 'vocals', roleOverrides),
-          }.toList();
-
-        case 'harsh_cut':
-        case 'presence_boost':
-        case 'air_boost':
-          return {
-            ..._rowsForRole(p, 'vocals', roleOverrides),
-            ..._rowsForRole(p, 'guitar', roleOverrides)
-          }.toList();
-      }
-    }
-
-    if (kind == 'gain') {
-      final v = _rowsForRole(p, 'vocals', roleOverrides);
-      if (v.isNotEmpty) return v;
-    }
-
-    // last resort: loudest overlapping competitor group leader
-    final loud = _loudestByEffRms(p);
-    return loud == null ? const [] : [loud];
-  }
-
   List<RowState> _rowsForRole(
       ProjectState p, String role, Map<int, String> roleOverrides) {
     return p.rows.where((r) {
@@ -1195,19 +1452,6 @@ class LocalMixingModel {
   double _effRms(RowState r) => r.approxRms * _gainLin(r);
   double _effPeak(RowState r) => (r.approxRms * r.approxCrest) * _gainLin(r);
 
-  RowState? _loudestByEffRms(ProjectState p) {
-    RowState? best;
-    double bestV = -1;
-    for (final r in p.rows) {
-      final v = _effRms(r);
-      if (v > bestV) {
-        bestV = v;
-        best = r;
-      }
-    }
-    return best;
-  }
-
   // -----------------------------
   // Safety: headroom protection
   // -----------------------------
@@ -1237,8 +1481,10 @@ class LocalMixingModel {
     required double intensity,
     required bool up,
     required bool strict,
+    required _MixExecutionPolicy policy,
   }) {
     final out = <MixAction>[];
+    final effectiveIntensity = policy.scaleIntensity(intensity);
     final median = ref.medianEffRms;
     final eff = _effRms(target);
     final alreadyForward = eff > median * 1.35;
@@ -1251,28 +1497,52 @@ class LocalMixingModel {
       for (final c in comps) {
         if (cut >= 2) break;
         if (_effRms(c) > median * 1.10) {
-          out.addAll(_gainDbDelta(c, (-2.5 * intensity).clamp(-4.0, -1.2)));
+          out.addAll(
+              _gainDbDelta(c, (-2.5 * effectiveIntensity).clamp(-5.5, -1.2)));
           cut++;
         }
       }
-      out.addAll(_gainDbDelta(target, (1.4 * intensity).clamp(0.8, 2.2)));
+      final targetFloor = policy.audibleFloor(
+        subtle: 0.8,
+        noticeable: 1.4,
+        obvious: 2.1,
+        extreme: 3.0,
+      );
+      out.addAll(_gainDbDelta(
+          target, (1.6 * effectiveIntensity).clamp(targetFloor, 4.6)));
       return out;
     }
 
     // Direct: more obvious moves
     final sev = _severityMultiplier(target, ref);
-    // final dbDelta = up ? (6.8 * intensity * sev).clamp(2.5, 10.0) : (-6.8 * intensity * sev).clamp(-9.0, -2.5);
-    final rawDb = 6.8 * intensity * sev;
+    final rawDb = 6.8 * effectiveIntensity * sev;
+    final upFloor = policy.audibleFloor(
+      subtle: 1.0,
+      noticeable: 1.5,
+      obvious: 2.4,
+      extreme: 3.4,
+    );
+    final downFloor = policy.audibleFloor(
+      subtle: -1.0,
+      noticeable: -1.5,
+      obvious: -2.4,
+      extreme: -3.4,
+    );
+    final maxUp =
+        policy.executionProfile == MixExecutionProfile.experimentalExtreme
+            ? 6.0
+            : (policy.executionProfile == MixExecutionProfile.creativeBold
+                ? 4.8
+                : 4.0);
+    final maxDown =
+        policy.executionProfile == MixExecutionProfile.experimentalExtreme
+            ? -6.0
+            : (policy.executionProfile == MixExecutionProfile.creativeBold
+                ? -4.8
+                : -4.0);
 
-    final dbDelta = up
-        ? rawDb.clamp(
-            1.5,
-            4.0,
-          )
-        : (-rawDb).clamp(
-            -4.0,
-            -1.5,
-          );
+    final dbDelta =
+        up ? rawDb.clamp(upFloor, maxUp) : (-rawDb).clamp(maxDown, downFloor);
     out.addAll(_gainDbDelta(target, dbDelta));
     return out;
   }
@@ -1384,8 +1654,10 @@ class LocalMixingModel {
     String direction, {
     required double intensity,
     required Map<int, String> roleOverrides,
+    required _MixExecutionPolicy policy,
   }) {
     final out = <MixAction>[];
+    final effectiveIntensity = policy.scaleIntensity(intensity);
 
     bool isAnchor(RowState r) {
       final role = roleOverrides[r.rowIndex] ?? _topRole(r);
@@ -1393,7 +1665,19 @@ class LocalMixingModel {
     }
 
     double targetForDirection(RowState r) {
-      final amt = (0.18 * (0.5 + 0.5 * intensity)).clamp(0.06, 0.20);
+      final amt = (0.18 * (0.5 + 0.5 * effectiveIntensity)).clamp(
+        policy.audibleFloor(
+          subtle: 0.06,
+          noticeable: 0.10,
+          obvious: 0.16,
+          extreme: 0.22,
+        ),
+        policy.executionProfile == MixExecutionProfile.experimentalExtreme
+            ? 0.36
+            : (policy.executionProfile == MixExecutionProfile.creativeBold
+                ? 0.28
+                : 0.20),
+      );
 
       if (direction == 'center') return r.pan0To1 * 0.2;
       if (direction == 'left') return -amt;
@@ -1407,9 +1691,17 @@ class LocalMixingModel {
         final current = r.pan0To1.clamp(0.0, 1.0);
         final target = targetForDirection(r);
         final delta = target - current;
-        if (delta.abs() < 0.05) continue;
+        if (delta.abs() <
+            policy.audibleFloor(
+              subtle: 0.04,
+              noticeable: 0.05,
+              obvious: 0.08,
+              extreme: 0.12,
+            )) {
+          continue;
+        }
         out.add(MixAction('set_row_pan',
-            {'row': r.rowIndex, 'delta': delta.clamp(-0.125, 0.125)}));
+            {'row': r.rowIndex, 'delta': delta.clamp(-0.22, 0.22)}));
       }
       return out;
     }
@@ -1417,7 +1709,17 @@ class LocalMixingModel {
     if (direction == 'narrow') {
       for (final r in rows) {
         final current = r.pan0To1.clamp(0, 1.0);
-        final target = current * (0.5 - (0.35 * intensity).clamp(0.06, 0.2));
+        final target = current *
+            (0.5 -
+                (0.35 * effectiveIntensity).clamp(
+                  policy.audibleFloor(
+                    subtle: 0.06,
+                    noticeable: 0.10,
+                    obvious: 0.16,
+                    extreme: 0.24,
+                  ),
+                  0.28,
+                ));
 
         final delta = target - current;
         if (delta.abs() < 0.03) continue;
@@ -1427,13 +1729,24 @@ class LocalMixingModel {
     }
 
     // widen: spread up to 2 loud non-anchor rows
-    final candidates = p.rows
+    final widenPool = rows.isNotEmpty ? rows : p.rows;
+    final candidates = widenPool
         .where((r) => !isAnchor(r) && r.approxRms > 0.001)
         .toList()
       ..sort((a, b) => _effRms(b).compareTo(_effRms(a)));
     final chosen = candidates.take(2).toList();
     if (chosen.isEmpty) return out;
-    final amt = (0.28 * (0.5 + 0.5 * intensity)).clamp(0.12, 0.28);
+    final amt = (0.28 * (0.5 + 0.5 * effectiveIntensity)).clamp(
+      policy.audibleFloor(
+        subtle: 0.12,
+        noticeable: 0.16,
+        obvious: 0.24,
+        extreme: 0.32,
+      ),
+      policy.executionProfile == MixExecutionProfile.experimentalExtreme
+          ? 0.44
+          : 0.32,
+    );
 
     if (chosen.length == 1) {
       final r = chosen[0];
@@ -1454,9 +1767,10 @@ class LocalMixingModel {
   // FX planning (UI-bounded param matching)
   // -----------------------------
   List<MixAction> _planReverb(List<RowState> rows, String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
+    final effectiveIntensity = policy.scaleIntensity(intensity);
 
     if (dir == 'remove' || dir == 'down') {
       if (dir == 'remove') {
@@ -1482,7 +1796,22 @@ class LocalMixingModel {
             'effect_name_contains': fxReverb,
             'param_name_contains_any': pMix,
             'mode': 'delta',
-            'delta_norm': sign * (0.10 * intensity).clamp(0.04, 0.18),
+            'delta_norm': sign *
+                (0.10 * effectiveIntensity).clamp(
+                  policy.audibleFloor(
+                    subtle: 0.03,
+                    noticeable: 0.05,
+                    obvious: 0.10,
+                    extreme: 0.16,
+                  ),
+                  policy.executionProfile ==
+                          MixExecutionProfile.experimentalExtreme
+                      ? 0.30
+                      : (policy.executionProfile ==
+                              MixExecutionProfile.creativeBold
+                          ? 0.22
+                          : 0.18),
+                ),
             'clamp_0_1': true,
           }),
         );
@@ -1497,7 +1826,22 @@ class LocalMixingModel {
             'effect_name_contains': fxReverb,
             'param_name_contains_any': pRoom,
             'mode': 'delta',
-            'delta_norm': sign * (0.07 * intensity).clamp(0.02, 0.12),
+            'delta_norm': sign *
+                (0.07 * effectiveIntensity).clamp(
+                  policy.audibleFloor(
+                    subtle: 0.02,
+                    noticeable: 0.04,
+                    obvious: 0.07,
+                    extreme: 0.12,
+                  ),
+                  policy.executionProfile ==
+                          MixExecutionProfile.experimentalExtreme
+                      ? 0.20
+                      : (policy.executionProfile ==
+                              MixExecutionProfile.creativeBold
+                          ? 0.15
+                          : 0.12),
+                ),
             'clamp_0_1': true,
             'skip_if_missing_effect': false,
           }),
@@ -1509,9 +1853,10 @@ class LocalMixingModel {
 
   List<MixAction> _planDelay(
       ProjectState p, List<RowState> rows, String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
+    final effectiveIntensity = policy.scaleIntensity(intensity);
 
     if (dir == 'remove') {
       for (final r in rows) {
@@ -1526,8 +1871,7 @@ class LocalMixingModel {
     final bpm = p.bpm <= 1 ? 120.0 : p.bpm;
     final eighthMs = 60000.0 / bpm / 2.0;
     final quarterMs = 60000.0 / bpm;
-    final timeMs =
-        (dir.contains('big') || dir.contains('more')) ? quarterMs : eighthMs;
+    final timeMs = policy.prefersLongDelay ? quarterMs : eighthMs;
 
     for (final r in rows) {
       out.add(MixAction('ensure_effect',
@@ -1541,7 +1885,16 @@ class LocalMixingModel {
             'effect_name_contains': fxDelay,
             'param_name_contains_any': pMix,
             'mode': 'delta',
-            'delta_norm': sign * (0.08 * intensity).clamp(0.03, 0.10),
+            'delta_norm': sign *
+                (0.08 * effectiveIntensity).clamp(
+                  policy.audibleFloor(
+                    subtle: 0.02,
+                    noticeable: 0.04,
+                    obvious: 0.08,
+                    extreme: 0.12,
+                  ),
+                  0.14,
+                ),
             'clamp_0_1': true,
           }),
         );
@@ -1555,7 +1908,16 @@ class LocalMixingModel {
             'effect_name_contains': fxDelay,
             'param_name_contains_any': pFb,
             'mode': 'delta',
-            'delta_norm': sign * (0.06 * intensity).clamp(0.02, 0.10),
+            'delta_norm': sign *
+                (0.06 * effectiveIntensity).clamp(
+                  policy.audibleFloor(
+                    subtle: 0.02,
+                    noticeable: 0.03,
+                    obvious: 0.06,
+                    extreme: 0.10,
+                  ),
+                  0.14,
+                ),
             'clamp_0_1': true,
           }),
         );
@@ -1580,7 +1942,7 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planLimiter(List<RowState> rows, String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
 
@@ -1592,13 +1954,15 @@ class LocalMixingModel {
       return out;
     }
 
-    final scale = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+    final scale = policy.blend(intensity, floor: 0.35, ceiling: 1.0);
     final thresholdDelta =
         ((dir == 'down') ? 1.0 : -1.0) * (6.0 * scale).clamp(1.4, 7.5);
     final releaseMs = (dir == 'down')
         ? _lerp(90.0, 170.0, intensity)
         : _lerp(100.0, 35.0, intensity);
-    final ceilingDb = (dir == 'down') ? -0.2 : (-0.8 - 0.6 * intensity);
+    final ceilingDb = (dir == 'down')
+        ? -0.2
+        : (-0.8 - 0.6 * policy.scaleIntensity(intensity));
 
     for (final r in rows) {
       out.add(MixAction('ensure_effect',
@@ -1644,7 +2008,7 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planClipper(List<RowState> rows, String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
 
@@ -1656,10 +2020,12 @@ class LocalMixingModel {
       return out;
     }
 
-    final scale = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+    final scale = policy.blend(intensity, floor: 0.35, ceiling: 1.0);
     final thresholdDelta =
         ((dir == 'down') ? 1.0 : -1.0) * (5.0 * scale).clamp(1.2, 6.8);
-    final ceilingDb = (dir == 'down') ? -0.1 : (-0.6 - 0.8 * intensity);
+    final ceilingDb = (dir == 'down')
+        ? -0.1
+        : (-0.6 - 0.8 * policy.scaleIntensity(intensity));
 
     for (final r in rows) {
       out.add(MixAction('ensure_effect',
@@ -1694,8 +2060,21 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planMasterGain(
-      {required bool up, required double intensity}) {
-    final mag = (0.04 + 0.10 * intensity).clamp(0.03, 0.16);
+      {required bool up,
+      required double intensity,
+      required _MixExecutionPolicy policy}) {
+    final effectiveIntensity = policy.scaleIntensity(intensity);
+    final mag = (0.04 + 0.10 * effectiveIntensity).clamp(
+      policy.audibleFloor(
+        subtle: 0.02,
+        noticeable: 0.04,
+        obvious: 0.08,
+        extreme: 0.12,
+      ),
+      policy.executionProfile == MixExecutionProfile.experimentalExtreme
+          ? 0.24
+          : 0.16,
+    );
     return [
       MixAction('set_master_gain', {
         'mode': 'delta',
@@ -1705,7 +2084,7 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planMasterPan(String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final dir = direction.toLowerCase();
     if (dir == 'center') {
       return [
@@ -1713,7 +2092,17 @@ class LocalMixingModel {
       ];
     }
     if (dir == 'left' || dir == 'right') {
-      final mag = (0.03 + 0.06 * intensity).clamp(0.02, 0.10);
+      final mag = (0.03 + 0.06 * policy.scaleIntensity(intensity)).clamp(
+        policy.audibleFloor(
+          subtle: 0.02,
+          noticeable: 0.03,
+          obvious: 0.06,
+          extreme: 0.10,
+        ),
+        policy.executionProfile == MixExecutionProfile.experimentalExtreme
+            ? 0.16
+            : 0.10,
+      );
       return [
         MixAction('set_master_pan',
             {'mode': 'delta', 'delta': dir == 'left' ? -mag : mag}),
@@ -1723,9 +2112,10 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planMasterReverb(String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
+    final effectiveIntensity = policy.scaleIntensity(intensity);
     if (dir == 'remove') {
       return [
         MixAction('delete_master_effect', {'effect_name_contains': fxReverb})
@@ -1740,7 +2130,16 @@ class LocalMixingModel {
       'effect_name_contains': fxReverb,
       'param_name_contains_any': const ['Mix'],
       'mode': 'delta',
-      'delta_norm': sign * (0.04 * intensity).clamp(0.01, 0.06),
+      'delta_norm': sign *
+          (0.04 * effectiveIntensity).clamp(
+            policy.audibleFloor(
+              subtle: 0.01,
+              noticeable: 0.02,
+              obvious: 0.05,
+              extreme: 0.08,
+            ),
+            0.10,
+          ),
       'clamp_0_1': true,
       'skip_if_missing_effect': false,
     }));
@@ -1748,7 +2147,16 @@ class LocalMixingModel {
       'effect_name_contains': fxReverb,
       'param_name_contains_any': const ['Room Size', 'Room', 'Size'],
       'mode': 'delta',
-      'delta_norm': sign * (0.02 * intensity).clamp(0.005, 0.04),
+      'delta_norm': sign *
+          (0.02 * effectiveIntensity).clamp(
+            policy.audibleFloor(
+              subtle: 0.005,
+              noticeable: 0.01,
+              obvious: 0.025,
+              extreme: 0.04,
+            ),
+            0.06,
+          ),
       'clamp_0_1': true,
       'skip_if_missing_effect': true,
     }));
@@ -1756,9 +2164,10 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planMasterDelay(ProjectState p, String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
+    final effectiveIntensity = policy.scaleIntensity(intensity);
     if (dir == 'remove') {
       return [
         MixAction('delete_master_effect', {'effect_name_contains': fxDelay})
@@ -1769,8 +2178,7 @@ class LocalMixingModel {
     final bpm = p.bpm <= 1 ? 120.0 : p.bpm;
     final eighthMs = 60000.0 / bpm / 2.0;
     final quarterMs = 60000.0 / bpm;
-    final timeMs =
-        (dir.contains('big') || dir.contains('more')) ? quarterMs : eighthMs;
+    final timeMs = policy.prefersLongDelay ? quarterMs : eighthMs;
 
     out.add(
         MixAction('ensure_master_effect', {'effect_name_contains': fxDelay}));
@@ -1778,7 +2186,16 @@ class LocalMixingModel {
       'effect_name_contains': fxDelay,
       'param_name_contains_any': const ['Mix'],
       'mode': 'delta',
-      'delta_norm': sign * (0.03 * intensity).clamp(0.01, 0.05),
+      'delta_norm': sign *
+          (0.03 * effectiveIntensity).clamp(
+            policy.audibleFloor(
+              subtle: 0.01,
+              noticeable: 0.02,
+              obvious: 0.04,
+              extreme: 0.07,
+            ),
+            0.09,
+          ),
       'clamp_0_1': true,
       'skip_if_missing_effect': true,
     }));
@@ -1786,7 +2203,16 @@ class LocalMixingModel {
       'effect_name_contains': fxDelay,
       'param_name_contains_any': const ['Feedback'],
       'mode': 'delta',
-      'delta_norm': sign * (0.02 * intensity).clamp(0.005, 0.04),
+      'delta_norm': sign *
+          (0.02 * effectiveIntensity).clamp(
+            policy.audibleFloor(
+              subtle: 0.005,
+              noticeable: 0.01,
+              obvious: 0.02,
+              extreme: 0.04,
+            ),
+            0.06,
+          ),
       'clamp_0_1': true,
       'skip_if_missing_effect': true,
     }));
@@ -1801,7 +2227,7 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planMasterEq(String? descriptor,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final out = <MixAction>[];
     final d = descriptor?.toLowerCase().trim();
 
@@ -1824,7 +2250,7 @@ class LocalMixingModel {
       }));
     }
 
-    final amt = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+    final amt = policy.blend(intensity, floor: 0.35, ceiling: 1.0);
 
     switch (d) {
       case 'mud_cut':
@@ -1875,14 +2301,16 @@ class LocalMixingModel {
         addMasterEq(
           const ['HPF Frequency', 'HPF', 'High Pass', 'Low Cut'],
           mode: 'delta_norm',
-          deltaNorm: (0.04 * intensity).clamp(0.01, 0.08),
+          deltaNorm:
+              (0.04 * policy.scaleIntensity(intensity)).clamp(0.01, 0.10),
         );
         break;
       case 'high_cut':
         addMasterEq(
           const ['LPF Frequency', 'LPF', 'Low Pass', 'High Cut'],
           mode: 'delta_norm',
-          deltaNorm: -(0.05 * intensity).clamp(0.01, 0.09),
+          deltaNorm:
+              -(0.05 * policy.scaleIntensity(intensity)).clamp(0.01, 0.12),
         );
         break;
       default:
@@ -1893,7 +2321,7 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planMasterDeEsser(String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final dir = direction.toLowerCase();
     if (dir == 'remove') {
       return [
@@ -1903,7 +2331,8 @@ class LocalMixingModel {
     }
 
     final more = dir != 'down';
-    final thresholdDelta = (more ? -4.0 : 4.0) * intensity.clamp(0.35, 1.0);
+    final thresholdDelta = (more ? -4.0 : 4.0) *
+        policy.blend(intensity, floor: 0.35, ceiling: 1.0);
     return [
       MixAction(
           'ensure_master_effect', {'effect_name_contains': fxDeEsserContains}),
@@ -1918,7 +2347,7 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planMasterDistortion(String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final dir = direction.toLowerCase();
     if (dir == 'remove') {
       return [
@@ -1928,6 +2357,7 @@ class LocalMixingModel {
     }
 
     final sign = (dir == 'down') ? -1.0 : 1.0;
+    final effectiveIntensity = policy.scaleIntensity(intensity);
     return [
       MixAction('ensure_master_effect',
           {'effect_name_contains': fxDistortionContains}),
@@ -1935,7 +2365,18 @@ class LocalMixingModel {
         'effect_name_contains': fxDistortionContains,
         'param_name_contains_any': const ['Drive'],
         'mode': 'delta_norm',
-        'delta_norm': sign * (0.08 * intensity).clamp(0.02, 0.14),
+        'delta_norm': sign *
+            (0.08 * effectiveIntensity).clamp(
+              policy.audibleFloor(
+                subtle: 0.02,
+                noticeable: 0.05,
+                obvious: 0.10,
+                extreme: 0.16,
+              ),
+              policy.executionProfile == MixExecutionProfile.experimentalExtreme
+                  ? 0.24
+                  : 0.16,
+            ),
         'clamp_min': 2.0,
         'clamp_max': 45.0,
         'skip_if_missing_effect': true,
@@ -1944,19 +2385,43 @@ class LocalMixingModel {
         'effect_name_contains': fxDistortionContains,
         'param_name_contains_any': const ['Mix'],
         'mode': 'set',
-        'value': _lerp(4.0, 16.0, intensity),
+        'value': _lerp(
+          4.0,
+          policy.executionProfile == MixExecutionProfile.experimentalExtreme
+              ? 28.0
+              : (policy.executionProfile == MixExecutionProfile.creativeBold
+                  ? 20.0
+                  : 16.0),
+          effectiveIntensity.clamp(0.0, 1.0),
+        ),
         'skip_if_missing_effect': true,
       }),
     ];
   }
 
   List<MixAction> _planMasterCompressor(
-      {required double intensity, required bool strict}) {
-    final thresholdDb = strict ? -10.0 : _lerp(-10.0, -16.0, intensity);
-    final ratio = strict ? 1.8 : _lerp(1.8, 2.8, intensity);
-    final attackMs = _lerp(20.0, 10.0, intensity);
-    final releaseMs = _lerp(180.0, 90.0, intensity);
-    final mixPct = strict ? 45.0 : _lerp(55.0, 75.0, intensity);
+      {required double intensity,
+      required bool strict,
+      required _MixExecutionPolicy policy}) {
+    final effectiveIntensity = policy.scaleIntensity(intensity).clamp(0.0, 1.0);
+    final ratioMax =
+        policy.executionProfile == MixExecutionProfile.experimentalExtreme
+            ? 4.2
+            : (policy.executionProfile == MixExecutionProfile.creativeBold
+                ? 3.4
+                : 2.8);
+    final mixMax =
+        policy.executionProfile == MixExecutionProfile.experimentalExtreme
+            ? 90.0
+            : (policy.executionProfile == MixExecutionProfile.creativeBold
+                ? 82.0
+                : 75.0);
+    final thresholdDb =
+        strict ? -10.0 : _lerp(-10.0, -18.0, effectiveIntensity);
+    final ratio = strict ? 1.8 : _lerp(1.8, ratioMax, effectiveIntensity);
+    final attackMs = _lerp(20.0, 8.0, effectiveIntensity);
+    final releaseMs = _lerp(180.0, 70.0, effectiveIntensity);
+    final mixPct = strict ? 45.0 : _lerp(55.0, mixMax, effectiveIntensity);
 
     return [
       MixAction('ensure_master_effect', {'effect_name_contains': fxCompressor}),
@@ -1999,7 +2464,7 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planMasterLimiter(String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final dir = direction.toLowerCase();
     if (dir == 'remove') {
       return [
@@ -2007,13 +2472,15 @@ class LocalMixingModel {
       ];
     }
 
-    final scale = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+    final scale = policy.blend(intensity, floor: 0.35, ceiling: 1.0);
     final thresholdDelta =
         ((dir == 'down') ? 1.0 : -1.0) * (4.0 * scale).clamp(1.0, 5.5);
     final releaseMs = (dir == 'down')
         ? _lerp(120.0, 180.0, intensity)
         : _lerp(90.0, 45.0, intensity);
-    final ceilingDb = (dir == 'down') ? -0.2 : (-0.9 - 0.6 * intensity);
+    final ceilingDb = (dir == 'down')
+        ? -0.2
+        : (-0.9 - 0.6 * policy.scaleIntensity(intensity));
 
     return [
       MixAction('ensure_master_effect', {'effect_name_contains': fxLimiter}),
@@ -2044,7 +2511,7 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planMasterClipper(String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final dir = direction.toLowerCase();
     if (dir == 'remove') {
       return [
@@ -2052,10 +2519,12 @@ class LocalMixingModel {
       ];
     }
 
-    final scale = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+    final scale = policy.blend(intensity, floor: 0.35, ceiling: 1.0);
     final thresholdDelta =
         ((dir == 'down') ? 1.0 : -1.0) * (4.0 * scale).clamp(1.0, 5.5);
-    final ceilingDb = (dir == 'down') ? -0.1 : (-0.7 - 0.8 * intensity);
+    final ceilingDb = (dir == 'down')
+        ? -0.1
+        : (-0.7 - 0.8 * policy.scaleIntensity(intensity));
 
     return [
       MixAction('ensure_master_effect', {'effect_name_contains': fxClipper}),
@@ -2079,12 +2548,29 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planMasterFinishing(
-      {required double intensity, required bool strict}) {
+      {required double intensity,
+      required bool strict,
+      required _MixExecutionPolicy policy}) {
     final out = <MixAction>[];
-    out.addAll(_planMasterCompressor(intensity: intensity, strict: strict));
-    out.addAll(_planMasterLimiter('up', intensity: intensity));
+    out.addAll(_planMasterCompressor(
+      intensity: intensity,
+      strict: strict,
+      policy: policy,
+    ));
+    out.addAll(_planMasterLimiter(
+      'up',
+      intensity: intensity,
+      policy: policy,
+    ));
 
-    final gainDelta = strict ? 0.0 : (0.02 + 0.05 * intensity).clamp(0.0, 0.08);
+    final gainDelta = strict
+        ? 0.0
+        : (0.02 + 0.05 * policy.scaleIntensity(intensity)).clamp(
+            0.0,
+            policy.executionProfile == MixExecutionProfile.experimentalExtreme
+                ? 0.12
+                : 0.08,
+          );
     if (gainDelta.abs() > 0.001) {
       out.add(
           MixAction('set_master_gain', {'mode': 'delta', 'delta': gainDelta}));
@@ -2100,6 +2586,7 @@ class LocalMixingModel {
     required Map<int, String> roleOverrides,
     required bool strict,
     required List<String> notesOut,
+    required _MixExecutionPolicy policy,
   }) {
     final out = <MixAction>[];
     final d = descriptor
@@ -2110,47 +2597,35 @@ class LocalMixingModel {
       out.add(MixAction(
           'ensure_effect', {'row': r.rowIndex, 'effect_name_contains': fxEq}));
 
-      final role = roleOverrides[r.rowIndex] ?? _topRole(r);
+      final amt = policy.blend(intensity, floor: 0.35, ceiling: 1.0);
       switch (d) {
         case 'mud_cut':
         case 'box_cut':
           // Low-mid is the real problem — but don’t over-carve
-          out.add(_eqMidDelta(
-            r,
-            db: (-7.2 * (0.35 + 0.65 * intensity)).clamp(-9.0, -4.5),
-          ));
+          out.add(_eqMidDelta(r, db: (-7.2 * amt).clamp(-10.5, -4.5)));
 
           // Low band trim should be subtle — just de-cloud
-          out.add(_eqLowDelta(
-            r,
-            db: (-3.2 * (0.35 + 0.65 * intensity)).clamp(-5.0, -1.5),
-          ));
+          out.add(_eqLowDelta(r, db: (-3.2 * amt).clamp(-6.0, -1.5)));
           break;
 
         case 'boom_cut':
-          out.add(_eqLowDelta(
-            r,
-            db: (-10.0 * (0.35 + 0.65 * intensity)).clamp(-10.0, -4.0),
-          ));
+          out.add(_eqLowDelta(r, db: (-10.0 * amt).clamp(-12.0, -4.0)));
 
           // Secondary mid trim to remove resonance bloom
-          out.add(_eqMidDelta(
-            r,
-            db: (-4.5 * (0.35 + 0.65 * intensity)).clamp(-7.0, -2.5),
-          ));
+          out.add(_eqMidDelta(r, db: (-4.5 * amt).clamp(-8.0, -2.5)));
           break;
 
         case 'harsh_cut':
           // Main harshness lives in upper band — keep this firm but sane
           out.add(_eqHighDelta(
             r,
-            db: (-4.5 * (0.35 + 0.65 * intensity)).clamp(-4.5, -1.0),
+            db: (-4.5 * amt).clamp(-5.5, -1.0),
           ));
 
           // Mid cut should be supportive only
           out.add(_eqMidDelta(
             r,
-            db: (-2.8 * (0.35 + 0.65 * intensity)).clamp(-4.0, -1.5),
+            db: (-2.8 * amt).clamp(-4.8, -1.5),
           ));
           break;
 
@@ -2158,13 +2633,13 @@ class LocalMixingModel {
           // Core presence lives in mids — keep this strong but controlled
           out.add(_eqMidDelta(
             r,
-            db: (6.0 * (0.35 + 0.65 * intensity)).clamp(3.5, 6.0),
+            db: (6.0 * amt).clamp(3.5, 7.0),
           ));
 
           // High lift should be subtle — just enough for projection
           out.add(_eqHighDelta(
             r,
-            db: (1.6 * (0.35 + 0.65 * intensity)).clamp(0.8, 3.0),
+            db: (1.6 * amt).clamp(0.8, 3.6),
           ));
           break;
 
@@ -2172,60 +2647,60 @@ class LocalMixingModel {
           // Air lives in highs — strong but not extreme
           out.add(_eqHighDelta(
             r,
-            db: (5.0 * (0.35 + 0.65 * intensity)).clamp(2.0, 5.0),
+            db: (5.0 * amt).clamp(2.0, 6.0),
           ));
 
           // Mid support should be minimal — avoid nasal/edge buildup
           out.add(_eqMidDelta(
             r,
-            db: (1.2 * (0.35 + 0.65 * intensity)).clamp(0.5, 2.0),
+            db: (1.2 * amt).clamp(0.5, 2.4),
           ));
           break;
 
         case 'warmth_boost':
           out.add(_eqLowDelta(
             r,
-            db: (9.0 * (0.35 + 0.65 * intensity)).clamp(5.0, 10.0),
+            db: (9.0 * amt).clamp(5.0, 11.0),
           ));
 
           out.add(_eqMidDelta(
             r,
-            db: (5.0 * (0.35 + 0.65 * intensity)).clamp(2.5, 5.0),
+            db: (5.0 * amt).clamp(2.5, 6.0),
           ));
           break;
 
         case 'thin_fix':
           out.add(_eqLowDelta(
             r,
-            db: (10.0 * (0.35 + 0.65 * intensity)).clamp(5.0, 10.0),
+            db: (10.0 * amt).clamp(5.0, 11.5),
           ));
 
           out.add(_eqMidDelta(
             r,
-            db: (5.5 * (0.35 + 0.65 * intensity)).clamp(3.0, 5.5),
+            db: (5.5 * amt).clamp(3.0, 6.5),
           ));
           break;
 
         case 'dull_fix':
           out.add(_eqHighDelta(
             r,
-            db: (5.0 * (0.35 + 0.65 * intensity)).clamp(2.5, 5.0),
+            db: (5.0 * amt).clamp(2.5, 6.0),
           ));
 
           out.add(_eqMidDelta(
             r,
-            db: (3.0 * (0.35 + 0.65 * intensity)).clamp(1.2, 3.0),
+            db: (3.0 * amt).clamp(1.2, 3.6),
           ));
           break;
 
         case 'low_cut':
           // no HPF available on 3-band; simulate by reducing low shelf
-          out.add(_eqLowDelta(r, db: (-2.4 * intensity).clamp(-6.0, -0.8)));
+          out.add(_eqLowDelta(r, db: (-2.4 * amt).clamp(-7.0, -0.8)));
           break;
 
         case 'high_cut':
           // no LPF available; simulate by reducing high shelf
-          out.add(_eqHighDelta(r, db: (-2.4 * intensity).clamp(-6.0, -0.8)));
+          out.add(_eqHighDelta(r, db: (-2.4 * amt).clamp(-7.0, -0.8)));
           break;
 
         default:
@@ -2234,23 +2709,6 @@ class LocalMixingModel {
     }
 
     return out;
-  }
-
-  MixAction _eqBandDelta(RowState r, {required int band, required double db}) {
-    final contains = <String>[
-      'Band $band Gain',
-      'Band$band Gain',
-      'B$band Gain'
-    ];
-
-    return MixAction('adjust_effect_param_by_name', {
-      'row': r.rowIndex,
-      'effect_name_contains': fxEq,
-      'param_name_contains_any': contains,
-      'mode': 'delta',
-      'delta': db,
-      'skip_if_missing_effect': false,
-    });
   }
 
   MixAction _eqLowDelta(RowState r, {required double db}) {
@@ -2286,65 +2744,13 @@ class LocalMixingModel {
     });
   }
 
-  List<MixAction> _setHpfTypical(RowState r, {required String role}) {
-    double hz;
-    switch (role) {
-      case 'vocals':
-        hz = 100.0;
-        break;
-      case 'guitar':
-      case 'synth':
-        hz = 90.0;
-        break;
-      case 'drums':
-        hz = 45.0;
-        break;
-      default:
-        hz = 70.0;
-    }
-
-    return [
-      MixAction('adjust_effect_param_by_name', {
-        'row': r.rowIndex,
-        'effect_name_contains': fxEq,
-        'param_name_contains_any': [
-          'HPF Frequency',
-          'HPF',
-          'High Pass',
-          'Low Cut'
-        ],
-        'mode': 'set',
-        'value': hz,
-        'skip_if_missing_effect': false,
-      }),
-    ];
-  }
-
-  List<MixAction> _openLpfSlightly(RowState r) {
-    return [
-      MixAction('adjust_effect_param_by_name', {
-        'row': r.rowIndex,
-        'effect_name_contains': fxEq,
-        'param_name_contains_any': [
-          'LPF Frequency',
-          'LPF',
-          'Low Pass',
-          'High Cut'
-        ],
-        'mode': 'delta_norm',
-        // small but audible opening
-        'delta_norm': 0.05, // ≈ +5% of LPF range
-        'skip_if_missing_effect': true,
-      }),
-    ];
-  }
-
   List<MixAction> _planDeEsser(
     ProjectState p,
     List<RowState> rows,
     String direction, {
     required double intensity,
     required List<String> notesOut,
+    required _MixExecutionPolicy policy,
   }) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
@@ -2358,7 +2764,8 @@ class LocalMixingModel {
     }
 
     final more = dir != 'down';
-    final thresholdDelta = (more ? -7.0 : 7.0) * intensity.clamp(0.35, 1.0);
+    final thresholdDelta = (more ? -7.0 : 7.0) *
+        policy.blend(intensity, floor: 0.35, ceiling: 1.0);
 
     for (final r in rows) {
       out.add(MixAction('ensure_effect',
@@ -2402,9 +2809,10 @@ class LocalMixingModel {
   }
 
   List<MixAction> _planDistortion(List<RowState> rows, String direction,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final out = <MixAction>[];
     final dir = direction.toLowerCase();
+    final effectiveIntensity = policy.scaleIntensity(intensity);
 
     if (dir == 'remove') {
       for (final r in rows) {
@@ -2422,7 +2830,17 @@ class LocalMixingModel {
 
       if (_isAllowedFxParam(fxDistortionContains, driveParams)) {
         final delta = ((dir == 'down') ? -1.0 : 1.0) *
-            (0.25 + 0.45 * intensity).clamp(0.15, 0.30);
+            (0.25 + 0.45 * effectiveIntensity).clamp(
+              policy.audibleFloor(
+                subtle: 0.12,
+                noticeable: 0.18,
+                obvious: 0.28,
+                extreme: 0.40,
+              ),
+              policy.executionProfile == MixExecutionProfile.experimentalExtreme
+                  ? 0.55
+                  : 0.40,
+            );
 
         out.add(
           MixAction('adjust_effect_param_by_name', {
@@ -2449,10 +2867,19 @@ class LocalMixingModel {
             'effect_name_contains': fxDistortionContains,
             'param_name_contains_any': angerParam,
             'mode': 'delta_norm',
-            // Push anger above neutral (0.5) with intensity
-            // Subtle at low intensity, aggressive at high
             'delta_norm': ((dir == 'down') ? -1.0 : 1.0) *
-                (0.10 + 0.45 * intensity).clamp(0.10, 0.34),
+                (0.10 + 0.45 * effectiveIntensity).clamp(
+                  policy.audibleFloor(
+                    subtle: 0.08,
+                    noticeable: 0.12,
+                    obvious: 0.22,
+                    extreme: 0.34,
+                  ),
+                  policy.executionProfile ==
+                          MixExecutionProfile.experimentalExtreme
+                      ? 0.45
+                      : 0.34,
+                ),
             'clamp_0_1': true,
             'skip_if_missing_effect': true,
           }),
@@ -2466,9 +2893,10 @@ class LocalMixingModel {
   // Balance core
   // -----------------------------
   List<MixAction> _planBalance(ProjectState p, _MixRef ref,
-      {required double intensity}) {
+      {required double intensity, required _MixExecutionPolicy policy}) {
     final out = <MixAction>[];
     final median = ref.medianEffRms;
+    final effectiveIntensity = policy.scaleIntensity(intensity);
 
     for (final r in p.rows) {
       if (r.approxRms <= 0.001) continue;
@@ -2476,12 +2904,302 @@ class LocalMixingModel {
       final eff = _effRms(r);
       final ratio = eff / (median + 1e-6);
       if (ratio > 1.7)
-        out.addAll(_gainDbDelta(r, (-3.5 * intensity).clamp(-6.0, -1.4)));
+        out.addAll(
+            _gainDbDelta(r, (-3.5 * effectiveIntensity).clamp(-7.0, -1.4)));
       if (ratio < 0.55 && _effPeak(r) < 0.98)
-        out.addAll(_gainDbDelta(r, (3.5 * intensity).clamp(1.4, 6.0)));
+        out.addAll(_gainDbDelta(r, (3.5 * effectiveIntensity).clamp(1.4, 7.0)));
     }
 
     return out;
+  }
+
+  _ReferencePlanResult _planReferenceGuidedMix({
+    required ProjectState project,
+    required RowState referenceRow,
+    required List<RowState> subjectRows,
+    required GoalVector goal,
+    required Map<int, String> roleOverrides,
+    required bool strict,
+    required _MixExecutionPolicy policy,
+  }) {
+    if (subjectRows.isEmpty) {
+      return const _ReferencePlanResult(
+        actions: [],
+        noOpSummary:
+            "I don't adjust the reference row itself. Target the rest of the project or a different row.",
+      );
+    }
+
+    final notes = <String>[];
+    final out = <MixAction>[];
+    final referenceMode = goal.referenceMode ?? MixReferenceMode.fullMix;
+    final closeness = goal.referenceCloseness ?? MixReferenceCloseness.balanced;
+    final adjustedIntensity =
+        _referenceAdjustedIntensity(goal.intensity, closeness: closeness);
+
+    final referenceLooksLikeMix = referenceRow.interpretation.fullMixLikely ||
+        referenceRow.interpretation.busLikeLikely;
+    final modes = <MixReferenceMode>[
+      if (referenceMode == MixReferenceMode.fullMix &&
+          referenceLooksLikeMix) ...[
+        MixReferenceMode.tone,
+        MixReferenceMode.loudness,
+        MixReferenceMode.width,
+        MixReferenceMode.glue,
+      ] else if (referenceMode == MixReferenceMode.fullMix) ...[
+        MixReferenceMode.tone,
+        MixReferenceMode.width,
+      ] else
+        referenceMode,
+    ];
+    if (referenceMode == MixReferenceMode.fullMix && !referenceLooksLikeMix) {
+      notes.add(
+        "The reference looks more like a single element than a full mix, so I matched tone and stereo character more than overall bus glue.",
+      );
+    }
+
+    final referenceProfile = _referenceProfileForRows([referenceRow]);
+    final subjectProfile = _referenceProfileForRows(subjectRows);
+    final focusRows = _selectReferenceFocusRows(subjectRows, maxCount: 4);
+    final compressionRows = _selectReferenceFocusRows(subjectRows, maxCount: 3);
+
+    if (modes.contains(MixReferenceMode.loudness)) {
+      final loudnessGapDb =
+          _referenceLoudnessGapDb(referenceProfile, subjectProfile);
+      final loudnessThreshold = switch (closeness) {
+        MixReferenceCloseness.loose => 2.2,
+        MixReferenceCloseness.balanced => 1.4,
+        MixReferenceCloseness.close => 0.9,
+      };
+      if (loudnessGapDb.abs() >= loudnessThreshold) {
+        final dbDelta = (loudnessGapDb *
+                (closeness == MixReferenceCloseness.close ? 0.65 : 0.52))
+            .clamp(-3.6, 3.6);
+        for (final row in subjectRows) {
+          out.addAll(_gainDbDelta(row, dbDelta));
+        }
+      }
+    }
+
+    if (modes.contains(MixReferenceMode.tone) && focusRows.isNotEmpty) {
+      final brightnessGap = _referenceBrightnessScore(referenceProfile) -
+          _referenceBrightnessScore(subjectProfile);
+      final lowGap = subjectProfile.bassiness - referenceProfile.bassiness;
+      final thinGap = referenceProfile.bassiness - subjectProfile.bassiness;
+      final harshGap = subjectProfile.sibilance - referenceProfile.sibilance;
+
+      if (brightnessGap > 0.10) {
+        final descriptor =
+            brightnessGap > 0.22 ? 'air_boost' : 'presence_boost';
+        out.addAll(_planEq(
+          project,
+          focusRows,
+          descriptor,
+          intensity: adjustedIntensity,
+          roleOverrides: roleOverrides,
+          strict: strict,
+          notesOut: notes,
+          policy: policy,
+        ));
+      } else if (brightnessGap < -0.10 || harshGap > 0.10) {
+        final descriptor =
+            harshGap > 0.14 || brightnessGap < -0.20 ? 'harsh_cut' : 'high_cut';
+        out.addAll(_planEq(
+          project,
+          focusRows,
+          descriptor,
+          intensity: adjustedIntensity,
+          roleOverrides: roleOverrides,
+          strict: strict,
+          notesOut: notes,
+          policy: policy,
+        ));
+      }
+
+      if (lowGap > 0.10) {
+        out.addAll(_planEq(
+          project,
+          focusRows,
+          lowGap > 0.22 ? 'boom_cut' : 'mud_cut',
+          intensity: adjustedIntensity,
+          roleOverrides: roleOverrides,
+          strict: strict,
+          notesOut: notes,
+          policy: policy,
+        ));
+      } else if (thinGap > 0.10) {
+        out.addAll(_planEq(
+          project,
+          focusRows,
+          thinGap > 0.20 ? 'thin_fix' : 'warmth_boost',
+          intensity: adjustedIntensity,
+          roleOverrides: roleOverrides,
+          strict: strict,
+          notesOut: notes,
+          policy: policy,
+        ));
+      }
+    }
+
+    if (modes.contains(MixReferenceMode.width)) {
+      final widthGap = _referenceWidthScore(referenceProfile) -
+          _referenceWidthScore(subjectProfile);
+      final widthThreshold = switch (closeness) {
+        MixReferenceCloseness.loose => 0.14,
+        MixReferenceCloseness.balanced => 0.10,
+        MixReferenceCloseness.close => 0.07,
+      };
+      if (widthGap.abs() >= widthThreshold) {
+        out.addAll(_planPan(
+          project,
+          subjectRows,
+          widthGap > 0 ? 'widen' : 'narrow',
+          intensity: adjustedIntensity,
+          roleOverrides: roleOverrides,
+          policy: policy,
+        ));
+      }
+    }
+
+    if (modes.contains(MixReferenceMode.glue) && compressionRows.isNotEmpty) {
+      final glueGap = _referenceGlueScore(referenceProfile) -
+          _referenceGlueScore(subjectProfile);
+      final glueThreshold = switch (closeness) {
+        MixReferenceCloseness.loose => 0.18,
+        MixReferenceCloseness.balanced => 0.12,
+        MixReferenceCloseness.close => 0.08,
+      };
+      if (glueGap >= glueThreshold) {
+        out.addAll(_planCompressor(
+          project,
+          compressionRows,
+          intensity: adjustedIntensity,
+          roleOverrides: roleOverrides,
+          strict: strict,
+          notesOut: notes,
+          policy: policy,
+        ));
+      }
+    }
+
+    if (out.isEmpty) {
+      return _ReferencePlanResult(
+        actions: const [],
+        notes: notes,
+        noOpSummary: referenceMode == MixReferenceMode.fullMix
+            ? "The project already sits fairly close to that reference."
+            : "That target already sits fairly close to the selected reference on the requested dimensions.",
+      );
+    }
+
+    return _ReferencePlanResult(actions: out, notes: notes);
+  }
+
+  double _referenceAdjustedIntensity(
+    double base, {
+    required MixReferenceCloseness closeness,
+  }) {
+    final multiplier = switch (closeness) {
+      MixReferenceCloseness.loose => 0.85,
+      MixReferenceCloseness.balanced => 1.0,
+      MixReferenceCloseness.close => 1.18,
+    };
+    return (base * multiplier).clamp(0.12, 1.0);
+  }
+
+  _ReferenceProfile _referenceProfileForRows(List<RowState> rows) {
+    return _ReferenceProfile(
+      medianEffRms: rows.isEmpty
+          ? 0.0
+          : rows.map(_effRms).reduce((a, b) => a + b) / rows.length,
+      centroidHz: _aggregateRowStat(rows, 'centroid_hz'),
+      rolloffHz: _aggregateRowStat(rows, 'spectral_rolloff_hz'),
+      spectralSlope: _aggregateRowStat(rows, 'spectral_slope'),
+      hfRms: _aggregateRowStat(rows, 'hf_rms'),
+      bassiness: _aggregateRowStat(rows, 'bassiness'),
+      sibilance: _aggregateRowStat(rows, 'sibilance'),
+      sideRatio: _aggregateRowStat(rows, 'side_ratio'),
+      phaseCorr: _aggregateRowStat(rows, 'phase_corr', fallback: 1.0),
+      stereoImbalance: _aggregateRowStat(rows, 'stereo_imbalance'),
+      integratedLufs:
+          _aggregateRowStat(rows, 'integrated_lufs_est', fallback: -24.0),
+      truePeakDbfs: _aggregateRowStat(rows, 'true_peak_dbfs', fallback: -12.0),
+      lraEst: _aggregateRowStat(rows, 'lra_est'),
+      transientDensity: _aggregateRowStat(rows, 'transient_density'),
+      clipRatio: _aggregateRowStat(rows, 'clip_ratio'),
+      stRmsStd: _aggregateRowStat(rows, 'st_rms_std'),
+    );
+  }
+
+  double _aggregateRowStat(
+    List<RowState> rows,
+    String key, {
+    double fallback = 0.0,
+  }) {
+    if (rows.isEmpty) return fallback;
+    var totalWeight = 0.0;
+    var weightedValue = 0.0;
+    for (final row in rows) {
+      final weight = math.max(0.05, math.min(1.25, _effRms(row)));
+      final statValue = row.audioStats[key];
+      final value = statValue is num ? (statValue as num).toDouble() : fallback;
+      weightedValue += value * weight;
+      totalWeight += weight;
+    }
+    if (totalWeight <= 1e-6) return fallback;
+    return weightedValue / totalWeight;
+  }
+
+  List<RowState> _selectReferenceFocusRows(
+    List<RowState> rows, {
+    required int maxCount,
+  }) {
+    final candidates = rows.where(_rowUsable).toList(growable: false)
+      ..sort((a, b) => _effRms(b).compareTo(_effRms(a)));
+    return candidates.take(maxCount).toList(growable: false);
+  }
+
+  double _referenceBrightnessScore(_ReferenceProfile profile) {
+    final centroid = ((profile.centroidHz - 900.0) / 3200.0).clamp(0.0, 1.0);
+    final rolloff = ((profile.rolloffHz - 1800.0) / 5200.0).clamp(0.0, 1.0);
+    final hf = (profile.hfRms / 0.9).clamp(0.0, 1.0);
+    return (0.38 * centroid + 0.34 * rolloff + 0.28 * hf).clamp(0.0, 1.0);
+  }
+
+  double _referenceWidthScore(_ReferenceProfile profile) {
+    final side = (profile.sideRatio / 0.9).clamp(0.0, 1.0);
+    final phase = ((1.0 - profile.phaseCorr) / 1.2).clamp(0.0, 1.0);
+    final imbalancePenalty =
+        (profile.stereoImbalance / 0.5).clamp(0.0, 1.0) * 0.25;
+    return (0.65 * side + 0.35 * phase - imbalancePenalty).clamp(0.0, 1.0);
+  }
+
+  double _referenceGlueScore(_ReferenceProfile profile) {
+    final lra = (1.0 - (profile.lraEst / 10.0).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    final transients = (1.0 - (profile.transientDensity / 1.0).clamp(0.0, 1.0))
+        .clamp(0.0, 1.0);
+    final clipRatio = (profile.clipRatio / 0.25).clamp(0.0, 1.0);
+    final dynamicsTightness =
+        (1.0 - (profile.stRmsStd / 0.18).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    return (0.30 * lra +
+            0.25 * transients +
+            0.25 * clipRatio +
+            0.20 * dynamicsTightness)
+        .clamp(0.0, 1.0);
+  }
+
+  double _referenceLoudnessGapDb(
+    _ReferenceProfile reference,
+    _ReferenceProfile subject,
+  ) {
+    if (reference.integratedLufs > -80.0 && subject.integratedLufs > -80.0) {
+      return (reference.integratedLufs - subject.integratedLufs)
+          .clamp(-9.0, 9.0);
+    }
+    final ratio =
+        (reference.medianEffRms + 1e-6) / (subject.medianEffRms + 1e-6);
+    final db = 20.0 * (math.log(ratio) / math.log(10));
+    return db.clamp(-9.0, 9.0);
   }
 
   // -----------------------------
@@ -2707,6 +3425,7 @@ class LocalMixingModel {
     ProjectState p, {
     required double intensity,
     required Map<int, String> roleOverrides,
+    required _MixExecutionPolicy policy,
   }) {
     // A gentle “make it sound like a record” pass:
     // - Only touch rows that are active and either peaky (crest) or close to clipping
@@ -2734,6 +3453,7 @@ class LocalMixingModel {
         roleOverrides: roleOverrides,
         strict: false,
         notesOut: const [],
+        policy: policy,
       ));
     }
 
@@ -2747,8 +3467,10 @@ class LocalMixingModel {
     required Map<int, String> roleOverrides,
     required bool strict,
     required List<String> notesOut,
+    required _MixExecutionPolicy policy,
   }) {
     final out = <MixAction>[];
+    final effectiveIntensity = policy.scaleIntensity(intensity).clamp(0.0, 1.0);
 
     for (final r in rows) {
       out.add(MixAction('ensure_effect',
@@ -2805,10 +3527,22 @@ class LocalMixingModel {
       final clipRisk = ((pk - 0.90) / 0.10).clamp(0.0, 1.0);
       final need = (0.55 * peaky + 0.45 * clipRisk).clamp(0.0, 1.0);
 
-      final amt = (0.35 + 0.65 * intensity).clamp(0.35, 1.0);
+      final amt = policy.blend(intensity, floor: 0.35, ceiling: 1.0);
       thresholdDb += (-8.0 * need * amt); // push threshold down up to ~8 dB
       makeupDb += (1.5 * need * amt); // add up to ~1.5 dB more makeup
       mix01 = (mix01 + 0.10 * need * amt).clamp(0.55, 0.90);
+
+      if (!strict &&
+          policy.executionProfile != MixExecutionProfile.producerSafe) {
+        final ratioMax =
+            policy.executionProfile == MixExecutionProfile.experimentalExtreme
+                ? 5.0
+                : 4.0;
+        ratio = _lerp(ratio, ratioMax, effectiveIntensity).clamp(1.0, ratioMax);
+        mix01 =
+            _lerp(mix01, policy.destructiveOk ? 0.95 : 0.88, effectiveIntensity)
+                .clamp(0.55, 0.95);
+      }
 
       // In strict mode, back off slightly (safer)
       if (strict) {
@@ -2830,19 +3564,6 @@ class LocalMixingModel {
         }));
       }
 
-      void setNormIfAllowed(List<String> paramAny, double v01) {
-        if (!_isAllowedFxParam(fxCompressor, paramAny)) return;
-        out.add(MixAction('adjust_effect_param_by_name', {
-          'row': r.rowIndex,
-          'effect_name_contains': fxCompressor,
-          'param_name_contains_any': paramAny,
-          'mode': 'set',
-          'value': v01.clamp(0.0, 1.0),
-          'clamp_0_1': true,
-          'skip_if_missing_effect': false,
-        }));
-      }
-
       setIfAllowed(const ['Threshold'], thresholdDb);
       setIfAllowed(const ['Ratio'], ratio);
       setIfAllowed(const ['Attack'], attackMs);
@@ -2857,74 +3578,6 @@ class LocalMixingModel {
   // -----------------------------
   // Disagreement logic (“already good”)
   // -----------------------------
-  bool _isAlreadyGood(ProjectState p, List<MixAction> planned, _MixRef ref,
-      {required double intensity}) {
-    // If the plan is only tiny nudges and overall spread is tight, say “already good”.
-    if (planned.isEmpty) return true;
-
-    double totalGainDelta = 0.0;
-    int gainOps = 0;
-    for (final a in planned) {
-      if (a.type == 'set_row_gain') {
-        gainOps++;
-        totalGainDelta += (a.data['delta'] as num).toDouble().abs();
-      }
-    }
-
-    // If we mostly planned FX steps but no actual strong justification, be conservative
-    final fxOps = planned
-        .where((a) => a.type != 'set_row_gain' && a.type != 'set_row_pan')
-        .length;
-
-    // Compute spread ratio of effective rms
-    final eff = <double>[];
-    for (final r in p.rows) {
-      if (r.approxRms <= 0.001) continue;
-      eff.add(_effRms(r));
-    }
-    eff.sort();
-    if (eff.length < 2) return false;
-
-    final median = ref.medianEffRms;
-    final p90 = eff[(eff.length * 0.90).floor().clamp(0, eff.length - 1)];
-    final p10 = eff[(eff.length * 0.10).floor().clamp(0, eff.length - 1)];
-    final spread = (p90 / (p10 + 1e-6)).clamp(1.0, 999.0);
-
-    final smallGain =
-        gainOps == 0 || (totalGainDelta < (0.12 + 0.12 * intensity));
-
-    final tight = spread < 3.2 && median > 0.03;
-
-    // If tight and only small changes, treat as already good
-    if (tight && smallGain && fxOps <= 2) return true;
-
-    return false;
-  }
-
-  // -----------------------------
-  // Permission gating: “big move” detection
-  // -----------------------------
-  bool _isBigMoveSet(List<MixAction> actions) {
-    double gain = 0.0;
-    int gainOps = 0;
-    int fxOps = 0;
-
-    for (final a in actions) {
-      if (a.type == 'set_row_gain') {
-        gainOps++;
-        gain += (a.data['delta'] as num).toDouble().abs();
-      } else if (a.type == 'set_row_pan') {
-        // pan is typically less “dangerous” here
-      } else {
-        fxOps++;
-      }
-    }
-
-    final bigGain = gainOps >= 1 && gain > 0.55; // roughly “noticeable”
-    final manyFx = fxOps >= 5;
-    return bigGain || manyFx;
-  }
-
   // -----------------------------
   // Utilities
   // -----------------------------
@@ -2941,21 +3594,6 @@ class LocalMixingModel {
     final e = r.roleProbs.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
     return e.first.key;
-  }
-
-  bool _dirAny(String? dir, List<String> words) {
-    if (dir == null) return false;
-    for (final w in words) {
-      if (dir.contains(w)) return true;
-    }
-    return false;
-  }
-
-  bool _textAny(String t, List<String> words) {
-    for (final w in words) {
-      if (t.contains(w)) return true;
-    }
-    return false;
   }
 
   String _summarize(List<MixAction> actions) {
@@ -3113,20 +3751,6 @@ class LocalMixingModel {
     return '${parts.sublist(0, parts.length - 1).join(', ')}, and ${parts.last}.';
   }
 
-  static const Set<String> _knownRoles = {
-    'vocals',
-    'drums',
-    'bass',
-    'guitar',
-    'synth',
-    'other'
-  };
-
-  bool _isKnownRole(String? role) {
-    if (role == null) return false;
-    return _knownRoles.contains(role.toLowerCase().trim());
-  }
-
   bool _anyOverlap(ProjectState p, List<RowState> rows) {
     for (int i = 0; i < rows.length; i++) {
       for (int j = i + 1; j < rows.length; j++) {
@@ -3151,7 +3775,7 @@ class LocalMixingModel {
     return false;
   }
 
-  DisagreementReason? detectDisagreement({
+  DisagreementReason? _detectDisagreement({
     required ProjectState project,
     required MixIntent intent,
     required List<RowState> targets,
@@ -3231,20 +3855,31 @@ class LocalMixingModel {
     return 'this part';
   }
 
-  List<MixAction> _planHardReset(ProjectState project) {
+  List<MixAction> _planHardReset(
+    ProjectState project, {
+    required MixTarget target,
+    required List<RowState> resolvedTargets,
+  }) {
     final out = <MixAction>[];
 
-    out.add(MixAction('hard_reset_master_fx', const {}));
-    out.add(MixAction('set_master_gain', {
-      'mode': 'set',
-      'value': 1.0,
-    }));
-    out.add(MixAction('set_master_pan', {
-      'mode': 'set',
-      'value': 0.5,
-    }));
+    final resetMaster = _isMasterTarget(target) || _isGlobalTarget(target);
+    if (resetMaster) {
+      out.add(MixAction('hard_reset_master_fx', const {}));
+      out.add(MixAction('set_master_gain', {
+        'mode': 'set',
+        'value': 1.0,
+      }));
+      out.add(MixAction('set_master_pan', {
+        'mode': 'set',
+        'value': 0.5,
+      }));
+    }
 
-    for (final r in project.rows) {
+    final rowResetTargets = _isGlobalTarget(target)
+        ? project.rows.where(_rowUsable).toList(growable: false)
+        : resolvedTargets.where(_rowUsable).toList(growable: false);
+
+    for (final r in rowResetTargets) {
       if (!_rowUsable(r)) continue;
 
       // FX reset (authoritative)
@@ -3273,6 +3908,56 @@ class LocalMixingModel {
 class _MixRef {
   final double medianEffRms;
   const _MixRef({required this.medianEffRms});
+}
+
+class _ReferenceProfile {
+  const _ReferenceProfile({
+    required this.medianEffRms,
+    required this.centroidHz,
+    required this.rolloffHz,
+    required this.spectralSlope,
+    required this.hfRms,
+    required this.bassiness,
+    required this.sibilance,
+    required this.sideRatio,
+    required this.phaseCorr,
+    required this.stereoImbalance,
+    required this.integratedLufs,
+    required this.truePeakDbfs,
+    required this.lraEst,
+    required this.transientDensity,
+    required this.clipRatio,
+    required this.stRmsStd,
+  });
+
+  final double medianEffRms;
+  final double centroidHz;
+  final double rolloffHz;
+  final double spectralSlope;
+  final double hfRms;
+  final double bassiness;
+  final double sibilance;
+  final double sideRatio;
+  final double phaseCorr;
+  final double stereoImbalance;
+  final double integratedLufs;
+  final double truePeakDbfs;
+  final double lraEst;
+  final double transientDensity;
+  final double clipRatio;
+  final double stRmsStd;
+}
+
+class _ReferencePlanResult {
+  const _ReferencePlanResult({
+    required this.actions,
+    this.notes = const [],
+    this.noOpSummary,
+  });
+
+  final List<MixAction> actions;
+  final List<String> notes;
+  final String? noOpSummary;
 }
 
 enum DisagreementReason {

@@ -1,9 +1,13 @@
 // lib/l10n/l10n.dart
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:mixroom/helpers/app_user_service.dart';
+import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/l10n/locale_config.dart';
-import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/main.dart';
+import 'package:mixroom/providers/locale_provider.dart';
+import 'package:provider/provider.dart';
 
 class L10n {
   /// Supported locales
@@ -20,7 +24,8 @@ class L10n {
     }
 
     try {
-      final providerLocale = Provider.of<LocaleProvider>(context, listen: false).locale;
+      final providerLocale =
+          Provider.of<LocaleProvider>(context, listen: false).locale;
       if (providerLocale != null) {
         return LocaleConfig.resolveLocale(providerLocale);
       }
@@ -83,7 +88,8 @@ class L10n {
           'Export': 'Export',
           'EXPORT': 'EXPORT',
           'Exported file saved!': 'Exported file saved!',
-          'Your video was exported successfully!': 'Your video was exported successfully!',
+          'Your video was exported successfully!':
+              'Your video was exported successfully!',
           'Share directly to:': 'Share directly to:',
           'YouTube': 'YouTube',
           'Instagram': 'Instagram',
@@ -93,12 +99,23 @@ class L10n {
           'Audio Editor': 'Audio Editor',
           'SoundCloud': 'SoundCloud',
           'Export canceled or failed.': 'Export canceled or failed.',
-          'Your audio was exported successfully!': 'Your audio was exported successfully!',
+          'Your audio was exported successfully!':
+              'Your audio was exported successfully!',
           'Coming soon': 'Coming soon',
           'Coming Soon': 'Coming Soon',
           'Search feature coming soon!': 'Search feature coming soon!',
           'Title / Artist / Genre / etc...': 'Title / Artist / Genre / etc...',
           'Explore feature coming soon!': 'Explore feature coming soon!',
+          'App Version': 'App Version',
+          'Your Projects': 'Your Projects',
+          'Demo Projects': 'Demo Projects',
+          'No demo projects available.': 'No demo projects available.',
+          'A newer version is ready!': 'A newer version is ready!',
+          'Latest version installed': 'Latest version installed',
+          'Open Store': 'Open Store',
+          'Open in App Store': 'Open in App Store',
+          'Open in Play Store': 'Open in Play Store',
+          'Version unavailable': 'Version unavailable',
           'Explore': 'Explore',
           'Basic': 'Basic',
           'Pro': 'Pro',
@@ -118,15 +135,18 @@ class L10n {
           'Export failed': 'Export failed',
           'Unknown error': 'Unknown error',
           'Export error': 'Export error',
-          'Offset cannot exceed 180 seconds.': 'Offset cannot exceed 180 seconds.',
+          'Offset cannot exceed 180 seconds.':
+              'Offset cannot exceed 180 seconds.',
           'Start from Now': 'Start from Now',
           'Delete track?': 'Delete track?',
-          'Are you sure you want to delete this audio track?': 'Are you sure you want to delete this audio track?',
+          'Are you sure you want to delete this audio track?':
+              'Are you sure you want to delete this audio track?',
           'Cancel': 'Cancel',
           'Delete': 'Delete',
           'Add Video Clip': 'Add Video Clip',
           'Pro Mode Feature': 'Pro Mode Feature',
-          'Upgrade to Pro mode to import more than 1 video.': 'Upgrade to Pro mode to import more than 1 video.',
+          'Upgrade to Pro mode to import more than 1 video.':
+              'Upgrade to Pro mode to import more than 1 video.',
           'Upgrade to Pro mode to import more than 3 audio tracks.':
               'Upgrade to Pro mode to import more than 3 audio tracks.',
           'Delete clip?': 'Delete clip?',
@@ -140,7 +160,8 @@ class L10n {
               'Automatically synchronizes all audio tracks to the video. Audio offset/trim may be adjusted.',
           'Audio Track Effects': 'Audio Track Effects',
           'Exporting...': 'Exporting...',
-          'Please don\'t close the app or lock your screen.': 'Please don\'t close the app or lock your screen.',
+          'Please don\'t close the app or lock your screen.':
+              'Please don\'t close the app or lock your screen.',
           'Track': 'Track',
           'Effects': 'Effects',
           'Row effects': 'Row effects',
@@ -158,21 +179,26 @@ class L10n {
           'Heavy Crunch': 'Heavy Crunch',
           'Applies wide reverb and subtle EQ to simulate a live concert space.':
               'Applies wide reverb and subtle EQ to simulate a live concert space.',
-          'Applies reverb and delay to give an echo effect.': 'Applies reverb and delay to give an echo effect.',
+          'Applies reverb and delay to give an echo effect.':
+              'Applies reverb and delay to give an echo effect.',
           'Applies filters and soft distortion for a vintage, relaxed vibe.':
               'Applies filters and soft distortion for a vintage, relaxed vibe.',
-          'Crushes sound with heavy distortion.': 'Crushes sound with heavy distortion.',
-          'This will replace your current effects with ': 'This will replace your current effects with ',
+          'Crushes sound with heavy distortion.':
+              'Crushes sound with heavy distortion.',
+          'This will replace your current effects with ':
+              'This will replace your current effects with ',
           'Add Effect': 'Add Effect',
           'Delete Effect?': 'Delete Effect?',
           'Parameters': 'Parameters',
           'Select ': 'Select ',
           'Close': 'Close',
-          'Export failed: Output file missing or too small.': 'Export failed: Output file missing or too small.',
+          'Export failed: Output file missing or too small.':
+              'Export failed: Output file missing or too small.',
           'Export failed! Check logs.': 'Export failed! Check logs.',
           'AI Sync failed: Computed offset exceeds audio length.':
               'AI Sync failed: Computed offset exceeds audio length.',
-          'AI Sync failed: Computed trim exceeds audio length.': 'AI Sync failed: Computed trim exceeds audio length.',
+          'AI Sync failed: Computed trim exceeds audio length.':
+              'AI Sync failed: Computed trim exceeds audio length.',
           'Done': 'Done',
           'Load Preset': 'Load Preset',
           'On Device': 'On Device',
@@ -180,12 +206,14 @@ class L10n {
           'No new notifications': 'No new notifications',
           'Welcome to Mixroom': 'Welcome to Mixroom',
           'Open Beta Version': 'Open Beta Version',
-          'There may be bugs or unexpected errors.': 'There may be bugs or unexpected errors.',
+          'There may be bugs or unexpected errors.':
+              'There may be bugs or unexpected errors.',
           'Language': 'Language',
           'Loading your account': 'Loading your account',
           'Checking your sign-in...': 'Checking your sign-in...',
           'Preparing your account...': 'Preparing your account...',
-          'We are getting everything ready for you.': 'We are getting everything ready for you.',
+          'We are getting everything ready for you.':
+              'We are getting everything ready for you.',
           'Finishing setup': 'Finishing setup',
           'Almost there...': 'Almost there...',
           'Sign out': 'Sign out',
@@ -193,7 +221,8 @@ class L10n {
           'Audio platform coming soon.': 'Audio platform coming soon.',
           'Video Projects': 'Video Projects',
           'Subscription required': 'Subscription required',
-          'Your current plan does not include video projects.': 'Your current plan does not include video projects.',
+          'Your current plan does not include video projects.':
+              'Your current plan does not include video projects.',
           'New Project': 'New Project',
           'Project limit reached': 'Project limit reached',
           'Create a new project': 'Create a new project',
@@ -225,7 +254,8 @@ class L10n {
           'Untitled Project': 'Untitled Project',
           'Untitled Video Project': 'Untitled Video Project',
           'Exporting…': 'Exporting…',
-          'Please select a .mixroom project file': 'Please select a .mixroom project file',
+          'Please select a .mixroom project file':
+              'Please select a .mixroom project file',
           'Importing…': 'Importing…',
           'Import failed': 'Import failed',
           'Projects are temporarily unavailable on this device. Please try again in a moment.':
@@ -236,7 +266,8 @@ class L10n {
               'We couldn\'t load your projects right now. Please try again.',
           'We couldn\'t load your video projects right now. Please try again.':
               'We couldn\'t load your video projects right now. Please try again.',
-          'Delete a project to create or import a new one.': 'Delete a project to create or import a new one.',
+          'Delete a project to create or import a new one.':
+              'Delete a project to create or import a new one.',
           'Last opened': 'Last opened',
           'Edit': 'Edit',
           'Rename': 'Rename',
@@ -281,7 +312,8 @@ class L10n {
               'Mixroom needs access to audio files to browse sample folders and import local media on Android.',
           'Not now': 'Not now',
           'Open settings': 'Open settings',
-          'Could not open the saved export.': 'Could not open the saved export.',
+          'Could not open the saved export.':
+              'Could not open the saved export.',
           'Platform upload coming soon': 'Platform upload coming soon',
           'Upload to YouTube': 'Upload to YouTube',
           'Title': 'Title',
@@ -299,21 +331,26 @@ class L10n {
           'YouTube QR Thumbnail': 'YouTube QR Thumbnail',
           'Your video has been uploaded!': 'Your video has been uploaded!',
           'Download QR Thumbnail': 'Download QR Thumbnail',
-          'Please enter a valid email address.': 'Please enter a valid email address.',
-          'Password should be at least 8 characters.': 'Password should be at least 8 characters.',
+          'Please enter a valid email address.':
+              'Please enter a valid email address.',
+          'Password should be at least 8 characters.':
+              'Password should be at least 8 characters.',
           'Passwords do not match.': 'Passwords do not match.',
           'Please enter your name.': 'Please enter your name.',
           'Please select your birthday.': 'Please select your birthday.',
           'Please enter your password.': 'Please enter your password.',
-          'Please choose what you use Mixroom for.': 'Please choose what you use Mixroom for.',
-          'Authentication is powered by Mixroom native auth.': 'Authentication is powered by Mixroom native auth.',
+          'Please choose what you use Mixroom for.':
+              'Please choose what you use Mixroom for.',
+          'Authentication is powered by Mixroom native auth.':
+              'Authentication is powered by Mixroom native auth.',
           'Welcome to': 'Welcome to',
           'Email or Username': 'Email or Username',
           'Email': 'Email',
           'Password': 'Password',
           'Confirmation code': 'Confirmation code',
           'Confirmation code sent!': 'Confirmation code sent!',
-          'Confirmation code will be sent to your email inbox.': 'Confirmation code will be sent to your email inbox.',
+          'Confirmation code will be sent to your email inbox.':
+              'Confirmation code will be sent to your email inbox.',
           'Select one (optional)': 'Select one (optional)',
           'Not set': 'Not set',
           'Enter a valid password and confirmation first to send the code.':
@@ -327,10 +364,12 @@ class L10n {
           'Create Account': 'Create Account',
           'Create account': 'Create account',
           'Finish your account setup': 'Finish your account setup',
-          'Add the last few details to start using Mixroom.': 'Add the last few details to start using Mixroom.',
+          'Add the last few details to start using Mixroom.':
+              'Add the last few details to start using Mixroom.',
           'Username': 'Username',
           'Bio': 'Bio',
-          'Tell people a bit about yourself': 'Tell people a bit about yourself',
+          'Tell people a bit about yourself':
+              'Tell people a bit about yourself',
           'Generate username': 'Generate username',
           'Birthday (yyyy.mm.dd)': 'Birthday (yyyy.mm.dd)',
           'What describes you best?': 'What describes you best?',
@@ -339,23 +378,30 @@ class L10n {
           'and': 'and',
           'Terms of Service': 'Terms of Service',
           'Privacy Policy': 'Privacy Policy',
-          'Receive marketing and update emails': 'Receive marketing and update emails',
+          'Receive marketing and update emails':
+              'Receive marketing and update emails',
           'chat_help_tooltip': 'AI help',
           'chat_help_title': 'What can Mixroom AI do?',
           'chat_help_intro': 'Mixroom AI is your production assistant.',
           'chat_help_can': 'It can',
-          'chat_help_can_mix': 'Adjust mix settings like level, EQ, compression, reverb, and balance.',
-          'chat_help_can_edit': 'Edit selected clips, automation, tempo alignment, and stem splitting (vocal/inst).',
+          'chat_help_can_mix':
+              'Adjust mix settings like level, EQ, compression, reverb, and balance.',
+          'chat_help_can_edit':
+              'Edit selected clips, automation, tempo alignment, and stem splitting (vocal/inst).',
           'chat_help_can_tools': 'Show where tools live and run MIDI edits.',
           'chat_help_cannot': 'It will not',
-          'chat_help_cannot_generate': 'Generate a brand-new song, beat, vocal, or instrument from text alone.',
-          'chat_help_cannot_empty': 'Create audio from nothing when there is no project material yet.',
-          'chat_help_cannot_text_to_music': 'Do text-to-music requests like “make me a song.”',
+          'chat_help_cannot_generate':
+              'Generate a brand-new song, beat, vocal, or instrument from text alone.',
+          'chat_help_cannot_empty':
+              'Create audio from nothing when there is no project material yet.',
+          'chat_help_cannot_text_to_music':
+              'Do text-to-music requests like “make me a song.”',
           'chat_help_examples':
               'Try: “Make the vocal clearer.” “Separate this clip into vocals and instrumental.” “Where is export?”',
           'Please agree to the Terms of Service and Privacy Policy.':
               'Please agree to the Terms of Service and Privacy Policy.',
-          'Bio must be 160 characters or fewer.': 'Bio must be 160 characters or fewer.',
+          'Bio must be 160 characters or fewer.':
+              'Bio must be 160 characters or fewer.',
           'At least 8 characters': 'At least 8 characters',
           'Use at least 8 characters.': 'Use at least 8 characters.',
           'Confirm Password': 'Confirm Password',
@@ -372,27 +418,34 @@ class L10n {
           'Select one': 'Select one',
           'Enter a valid email address.': 'Enter a valid email address.',
           'Enter the verification code.': 'Enter the verification code.',
-          'Email verified. You are now signed in.': 'Email verified. You are now signed in.',
+          'Email verified. You are now signed in.':
+              'Email verified. You are now signed in.',
           'Verification code resent.': 'Verification code resent.',
           'Verify your email': 'Verify your email',
-          'Enter the verification code sent to your email.': 'Enter the verification code sent to your email.',
+          'Enter the verification code sent to your email.':
+              'Enter the verification code sent to your email.',
           'Verification Code': 'Verification Code',
           'Enter code': 'Enter code',
           'Resend code': 'Resend code',
           'Verifying...': 'Verifying...',
           'Verify Email': 'Verify Email',
           'Verification code sent.': 'Verification code sent.',
-          'Password updated. You can sign in now.': 'Password updated. You can sign in now.',
+          'Password updated. You can sign in now.':
+              'Password updated. You can sign in now.',
           'Reset your password': 'Reset your password',
           'Enter verification code': 'Enter verification code',
-          'We will send a verification code to your email.': 'We will send a verification code to your email.',
-          'Use the code from email and set a new password.': 'Use the code from email and set a new password.',
+          'We will send a verification code to your email.':
+              'We will send a verification code to your email.',
+          'Use the code from email and set a new password.':
+              'Use the code from email and set a new password.',
           'New Password': 'New Password',
           'Confirm New Password': 'Confirm New Password',
           'Send Reset Code': 'Send Reset Code',
           'Update Password': 'Update Password',
-          'Fast, AI-assisted music production.': 'Fast, AI-assisted music production.',
-          'Fast, AI-assisted music production': 'Fast, AI-assisted music production',
+          'Fast, AI-assisted music production.':
+              'Fast, AI-assisted music production.',
+          'Fast, AI-assisted music production':
+              'Fast, AI-assisted music production',
           'Or continue with': 'Or continue with',
           'Continue with Google': 'Continue with Google',
           'Continue with Apple': 'Continue with Apple',
@@ -428,7 +481,8 @@ class L10n {
           'For work': 'For work',
           'Songwriting': 'Songwriting',
           'Mix/master practice': 'Mix/master practice',
-          'Account data sync target: Mixroom account profile.': 'Account data sync target: Mixroom account profile.',
+          'Account data sync target: Mixroom account profile.':
+              'Account data sync target: Mixroom account profile.',
           'Feedback': 'Feedback',
           'Bug Report': 'Bug Report',
           'Feedback for': 'Feedback for',
@@ -440,7 +494,8 @@ class L10n {
               'Tell us what is working, missing, or would make this better.',
           'Describe the bug, what you expected, and what happened.':
               'Describe the bug, what you expected, and what happened.',
-          'Allow Mixroom to respond by email.': 'Allow Mixroom to respond by email.',
+          'Allow Mixroom to respond by email.':
+              'Allow Mixroom to respond by email.',
           'Optional. We may follow up using your account email about this submission.':
               'Optional. We may follow up using your account email about this submission.',
           'Video projects are coming soon.': 'Video projects are coming soon.',
@@ -467,7 +522,8 @@ class L10n {
           'Open': 'Open',
           'Legal & Privacy': 'Legal & Privacy',
           'Feedback / bug report': 'Feedback / bug report',
-          'Subscriptions are not enabled yet.': 'Subscriptions are not enabled yet.',
+          'Subscriptions are not enabled yet.':
+              'Subscriptions are not enabled yet.',
           'When billing opens, you will be able to upgrade and manage your plan from this screen.':
               'When billing opens, you will be able to upgrade and manage your plan from this screen.',
           'Change Password': 'Change Password',
@@ -478,7 +534,8 @@ class L10n {
           'Prompt usage': 'Prompt usage',
           'Extra prompt credits are used first, before daily and weekly limits.':
               'Extra prompt credits are used first, before daily and weekly limits.',
-          'Daily and weekly prompt usage limits.': 'Daily and weekly prompt usage limits.',
+          'Daily and weekly prompt usage limits.':
+              'Daily and weekly prompt usage limits.',
           'Extra prompt bank': 'Extra prompt bank',
           'left': 'left',
           'Window': 'Window',
@@ -505,13 +562,15 @@ class L10n {
           'Show prompt limits': 'Show prompt limits',
           'Extra bank': 'Extra bank',
           'used first': 'used first',
-          'Prompt limit reached. Tap to see reset time.': 'Prompt limit reached. Tap to see reset time.',
+          'Prompt limit reached. Tap to see reset time.':
+              'Prompt limit reached. Tap to see reset time.',
           'No copied clip to paint': 'No copied clip to paint',
           'MIDI Clip': 'MIDI Clip',
           'Audio Clip': 'Audio Clip',
           'Rename Clip': 'Rename Clip',
           'Clip name': 'Clip name',
-          'Tempo detection is only for audio clips.': 'Tempo detection is only for audio clips.',
+          'Tempo detection is only for audio clips.':
+              'Tempo detection is only for audio clips.',
           'Place clone': 'Place clone',
           'Clear clipboard': 'Clear clipboard',
           'Clipboard cleared': 'Clipboard cleared',
@@ -544,16 +603,21 @@ class L10n {
           'Project saved': 'Project saved',
           'Save failed': 'Save failed',
           'Name Your Project': 'Name Your Project',
-          'Unable to arm selected MIDI clip.': 'Unable to arm selected MIDI clip.',
-          'Select a track to record on first.': 'Select a track to record on first.',
+          'Unable to arm selected MIDI clip.':
+              'Unable to arm selected MIDI clip.',
+          'Select a track to record on first.':
+              'Select a track to record on first.',
           'Failed to start recording': 'Failed to start recording',
           'Microphone access is blocked. Open app settings to record audio.':
               'Microphone access is blocked. Open app settings to record audio.',
-          'Microphone access is required to record audio.': 'Microphone access is required to record audio.',
-          'Recording failed or no data captured.': 'Recording failed or no data captured.',
+          'Microphone access is required to record audio.':
+              'Microphone access is required to record audio.',
+          'Recording failed or no data captured.':
+              'Recording failed or no data captured.',
           'Failed to add recorded track.': 'Failed to add recorded track.',
           'File is unavailable.': 'File is unavailable.',
-          'Folder already loaded for this project.': 'Folder already loaded for this project.',
+          'Folder already loaded for this project.':
+              'Folder already loaded for this project.',
           'Failed to preview sample': 'Failed to preview sample',
           'Project Name': 'Project Name',
           'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.':
@@ -569,7 +633,8 @@ class L10n {
               'System default (speaker / Bluetooth / audio interface)',
           'Output Route': 'Output Route',
           'Refresh output route': 'Refresh output route',
-          'System default (managed by macOS audio settings)': 'System default (managed by macOS audio settings)',
+          'System default (managed by macOS audio settings)':
+              'System default (managed by macOS audio settings)',
           'Output Device': 'Output Device',
           'Refresh output device': 'Refresh output device',
           'No selectable output devices': 'No selectable output devices',
@@ -608,7 +673,8 @@ class L10n {
           'FX Bypass': 'FX Bypass',
           'Open File Browser': 'Open File Browser',
           'Choose Instrument': 'Choose Instrument',
-          'No instruments in this category.': 'No instruments in this category.',
+          'No instruments in this category.':
+              'No instruments in this category.',
           'Microphone access is turned off': 'Microphone access is turned off',
           'No input devices available': 'No input devices available',
           'Input Device': 'Input Device',
@@ -621,7 +687,8 @@ class L10n {
               'Built-in microphone recording needs access in Settings. External audio interfaces can still be used below when available.',
           'Built-in microphone recording needs access. External audio interfaces can still be used below when available.':
               'Built-in microphone recording needs access. External audio interfaces can still be used below when available.',
-          'Audition folders and drag and drop': 'Audition folders and drag and drop',
+          'Audition folders and drag and drop':
+              'Audition folders and drag and drop',
           'Finish': 'Finish',
         },
         'ko': {
@@ -673,6 +740,16 @@ class L10n {
           'Search feature coming soon!': '검색 기능이 곧 제공됩니다!',
           'Title / Artist / Genre / etc...': '제목 / 아티스트 / 장르 / 등...',
           'Explore feature coming soon!': '감상하기 기능이 곧 제공됩니다!',
+          'App Version': '앱 버전',
+          'Your Projects': '내 프로젝트',
+          'Demo Projects': '데모 프로젝트',
+          'No demo projects available.': '사용 가능한 데모 프로젝트가 없습니다.',
+          'A newer version is ready!': '새 버전이 준비되어 있어요!',
+          'Latest version installed': '최신 버전 사용 중',
+          'Open Store': '스토어 열기',
+          'Open in App Store': 'App Store에서 열기',
+          'Open in Play Store': 'Play 스토어에서 열기',
+          'Version unavailable': '버전 정보를 불러올 수 없습니다',
           'Explore': '감상하기',
           'Basic': '베이직',
           'Pro': '프로',
@@ -695,15 +772,19 @@ class L10n {
           'Offset cannot exceed 180 seconds.': '오프셋은 180초를 초과할 수 없습니다.',
           'Start from Now': '지금부터 시작',
           'Delete track?': '트랙 삭제?',
-          'Are you sure you want to delete this audio track?': '이 오디오 트랙을 삭제하시겠습니까?',
+          'Are you sure you want to delete this audio track?':
+              '이 오디오 트랙을 삭제하시겠습니까?',
           'Cancel': '취소',
           'Delete': '삭제',
           'Add Video Clip': '비디오 클립 추가',
           'Pro Mode Feature': '프로 모드 기능',
-          'Upgrade to Pro mode to import more than 1 video.': '1개 이상의 비디오를 가져오려면 프로 모드로 업그레이드하세요.',
-          'Upgrade to Pro mode to import more than 3 audio tracks.': '3개 이상의 오디오 트랙을 가져오려면 프로 모드로 업그레이드하세요.',
+          'Upgrade to Pro mode to import more than 1 video.':
+              '1개 이상의 비디오를 가져오려면 프로 모드로 업그레이드하세요.',
+          'Upgrade to Pro mode to import more than 3 audio tracks.':
+              '3개 이상의 오디오 트랙을 가져오려면 프로 모드로 업그레이드하세요.',
           'Delete clip?': '클립을 삭제하시겠습니까?',
-          'Are you sure you want to remove this video clip from your timeline?': '타임라인에서 이 비디오 클립을 제거하시겠습니까?',
+          'Are you sure you want to remove this video clip from your timeline?':
+              '타임라인에서 이 비디오 클립을 제거하시겠습니까?',
           'Exit project?': '프로젝트를 종료하시겠습니까?',
           'All progress will be lost.': '모든 진행 내용이 사라집니다.',
           'Confirm': '확인',
@@ -712,7 +793,8 @@ class L10n {
               '모든 오디오 트랙을 비디오와 자동으로 동기화합니다. 오디오 오프셋/트림이 조정될 수 있습니다.',
           'Audio Track Effects': '오디오 트랙 이펙터',
           'Exporting...': '내보내는 중...',
-          'Please don\'t close the app or lock your screen.': '앱을 종료하거나 화면을 잠그지 마세요.',
+          'Please don\'t close the app or lock your screen.':
+              '앱을 종료하거나 화면을 잠그지 마세요.',
           'Track': '트랙',
           'Effects': '이펙터',
           'Row effects': '행 이펙터',
@@ -730,8 +812,10 @@ class L10n {
           'Heavy Crunch': '헤비 크런치',
           'Applies wide reverb and subtle EQ to simulate a live concert space.':
               '라이브 콘서트 공간을 시뮬레이션하기 위해 넓은 리버브와 섬세한 EQ를 적용합니다.',
-          'Applies reverb and delay to give an echo effect.': '에코 효과를 위해 리버브와 딜레이를 적용합니다.',
-          'Applies filters and soft distortion for a vintage, relaxed vibe.': '빈티지하고 편안한 분위기를 위해 필터와 부드러운 디스토션을 적용합니다.',
+          'Applies reverb and delay to give an echo effect.':
+              '에코 효과를 위해 리버브와 딜레이를 적용합니다.',
+          'Applies filters and soft distortion for a vintage, relaxed vibe.':
+              '빈티지하고 편안한 분위기를 위해 필터와 부드러운 디스토션을 적용합니다.',
           'Crushes sound with heavy distortion.': '강한 디스토션으로 사운드를 뭉개줍니다.',
           'This will replace your current effects with ': '현재 효과가 다음으로 교체됩니다: ',
           'Add Effect': '효과 추가',
@@ -739,10 +823,13 @@ class L10n {
           'Parameters': '파라미터',
           'Select ': '선택 ',
           'Close': '닫기',
-          'Export failed: Output file missing or too small.': '내보내기 실패: 출력 파일이 없거나 너무 작습니다.',
+          'Export failed: Output file missing or too small.':
+              '내보내기 실패: 출력 파일이 없거나 너무 작습니다.',
           'Export failed! Check logs.': '내보내기 실패! 로그를 확인하세요.',
-          'AI Sync failed: Computed offset exceeds audio length.': 'AI 싱크 실패: 계산된 오프셋이 오디오 길이를 초과합니다.',
-          'AI Sync failed: Computed trim exceeds audio length.': 'AI 싱크 실패: 계산된 트림이 오디오 길이를 초과합니다.',
+          'AI Sync failed: Computed offset exceeds audio length.':
+              'AI 싱크 실패: 계산된 오프셋이 오디오 길이를 초과합니다.',
+          'AI Sync failed: Computed trim exceeds audio length.':
+              'AI 싱크 실패: 계산된 트림이 오디오 길이를 초과합니다.',
           'Done': '완료',
           'Load Preset': '프리셋 불러오기',
           'On Device': '기기 내',
@@ -750,7 +837,8 @@ class L10n {
           'No new notifications': '새 알림이 없습니다',
           'Welcome to Mixroom': '믹스룸에 오신 것을 환영합니다',
           'Open Beta Version': '오픈 베타 버전',
-          'There may be bugs or unexpected errors.': '버그나 예상치 못한 오류가 있을 수 있습니다.',
+          'There may be bugs or unexpected errors.':
+              '버그나 예상치 못한 오류가 있을 수 있습니다.',
           'Language': '언어',
           'Loading your account': '계정을 불러오는 중입니다',
           'Checking your sign-in...': '로그인 상태를 확인하는 중입니다...',
@@ -763,7 +851,8 @@ class L10n {
           'Audio platform coming soon.': '오디오 플랫폼은 곧 제공됩니다.',
           'Video Projects': '비디오 프로젝트',
           'Subscription required': '구독이 필요합니다',
-          'Your current plan does not include video projects.': '현재 플랜에는 비디오 프로젝트 기능이 포함되어 있지 않습니다.',
+          'Your current plan does not include video projects.':
+              '현재 플랜에는 비디오 프로젝트 기능이 포함되어 있지 않습니다.',
           'New Project': '새 프로젝트',
           'Project limit reached': '프로젝트 한도에 도달했습니다',
           'Create a new project': '새 프로젝트 만들기',
@@ -802,9 +891,12 @@ class L10n {
               '이 기기에서는 프로젝트를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
           'Video projects are temporarily unavailable on this device. Please try again in a moment.':
               '이 기기에서는 비디오 프로젝트를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
-          'We couldn\'t load your projects right now. Please try again.': '지금은 프로젝트를 불러올 수 없습니다. 다시 시도하세요.',
-          'We couldn\'t load your video projects right now. Please try again.': '지금은 비디오 프로젝트를 불러올 수 없습니다. 다시 시도하세요.',
-          'Delete a project to create or import a new one.': '새 프로젝트를 만들거나 가져오려면 프로젝트를 삭제하세요.',
+          'We couldn\'t load your projects right now. Please try again.':
+              '지금은 프로젝트를 불러올 수 없습니다. 다시 시도하세요.',
+          'We couldn\'t load your video projects right now. Please try again.':
+              '지금은 비디오 프로젝트를 불러올 수 없습니다. 다시 시도하세요.',
+          'Delete a project to create or import a new one.':
+              '새 프로젝트를 만들거나 가져오려면 프로젝트를 삭제하세요.',
           'Last opened': '마지막으로 연 시간',
           'Edit': '편집',
           'Rename': '이름 변경',
@@ -817,12 +909,14 @@ class L10n {
           'Tap empty grid to add. Drag to move. Pull right edge to resize.':
               '빈 그리드를 눌러 노트를 추가하세요. 드래그해 이동하고 오른쪽 끝을 끌어 길이를 조절하세요.',
           'Select groups quickly': '빠르게 그룹 선택',
-          'Hold empty space and drag a box to multi-select notes.': '빈 공간을 길게 누른 뒤 박스를 드래그해 여러 노트를 선택하세요.',
+          'Hold empty space and drag a box to multi-select notes.':
+              '빈 공간을 길게 누른 뒤 박스를 드래그해 여러 노트를 선택하세요.',
           'Zoom + edit faster': '빠르게 확대하고 편집하기',
           'Pinch with two fingers or use +/- buttons to zoom in time and pitch.':
               '두 손가락으로 핀치하거나 +/- 버튼을 사용해 시간과 음높이를 확대하세요.',
           'Use the bottom tray': '하단 트레이 활용',
-          'Duplicate, delete, and adjust length/velocity for selected notes.': '선택한 노트를 복제, 삭제하거나 길이와 벨로시티를 조정하세요.',
+          'Duplicate, delete, and adjust length/velocity for selected notes.':
+              '선택한 노트를 복제, 삭제하거나 길이와 벨로시티를 조정하세요.',
           'Got it': '확인',
           'Custom': '사용자 지정',
           'Resample quality': '리샘플 품질',
@@ -872,17 +966,20 @@ class L10n {
           'Please select your birthday.': '생년월일을 선택해주세요.',
           'Please enter your password.': '비밀번호를 입력해주세요.',
           'Please choose what you use Mixroom for.': 'Mixroom 사용 목적을 선택해주세요.',
-          'Authentication is powered by Mixroom native auth.': '인증은 Mixroom 자체 인증으로 제공됩니다.',
+          'Authentication is powered by Mixroom native auth.':
+              '인증은 Mixroom 자체 인증으로 제공됩니다.',
           'Welcome to': 'Welcome to',
           'Email or Username': '이메일 또는 사용자 ID',
           'Email': '이메일',
           'Password': '비밀번호',
           'Confirmation code': '확인 코드',
           'Confirmation code sent!': '확인 코드가 전송되었습니다!',
-          'Confirmation code will be sent to your email inbox.': '확인 코드는 이메일 받은편지함으로 전송됩니다.',
+          'Confirmation code will be sent to your email inbox.':
+              '확인 코드는 이메일 받은편지함으로 전송됩니다.',
           'Select one (optional)': '선택하세요 (선택 사항)',
           'Not set': '설정 안 함',
-          'Enter a valid password and confirmation first to send the code.': '코드를 보내려면 올바른 비밀번호와 비밀번호 확인을 먼저 입력하세요.',
+          'Enter a valid password and confirmation first to send the code.':
+              '코드를 보내려면 올바른 비밀번호와 비밀번호 확인을 먼저 입력하세요.',
           'Continue': '계속',
           'Enter password': '비밀번호 입력',
           'Forgot password?': '비밀번호를 잊으셨나요?',
@@ -892,7 +989,8 @@ class L10n {
           'Create Account': '계정 만들기',
           'Create account': '계정 만들기',
           'Finish your account setup': '계정 설정을 마무리하세요',
-          'Add the last few details to start using Mixroom.': 'Mixroom을 시작하기 위한 마지막 정보를 입력하세요.',
+          'Add the last few details to start using Mixroom.':
+              'Mixroom을 시작하기 위한 마지막 정보를 입력하세요.',
           'Username': '사용자 ID',
           'Bio': '소개',
           'Tell people a bit about yourself': '자신을 간단히 소개해보세요',
@@ -910,14 +1008,19 @@ class L10n {
           'chat_help_intro': 'Mixroom AI는 작업 도우미입니다.',
           'chat_help_can': '가능한 작업',
           'chat_help_can_mix': '레벨, EQ, 컴프레서, 리버브, 밸런스 같은 믹스 설정을 조정할 수 있어요.',
-          'chat_help_can_edit': '선택한 클립 편집, 오토메이션, 템포 정렬, 스템 분리(보컬/반주)를 할 수 있어요.',
+          'chat_help_can_edit':
+              '선택한 클립 편집, 오토메이션, 템포 정렬, 스템 분리(보컬/반주)를 할 수 있어요.',
           'chat_help_can_tools': '도구 위치를 알려주고 MIDI 편집을 실행할 수 있어요.',
           'chat_help_cannot': '지원하지 않는 작업',
           'chat_help_cannot_generate': '텍스트만으로 새로운 음악(비트, 보컬, 악기 등)을 생성하지않습니다.',
-          'chat_help_cannot_empty': '프로젝트에 사용할 오디오 소스가 없는 경우 새로운 오디오를 생성하는 기능은 없습니다.',
-          'chat_help_cannot_text_to_music': '“곡 하나 만들어줘” 와 같은 텍스트 기반의 음악 생성 요청(Text-to-Music)은 불가합니다.',
-          'chat_help_examples': '예시: “보컬을 더 선명하게 해줘.” “이 클립을 보컬과 반주로 분리해줘.” “Export가 어디 있어?”',
-          'Please agree to the Terms of Service and Privacy Policy.': '이용약관 및 개인정보 처리방침에 동의해주세요.',
+          'chat_help_cannot_empty':
+              '프로젝트에 사용할 오디오 소스가 없는 경우 새로운 오디오를 생성하는 기능은 없습니다.',
+          'chat_help_cannot_text_to_music':
+              '“곡 하나 만들어줘” 와 같은 텍스트 기반의 음악 생성 요청(Text-to-Music)은 불가합니다.',
+          'chat_help_examples':
+              '예시: “보컬을 더 선명하게 해줘.” “이 클립을 보컬과 반주로 분리해줘.” “Export가 어디 있어?”',
+          'Please agree to the Terms of Service and Privacy Policy.':
+              '이용약관 및 개인정보 처리방침에 동의해주세요.',
           'Bio must be 160 characters or fewer.': '소개는 160자 이하로 입력해주세요.',
           'At least 8 characters': '최소 8자',
           'Use at least 8 characters.': '최소 8자를 사용하세요.',
@@ -935,21 +1038,26 @@ class L10n {
           'Select one': '하나를 선택하세요',
           'Enter a valid email address.': '유효한 이메일 주소를 입력하세요.',
           'Enter the verification code.': '인증 코드를 입력하세요.',
-          'Email verified. You are now signed in.': '이메일 인증이 완료되었습니다. 이제 로그인되었습니다.',
+          'Email verified. You are now signed in.':
+              '이메일 인증이 완료되었습니다. 이제 로그인되었습니다.',
           'Verification code resent.': '인증 코드를 다시 보냈습니다.',
           'Verify your email': '이메일 인증',
-          'Enter the verification code sent to your email.': '이메일로 전송된 인증 코드를 입력하세요.',
+          'Enter the verification code sent to your email.':
+              '이메일로 전송된 인증 코드를 입력하세요.',
           'Verification Code': '인증 코드',
           'Enter code': '코드 입력',
           'Resend code': '코드 다시 보내기',
           'Verifying...': '인증 중...',
           'Verify Email': '이메일 인증하기',
           'Verification code sent.': '인증 코드를 보냈습니다.',
-          'Password updated. You can sign in now.': '비밀번호가 변경되었습니다. 이제 로그인할 수 있습니다.',
+          'Password updated. You can sign in now.':
+              '비밀번호가 변경되었습니다. 이제 로그인할 수 있습니다.',
           'Reset your password': '비밀번호 재설정',
           'Enter verification code': '인증 코드 입력',
-          'We will send a verification code to your email.': '이메일로 인증 코드를 보내드립니다.',
-          'Use the code from email and set a new password.': '이메일로 받은 코드를 입력하고 새 비밀번호를 설정하세요.',
+          'We will send a verification code to your email.':
+              '이메일로 인증 코드를 보내드립니다.',
+          'Use the code from email and set a new password.':
+              '이메일로 받은 코드를 입력하고 새 비밀번호를 설정하세요.',
           'New Password': '새 비밀번호',
           'Confirm New Password': '새 비밀번호 확인',
           'Send Reset Code': '재설정 코드 보내기',
@@ -975,7 +1083,8 @@ class L10n {
           'Not provided': '미입력',
           'Save Changes': '변경사항 저장',
           'Email not verified': '이메일 미인증',
-          'Please verify your email for better account security.': '계정 보안을 위해 이메일 인증을 완료해주세요.',
+          'Please verify your email for better account security.':
+              '계정 보안을 위해 이메일 인증을 완료해주세요.',
           'Sending...': '전송 중...',
           'Resend verification email': '인증 이메일 다시 보내기',
           'Birthday': '생년월일',
@@ -990,7 +1099,8 @@ class L10n {
           'For work': '업무용',
           'Songwriting': '작곡',
           'Mix/master practice': '믹싱/마스터링 연습',
-          'Account data sync target: Mixroom account profile.': '계정 데이터 동기화 대상: Mixroom 계정 프로필.',
+          'Account data sync target: Mixroom account profile.':
+              '계정 데이터 동기화 대상: Mixroom 계정 프로필.',
           'Feedback': '피드백',
           'Bug Report': '버그 제보',
           'Feedback for': '피드백 대상',
@@ -998,9 +1108,12 @@ class L10n {
           'Submit': '제출',
           'Thank you for your submission!': '의견을 보내주셔서 감사합니다!',
           'Thank you for the feedback!': '피드백 감사합니다!',
-          'Tell us what is working, missing, or would make this better.': '잘 작동하는 점, 부족한 점, 더 좋아졌으면 하는 점을 알려주세요.',
-          'Describe the bug, what you expected, and what happened.': '버그 내용과 기대한 동작, 실제로 발생한 내용을 알려주세요.',
-          'Allow Mixroom to respond by email.': 'Mixroom이 이메일로 답변할 수 있도록 허용합니다.',
+          'Tell us what is working, missing, or would make this better.':
+              '잘 작동하는 점, 부족한 점, 더 좋아졌으면 하는 점을 알려주세요.',
+          'Describe the bug, what you expected, and what happened.':
+              '버그 내용과 기대한 동작, 실제로 발생한 내용을 알려주세요.',
+          'Allow Mixroom to respond by email.':
+              'Mixroom이 이메일로 답변할 수 있도록 허용합니다.',
           'Optional. We may follow up using your account email about this submission.':
               '선택 사항입니다. 이 제출 내용과 관련해 계정 이메일로 후속 연락을 드릴 수 있습니다.',
           'Video projects are coming soon.': '비디오 프로젝트는 곧 제공됩니다.',
@@ -1036,7 +1149,8 @@ class L10n {
           'Password updated successfully.': '비밀번호가 성공적으로 변경되었습니다.',
           'Updating...': '업데이트 중...',
           'Prompt usage': '프롬프트 사용량',
-          'Extra prompt credits are used first, before daily and weekly limits.': '추가 프롬프트 크레딧이 일일/주간 한도보다 먼저 사용됩니다.',
+          'Extra prompt credits are used first, before daily and weekly limits.':
+              '추가 프롬프트 크레딧이 일일/주간 한도보다 먼저 사용됩니다.',
           'Daily and weekly prompt usage limits.': '일일 및 주간 프롬프트 사용 한도입니다.',
           'Extra prompt bank': '추가 프롬프트 뱅크',
           'left': '남음',
@@ -1048,7 +1162,8 @@ class L10n {
           'Try again in': '다시 시도까지',
           'Blocked until': '차단 해제 시각',
           'Clear chat history?': '채팅 기록을 지울까요?',
-          'This removes the saved project chat context and cannot be undone.': '저장된 프로젝트 채팅 컨텍스트를 삭제하며 되돌릴 수 없습니다.',
+          'This removes the saved project chat context and cannot be undone.':
+              '저장된 프로젝트 채팅 컨텍스트를 삭제하며 되돌릴 수 없습니다.',
           'Clear': '지우기',
           'Chat history cleared': '채팅 기록을 지웠습니다',
           'Project Chat': '프로젝트 채팅',
@@ -1063,13 +1178,15 @@ class L10n {
           'Show prompt limits': '프롬프트 한도 보기',
           'Extra bank': '추가 뱅크',
           'used first': '먼저 사용됨',
-          'Prompt limit reached. Tap to see reset time.': '프롬프트 한도에 도달했습니다. 재설정 시간을 확인하려면 탭하세요.',
+          'Prompt limit reached. Tap to see reset time.':
+              '프롬프트 한도에 도달했습니다. 재설정 시간을 확인하려면 탭하세요.',
           'No copied clip to paint': '붙여넣을 복사된 클립이 없습니다',
           'MIDI Clip': 'MIDI 클립',
           'Audio Clip': '오디오 클립',
           'Rename Clip': '클립 이름 변경',
           'Clip name': '클립 이름',
-          'Tempo detection is only for audio clips.': '템포 감지는 오디오 클립에서만 사용할 수 있습니다.',
+          'Tempo detection is only for audio clips.':
+              '템포 감지는 오디오 클립에서만 사용할 수 있습니다.',
           'Place clone': '복제본 배치',
           'Clear clipboard': '클립보드 지우기',
           'Clipboard cleared': '클립보드를 지웠습니다',
@@ -1102,11 +1219,14 @@ class L10n {
           'Project saved': '프로젝트가 저장되었습니다',
           'Save failed': '저장 실패',
           'Name Your Project': '프로젝트 이름 지정',
-          'Unable to arm selected MIDI clip.': '선택한 MIDI 클립을 녹음 대기 상태로 설정할 수 없습니다.',
+          'Unable to arm selected MIDI clip.':
+              '선택한 MIDI 클립을 녹음 대기 상태로 설정할 수 없습니다.',
           'Select a track to record on first.': '먼저 녹음할 트랙을 선택하세요.',
           'Failed to start recording': '녹음을 시작하지 못했습니다',
-          'Microphone access is blocked. Open app settings to record audio.': '마이크 접근이 차단되었습니다. 오디오 녹음을 위해 앱 설정을 여세요.',
-          'Microphone access is required to record audio.': '오디오 녹음을 위해 마이크 접근이 필요합니다.',
+          'Microphone access is blocked. Open app settings to record audio.':
+              '마이크 접근이 차단되었습니다. 오디오 녹음을 위해 앱 설정을 여세요.',
+          'Microphone access is required to record audio.':
+              '오디오 녹음을 위해 마이크 접근이 필요합니다.',
           'Recording failed or no data captured.': '녹음에 실패했거나 캡처된 데이터가 없습니다.',
           'Failed to add recorded track.': '녹음된 트랙을 추가하지 못했습니다.',
           'File is unavailable.': '파일을 사용할 수 없습니다.',
@@ -1122,10 +1242,12 @@ class L10n {
               '블루투스 헤드셋 마이크는 음질 저하와 지연 증가를 유발할 수 있습니다. 내장/기본 마이크를 사용할지, 이 마이크로 계속할지 선택하세요.',
           'Use default mic': '기본 마이크 사용',
           'Input Channel': '입력 채널',
-          'System default (speaker / Bluetooth / audio interface)': '시스템 기본값 (스피커 / 블루투스 / 오디오 인터페이스)',
+          'System default (speaker / Bluetooth / audio interface)':
+              '시스템 기본값 (스피커 / 블루투스 / 오디오 인터페이스)',
           'Output Route': '출력 경로',
           'Refresh output route': '출력 경로 새로고침',
-          'System default (managed by macOS audio settings)': '시스템 기본값 (macOS 오디오 설정에서 관리)',
+          'System default (managed by macOS audio settings)':
+              '시스템 기본값 (macOS 오디오 설정에서 관리)',
           'Output Device': '출력 장치',
           'Refresh output device': '출력 장치 새로고침',
           'No selectable output devices': '선택 가능한 출력 장치가 없습니다',
@@ -1135,7 +1257,8 @@ class L10n {
           'is using Bluetooth output. Real-time monitoring is off by default.':
               '는 블루투스 출력을 사용 중입니다. 실시간 모니터링은 기본적으로 꺼져 있습니다.',
           'Advanced: monitor anyway': '고급: 그래도 모니터링',
-          'May sound choppy or unstable on Bluetooth earphones.': '블루투스 이어폰에서 끊기거나 불안정하게 들릴 수 있습니다.',
+          'May sound choppy or unstable on Bluetooth earphones.':
+              '블루투스 이어폰에서 끊기거나 불안정하게 들릴 수 있습니다.',
           'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.':
               '블루투스 헤드셋 마이크는 음질 저하와 지연 증가를 유발할 수 있습니다. 이 장치는 현재 녹음이 허용되어 있습니다.',
           'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
@@ -1228,6 +1351,16 @@ class L10n {
           'Search feature coming soon!': '搜索功能即将推出！',
           'Title / Artist / Genre / etc...': '标题 / 艺术家 / 类型 / 等…',
           'Explore feature coming soon!': '探索功能即将推出！',
+          'App Version': '应用版本',
+          'Your Projects': '你的项目',
+          'Demo Projects': '演示项目',
+          'No demo projects available.': '暂无可用演示项目。',
+          'A newer version is ready!': '新版本已可更新！',
+          'Latest version installed': '已是最新版本',
+          'Open Store': '打开商店',
+          'Open in App Store': '在 App Store 中打开',
+          'Open in Play Store': '在 Play 商店中打开',
+          'Version unavailable': '无法获取版本信息',
           'Explore': '探索',
           'Basic': '基础',
           'Pro': '专业',
@@ -1255,10 +1388,13 @@ class L10n {
           'Delete': '删除',
           'Add Video Clip': '添加视频片段',
           'Pro Mode Feature': '专业模式功能',
-          'Upgrade to Pro mode to import more than 1 video.': '升级到专业模式以导入超过1个视频。',
-          'Upgrade to Pro mode to import more than 3 audio tracks.': '升级到专业模式以导入超过3条音轨。',
+          'Upgrade to Pro mode to import more than 1 video.':
+              '升级到专业模式以导入超过1个视频。',
+          'Upgrade to Pro mode to import more than 3 audio tracks.':
+              '升级到专业模式以导入超过3条音轨。',
           'Delete clip?': '删除片段？',
-          'Are you sure you want to remove this video clip from your timeline?': '确定要从时间轴中移除此视频片段吗？',
+          'Are you sure you want to remove this video clip from your timeline?':
+              '确定要从时间轴中移除此视频片段吗？',
           'Exit project?': '退出项目？',
           'All progress will be lost.': '所有进度将丢失。',
           'Confirm': '确认',
@@ -1274,9 +1410,11 @@ class L10n {
           'Echoes': '回声',
           'LoFi Effect': 'LoFi 效果',
           'Heavy Crunch': '重度失真',
-          'Applies wide reverb and subtle EQ to simulate a live concert space.': '应用宽广混响和细微均衡，模拟现场音乐会空间。',
+          'Applies wide reverb and subtle EQ to simulate a live concert space.':
+              '应用宽广混响和细微均衡，模拟现场音乐会空间。',
           'Applies reverb and delay to give an echo effect.': '应用混响和延迟以产生回声效果。',
-          'Applies filters and soft distortion for a vintage, relaxed vibe.': '应用滤波和轻微失真，营造复古、松弛的氛围。',
+          'Applies filters and soft distortion for a vintage, relaxed vibe.':
+              '应用滤波和轻微失真，营造复古、松弛的氛围。',
           'Crushes sound with heavy distortion.': '使用强烈失真压碎声音。',
           'This will replace your current effects with ': '这将把您当前的效果替换为 ',
           'Add Effect': '添加效果',
@@ -1286,8 +1424,10 @@ class L10n {
           'Close': '关闭',
           'Export failed: Output file missing or too small.': '导出失败：输出文件缺失或过小。',
           'Export failed! Check logs.': '导出失败！请检查日志。',
-          'AI Sync failed: Computed offset exceeds audio length.': 'AI 同步失败：计算的偏移超过音频长度。',
-          'AI Sync failed: Computed trim exceeds audio length.': 'AI 同步失败：计算的裁剪超过音频长度。',
+          'AI Sync failed: Computed offset exceeds audio length.':
+              'AI 同步失败：计算的偏移超过音频长度。',
+          'AI Sync failed: Computed trim exceeds audio length.':
+              'AI 同步失败：计算的裁剪超过音频长度。',
           'Done': '完成',
           'Load Preset': '加载预设',
           'On Device': '在设备上',
@@ -1338,7 +1478,8 @@ class L10n {
           'Select a track to record on first.': '请先选择要录制的轨道。',
           'Failed to start recording': '无法开始录制',
           'Allow access': '允许访问',
-          'Microphone access is blocked. Open app settings to record audio.': '麦克风权限被阻止。请打开应用设置以录制音频。',
+          'Microphone access is blocked. Open app settings to record audio.':
+              '麦克风权限被阻止。请打开应用设置以录制音频。',
           'Microphone access is required to record audio.': '录制音频需要麦克风权限。',
           'Microphone access is turned off': '麦克风访问已关闭',
           'No input devices available': '没有可用的输入设备',
@@ -1363,19 +1504,23 @@ class L10n {
           'Input Device': '输入设备',
           'Refresh audio devices': '刷新音频设备',
           'Input Channel': '输入通道',
-          'System default (speaker / Bluetooth / audio interface)': '系统默认（扬声器 / 蓝牙 / 音频接口）',
+          'System default (speaker / Bluetooth / audio interface)':
+              '系统默认（扬声器 / 蓝牙 / 音频接口）',
           'Output Route': '输出路由',
           'Refresh output route': '刷新输出路由',
-          'System default (managed by macOS audio settings)': '系统默认（由 macOS 音频设置管理）',
+          'System default (managed by macOS audio settings)':
+              '系统默认（由 macOS 音频设置管理）',
           'Output Device': '输出设备',
           'Refresh output device': '刷新输出设备',
           'No selectable output devices': '没有可选择的输出设备',
           'Bluetooth recording policy': '蓝牙录音策略',
           'Bluetooth playback and recording are supported. Real-time monitoring is off by default.':
               '支持蓝牙播放和录音。实时监听默认关闭。',
-          'is using Bluetooth output. Real-time monitoring is off by default.': '正在使用蓝牙输出。实时监听默认关闭。',
+          'is using Bluetooth output. Real-time monitoring is off by default.':
+              '正在使用蓝牙输出。实时监听默认关闭。',
           'Advanced: monitor anyway': '高级：仍然监听',
-          'May sound choppy or unstable on Bluetooth earphones.': '在蓝牙耳机上可能出现卡顿或不稳定。',
+          'May sound choppy or unstable on Bluetooth earphones.':
+              '在蓝牙耳机上可能出现卡顿或不稳定。',
           'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.':
               '蓝牙耳机麦克风可能降低音质并增加延迟。该设备当前允许录音。',
           'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
@@ -1459,6 +1604,16 @@ class L10n {
           'Search feature coming soon!': '検索機能は近日公開予定！',
           'Title / Artist / Genre / etc...': 'タイトル / アーティスト / ジャンル / など...',
           'Explore feature coming soon!': '探索機能は近日公開予定！',
+          'App Version': 'アプリ版',
+          'Your Projects': 'あなたのプロジェクト',
+          'Demo Projects': 'デモプロジェクト',
+          'No demo projects available.': '利用可能なデモプロジェクトはありません。',
+          'A newer version is ready!': '新しいバージョンを利用できます！',
+          'Latest version installed': '最新バージョンです',
+          'Open Store': 'ストアを開く',
+          'Open in App Store': 'App Storeで開く',
+          'Open in Play Store': 'Playストアで開く',
+          'Version unavailable': 'バージョン情報を取得できません',
           'Explore': '探索',
           'Basic': 'ベーシック',
           'Pro': 'プロ',
@@ -1481,15 +1636,19 @@ class L10n {
           'Offset cannot exceed 180 seconds.': 'オフセットは180秒を超えることはできません。',
           'Start from Now': '今から開始',
           'Delete track?': 'トラックを削除?',
-          'Are you sure you want to delete this audio track?': 'このオーディオトラックを削除してもよろしいですか？',
+          'Are you sure you want to delete this audio track?':
+              'このオーディオトラックを削除してもよろしいですか？',
           'Cancel': 'キャンセル',
           'Delete': '削除',
           'Add Video Clip': '動画クリップを追加',
           'Pro Mode Feature': 'プロモードの機能',
-          'Upgrade to Pro mode to import more than 1 video.': '1本以上の動画を取り込むにはプロモードにアップグレードしてください。',
-          'Upgrade to Pro mode to import more than 3 audio tracks.': '3本以上のオーディオトラックを取り込むにはプロモードにアップグレードしてください。',
+          'Upgrade to Pro mode to import more than 1 video.':
+              '1本以上の動画を取り込むにはプロモードにアップグレードしてください。',
+          'Upgrade to Pro mode to import more than 3 audio tracks.':
+              '3本以上のオーディオトラックを取り込むにはプロモードにアップグレードしてください。',
           'Delete clip?': 'クリップを削除しますか？',
-          'Are you sure you want to remove this video clip from your timeline?': 'タイムラインからこの動画クリップを削除してもよろしいですか？',
+          'Are you sure you want to remove this video clip from your timeline?':
+              'タイムラインからこの動画クリップを削除してもよろしいですか？',
           'Exit project?': 'プロジェクトを終了しますか？',
           'All progress will be lost.': '進行状況はすべて失われます。',
           'Confirm': '確認',
@@ -1498,7 +1657,8 @@ class L10n {
               'すべてのオーディオトラックを動画に自動同期します。オーディオのオフセット/トリムが調整される場合があります。',
           'Audio Track Effects': 'オーディオトラックのエフェクト',
           'Exporting...': '書き出し中...',
-          'Please don\'t close the app or lock your screen.': 'アプリを閉じたり画面をロックしないでください。',
+          'Please don\'t close the app or lock your screen.':
+              'アプリを閉じたり画面をロックしないでください。',
           'Track': 'トラック',
           'Effects': 'エフェクト',
           'Row effects': '行エフェクト',
@@ -1514,20 +1674,27 @@ class L10n {
           'Echoes': 'エコー',
           'LoFi Effect': 'LoFi エフェクト',
           'Heavy Crunch': 'ヘビークランチ',
-          'Applies wide reverb and subtle EQ to simulate a live concert space.': '広がりのあるリバーブと繊細なEQでライブ会場の空間を再現します。',
-          'Applies reverb and delay to give an echo effect.': 'リバーブとディレイを適用してエコー効果を与えます。',
-          'Applies filters and soft distortion for a vintage, relaxed vibe.': 'フィルターと穏やかな歪みで、ヴィンテージでリラックスした雰囲気を演出します。',
+          'Applies wide reverb and subtle EQ to simulate a live concert space.':
+              '広がりのあるリバーブと繊細なEQでライブ会場の空間を再現します。',
+          'Applies reverb and delay to give an echo effect.':
+              'リバーブとディレイを適用してエコー効果を与えます。',
+          'Applies filters and soft distortion for a vintage, relaxed vibe.':
+              'フィルターと穏やかな歪みで、ヴィンテージでリラックスした雰囲気を演出します。',
           'Crushes sound with heavy distortion.': '強いディストーションでサウンドを潰します。',
-          'This will replace your current effects with ': '現在のエフェクトは次の内容に置き換えられます： ',
+          'This will replace your current effects with ':
+              '現在のエフェクトは次の内容に置き換えられます： ',
           'Add Effect': 'エフェクトを追加',
           'Delete Effect?': 'エフェクトを削除しますか？',
           'Parameters': 'パラメーター',
           'Select ': '選択 ',
           'Close': '閉じる',
-          'Export failed: Output file missing or too small.': '書き出し失敗：出力ファイルが見つからないか小さすぎます。',
+          'Export failed: Output file missing or too small.':
+              '書き出し失敗：出力ファイルが見つからないか小さすぎます。',
           'Export failed! Check logs.': '書き出し失敗！ログを確認してください。',
-          'AI Sync failed: Computed offset exceeds audio length.': 'AI同期に失敗:計算されたオフセットが音声の長さを超えています。',
-          'AI Sync failed: Computed trim exceeds audio length.': 'AI同期に失敗:計算されたトリムが音声の長さを超えています。',
+          'AI Sync failed: Computed offset exceeds audio length.':
+              'AI同期に失敗:計算されたオフセットが音声の長さを超えています。',
+          'AI Sync failed: Computed trim exceeds audio length.':
+              'AI同期に失敗:計算されたトリムが音声の長さを超えています。',
           'Done': '完了',
           'Load Preset': 'プリセットを読み込む',
           'On Device': 'このデバイス内',
@@ -1535,7 +1702,8 @@ class L10n {
           'No new notifications': '新しい通知はありません',
           'Welcome to Mixroom': 'Mixroomへようこそ',
           'Open Beta Version': 'オープンベータ版',
-          'There may be bugs or unexpected errors.': '不具合や予期しないエラーが発生する場合があります。',
+          'There may be bugs or unexpected errors.':
+              '不具合や予期しないエラーが発生する場合があります。',
           'Language': '言語',
           'Loading your account': 'アカウントを読み込んでいます',
           'Checking your sign-in...': 'サインイン状態を確認しています...',
@@ -1548,7 +1716,8 @@ class L10n {
           'Audio platform coming soon.': 'オーディオプラットフォームは近日公開です。',
           'Video Projects': 'ビデオプロジェクト',
           'Subscription required': 'サブスクリプションが必要です',
-          'Your current plan does not include video projects.': '現在のプランにはビデオプロジェクト機能が含まれていません。',
+          'Your current plan does not include video projects.':
+              '現在のプランにはビデオプロジェクト機能が含まれていません。',
           'New Project': '新規プロジェクト',
           'Project limit reached': 'プロジェクト上限に達しました',
           'Create a new project': '新しいプロジェクトを作成',
@@ -1580,16 +1749,20 @@ class L10n {
           'Untitled Project': '無題のプロジェクト',
           'Untitled Video Project': '無題のビデオプロジェクト',
           'Exporting…': '書き出しています…',
-          'Please select a .mixroom project file': '.mixroom プロジェクトファイルを選択してください',
+          'Please select a .mixroom project file':
+              '.mixroom プロジェクトファイルを選択してください',
           'Importing…': 'インポート中…',
           'Import failed': 'インポートに失敗しました',
           'Projects are temporarily unavailable on this device. Please try again in a moment.':
               'この端末では現在プロジェクトを利用できません。しばらくしてからもう一度お試しください。',
           'Video projects are temporarily unavailable on this device. Please try again in a moment.':
               'この端末では現在ビデオプロジェクトを利用できません。しばらくしてからもう一度お試しください。',
-          'We couldn\'t load your projects right now. Please try again.': '現在プロジェクトを読み込めません。もう一度お試しください。',
-          'We couldn\'t load your video projects right now. Please try again.': '現在ビデオプロジェクトを読み込めません。もう一度お試しください。',
-          'Delete a project to create or import a new one.': '新しいプロジェクトを作成または読み込むには、プロジェクトを削除してください。',
+          'We couldn\'t load your projects right now. Please try again.':
+              '現在プロジェクトを読み込めません。もう一度お試しください。',
+          'We couldn\'t load your video projects right now. Please try again.':
+              '現在ビデオプロジェクトを読み込めません。もう一度お試しください。',
+          'Delete a project to create or import a new one.':
+              '新しいプロジェクトを作成または読み込むには、プロジェクトを削除してください。',
           'Last opened': '最終オープン',
           'Edit': '編集',
           'Rename': '名前を変更',
@@ -1602,12 +1775,14 @@ class L10n {
           'Tap empty grid to add. Drag to move. Pull right edge to resize.':
               '空いているグリッドをタップして追加します。ドラッグで移動し、右端を引いて長さを変えます。',
           'Select groups quickly': '素早くグループ選択',
-          'Hold empty space and drag a box to multi-select notes.': '空白部分を長押ししてボックスをドラッグすると、複数のノートを選択できます。',
+          'Hold empty space and drag a box to multi-select notes.':
+              '空白部分を長押ししてボックスをドラッグすると、複数のノートを選択できます。',
           'Zoom + edit faster': 'すばやくズームして編集',
           'Pinch with two fingers or use +/- buttons to zoom in time and pitch.':
               '2本指でピンチするか +/- ボタンを使って、時間と音程を拡大できます。',
           'Use the bottom tray': '下部トレイを使う',
-          'Duplicate, delete, and adjust length/velocity for selected notes.': '選択したノートを複製、削除し、長さやベロシティを調整できます。',
+          'Duplicate, delete, and adjust length/velocity for selected notes.':
+              '選択したノートを複製、削除し、長さやベロシティを調整できます。',
           'Got it': '了解',
           'Custom': 'カスタム',
           'Resample quality': 'リサンプル品質',
@@ -1657,17 +1832,20 @@ class L10n {
           'Please select your birthday.': '生年月日を選択してください。',
           'Please enter your password.': 'パスワードを入力してください。',
           'Please choose what you use Mixroom for.': 'Mixroomの利用目的を選択してください。',
-          'Authentication is powered by Mixroom native auth.': '認証はMixroomの独自認証を利用しています。',
+          'Authentication is powered by Mixroom native auth.':
+              '認証はMixroomの独自認証を利用しています。',
           'Welcome to': 'Welcome to',
           'Email or Username': 'メールまたはユーザー名',
           'Email': 'メール',
           'Password': 'パスワード',
           'Confirmation code': '確認コード',
           'Confirmation code sent!': '確認コードを送信しました！',
-          'Confirmation code will be sent to your email inbox.': '確認コードはメール受信箱に送信されます。',
+          'Confirmation code will be sent to your email inbox.':
+              '確認コードはメール受信箱に送信されます。',
           'Select one (optional)': '1つ選択してください（任意）',
           'Not set': '未設定',
-          'Enter a valid password and confirmation first to send the code.': 'コード送信前に有効なパスワードと確認入力を完了してください。',
+          'Enter a valid password and confirmation first to send the code.':
+              'コード送信前に有効なパスワードと確認入力を完了してください。',
           'Continue': '続行',
           'Enter password': 'パスワードを入力',
           'Forgot password?': 'パスワードをお忘れですか？',
@@ -1677,7 +1855,8 @@ class L10n {
           'Create Account': 'アカウント作成',
           'Create account': 'アカウント作成',
           'Finish your account setup': 'アカウント設定を完了してください',
-          'Add the last few details to start using Mixroom.': 'Mixroomを使い始めるために、最後の情報を入力してください。',
+          'Add the last few details to start using Mixroom.':
+              'Mixroomを使い始めるために、最後の情報を入力してください。',
           'Username': 'ユーザー名',
           'Bio': '自己紹介',
           'Tell people a bit about yourself': 'あなたのことをひとこと書いてください',
@@ -1695,14 +1874,19 @@ class L10n {
           'chat_help_intro': 'Mixroom AIは制作アシスタントです。',
           'chat_help_can': 'できること',
           'chat_help_can_mix': 'レベル、EQ、コンプレッサー、リバーブ、バランスなどのミックス設定を調整できます。',
-          'chat_help_can_edit': '選択したクリップ編集、オートメーション、テンポ合わせ、ステム分離（ボーカル/伴奏）ができます。',
+          'chat_help_can_edit':
+              '選択したクリップ編集、オートメーション、テンポ合わせ、ステム分離（ボーカル/伴奏）ができます。',
           'chat_help_can_tools': 'ツールの場所を案内し、MIDI編集を実行できます。',
           'chat_help_cannot': 'できないこと',
-          'chat_help_cannot_generate': 'テキストだけでまったく新しい曲、ビート、ボーカル、楽器を生成することはできません。',
+          'chat_help_cannot_generate':
+              'テキストだけでまったく新しい曲、ビート、ボーカル、楽器を生成することはできません。',
           'chat_help_cannot_empty': 'プロジェクトに素材がない状態で、新しいオーディオをゼロから作ることはできません。',
-          'chat_help_cannot_text_to_music': '「曲を作って」のようなテキストから音楽を作る依頼には対応していません。',
-          'chat_help_examples': '例: 「ボーカルをもっとクリアにして。」 「このクリップをボーカルと伴奏に分離して。」 「書き出しはどこ？」',
-          'Please agree to the Terms of Service and Privacy Policy.': '利用規約とプライバシーポリシーに同意してください。',
+          'chat_help_cannot_text_to_music':
+              '「曲を作って」のようなテキストから音楽を作る依頼には対応していません。',
+          'chat_help_examples':
+              '例: 「ボーカルをもっとクリアにして。」 「このクリップをボーカルと伴奏に分離して。」 「書き出しはどこ？」',
+          'Please agree to the Terms of Service and Privacy Policy.':
+              '利用規約とプライバシーポリシーに同意してください。',
           'Bio must be 160 characters or fewer.': '自己紹介は160文字以内で入力してください。',
           'At least 8 characters': '8文字以上',
           'Use at least 8 characters.': '8文字以上で入力してください。',
@@ -1723,7 +1907,8 @@ class L10n {
           'Email verified. You are now signed in.': 'メール認証が完了しました。サインインしました。',
           'Verification code resent.': '認証コードを再送しました。',
           'Verify your email': 'メール認証',
-          'Enter the verification code sent to your email.': 'メールに送信された認証コードを入力してください。',
+          'Enter the verification code sent to your email.':
+              'メールに送信された認証コードを入力してください。',
           'Verification Code': '認証コード',
           'Enter code': 'コードを入力',
           'Resend code': 'コードを再送',
@@ -1734,7 +1919,8 @@ class L10n {
           'Reset your password': 'パスワードをリセット',
           'Enter verification code': '認証コードを入力',
           'We will send a verification code to your email.': 'メールに認証コードを送信します。',
-          'Use the code from email and set a new password.': 'メールのコードを使って新しいパスワードを設定してください。',
+          'Use the code from email and set a new password.':
+              'メールのコードを使って新しいパスワードを設定してください。',
           'New Password': '新しいパスワード',
           'Confirm New Password': '新しいパスワード確認',
           'Send Reset Code': 'リセットコードを送信',
@@ -1760,7 +1946,8 @@ class L10n {
           'Not provided': '未設定',
           'Save Changes': '変更を保存',
           'Email not verified': 'メール未認証',
-          'Please verify your email for better account security.': 'アカウントの安全性向上のため、メール認証を完了してください。',
+          'Please verify your email for better account security.':
+              'アカウントの安全性向上のため、メール認証を完了してください。',
           'Sending...': '送信中...',
           'Resend verification email': '確認メールを再送',
           'Birthday': '生年月日',
@@ -1775,7 +1962,8 @@ class L10n {
           'For work': '仕事用',
           'Songwriting': '作曲',
           'Mix/master practice': 'ミックス/マスタリング練習',
-          'Account data sync target: Mixroom account profile.': 'アカウントデータ同期先: Mixroom アカウントプロファイル。',
+          'Account data sync target: Mixroom account profile.':
+              'アカウントデータ同期先: Mixroom アカウントプロファイル。',
           'Feedback': 'フィードバック',
           'Bug Report': 'バグ報告',
           'Feedback for': 'フィードバック先',
@@ -1783,8 +1971,10 @@ class L10n {
           'Submit': '送信',
           'Thank you for your submission!': 'ご意見ありがとうございます！',
           'Thank you for the feedback!': 'フィードバックありがとうございます！',
-          'Tell us what is working, missing, or would make this better.': '良い点、不足している点、改善してほしい点を教えてください。',
-          'Describe the bug, what you expected, and what happened.': '不具合の内容、期待した動作、実際に起きたことを教えてください。',
+          'Tell us what is working, missing, or would make this better.':
+              '良い点、不足している点、改善してほしい点を教えてください。',
+          'Describe the bug, what you expected, and what happened.':
+              '不具合の内容、期待した動作、実際に起きたことを教えてください。',
           'Allow Mixroom to respond by email.': 'Mixroom からメールで返信できるようにする。',
           'Optional. We may follow up using your account email about this submission.':
               '任意です。この内容について、アカウントのメールアドレスにご連絡する場合があります。',
@@ -1821,7 +2011,8 @@ class L10n {
           'Password updated successfully.': 'パスワードが正常に更新されました。',
           'Updating...': '更新中...',
           'Prompt usage': 'プロンプト使用量',
-          'Extra prompt credits are used first, before daily and weekly limits.': '追加プロンプトクレジットは、日次/週次の上限より先に消費されます。',
+          'Extra prompt credits are used first, before daily and weekly limits.':
+              '追加プロンプトクレジットは、日次/週次の上限より先に消費されます。',
           'Daily and weekly prompt usage limits.': '日次と週次のプロンプト使用上限です。',
           'Extra prompt bank': '追加プロンプトバンク',
           'left': '残り',
@@ -1833,7 +2024,8 @@ class L10n {
           'Try again in': '再試行まで',
           'Blocked until': 'ブロック解除',
           'Clear chat history?': 'チャット履歴を消去しますか？',
-          'This removes the saved project chat context and cannot be undone.': '保存されたプロジェクトのチャット履歴を削除します。元に戻せません。',
+          'This removes the saved project chat context and cannot be undone.':
+              '保存されたプロジェクトのチャット履歴を削除します。元に戻せません。',
           'Clear': '消去',
           'Chat history cleared': 'チャット履歴を消去しました',
           'Project Chat': 'プロジェクトチャット',
@@ -1848,7 +2040,8 @@ class L10n {
           'Show prompt limits': 'プロンプト上限を表示',
           'Extra bank': '追加バンク',
           'used first': '先に使用',
-          'Prompt limit reached. Tap to see reset time.': 'プロンプト上限に達しました。タップしてリセット時刻を確認してください。',
+          'Prompt limit reached. Tap to see reset time.':
+              'プロンプト上限に達しました。タップしてリセット時刻を確認してください。',
           'No copied clip to paint': '貼り付けるコピー済みクリップがありません',
           'MIDI Clip': 'MIDIクリップ',
           'Audio Clip': 'オーディオクリップ',
@@ -1890,7 +2083,8 @@ class L10n {
           'Unable to arm selected MIDI clip.': '選択したMIDIクリップを録音待機にできませんでした。',
           'Select a track to record on first.': '先に録音するトラックを選択してください。',
           'Failed to start recording': '録音の開始に失敗しました',
-          'Microphone access is blocked. Open app settings to record audio.': 'マイクアクセスがブロックされています。録音するにはアプリ設定を開いてください。',
+          'Microphone access is blocked. Open app settings to record audio.':
+              'マイクアクセスがブロックされています。録音するにはアプリ設定を開いてください。',
           'Microphone access is required to record audio.': '録音にはマイクアクセスが必要です。',
           'Microphone access is turned off': 'マイクアクセスがオフになっています',
           'No input devices available': '利用可能な入力デバイスがありません',
@@ -1901,7 +2095,8 @@ class L10n {
           'Recording failed or no data captured.': '録音に失敗したか、データを取得できませんでした。',
           'Failed to add recorded track.': '録音トラックの追加に失敗しました。',
           'File is unavailable.': 'ファイルを利用できません。',
-          'Folder already loaded for this project.': 'このプロジェクトでは既に読み込まれているフォルダーです。',
+          'Folder already loaded for this project.':
+              'このプロジェクトでは既に読み込まれているフォルダーです。',
           'Failed to preview sample': 'サンプルの試聴に失敗しました',
           'Project Name': 'プロジェクト名',
           'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.':
@@ -1915,10 +2110,12 @@ class L10n {
           'Input Device': '入力デバイス',
           'Refresh audio devices': 'オーディオデバイスを更新',
           'Input Channel': '入力チャンネル',
-          'System default (speaker / Bluetooth / audio interface)': 'システム既定（スピーカー / Bluetooth / オーディオインターフェース）',
+          'System default (speaker / Bluetooth / audio interface)':
+              'システム既定（スピーカー / Bluetooth / オーディオインターフェース）',
           'Output Route': '出力ルート',
           'Refresh output route': '出力ルートを更新',
-          'System default (managed by macOS audio settings)': 'システム既定（macOSオーディオ設定で管理）',
+          'System default (managed by macOS audio settings)':
+              'システム既定（macOSオーディオ設定で管理）',
           'Output Device': '出力デバイス',
           'Refresh output device': '出力デバイスを更新',
           'No selectable output devices': '選択可能な出力デバイスがありません',
@@ -1928,7 +2125,8 @@ class L10n {
           'is using Bluetooth output. Real-time monitoring is off by default.':
               'はBluetooth出力を使用しています。リアルタイムモニタリングはデフォルトでオフです。',
           'Advanced: monitor anyway': '詳細: それでもモニターする',
-          'May sound choppy or unstable on Bluetooth earphones.': 'Bluetoothイヤホンでは音が途切れたり不安定になる場合があります。',
+          'May sound choppy or unstable on Bluetooth earphones.':
+              'Bluetoothイヤホンでは音が途切れたり不安定になる場合があります。',
           'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.':
               'Bluetoothヘッドセットマイクは音質低下や遅延増加の可能性があります。このデバイスは現在録音を許可されています。',
           'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
@@ -1977,11 +2175,22 @@ class L10n {
   static Future<void> setLocale(BuildContext context, Locale newLocale) async {
     final resolvedLocale = resolveSupportedLocale(newLocale);
     final appState = context.findAncestorStateOfType<MyAppState>();
+    final auth = Provider.of<AuthService>(context, listen: false);
+    final appUser = Provider.of<AppUserService>(context, listen: false);
 
     // Save to provider and persistent storage
-    await Provider.of<LocaleProvider>(context, listen: false).setLocale(resolvedLocale);
+    await Provider.of<LocaleProvider>(context, listen: false)
+        .setLocale(resolvedLocale);
 
     // Directly access the state of MyApp and update the locale
     appState?.setAppLocale(resolvedLocale);
+
+    if (auth.isSignedIn && appUser.supportsRemoteProfileEdits) {
+      unawaited(
+        appUser.stageLocalePreference(
+          localeCode: resolvedLocale.languageCode,
+        ),
+      );
+    }
   }
 }

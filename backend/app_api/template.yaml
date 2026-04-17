@@ -77,6 +77,50 @@ Parameters:
   PostmarkMessageStream:
     Type: String
     Default: ''
+  StibeeAccessToken:
+    Type: String
+    NoEcho: true
+    Default: ''
+  StibeeAccessTokenSecretArn:
+    Type: String
+    Default: ''
+  StibeeApiBaseUrl:
+    Type: String
+    Default: 'https://api.stibee.com/v2'
+  StibeeAppSignupsListId:
+    Type: String
+    Default: ''
+  StibeeNewsletterListId:
+    Type: String
+    Default: ''
+  StibeeLanguageFieldKey:
+    Type: String
+    Default: 'language'
+  StibeeNameFieldKey:
+    Type: String
+    Default: ''
+  StibeeSourceFieldKey:
+    Type: String
+    Default: ''
+  StibeeDateFieldKey:
+    Type: String
+    Default: ''
+  StibeeUserIdFieldKey:
+    Type: String
+    Default: ''
+  StibeeSubscriptionStatusFieldKey:
+    Type: String
+    Default: ''
+  StibeeWebhookSharedSecret:
+    Type: String
+    NoEcho: true
+    Default: ''
+  StibeeWebhookSharedSecretArn:
+    Type: String
+    Default: ''
+  StibeeWebhookAllowedIps:
+    Type: String
+    Default: '52.78.132.66'
   AppAuthAccessTokenTtlSeconds:
     Type: Number
     Default: 3600
@@ -176,6 +220,8 @@ Conditions:
   HasSocialAuthSecretArn: !Not [!Equals [!Ref SocialAuthSecretArn, '']]
   HasAppAuthSecretArn: !Not [!Equals [!Ref AppAuthSecretArn, '']]
   HasPostmarkServerTokenSecretArn: !Not [!Equals [!Ref PostmarkServerTokenSecretArn, '']]
+  HasStibeeAccessTokenSecretArn: !Not [!Equals [!Ref StibeeAccessTokenSecretArn, '']]
+  HasStibeeWebhookSharedSecretArn: !Not [!Equals [!Ref StibeeWebhookSharedSecretArn, '']]
   HasAppleRootCaSecretArn: !Not [!Equals [!Ref AppleRootCaSecretArn, '']]
   HasAppleSharedSecretSecretArn: !Not [!Equals [!Ref AppleSharedSecretSecretArn, '']]
   HasGoogleServiceAccountSecretArn: !Not [!Equals [!Ref GoogleServiceAccountSecretArn, '']]
@@ -215,38 +261,17 @@ Globals:
         RECONCILIATION_JOBS_TABLE: !Ref ReconciliationJobsTable
         PROJECTION_QUEUE_URL: !Ref BillingProjectionQueue
         USER_TOMBSTONES_TABLE: !Ref UserTombstonesTable
-        AI_USAGE_STATE_TABLE: !Ref AiUsageStateTableName
-        AI_USAGE_EVENTS_TABLE: !Ref AiUsageEventsTableName
-        AI_PROMPT_LIMIT_SETTINGS_TABLE: !Ref AiPromptLimitSettingsTableName
-        PRODUCER_CAPTURE_WHITELIST_TABLE: !Ref ProducerCaptureWhitelistTable
-        FEEDBACK_SUBMISSIONS_TABLE: !Ref FeedbackSubmissionsTable
-        ADMIN_ALLOWLIST_TABLE: !Ref AdminAllowlistTable
-        ADMIN_COGNITO_APP_CLIENT_ID: !If
-          - HasAdminCognitoAppClientId
-          - !Ref AdminCognitoAppClientId
-          - !Ref CognitoAppClientId
-        ADMIN_COGNITO_USER_POOL_ID: !If
-          - HasAdminCognitoUserPoolId
-          - !Ref AdminCognitoUserPoolId
-          - !Ref CognitoUserPoolId
-        AI_ADMIN_EDITOR_EMAILS: !Ref AiAdminEditorEmails
-        AI_RUNTIME_DEFAULT_MODEL: !Ref AiRuntimeDefaultModel
-        AI_CHAT_DEFAULT_TEMPERATURE: !Ref AiChatDefaultTemperature
-        VIDEO_EDITOR_DEFAULT_TEMPERATURE: !Ref VideoEditorDefaultTemperature
-        AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS: !Ref AiChatExtendedPromptCacheRetentionModels
         SOCIAL_AUTH_SECRET_ARN: !Ref SocialAuthSecretArn
         APP_AUTH_SECRET_ARN: !Ref AppAuthSecretArn
         APP_AUTH_ISSUER: !Ref AppAuthIssuer
         APP_AUTH_AUDIENCE: !Ref AppAuthAudience
         APP_AUTH_EMAIL_FROM_ADDRESS: !Ref AppAuthEmailFromAddress
         APP_AUTH_EMAIL_REPLY_TO_ADDRESS: !Ref AppAuthEmailReplyToAddress
-        POSTMARK_SERVER_TOKEN: !Ref PostmarkServerToken
         POSTMARK_SERVER_TOKEN_SECRET_ARN: !Ref PostmarkServerTokenSecretArn
         POSTMARK_API_BASE_URL: !Ref PostmarkApiBaseUrl
         POSTMARK_MESSAGE_STREAM: !Ref PostmarkMessageStream
         APP_AUTH_ACCESS_TOKEN_TTL_SECONDS: !Ref AppAuthAccessTokenTtlSeconds
         APP_AUTH_REFRESH_TOKEN_TTL_SECONDS: !Ref AppAuthRefreshTokenTtlSeconds
-        GOOGLE_OAUTH_CLIENT_IDS: !Ref GoogleOauthClientIds
         ALLOW_STUDIO_TIER: !Ref AllowStudioTier
         SECRET_CACHE_TTL_SECONDS: !Ref SecretCacheTtlSeconds
         HTTP_TIMEOUT_SECONDS: !Ref HttpTimeoutSeconds
@@ -267,11 +292,6 @@ Globals:
         TOSS_WEBHOOK_SECRET_ARN: !Ref TossWebhookSecretArn
         POSTHOG_API_KEY: !Ref PostHogApiKey
         POSTHOG_HOST: !Ref PostHogHost
-        POSTHOG_APP_HOST: !Ref PostHogAppHost
-        POSTHOG_PROJECT_ID: !Ref PostHogProjectId
-        POSTHOG_PERSONAL_API_KEY: !Ref PostHogPersonalApiKey
-        POSTHOG_PERSONAL_API_KEY_SECRET_ARN: !Ref PostHogPersonalApiKeySecretArn
-        POSTHOG_METRICS_CACHE_TTL_SECONDS: !Ref PostHogMetricsCacheTtlSeconds
         SENTRY_DSN: !Ref SentryDsn
         ENVIRONMENT: !Ref StageName
 
@@ -725,6 +745,24 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  TelemetryProjectSnapshotsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
   EntitlementApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -755,6 +793,19 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: handlers/api_users.handler
+      Environment:
+        Variables:
+          PRODUCER_CAPTURE_WHITELIST_TABLE: !Ref ProducerCaptureWhitelistTable
+          STIBEE_ACCESS_TOKEN_SECRET_ARN: !Ref StibeeAccessTokenSecretArn
+          STIBEE_API_BASE_URL: !Ref StibeeApiBaseUrl
+          STIBEE_APP_SIGNUPS_LIST_ID: !Ref StibeeAppSignupsListId
+          STIBEE_NEWSLETTER_LIST_ID: !Ref StibeeNewsletterListId
+          STIBEE_LANGUAGE_FIELD_KEY: !Ref StibeeLanguageFieldKey
+          STIBEE_NAME_FIELD_KEY: !Ref StibeeNameFieldKey
+          STIBEE_SOURCE_FIELD_KEY: !Ref StibeeSourceFieldKey
+          STIBEE_DATE_FIELD_KEY: !Ref StibeeDateFieldKey
+          STIBEE_USER_ID_FIELD_KEY: !Ref StibeeUserIdFieldKey
+          STIBEE_SUBSCRIPTION_STATUS_FIELD_KEY: !Ref StibeeSubscriptionStatusFieldKey
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -775,6 +826,14 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref AppAuthSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasStibeeAccessTokenSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref StibeeAccessTokenSecretArn
           - !Ref AWS::NoValue
       Events:
         UsernameAvailability:
@@ -801,6 +860,9 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: handlers/api_feedback.handler
+      Environment:
+        Variables:
+          FEEDBACK_SUBMISSIONS_TABLE: !Ref FeedbackSubmissionsTable
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref FeedbackSubmissionsTable
@@ -828,11 +890,49 @@ Resources:
             Path: /v1/feedback
             Method: post
 
+  ProjectTelemetryApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_project_telemetry.handler
+      Environment:
+        Variables:
+          TELEMETRY_PROJECT_SNAPSHOTS_BUCKET: !Ref TelemetryProjectSnapshotsBucket
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref AuthAccountsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthSessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthRateLimitsTable
+        - S3CrudPolicy:
+            BucketName: !Ref TelemetryProjectSnapshotsBucket
+        - !If
+          - HasAppAuthSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AppAuthSecretArn
+          - !Ref AWS::NoValue
+      Events:
+        ProjectTelemetrySubmit:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/telemetry/project-snapshots
+            Method: post
+
   SocialAuthApiFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
       Handler: handlers/api_auth.handler
+      Environment:
+        Variables:
+          GOOGLE_OAUTH_CLIENT_IDS: !Ref GoogleOauthClientIds
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -958,6 +1058,23 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: handlers/api_admin_overview.handler
+      Environment:
+        Variables:
+          AI_USAGE_STATE_TABLE: !Ref AiUsageStateTableName
+          AI_USAGE_EVENTS_TABLE: !Ref AiUsageEventsTableName
+          ADMIN_ALLOWLIST_TABLE: !Ref AdminAllowlistTable
+          ADMIN_COGNITO_APP_CLIENT_ID: !If
+            - HasAdminCognitoAppClientId
+            - !Ref AdminCognitoAppClientId
+            - !Ref CognitoAppClientId
+          ADMIN_COGNITO_USER_POOL_ID: !If
+            - HasAdminCognitoUserPoolId
+            - !Ref AdminCognitoUserPoolId
+            - !Ref CognitoUserPoolId
+          POSTHOG_APP_HOST: !Ref PostHogAppHost
+          POSTHOG_PROJECT_ID: !Ref PostHogProjectId
+          POSTHOG_PERSONAL_API_KEY_SECRET_ARN: !Ref PostHogPersonalApiKeySecretArn
+          POSTHOG_METRICS_CACHE_TTL_SECONDS: !Ref PostHogMetricsCacheTtlSeconds
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref UsersTable
@@ -1007,6 +1124,18 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: handlers/api_admin_users.handler
+      Environment:
+        Variables:
+          AI_USAGE_STATE_TABLE: !Ref AiUsageStateTableName
+          ADMIN_ALLOWLIST_TABLE: !Ref AdminAllowlistTable
+          ADMIN_COGNITO_APP_CLIENT_ID: !If
+            - HasAdminCognitoAppClientId
+            - !Ref AdminCognitoAppClientId
+            - !Ref CognitoAppClientId
+          ADMIN_COGNITO_USER_POOL_ID: !If
+            - HasAdminCognitoUserPoolId
+            - !Ref AdminCognitoUserPoolId
+            - !Ref CognitoUserPoolId
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AdminAllowlistTable
@@ -1066,6 +1195,18 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: handlers/api_admin_feedback.handler
+      Environment:
+        Variables:
+          FEEDBACK_SUBMISSIONS_TABLE: !Ref FeedbackSubmissionsTable
+          ADMIN_ALLOWLIST_TABLE: !Ref AdminAllowlistTable
+          ADMIN_COGNITO_APP_CLIENT_ID: !If
+            - HasAdminCognitoAppClientId
+            - !Ref AdminCognitoAppClientId
+            - !Ref CognitoAppClientId
+          ADMIN_COGNITO_USER_POOL_ID: !If
+            - HasAdminCognitoUserPoolId
+            - !Ref AdminCognitoUserPoolId
+            - !Ref CognitoUserPoolId
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AdminAllowlistTable
@@ -1084,6 +1225,18 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: handlers/api_admin_ai_prompt_limits.handler
+      Environment:
+        Variables:
+          AI_PROMPT_LIMIT_SETTINGS_TABLE: !Ref AiPromptLimitSettingsTableName
+          ADMIN_ALLOWLIST_TABLE: !Ref AdminAllowlistTable
+          ADMIN_COGNITO_APP_CLIENT_ID: !If
+            - HasAdminCognitoAppClientId
+            - !Ref AdminCognitoAppClientId
+            - !Ref CognitoAppClientId
+          ADMIN_COGNITO_USER_POOL_ID: !If
+            - HasAdminCognitoUserPoolId
+            - !Ref AdminCognitoUserPoolId
+            - !Ref CognitoUserPoolId
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AdminAllowlistTable
@@ -1111,6 +1264,23 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: handlers/api_admin_ai_runtime.handler
+      Environment:
+        Variables:
+          AI_PROMPT_LIMIT_SETTINGS_TABLE: !Ref AiPromptLimitSettingsTableName
+          AI_ADMIN_EDITOR_EMAILS: !Ref AiAdminEditorEmails
+          AI_RUNTIME_DEFAULT_MODEL: !Ref AiRuntimeDefaultModel
+          AI_CHAT_DEFAULT_TEMPERATURE: !Ref AiChatDefaultTemperature
+          VIDEO_EDITOR_DEFAULT_TEMPERATURE: !Ref VideoEditorDefaultTemperature
+          AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS: !Ref AiChatExtendedPromptCacheRetentionModels
+          ADMIN_ALLOWLIST_TABLE: !Ref AdminAllowlistTable
+          ADMIN_COGNITO_APP_CLIENT_ID: !If
+            - HasAdminCognitoAppClientId
+            - !Ref AdminCognitoAppClientId
+            - !Ref CognitoAppClientId
+          ADMIN_COGNITO_USER_POOL_ID: !If
+            - HasAdminCognitoUserPoolId
+            - !Ref AdminCognitoUserPoolId
+            - !Ref CognitoUserPoolId
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AdminAllowlistTable
@@ -1138,6 +1308,18 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: handlers/api_admin_producer_capture_whitelist.handler
+      Environment:
+        Variables:
+          PRODUCER_CAPTURE_WHITELIST_TABLE: !Ref ProducerCaptureWhitelistTable
+          ADMIN_ALLOWLIST_TABLE: !Ref AdminAllowlistTable
+          ADMIN_COGNITO_APP_CLIENT_ID: !If
+            - HasAdminCognitoAppClientId
+            - !Ref AdminCognitoAppClientId
+            - !Ref CognitoAppClientId
+          ADMIN_COGNITO_USER_POOL_ID: !If
+            - HasAdminCognitoUserPoolId
+            - !Ref AdminCognitoUserPoolId
+            - !Ref CognitoUserPoolId
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref AdminAllowlistTable
@@ -1237,9 +1419,16 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: handlers/webhooks.handler
+      Environment:
+        Variables:
+          STIBEE_NEWSLETTER_LIST_ID: !Ref StibeeNewsletterListId
+          STIBEE_WEBHOOK_SHARED_SECRET_ARN: !Ref StibeeWebhookSharedSecretArn
+          STIBEE_WEBHOOK_ALLOWED_IPS: !Ref StibeeWebhookAllowedIps
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BillingEventsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
         - SQSSendMessagePolicy:
             QueueName: !GetAtt BillingProjectionQueue.QueueName
         - !If
@@ -1254,7 +1443,21 @@ Resources:
                   - !If [HasPaddleWebhookSecretArn, !Ref PaddleWebhookSecretArn, !Ref AWS::NoValue]
                   - !If [HasTossWebhookSecretArn, !Ref TossWebhookSecretArn, !Ref AWS::NoValue]
           - !Ref AWS::NoValue
+        - !If
+          - HasStibeeWebhookSharedSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref StibeeWebhookSharedSecretArn
+          - !Ref AWS::NoValue
       Events:
+        StibeeWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/webhooks/stibee
+            Method: post
         AppleWebhook:
           Type: Api
           Properties:
@@ -1731,6 +1934,9 @@ Outputs:
   BillingApiUrl:
     Description: Legacy alias for the Mixroom app API base URL
     Value: !Sub https://${BillingApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
+  TelemetryProjectSnapshotsBucketName:
+    Description: Append-only bucket for project telemetry snapshots
+    Value: !Ref TelemetryProjectSnapshotsBucket
   AppleWebhookUrl:
     Description: App Store Server Notifications endpoint
     Value: !Sub https://${BillingApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/v1/webhooks/apple

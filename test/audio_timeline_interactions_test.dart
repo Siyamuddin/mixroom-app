@@ -14,14 +14,16 @@ const double _kRulerHeight = 40.0;
 const double _kInitialPixelsPerMs = 0.1;
 const double _kClipDurationMs = 2000.0;
 const int _kClipDurationMsInt = 2000;
+const double _kTrimHandleWidthPx = 14.0;
+const double _kTrimHandleGapPx = 8.0;
 
-Future<AudioTrack> _buildClip() {
+Future<AudioTrack> _buildClip({int durationMs = _kClipDurationMsInt}) {
   return AudioTrack.create(
     file: File('test_audio.wav'),
     originalFile: File('test_audio.wav'),
-    audioDuration: const Duration(milliseconds: _kClipDurationMsInt),
+    audioDuration: Duration(milliseconds: durationMs),
     trimStart: Duration.zero,
-    trimEnd: const Duration(milliseconds: _kClipDurationMsInt),
+    trimEnd: Duration(milliseconds: durationMs),
     offset: 0.0,
     rowIndex: 0,
     rowId: 1,
@@ -30,10 +32,14 @@ Future<AudioTrack> _buildClip() {
   );
 }
 
-Offset _clipCenter(WidgetTester tester, {double additionalDx = 0.0}) {
+Offset _clipCenter(
+  WidgetTester tester, {
+  double additionalDx = 0.0,
+  double clipDurationMs = _kClipDurationMs,
+}) {
   final topLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
   final playheadPx = (_kTestTimelineWidth / 2.0) - _kHeaderWidth;
-  final clipWidthPx = _kClipDurationMs * _kInitialPixelsPerMs;
+  final clipWidthPx = clipDurationMs * _kInitialPixelsPerMs;
   return topLeft +
       Offset(
         _kHeaderWidth + playheadPx + (clipWidthPx / 2.0) + additionalDx,
@@ -46,7 +52,11 @@ Offset _clipLeftHandle(WidgetTester tester, {double additionalDx = 0.0}) {
   final playheadPx = (_kTestTimelineWidth / 2.0) - _kHeaderWidth;
   return topLeft +
       Offset(
-        _kHeaderWidth + playheadPx + 6.0 + additionalDx,
+        _kHeaderWidth +
+            playheadPx -
+            _kTrimHandleGapPx -
+            (_kTrimHandleWidthPx / 2.0) +
+            additionalDx,
         _kRulerHeight + 40.0,
       );
 }
@@ -312,6 +322,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(trimCommits, isEmpty);
+    expect(
+      selectionSnapshots.where((snapshot) => snapshot.isNotEmpty),
+      isEmpty,
+    );
+
+    await tester.tapAt(_clipCenter(tester));
+    await tester.pumpAndSettle();
+
     expect(selectionSnapshots, isNotEmpty);
     expect(selectionSnapshots.last, <int>[0]);
 
@@ -320,6 +338,48 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(trimCommits, hasLength(1));
+  });
+
+  testWidgets('tiny selected clips drag from the body instead of arming trim',
+      (tester) async {
+    final clips = <AudioTrack>[await _buildClip(durationMs: 60)];
+    final moveCommits = <double>[];
+    final trimCommits = <Map<String, double?>>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: clips,
+        onMoveClipCommit: (_, newStartMs, __) async {
+          moveCommits.add(newStartMs);
+        },
+        onTrimClipCommit: (
+          _,
+          newTrimStartMs,
+          newTrimEndMs,
+          __,
+          ___,
+          ____, {
+          newStartMs,
+        }) {
+          trimCommits.add(<String, double?>{
+            'newTrimStartMs': newTrimStartMs,
+            'newTrimEndMs': newTrimEndMs,
+            'newStartMs': newStartMs,
+          });
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final clipCenter = _clipCenter(tester, clipDurationMs: 60.0);
+    await tester.tapAt(clipCenter);
+    await tester.pumpAndSettle();
+
+    await tester.dragFrom(clipCenter, const Offset(80, 0));
+    await tester.pumpAndSettle();
+
+    expect(moveCommits, hasLength(1));
+    expect(trimCommits, isEmpty);
   });
 
   testWidgets('pinch zoom does not commit a clip drag', (tester) async {
@@ -522,8 +582,7 @@ void main() {
     expect(clearedRow, 0);
   });
 
-  testWidgets(
-      'clip popup appears on trim-handle selection without waiting for tap up',
+  testWidgets('trim handle zone stays inert while clip is unselected',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
     final popupFinder = find.byKey(const ValueKey('selected_clip_popup'));
@@ -539,20 +598,16 @@ void main() {
     final gesture = await tester.startGesture(_clipLeftHandle(tester));
     await tester.pump();
 
-    expect(tester.widget<AnimatedOpacity>(popupFinder).opacity, 1.0);
-    expect(find.byIcon(Icons.copy), findsOneWidget);
-    expect(find.byIcon(Icons.tune), findsOneWidget);
-    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+    expect(tester.widget<AnimatedOpacity>(popupFinder).opacity, 0.0);
 
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(find.byIcon(Icons.copy), findsOneWidget);
-
-    await tester.tapAt(_clipCenter(tester, additionalDx: 260.0));
+    await tester.tapAt(_clipCenter(tester));
     await tester.pumpAndSettle();
 
-    expect(tester.widget<AnimatedOpacity>(popupFinder).opacity, 0.0);
+    expect(tester.widget<AnimatedOpacity>(popupFinder).opacity, 1.0);
+    expect(find.byIcon(Icons.copy), findsOneWidget);
   });
 
   testWidgets(

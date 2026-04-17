@@ -26,6 +26,7 @@ object JuceBridge {
     @JvmStatic external fun getTrackDurationJNI(trackIndex: Int): Double
 
     // New clip API
+    @JvmStatic external fun beginProjectClipLoadTransactionJNI()
     @JvmStatic external fun loadClipJNI(
         clipIndex: Int,
         rowId: Int,
@@ -33,9 +34,10 @@ object JuceBridge {
         startSec: Double,
         lengthSec: Double,
         inFileOffsetSec: Double,
-    )
+    ): Boolean
 
     @JvmStatic external fun unloadClipJNI(clipIndex: Int)
+    @JvmStatic external fun endProjectClipLoadTransactionJNI()
     @JvmStatic external fun setClipGainJNI(clipIndex: Int, gain: Float)
     @JvmStatic external fun muteClipJNI(clipIndex: Int, mute: Boolean)
     @JvmStatic external fun setClipPanJNI(clipIndex: Int, pan: Float)
@@ -192,6 +194,8 @@ object JuceBridge {
         path: String,
         windowSamples: Int,
         windowCount: Int,
+        trimStartMs: Double,
+        trimEndMs: Double,
     ): HashMap<String, Any>
 
     // Input device / recording
@@ -225,6 +229,10 @@ object JuceBridge {
     @JvmStatic external fun getHostSampleRateJNI(): Double
     @JvmStatic external fun getRowEqWaveformJNI(row: Int, effectIndex: Int, sampleCount: Int): DoubleArray
     @JvmStatic external fun getMasterEqWaveformJNI(effectIndex: Int, sampleCount: Int): DoubleArray
+    @JvmStatic external fun getRowStereoScopeJNI(row: Int, effectIndex: Int, pointCount: Int): DoubleArray
+    @JvmStatic external fun getMasterStereoScopeJNI(effectIndex: Int, pointCount: Int): DoubleArray
+    @JvmStatic external fun getRowShaperPreviewJNI(row: Int, effectIndex: Int, pointCount: Int): DoubleArray
+    @JvmStatic external fun getMasterShaperPreviewJNI(effectIndex: Int, pointCount: Int): DoubleArray
 
     // Export
     @JvmStatic external fun exportMixJNI(

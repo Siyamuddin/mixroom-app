@@ -10,6 +10,7 @@ Use this doc when you need to:
 - publish new corrective magnitude ONNX models
 - show a welcome onboarding experience to new users
 - show an announcement banner or modal to signed-in users
+- prompt users to update the app without a new app binary
 
 This doc is intentionally concise. It is the source of truth for runtime-safe
 remote changes.
@@ -127,6 +128,49 @@ Important behavior:
 - Banner stays until dismissed for that version
 - Disabled manifest removes the installed remote announcement
 
+### 6. App Update Policy
+
+Purpose:
+
+- Soft-update and force-update prompting on signed-in app entry without a new
+  app submission
+
+Current behavior:
+
+- The app checks a remote JSON policy only if
+  `MIXROOM_APP_UPDATE_POLICY_URL` is configured in the app build.
+- The client caches the fetched policy locally for 6 hours by default.
+- If the remote fetch fails, the app falls back to the most recently cached
+  policy.
+- If no policy URL is configured, the feature is inactive unless local
+  `dart-define` values are provided for testing.
+
+Important behavior:
+
+- `latestVersion` controls soft-update prompting
+- `minSupportedVersion` controls force-update prompting
+- Soft update reminders reappear every `promptCadenceHours`
+- The app store links are only launch targets, not the source of truth
+
+Example policy:
+
+```json
+{
+  "ios": {
+    "latestVersion": "1.1.1",
+    "minSupportedVersion": "1.1.0",
+    "storeUrl": "https://apps.apple.com/us/app/mixroom-ai-co-producer/id6759779450",
+    "promptCadenceHours": 24
+  },
+  "android": {
+    "latestVersion": "1.1.1",
+    "minSupportedVersion": "1.1.0",
+    "storeUrl": "https://play.google.com/store/apps/details?id=com.mixroom.mixroomapp",
+    "promptCadenceHours": 24
+  }
+}
+```
+
 ## What Is Not Remotely Adjustable
 
 - YAMNet model weights
@@ -134,6 +178,7 @@ Important behavior:
 - tutorial step content / DAW tutorial flow
 - local mixing execution code
 - app-shell structure itself
+- update-policy URL wiring in existing shipped binaries
 
 Those still require an app release.
 
@@ -143,6 +188,7 @@ For every remote surface above:
 
 - keep the app functional with no remote config present
 - keep remote content optional, never required for core app operation
+- do not configure the update policy URL in production until the JSON is ready
 - change version identifiers every time you publish a new bundle/campaign
 - use rollout percentages for risky changes
 - gate by app version if compatibility is uncertain
@@ -159,6 +205,49 @@ Use this sequence for any remote update.
 4. Confirm telemetry shows expected version + success statuses.
 5. Increase rollout only after validation.
 6. If something goes wrong, disable or revert at the manifest/admin layer first.
+
+## SOP: App Update Policy
+
+Use for:
+
+- soft reminders to upgrade to the latest version
+- forced upgrades for unsupported app versions
+
+Lowest-cost hosting:
+
+- host `version-policy.json` as a static object on S3
+- put CloudFront in front only if you already have it or want a stable public
+  URL
+
+Publish command:
+
+```bash
+bash tool/publish_app_update_policy.sh \
+  --input docs/app_update_policy.example.json \
+  --bucket your-static-config-bucket \
+  --region ap-northeast-2 \
+  --public-base-url https://cdn.example.com/app-update \
+  --distribution-id E123ABCDEF
+```
+
+How to roll out safely:
+
+1. Keep `MIXROOM_APP_UPDATE_POLICY_URL` unset in production until validated.
+2. Test the JSON URL on an internal build first.
+3. Start with a soft-update policy only.
+4. Confirm the prompt appears only for behind versions.
+5. Only then use `minSupportedVersion` for force updates.
+
+Rollback:
+
+- update the JSON to set `latestVersion` to the currently shipped version
+- or remove the URL from future builds if you need to disable the feature
+
+Failure signs:
+
+- prompt appears for users already on current version
+- wrong platform store page opens
+- force-update locks valid users out unexpectedly
 
 ## SOP: AI Runtime Changes
 

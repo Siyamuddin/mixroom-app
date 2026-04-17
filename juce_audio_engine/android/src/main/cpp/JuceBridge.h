@@ -25,7 +25,9 @@ extern "C"
     JNIEXPORT jdouble JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackDurationJNI(JNIEnv *, jclass, jint);
 
     // New clip API
-    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadClipJNI(JNIEnv *, jclass, jint, jint, jstring, jdouble, jdouble, jdouble);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_beginProjectClipLoadTransactionJNI(JNIEnv *, jclass);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_endProjectClipLoadTransactionJNI(JNIEnv *, jclass);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadClipJNI(JNIEnv *, jclass, jint, jint, jstring, jdouble, jdouble, jdouble);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_unloadClipJNI(JNIEnv *, jclass, jint);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipGainJNI(JNIEnv *, jclass, jint, jfloat);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_muteClipJNI(JNIEnv *, jclass, jint, jboolean);
@@ -124,7 +126,7 @@ extern "C"
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_decodeAudioMono16kJNI(JNIEnv *, jclass, jstring);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_decodeAudioMono16kForAnalysisJNI(JNIEnv *, jclass, jstring, jint);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioStereo16kJNI(JNIEnv *, jclass, jstring);
-    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioForPromptJNI(JNIEnv *, jclass, jstring, jint, jint);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioForPromptJNI(JNIEnv *, jclass, jstring, jint, jint, jdouble, jdouble);
 
     // Input devices and recording
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getInputDevicesJNI(JNIEnv *, jclass);
@@ -157,6 +159,10 @@ extern "C"
     JNIEXPORT jdouble JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getHostSampleRateJNI(JNIEnv *, jclass);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowEqWaveformJNI(JNIEnv *, jclass, jint, jint, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEqWaveformJNI(JNIEnv *, jclass, jint, jint);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowStereoScopeJNI(JNIEnv *, jclass, jint, jint, jint);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterStereoScopeJNI(JNIEnv *, jclass, jint, jint);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowShaperPreviewJNI(JNIEnv *, jclass, jint, jint, jint);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterShaperPreviewJNI(JNIEnv *, jclass, jint, jint);
 
     // Export and plugin discovery
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *, jclass, jstring, jstring, jint, jint, jboolean, jint);

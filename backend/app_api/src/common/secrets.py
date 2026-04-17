@@ -205,6 +205,73 @@ def load_postmark_server_token() -> str:
     return value
 
 
+def load_stibee_access_token() -> str:
+    if config.STIBEE_ACCESS_TOKEN:
+        return config.STIBEE_ACCESS_TOKEN
+    if not config.STIBEE_ACCESS_TOKEN_SECRET_ARN:
+        raise ValueError(
+            "STIBEE_ACCESS_TOKEN or STIBEE_ACCESS_TOKEN_SECRET_ARN must be configured."
+        )
+
+    raw = get_secret_string(config.STIBEE_ACCESS_TOKEN_SECRET_ARN)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = raw
+
+    if isinstance(parsed, dict):
+        for key in ("token", "access_token", "stibee_access_token", "STIBEE_ACCESS_TOKEN"):
+            value = str(parsed.get(key) or "").strip()
+            if value:
+                return value
+        raise ValueError(
+            (
+                "Stibee access token secret JSON must include one of: token, "
+                "access_token, stibee_access_token, STIBEE_ACCESS_TOKEN."
+            )
+        )
+
+    value = str(parsed).strip()
+    if not value:
+        raise ValueError("Stibee access token is empty.")
+    return value
+
+
+def load_stibee_webhook_shared_secret() -> str:
+    if config.STIBEE_WEBHOOK_SHARED_SECRET:
+        return config.STIBEE_WEBHOOK_SHARED_SECRET
+    if not config.STIBEE_WEBHOOK_SHARED_SECRET_ARN:
+        raise ValueError(
+            (
+                "STIBEE_WEBHOOK_SHARED_SECRET or "
+                "STIBEE_WEBHOOK_SHARED_SECRET_ARN must be configured."
+            )
+        )
+
+    raw = get_secret_string(config.STIBEE_WEBHOOK_SHARED_SECRET_ARN)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = raw
+
+    if isinstance(parsed, dict):
+        for key in ("secret", "webhook_secret", "shared_secret", "STIBEE_WEBHOOK_SHARED_SECRET"):
+            value = str(parsed.get(key) or "").strip()
+            if value:
+                return value
+        raise ValueError(
+            (
+                "Stibee webhook secret JSON must include one of: secret, "
+                "webhook_secret, shared_secret, STIBEE_WEBHOOK_SHARED_SECRET."
+            )
+        )
+
+    value = str(parsed).strip()
+    if not value:
+        raise ValueError("Stibee webhook shared secret is empty.")
+    return value
+
+
 def load_posthog_personal_api_key() -> str:
     if config.POSTHOG_PERSONAL_API_KEY:
         return config.POSTHOG_PERSONAL_API_KEY

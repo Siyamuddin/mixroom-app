@@ -478,6 +478,10 @@ components:
           type: string
           format: date-time
           nullable: true
+        locale_code:
+          type: string
+          nullable: true
+          description: Preferred locale used for newsletter and welcome-email routing. `ko` uses Korean; all other values default to English.
     Entitlement:
       type: object
       required:

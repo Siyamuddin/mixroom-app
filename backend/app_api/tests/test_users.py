@@ -52,6 +52,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
         self.assertIsNone(record["family_name"])
         self.assertIsNone(record["birthdate"])
         self.assertIsNone(record["music_profile"])
+        self.assertIsNone(record["locale_code"])
 
     def test_preserves_existing_platform_fields(self) -> None:
         record = build_user_profile_from_claims(
@@ -74,6 +75,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
                 "accepted_at": "2026-03-10T00:00:00+00:00",
                 "newsletter_opt_in": True,
                 "newsletter_opt_in_at": "2026-03-10T00:00:00+00:00",
+                "locale_code": "ko-KR",
                 "created_at": "2026-01-01T00:00:00+00:00",
             },
         )
@@ -98,6 +100,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
             record["newsletter_opt_in_at"],
             "2026-03-10T00:00:00+00:00",
         )
+        self.assertEqual(record["locale_code"], "ko")
         self.assertEqual(record["created_at"], "2026-01-01T00:00:00+00:00")
 
     def test_rejects_reserved_username(self) -> None:
@@ -301,6 +304,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
                 "music_profile": "music_for_work",
                 "newsletter_opt_in": True,
                 "newsletter_opt_in_at": "2026-03-10T01:02:03Z",
+                "locale_code": "ko-KR",
             },
         )
 
@@ -312,6 +316,7 @@ class BuildUserProfileFromClaimsTests(unittest.TestCase):
             updated["newsletter_opt_in_at"],
             "2026-03-10T01:02:03+00:00",
         )
+        self.assertEqual(updated["locale_code"], "ko")
         self.assertEqual(updated["birthdate"], "1997-12-24")
         self.assertEqual(updated["music_profile"], "music_for_work")
         self.assertEqual(updated["onboarding_state"], "signup_complete")

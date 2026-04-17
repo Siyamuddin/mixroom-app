@@ -52,8 +52,21 @@ _STRUCTURED_MIXROOM_FIELDS = frozenset(
         "user_text",
         "project_snapshot",
         "selection_snapshot",
+        "library_snapshot",
         "pending_mix",
         "request_overrides",
+    }
+)
+_BASE_DAW_ACTION_TYPES = frozenset(
+    {
+        "tutorial",
+        "clarify",
+        "clip_edit",
+        "effect_edit",
+        "automation_edit",
+        "midi_compose",
+        "stem_separate",
+        "role_override",
     }
 )
 _ALLOWED_MIX_INTENT_KINDS = frozenset(
@@ -71,6 +84,37 @@ _ALLOWED_MIX_INTENT_KINDS = frozenset(
         "balance",
     }
 )
+_ALLOWED_MIX_EXECUTION_PROFILES = frozenset(
+    {
+        "producer_safe",
+        "creative_bold",
+        "experimental_extreme",
+    }
+)
+_ALLOWED_MIX_AUDIBILITY = frozenset(
+    {
+        "subtle",
+        "noticeable",
+        "obvious",
+        "extreme",
+    }
+)
+_ALLOWED_MIX_REFERENCE_MODES = frozenset(
+    {
+        "tone",
+        "loudness",
+        "width",
+        "glue",
+        "full_mix",
+    }
+)
+_ALLOWED_MIX_REFERENCE_CLOSENESS = frozenset(
+    {
+        "loose",
+        "balanced",
+        "close",
+    }
+)
 _TOOL_TEXT_LEAK_MARKERS = (
     "mix_model_request",
     "daw_assistant_actions",
@@ -78,12 +122,102 @@ _TOOL_TEXT_LEAK_MARKERS = (
     '"assistant_message"',
     '"row_index"',
     '"target_id"',
+    "project snapshot",
+    "selection snapshot",
+    "project_snapshot",
+    "selection_snapshot",
+    "library_snapshot",
+    "pending_mix_proposal",
+    "isempty = true",
+    "isempty = false",
+    "isempty=true",
+    "isempty=false",
+    "clip_index",
+    "clip_indices",
+    "row_index:",
 )
 _INVALID_STRUCTURED_OUTPUT_MESSAGE = (
     "I couldn't complete that request just now. Please try again."
 )
 
 init_sentry("mixroom-llm-proxy")
+
+
+def _normalize_mix_goal_type(_: Any) -> str:
+    # Compatibility shim: legacy model outputs sometimes leak the primary sonic
+    # intent into goal.type ("eq", "reverb", etc). On this wire format there is
+    # only one valid goal type, and shipped clients expect it.
+    return "mix_request"
+
+
+def _normalize_mix_execution_profile(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in _ALLOWED_MIX_EXECUTION_PROFILES:
+        return normalized
+    return "producer_safe"
+
+
+def _normalize_mix_audibility(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in _ALLOWED_MIX_AUDIBILITY:
+        return normalized
+    return "noticeable"
+
+
+def _normalize_mix_style_tags(value: Any) -> list[str]:
+    raw_values = value if isinstance(value, list) else ([value] if isinstance(value, str) else [])
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw_values:
+        normalized = str(item or "").strip().lower()
+        if not normalized or normalized == "null":
+            continue
+        canonical = re.sub(r"\s+", "_", normalized)
+        if not canonical or len(canonical) > 40 or canonical in seen:
+            continue
+        seen.add(canonical)
+        out.append(canonical)
+        if len(out) >= 8:
+            break
+    return out
+
+
+def _normalize_mix_reference_target(value: Any) -> Dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    normalized: Dict[str, Any] = {}
+    raw_row_index = value.get("row_index")
+    if isinstance(raw_row_index, (int, float)):
+        row_index = int(raw_row_index)
+        if row_index >= 0:
+            normalized["row_index"] = row_index
+    elif value.get("prefer_selected") is True:
+        normalized["prefer_selected"] = True
+    else:
+        return None
+
+    raw_confidence = value.get("confidence")
+    normalized["confidence"] = (
+        max(0.0, min(1.0, float(raw_confidence)))
+        if isinstance(raw_confidence, (int, float))
+        else 0.5
+    )
+    return normalized
+
+
+def _normalize_mix_reference_mode(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in _ALLOWED_MIX_REFERENCE_MODES:
+        return normalized
+    return "full_mix"
+
+
+def _normalize_mix_reference_closeness(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in _ALLOWED_MIX_REFERENCE_CLOSENESS:
+        return normalized
+    return "balanced"
 
 
 def _env_value(*keys: str, default: str = "") -> str:
@@ -489,6 +623,8 @@ def _sanitize_user_facing_text(
     lower = raw.lower()
     if any(marker in lower for marker in _TOOL_TEXT_LEAK_MARKERS):
         return fallback
+    if re.search(r"\bisempty\s*=\s*(true|false)\b", lower):
+        return fallback
     if raw.startswith("{") or raw.startswith("["):
         return fallback
     return raw
@@ -554,17 +690,495 @@ def _normalize_tutorial_target_id(target_id: Any) -> Any:
     return f"{match.group(1)}fx_contains:{effect_ref}{suffix}"
 
 
+def _parse_action_int(raw: Any) -> int | None:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        return int(raw)
+    if isinstance(raw, str):
+        try:
+            return int(raw.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_action_float(raw: Any) -> float | None:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str):
+        try:
+            return float(raw.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _measure_index_to_start_beat(raw: Any) -> float | None:
+    measure = _parse_action_float(raw)
+    if measure is None:
+        return None
+    return (measure - 1.0) * 4.0
+
+
+def _measures_to_beats(raw: Any) -> float | None:
+    measures = _parse_action_float(raw)
+    if measures is None:
+        return None
+    return measures * 4.0
+
+
+def _normalize_midi_velocity(raw: Any) -> float | None:
+    parsed = _parse_action_float(raw)
+    if parsed is None:
+        return None
+    if parsed > 1.0:
+        return max(0.0, min(1.0, parsed / 127.0))
+    return max(0.0, min(1.0, parsed))
+
+
+def _midi_pitch_from_raw(raw: Any, *, fallback_octave: int = 3) -> int | None:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    if not isinstance(raw, str):
+        return None
+    token = raw.strip()
+    if not token:
+        return None
+    try:
+        return int(token)
+    except ValueError:
+        pass
+
+    match = re.fullmatch(r"([A-Ga-g])([#b]?)(-?\d+)?", token)
+    if not match:
+        return None
+    note_name = (match.group(1) or "").upper()
+    accidental = match.group(2) or ""
+    octave = int(match.group(3) or fallback_octave)
+    semitone = {
+        "C": 0,
+        "D": 2,
+        "E": 4,
+        "F": 5,
+        "G": 7,
+        "A": 9,
+        "B": 11,
+    }.get(note_name)
+    if semitone is None:
+        return None
+    if accidental == "#":
+        semitone += 1
+    elif accidental == "b":
+        semitone -= 1
+    return (octave + 1) * 12 + semitone
+
+
+def _is_valid_midi_note_payload(note: Dict[str, Any]) -> bool:
+    pitch = note.get("pitch")
+    chord_pitches = note.get("pitches")
+    start_beat = note.get("start_beat")
+    length_beats = note.get("length_beats")
+    has_single_pitch = isinstance(pitch, int) and 0 <= pitch <= 127
+    has_chord_pitches = (
+        isinstance(chord_pitches, list)
+        and any(isinstance(value, int) and 0 <= value <= 127 for value in chord_pitches)
+    )
+    if not has_single_pitch and not has_chord_pitches:
+        return False
+    if not isinstance(start_beat, (int, float)):
+        return False
+    if not isinstance(length_beats, (int, float)) or float(length_beats) <= 0.0:
+        return False
+    return True
+
+
+def _normalize_midi_note_payload(raw_note: Dict[str, Any]) -> Dict[str, Any]:
+    note = dict(raw_note)
+
+    pitch = _midi_pitch_from_raw(
+        note.get("pitch")
+        or note.get("midi")
+        or note.get("note")
+        or note.get("note_name")
+    )
+    if pitch is not None:
+        note["pitch"] = max(0, min(127, pitch))
+
+    raw_chord_pitches = note.get("pitches")
+    if isinstance(raw_chord_pitches, list):
+        normalized_chord_pitches = []
+        for raw_pitch in raw_chord_pitches:
+            chord_pitch = _midi_pitch_from_raw(raw_pitch)
+            if chord_pitch is None:
+                continue
+            normalized_chord_pitches.append(max(0, min(127, chord_pitch)))
+        if normalized_chord_pitches:
+            note["pitches"] = normalized_chord_pitches
+
+    start_beat = _parse_action_float(
+        note.get("start_beat")
+        or note.get("startBeat")
+        or note.get("time_beats")
+        or note.get("timeBeats")
+        or note.get("time_beat")
+        or note.get("timeBeat")
+        or note.get("absolute_beat")
+        or note.get("absoluteBeat")
+        or note.get("timeline_beat")
+        or note.get("timelineBeat")
+        or note.get("at_beat")
+        or note.get("atBeat")
+        or note.get("offset_beats")
+        or note.get("offsetBeats")
+        or note.get("start")
+    )
+    if start_beat is None:
+        measure = _parse_action_float(
+            note.get("start_measure")
+            or note.get("startMeasure")
+            or note.get("start_bar")
+            or note.get("startBar")
+            or note.get("measure")
+            or note.get("bar")
+        )
+        beat_in_measure = _parse_action_float(
+            note.get("beat_in_measure")
+            or note.get("beatInMeasure")
+            or note.get("beat")
+            or note.get("beat_index")
+            or note.get("beatIndex")
+        )
+        if measure is not None:
+            clamped_measure = max(1.0, measure)
+            within_measure = (
+                beat_in_measure - 1.0
+                if beat_in_measure is not None and beat_in_measure > 0.0
+                else 0.0
+            )
+            start_beat = ((clamped_measure - 1.0) * 4.0) + within_measure
+        else:
+            start_beat = beat_in_measure
+    if start_beat is not None:
+        note["start_beat"] = start_beat
+
+    length_beats = _parse_action_float(
+        note.get("length_beats")
+        or note.get("lengthBeats")
+        or note.get("lengthBeat")
+        or note.get("length")
+        or note.get("duration_beats")
+        or note.get("durationBeats")
+        or note.get("duration")
+    )
+    if length_beats is None:
+        length_beats = _measures_to_beats(
+            note.get("duration_measures")
+            or note.get("durationMeasures")
+            or note.get("length_measures")
+            or note.get("lengthMeasures")
+            or note.get("duration_bars")
+            or note.get("durationBars")
+        )
+    if length_beats is not None:
+        note["length_beats"] = length_beats
+
+    velocity = _normalize_midi_velocity(note.get("velocity"))
+    if velocity is not None:
+        note["velocity"] = velocity
+
+    return note
+
+
+def _normalize_midi_notes_payload(raw_notes: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_notes, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for raw_note in raw_notes:
+        if not isinstance(raw_note, dict):
+            continue
+        note = _normalize_midi_note_payload(dict(raw_note))
+        if _is_valid_midi_note_payload(note):
+            normalized.append(note)
+    return normalized
+
+
+def _normalize_sample_insert_item(raw_item: Dict[str, Any]) -> Dict[str, Any]:
+    item = dict(raw_item)
+    target = item.get("target")
+    normalized_target = dict(target) if isinstance(target, dict) else {}
+    item["target"] = normalized_target
+
+    library_path = str(
+        item.get("library_path")
+        or normalized_target.get("library_path")
+        or item.get("asset_path")
+        or normalized_target.get("asset_path")
+        or ""
+    ).strip()
+    if library_path:
+        item["library_path"] = library_path
+
+    row_index = _parse_action_int(item.get("row_index") or normalized_target.get("row_index"))
+    if row_index is not None and row_index >= 0:
+        item["row_index"] = row_index
+        normalized_target.setdefault("row_index", row_index)
+
+    for key in ("start_ms", "start_measure", "start_beat"):
+        value = _parse_action_float(item.get(key) or normalized_target.get(key))
+        if value is not None:
+            item[key] = value
+
+    return item
+
+
+
+_ALLOWED_CLIP_EDIT_OPERATIONS = frozenset(
+    {
+        "trim",
+        "auto_trim",
+        "cut",
+        "stretch",
+        "move",
+        "tempo_follow",
+        "auto_bpm_align",
+        "tempo_detect_set_project",
+        "duplicate",
+        "delete",
+        "dialog_cleanup",
+        "dialog_remove_range",
+        "dialog_tighten_pauses",
+        "dialog_lift_quiet",
+    }
+)
+_ALLOWED_EFFECT_EDIT_OPERATIONS = frozenset(
+    {"add", "remove", "bypass", "unbypass", "toggle_bypass"}
+)
+_ALLOWED_AUTOMATION_EDIT_OPERATIONS = frozenset(
+    {
+        "set_points",
+        "add_ramp",
+        "clear",
+        "create_clip",
+        "duplicate_clip",
+        "move_clip",
+        "delete_clip",
+        "clear_clips",
+        "mute_clip",
+        "unmute_clip",
+        "toggle_clip_mute",
+        "set_clip_points",
+        "make_unique_clip",
+        "apply_template",
+    }
+)
+_ALLOWED_MIDI_COMPOSE_OPERATIONS = frozenset(
+    {
+        "create_clip",
+        "compose_bassline",
+        "compose_pattern",
+        "replace_notes",
+        "append_notes",
+        "transpose_notes",
+        "chop_notes",
+        "convert_audio_to_midi",
+    }
+)
+_ALLOWED_STEM_SEPARATE_OPERATIONS = frozenset({"vocal_instrumental"})
+_ALLOWED_ROLE_OVERRIDE_OPERATIONS = frozenset({"set", "clear"})
+_ALLOWED_PROJECT_EDIT_OPERATIONS = frozenset({"set_tempo"})
+_ALLOWED_SAMPLE_INSERT_OPERATIONS = frozenset(
+    {"insert_audio_clips", "replace_audio_clips"}
+)
+
+
+def _client_capabilities_from_context(client_context: Dict[str, Any] | None) -> set[str]:
+    if not isinstance(client_context, dict):
+        return set()
+    raw = client_context.get("ai_capabilities")
+    if not isinstance(raw, list):
+        return set()
+    capabilities: set[str] = set()
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            capabilities.add(item.strip())
+    return capabilities
+
+
+def _allowed_daw_action_types(client_capabilities: set[str]) -> set[str]:
+    allowed = set(_BASE_DAW_ACTION_TYPES)
+    if "daw.project_edit.set_tempo" in client_capabilities:
+        allowed.add("project_edit")
+    if "daw.sample_insert.library" in client_capabilities:
+        allowed.add("sample_insert")
+    return allowed
+
+
+def _allowed_midi_compose_operations(client_capabilities: set[str]) -> set[str]:
+    allowed = set(_ALLOWED_MIDI_COMPOSE_OPERATIONS)
+    if "daw.midi_compose.transpose_notes" not in client_capabilities:
+        allowed.discard("transpose_notes")
+    if "daw.midi_compose.audio_to_midi" not in client_capabilities:
+        allowed.discard("convert_audio_to_midi")
+    return allowed
+
+
+def _normalize_clip_edit_operation(raw: Any) -> str:
+    token = re.sub(r"[^a-z0-9]+", "_", str(raw or "").strip().lower()).strip("_")
+    aliases = {
+        "split": "cut",
+        "split_clip": "cut",
+        "cut_clip": "cut",
+        "resize": "stretch",
+        "resize_clip": "stretch",
+        "move_clip": "move",
+        "reposition": "move",
+        "shift": "move",
+        "nudge": "move",
+        "copy": "duplicate",
+        "copy_clip": "duplicate",
+        "remove": "delete",
+        "remove_clip": "delete",
+        "delete_clip": "delete",
+        "tempo_follow_project": "tempo_follow",
+        "align_tempo": "auto_bpm_align",
+        "align_to_project_tempo": "auto_bpm_align",
+        "detect_tempo_set_project": "tempo_detect_set_project",
+    }
+    return aliases.get(token, token)
+
+
+def _normalize_effect_edit_operation(raw: Any) -> str:
+    token = re.sub(r"[^a-z0-9]+", "_", str(raw or "").strip().lower()).strip("_")
+    aliases = {
+        "delete": "remove",
+        "remove": "remove",
+        "delete_effect": "remove",
+        "remove_effect": "remove",
+        "take_out": "remove",
+        "insert": "add",
+        "ensure": "add",
+        "ensure_effect": "add",
+        "add_effect": "add",
+        "insert_effect": "add",
+        "disable": "bypass",
+        "mute": "bypass",
+        "enable": "unbypass",
+        "unmute": "unbypass",
+        "toggle": "toggle_bypass",
+    }
+    return aliases.get(token, token)
+
+
+def _normalize_automation_edit_operation(raw: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(raw or "").strip().lower()).strip("_")
+
+
+def _normalize_project_edit_operation(raw: Any) -> str:
+    token = re.sub(r"[^a-z0-9]+", "_", str(raw or "").strip().lower()).strip("_")
+    aliases = {
+        "set_bpm": "set_tempo",
+        "change_bpm": "set_tempo",
+        "set_project_bpm": "set_tempo",
+        "change_project_bpm": "set_tempo",
+        "set_project_tempo": "set_tempo",
+        "change_tempo": "set_tempo",
+    }
+    return aliases.get(token, token)
+
+
+def _normalize_sample_insert_operation(raw: Any) -> str:
+    token = re.sub(r"[^a-z0-9]+", "_", str(raw or "").strip().lower()).strip("_")
+    aliases = {
+        "insert_audio_clip": "insert_audio_clips",
+        "insert_sample": "insert_audio_clips",
+        "insert_samples": "insert_audio_clips",
+        "add_sample": "insert_audio_clips",
+        "add_samples": "insert_audio_clips",
+        "insert_library_audio": "insert_audio_clips",
+        "replace_audio_clip": "replace_audio_clips",
+        "replace_audio": "replace_audio_clips",
+        "replace_sample": "replace_audio_clips",
+        "replace_samples": "replace_audio_clips",
+        "swap_sample": "replace_audio_clips",
+        "swap_samples": "replace_audio_clips",
+    }
+    return aliases.get(token, token)
+
+
+def _normalize_midi_compose_operation(raw: Any) -> str:
+    token = re.sub(r"[^a-z0-9]+", "_", str(raw or "").strip().lower()).strip("_")
+    aliases = {
+        "create": "create_clip",
+        "create_clip": "create_clip",
+        "new_clip": "create_clip",
+        "new_midi_clip": "create_clip",
+        "compose": "compose_pattern",
+        "compose_notes": "compose_pattern",
+        "write_pattern": "compose_pattern",
+        "generate_pattern": "compose_pattern",
+        "make_pattern": "compose_pattern",
+        "compose_bass": "compose_bassline",
+        "write_bassline": "compose_bassline",
+        "generate_bassline": "compose_bassline",
+        "make_bassline": "compose_bassline",
+        "replace": "replace_notes",
+        "overwrite_notes": "replace_notes",
+        "set_notes": "replace_notes",
+        "append": "append_notes",
+        "add_notes": "append_notes",
+        "extend_notes": "append_notes",
+        "transpose": "transpose_notes",
+        "transpose_note": "transpose_notes",
+        "transpose_notes": "transpose_notes",
+        "shift_pitch": "transpose_notes",
+        "pitch_shift": "transpose_notes",
+        "octave_up": "transpose_notes",
+        "octave_down": "transpose_notes",
+        "audio_to_midi": "convert_audio_to_midi",
+        "convert_to_midi": "convert_audio_to_midi",
+        "transcribe_audio": "convert_audio_to_midi",
+        "extract_midi": "convert_audio_to_midi",
+        "chop": "chop_notes",
+        "chop_note": "chop_notes",
+        "note_chop": "chop_notes",
+        "note_chopper": "chop_notes",
+        "splice_notes": "chop_notes",
+        "slice_notes": "chop_notes",
+        "split_notes": "chop_notes",
+        "grid_chop": "chop_notes",
+        "ratchet": "chop_notes",
+        "stutter": "chop_notes",
+    }
+    return aliases.get(token, token)
+
+
+def _normalize_role_override_operation(raw: Any) -> str:
+    token = re.sub(r"[^a-z0-9]+", "_", str(raw or "").strip().lower()).strip("_")
+    if token in {"clear", "remove", "unset", "delete"}:
+        return "clear"
+    return token
+
+
 def _normalize_daw_action_payloads(
     actions: list[dict[str, Any]],
     *,
     user_text: str,
+    client_capabilities: set[str],
 ) -> list[dict[str, Any]]:
+    allowed_action_types = _allowed_daw_action_types(client_capabilities)
+    allowed_midi_operations = _allowed_midi_compose_operations(client_capabilities)
     normalized_actions: list[dict[str, Any]] = []
     for action in actions:
         normalized_action = dict(action)
         data = normalized_action.get("data")
         if not isinstance(data, dict):
-            normalized_actions.append(normalized_action)
             continue
         normalized_data = dict(data)
         target = normalized_data.get("target")
@@ -572,9 +1186,27 @@ def _normalize_daw_action_payloads(
             normalized_target = dict(target)
             normalized_data["target"] = normalized_target
         else:
-            normalized_target = None
+            normalized_target = {}
+            normalized_data["target"] = normalized_target
+
+        parsed_row_index = _parse_action_int(normalized_target.get("row_index"))
+        if parsed_row_index is not None and parsed_row_index >= 0:
+            normalized_target["row_index"] = parsed_row_index
 
         action_type = str(normalized_action.get("type") or "").strip().lower()
+        if action_type not in allowed_action_types:
+            continue
+        if action_type == "clarify":
+            question = str(normalized_data.get("question") or "").strip()
+            if not question:
+                continue
+            options = normalized_data.get("options")
+            if isinstance(options, list):
+                normalized_data["options"] = [
+                    str(option).strip()
+                    for option in options
+                    if str(option).strip()
+                ]
         if action_type == "tutorial":
             steps = normalized_data.get("steps")
             if isinstance(steps, list):
@@ -589,15 +1221,123 @@ def _normalize_daw_action_payloads(
                     )
                     repaired_steps.append(repaired_step)
                 normalized_data["steps"] = repaired_steps
+            topic = str(normalized_data.get("topic") or "").strip()
+            steps = normalized_data.get("steps")
+            if not topic and not isinstance(steps, list):
+                continue
 
-        if action_type == "clip_edit" and normalized_target is not None:
-            if _user_requested_global_clip_scope(user_text):
+        if action_type == "clip_edit":
+            operation = _normalize_clip_edit_operation(normalized_data.get("operation"))
+            if operation not in _ALLOWED_CLIP_EDIT_OPERATIONS:
+                continue
+            normalized_data["operation"] = operation
+            if normalized_target is not None and _user_requested_global_clip_scope(user_text):
                 normalized_target["scope"] = "all"
                 normalized_target.pop("clip_index", None)
                 normalized_target.pop("clip_indices", None)
                 normalized_target.pop("row_index", None)
                 normalized_target.pop("prefer_selected", None)
                 normalized_data["target"] = normalized_target
+        elif action_type == "effect_edit":
+            operation = _normalize_effect_edit_operation(normalized_data.get("operation"))
+            if operation not in _ALLOWED_EFFECT_EDIT_OPERATIONS:
+                continue
+            normalized_data["operation"] = operation
+        elif action_type == "automation_edit":
+            operation = _normalize_automation_edit_operation(
+                normalized_data.get("operation")
+            )
+            if operation not in _ALLOWED_AUTOMATION_EDIT_OPERATIONS:
+                continue
+            normalized_data["operation"] = operation
+        elif action_type == "project_edit":
+            operation = _normalize_project_edit_operation(normalized_data.get("operation"))
+            if operation not in _ALLOWED_PROJECT_EDIT_OPERATIONS:
+                continue
+            tempo = _parse_action_float(
+                normalized_data.get("tempo_bpm")
+                or normalized_target.get("tempo_bpm")
+                or normalized_data.get("bpm")
+                or normalized_target.get("bpm")
+            )
+            if tempo is None or tempo <= 0.0:
+                continue
+            normalized_data["operation"] = operation
+            normalized_data["tempo_bpm"] = tempo
+        elif action_type == "sample_insert":
+            operation = _normalize_sample_insert_operation(normalized_data.get("operation"))
+            if operation not in _ALLOWED_SAMPLE_INSERT_OPERATIONS:
+                continue
+            raw_items = normalized_data.get("items")
+            normalized_items: list[dict[str, Any]] = []
+            if isinstance(raw_items, list) and raw_items:
+                for raw_item in raw_items:
+                    if not isinstance(raw_item, dict):
+                        continue
+                    item = _normalize_sample_insert_item(dict(raw_item))
+                    if str(item.get("library_path") or "").strip():
+                        normalized_items.append(item)
+            elif (
+                str(normalized_data.get("library_path") or "").strip()
+                or str(normalized_target.get("library_path") or "").strip()
+            ):
+                item = _normalize_sample_insert_item(normalized_data)
+                if str(item.get("library_path") or "").strip():
+                    normalized_items.append(item)
+            if not normalized_items:
+                continue
+            normalized_data["operation"] = operation
+            normalized_data["items"] = normalized_items
+        elif action_type == "midi_compose":
+            operation = _normalize_midi_compose_operation(normalized_data.get("operation"))
+            if operation not in allowed_midi_operations:
+                continue
+            normalized_data["operation"] = operation
+            if operation == "transpose_notes":
+                semitones = _parse_action_float(normalized_data.get("semitones"))
+                octaves = _parse_action_float(normalized_data.get("octaves"))
+                if semitones is None and octaves is None:
+                    continue
+                if semitones is not None:
+                    normalized_data["semitones"] = semitones
+                if octaves is not None:
+                    normalized_data["octaves"] = octaves
+            elif operation == "convert_audio_to_midi":
+                pass
+            elif operation == "chop_notes":
+                subdivision = _parse_action_int(
+                    normalized_data.get("subdivision")
+                    or normalized_data.get("subdivision_divisor")
+                )
+                if subdivision is not None and subdivision > 0:
+                    normalized_data["subdivision"] = subdivision
+            else:
+                normalized_notes = _normalize_midi_notes_payload(
+                    normalized_data.get("notes")
+                )
+                if normalized_notes:
+                    normalized_data["notes"] = normalized_notes
+                progression = normalized_data.get("progression")
+                has_progression = (
+                    isinstance(progression, list) and len(progression) > 0
+                ) or (
+                    isinstance(progression, str) and progression.strip()
+                )
+                if not normalized_notes and not has_progression:
+                    continue
+        elif action_type == "stem_separate":
+            operation = re.sub(
+                r"[^a-z0-9]+", "_",
+                str(normalized_data.get("operation") or "").strip().lower(),
+            ).strip("_")
+            if operation not in _ALLOWED_STEM_SEPARATE_OPERATIONS:
+                continue
+            normalized_data["operation"] = operation
+        elif action_type == "role_override":
+            operation = _normalize_role_override_operation(normalized_data.get("operation") or "set")
+            if operation not in _ALLOWED_ROLE_OVERRIDE_OPERATIONS:
+                continue
+            normalized_data["operation"] = operation
 
         normalized_action["data"] = normalized_data
         normalized_actions.append(normalized_action)
@@ -708,6 +1448,36 @@ def _normalize_mix_model_request_arguments(
 
         normalized_action = dict(action)
         normalized_goal = dict(goal)
+        normalized_goal["type"] = _normalize_mix_goal_type(
+            normalized_goal.get("type")
+        )
+        normalized_goal["execution_profile"] = _normalize_mix_execution_profile(
+            normalized_goal.get("execution_profile")
+        )
+        normalized_goal["audibility"] = _normalize_mix_audibility(
+            normalized_goal.get("audibility")
+        )
+        normalized_reference_target = _normalize_mix_reference_target(
+            normalized_goal.get("reference_target")
+        )
+        if normalized_reference_target is not None:
+            normalized_goal["reference_target"] = normalized_reference_target
+            normalized_goal["reference_mode"] = _normalize_mix_reference_mode(
+                normalized_goal.get("reference_mode")
+            )
+            normalized_goal["reference_closeness"] = (
+                _normalize_mix_reference_closeness(
+                    normalized_goal.get("reference_closeness")
+                )
+            )
+        else:
+            normalized_goal.pop("reference_target", None)
+            normalized_goal.pop("reference_mode", None)
+            normalized_goal.pop("reference_closeness", None)
+        normalized_goal["style_tags"] = _normalize_mix_style_tags(
+            normalized_goal.get("style_tags")
+        )
+        normalized_goal["destructive_ok"] = normalized_goal.get("destructive_ok") is True
         intents = normalized_goal.get("intents")
         if not isinstance(intents, list) or not intents:
             issues.append(f"mix action {index} missing intents.")
@@ -788,6 +1558,7 @@ def _normalize_function_call_arguments(
     raw_arguments: Any,
     *,
     user_text: str,
+    client_capabilities: set[str],
 ) -> tuple[Dict[str, Any] | None, list[str]]:
     args = _decode_tool_arguments(raw_arguments)
     if args is None:
@@ -807,7 +1578,10 @@ def _normalize_function_call_arguments(
         normalized["actions"] = _normalize_daw_action_payloads(
             normalized_actions,
             user_text=user_text,
+            client_capabilities=client_capabilities,
         )
+        if not normalized["actions"]:
+            return None, ["daw_assistant_actions had no valid actions."]
         has_tutorial = any(
             str(action.get("type") or "").strip().lower() == "tutorial"
             for action in normalized["actions"]
@@ -901,6 +1675,10 @@ def _issue_is_refundable(issue: str) -> bool:
         "message output was blank or looked like leaked json.",
         "success payload had no function call or usable assistant text.",
         "function call missing name.",
+        "mix_model_request missing actions array.",
+        "mix_model_request had no valid actions.",
+        "daw_assistant_actions missing actions array.",
+        "daw_assistant_actions had no valid actions.",
     } or normalized.endswith("arguments are not a json object.")
 
 
@@ -908,6 +1686,7 @@ def _normalize_success_payload(
     *,
     request_body: Dict[str, Any],
     payload: Dict[str, Any],
+    client_capabilities: set[str],
 ) -> tuple[Dict[str, Any], list[str], bool]:
     user_text = _latest_user_message(request_body)
     outputs = payload.get("output")
@@ -930,6 +1709,8 @@ def _normalize_success_payload(
             continue
 
         item_type = str(item.get("type") or "").strip()
+        if item_type in {"reasoning", "reasoning_summary"}:
+            continue
         if item_type == "message":
             content = item.get("content")
             if not isinstance(content, list):
@@ -964,6 +1745,7 @@ def _normalize_success_payload(
             tool_name,
             item.get("arguments"),
             user_text=user_text,
+            client_capabilities=client_capabilities,
         )
         if normalized_args is None:
             issues.extend(item_issues)
@@ -1166,6 +1948,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     request_log_context["project_id"] = project_id
     analytics_enabled = analytics_enabled_from_body(body)
     client_context = client_context_from_body(body)
+    client_capabilities = _client_capabilities_from_context(client_context)
     raw_ai_feature = str(body.get("ai_feature") or "ai_chat").strip() or "ai_chat"
     try:
         ai_feature = validate_feature(raw_ai_feature)
@@ -1521,6 +2304,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         response_payload, normalization_issues, normalization_refunded = _normalize_success_payload(
             request_body=request_body,
             payload=response_payload,
+            client_capabilities=client_capabilities,
         )
         response_normalize_ms = int((time.perf_counter() - normalization_started_at) * 1000)
         if response_normalize_ms > 0:

@@ -1,10 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/models/mixing_result.dart';
 
+import 'package:mixroom/ai/ai_debug.dart';
+import 'package:mixroom/ai/assistant_action_utils.dart';
 import 'package:mixroom/ai/debug_system_prompt.dart';
 
 class AiPromptRateLimitWindow {
@@ -146,7 +150,8 @@ class LlmResult {
         meta: meta,
       );
 
-  factory LlmResult.tool(String toolName, Map<String, dynamic> toolArgs, {String? text, Map<String, dynamic>? meta}) =>
+  factory LlmResult.tool(String toolName, Map<String, dynamic> toolArgs,
+          {String? text, Map<String, dynamic>? meta}) =>
       LlmResult(
         text: text,
         toolName: toolName,
@@ -157,10 +162,13 @@ class LlmResult {
 
 class CloudLlmService {
   static const _apiUrl = 'https://api.openai.com/v1/responses';
-  static const _promptCacheVersion = 'mixroom-daw-v20260316';
+  static const _promptCacheVersion = 'mixroom-daw-v20260416c';
+  static const _directOpenAiMaxOutputTokens = 4096;
   static const _defaultPromptCacheRetention = 'in_memory';
-  static const _recoverableAuthMessage = "I couldn't reach the AI service just now. Please try again in a moment.";
-  static const _temporaryFailureMessage = "I couldn't complete that request just now. Please try again in a moment.";
+  static const _recoverableAuthMessage =
+      "I couldn't reach the AI service just now. Please try again in a moment.";
+  static const _temporaryFailureMessage =
+      "I couldn't complete that request just now. Please try again in a moment.";
   static const Set<String> _extendedPromptCacheRetentionModels = {
     'gpt-4.1',
     'gpt-5',
@@ -170,6 +178,7 @@ class CloudLlmService {
     'gpt-5.1-codex-mini',
     'gpt-5.1-chat-latest',
     'gpt-5.2',
+    'gpt-5.4-mini',
   };
 
   final String apiKey;
@@ -193,22 +202,31 @@ class CloudLlmService {
   }) : _httpClient = httpClient ?? http.Client();
 
   bool get _supportsTemperature => !model.toLowerCase().startsWith('gpt-5');
-  Map<String, dynamic>? get _defaultReasoning =>
-      _supportsTemperature ? null : const <String, dynamic>{'effort': 'minimal'};
+  Map<String, dynamic>? get _defaultReasoning {
+    final effort = _defaultReasoningEffort(model);
+    return effort.isEmpty ? null : <String, dynamic>{'effort': effort};
+  }
+
   String _promptCacheKeyForFeature(String aiFeature) =>
       '$_promptCacheVersion:${aiFeature.trim().isEmpty ? 'ai_chat' : aiFeature.trim()}';
   String get _promptCacheRetention =>
-      _extendedPromptCacheRetentionModels.contains(model.trim().toLowerCase()) ? '24h' : _defaultPromptCacheRetention;
-  bool get _canUseDirectOpenAi => apiKey.trim().isNotEmpty && model.trim().isNotEmpty;
+      _extendedPromptCacheRetentionModels.contains(model.trim().toLowerCase())
+          ? '24h'
+          : _defaultPromptCacheRetention;
+  bool get _canUseDirectOpenAi =>
+      apiKey.trim().isNotEmpty && model.trim().isNotEmpty;
   bool get _isProxyEnabled => proxyApiBaseUrl.trim().isNotEmpty;
-  bool get _isUsingDebugSystemPrompt => kDebugMode && kDebugSystemPrompt.trim().isNotEmpty;
-  String get _llmRouteLabel => _isProxyEnabled ? 'llm_proxy' : (_canUseDirectOpenAi ? 'direct_openai' : 'unconfigured');
+  bool get _isUsingDebugSystemPrompt =>
+      kDebugMode && kDebugSystemPrompt.trim().isNotEmpty;
+  String get _llmRouteLabel => _isProxyEnabled
+      ? 'llm_proxy'
+      : (_canUseDirectOpenAi ? 'direct_openai' : 'unconfigured');
   String get _promptSourceLabel {
     if (_isProxyEnabled) {
       return 'llm_proxy_system_prompt';
     }
     if (_isUsingDebugSystemPrompt) {
-      return 'kDebugSystemPrompt2';
+      return 'kDebugSystemPrompt20';
     }
     return 'missing_direct_openai_prompt';
   }
@@ -218,11 +236,33 @@ class CloudLlmService {
     return debugPrompt;
   }
 
+  String _defaultReasoningEffort(String modelName) {
+    final normalized = modelName.trim().toLowerCase();
+    if (normalized.startsWith('gpt-5.4-mini')) {
+      return 'low';
+    }
+    if (normalized.startsWith('gpt-5-pro') ||
+        normalized.startsWith('gpt-5.2-pro') ||
+        normalized.startsWith('gpt-5.4-pro')) {
+      return 'high';
+    }
+    if (normalized.startsWith('gpt-5.4') ||
+        normalized.startsWith('gpt-5.2') ||
+        normalized.startsWith('gpt-5.1')) {
+      return 'none';
+    }
+    if (normalized.startsWith('gpt-5')) {
+      return 'minimal';
+    }
+    return '';
+  }
+
   List<Map<String, dynamic>> _buildInputMessages({
     required List<Map<String, String>> conversation,
     required String userText,
     required String projectSnapshot,
     required String selectionSnapshot,
+    required String librarySnapshot,
     MixingResult? pendingMix,
   }) {
     return [
@@ -231,6 +271,11 @@ class CloudLlmService {
         {
           'role': 'user',
           'content': 'SELECTION_SNAPSHOT:\n$selectionSnapshot',
+        },
+      if (librarySnapshot.trim().isNotEmpty)
+        {
+          'role': 'user',
+          'content': 'LIBRARY_SNAPSHOT:\n$librarySnapshot',
         },
       if (pendingMix != null)
         {
@@ -249,98 +294,780 @@ class CloudLlmService {
     ];
   }
 
-  Map<String, dynamic> _buildOpenAiRequestBody({
-    required List<Map<String, dynamic>> inputMessages,
-    String? aiFeature,
+  Map<String, dynamic> _dawTargetSchema({
+    bool allowMasterScope = false,
   }) {
-    final normalizedAiFeature = _normalizeAiFeatureForProxy(aiFeature);
-    final body = <String, dynamic>{
-      'model': model,
-      'instructions': _effectiveSystemPrompt,
-      'prompt_cache_key': _promptCacheKeyForFeature(normalizedAiFeature),
-      'prompt_cache_retention': _promptCacheRetention,
-      'input': inputMessages,
-      'tools': [
-        {
-          'type': 'function',
-          'name': 'informational_response',
-          'parameters': {
-            'type': 'object',
-            'properties': {
-              'message': {'type': 'string', 'description': 'Pure informational response. No mix changes.'},
-              'cancels_pending': {'type': 'boolean', 'description': 'Whether a pending mix is canceled or rejected.'},
-            },
-            'required': ['message', 'cancels_pending'],
+    final scopeValues = <String>[
+      'selected',
+      'all_audio',
+      'all',
+      if (allowMasterScope) 'master',
+    ];
+    return <String, dynamic>{
+      'type': 'object',
+      'description':
+          'Target reference for the DAW action. Use existing project context and selection to fill what you already know. Resolve relative references like top/bottom/first/last row or line into an explicit row_index when the intended row is clear, preferring occupied-row context over empty rows. Resolve natural identity references using labels, filenames, instrument names or IDs, clip kind, and row/source cues from the snapshots. Use prefer_selected only for explicit selection references such as "this one", "that one", "here", or "selected".',
+      'properties': <String, dynamic>{
+        'clip_index': {
+          'type': 'integer',
+          'minimum': 0,
+        },
+        'clip_indices': {
+          'type': 'array',
+          'items': {
+            'type': 'integer',
+            'minimum': 0,
+          },
+          'minItems': 1,
+        },
+        'row_index': {
+          'type': 'integer',
+          'minimum': 0,
+        },
+        'scope': {
+          'type': 'string',
+          'enum': scopeValues,
+        },
+        'prefer_selected': {
+          'type': 'boolean',
+          'description':
+              'Use when the user refers to the current selection with phrases like "this one", "that one", or "here".',
+        },
+        'automation_target_id': {'type': 'string'},
+        'target_id': {'type': 'string'},
+        'lane_id': {'type': 'string'},
+        'effect_index': {
+          'type': 'integer',
+          'minimum': 0,
+        },
+        'effect_name': {'type': 'string'},
+        'plugin_name': {'type': 'string'},
+        'effect_name_contains': {'type': 'string'},
+        'param_id': {'type': 'string'},
+        'param_name': {'type': 'string'},
+      },
+      'additionalProperties': true,
+    };
+  }
+
+  Map<String, dynamic> _midiNoteSchema() => <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'pitch': {
+            'type': 'integer',
+            'minimum': 0,
+            'maximum': 127,
+            'description':
+                'MIDI note number, for example 60 for middle C. Do not use note names like C4.',
+          },
+          'start_beat': {
+            'type': 'number',
+            'description':
+                'Zero-based start beat in the clip. Measure 1 beat 1 is start_beat 0.',
+          },
+          'length_beats': {
+            'type': 'number',
+            'exclusiveMinimum': 0,
+            'description': 'Note length in beats.',
+          },
+          'velocity': {
+            'type': 'number',
+            'minimum': 0,
+            'maximum': 1,
+            'description':
+                'Normalized velocity from 0 to 1. Do not use 1 to 127 velocity values.',
           },
         },
-        {
+        'required': ['pitch', 'start_beat', 'length_beats'],
+        'additionalProperties': true,
+      };
+
+  List<Map<String, dynamic>> _directOpenAiToolSchemas() =>
+      <Map<String, dynamic>>[
+        <String, dynamic>{
+          'type': 'function',
+          'name': 'informational_response',
+          'strict': false,
+          'description':
+              'Use for explanations, summaries, unsupported or unimplemented requests, empty-project replies, and any case where no valid executable action can be formed. Also use this when the user\'s main request depends on unsupported features and a nearby supported tool would be misleading.',
+          'parameters': <String, dynamic>{
+            'type': 'object',
+            'properties': <String, dynamic>{
+              'message': {
+                'type': 'string',
+                'description':
+                    'Short user-facing response. Also use this for unsupported or not-yet-implemented features.',
+              },
+              'cancels_pending': {
+                'type': 'boolean',
+                'description':
+                    'True only when the user clearly cancels or rejects a pending mix proposal.',
+              },
+            },
+            'required': ['message', 'cancels_pending'],
+            'additionalProperties': false,
+          },
+        },
+        <String, dynamic>{
           'type': 'function',
           'name': 'daw_assistant_actions',
-          'parameters': {
+          'strict': false,
+          'description':
+              'Use for tutorials, project edits like BPM changes, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files or advertised role aliases like role:kick, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. For 8+ bar starter grooves or build-ups, prefer a workable scaffold with repetition plus light variation or fills instead of one identical bar copied forever. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Inspect existing plugin chains and selected MIDI note state when available: prefer modifying, unbypassing, extending, or reshaping what is already there when it is close, and remove conflicting effects or rewrite notes only when the current state clearly fights the user goal. Never use for pure sonic mix changes. Only emit actions the app can actually execute.',
+          'parameters': <String, dynamic>{
             'type': 'object',
-            'properties': {
+            'properties': <String, dynamic>{
               'assistant_message': {
                 'type': 'string',
                 'description':
-                    'Required short response shown to the user in their language; must be specific and non-placeholder.',
+                    'Short user-facing message in the user language. Must match the emitted action type, must not be a placeholder, and must not switch languages unless the user did.',
               },
               'actions': {
                 'type': 'array',
+                'minItems': 1,
                 'items': {
-                  'type': 'object',
-                  'properties': {
-                    'type': {
-                      'type': 'string',
-                      'enum': [
-                        'tutorial',
-                        'clarify',
-                        'clip_edit',
-                        'effect_edit',
-                        'automation_edit',
-                        'midi_compose',
-                        'stem_separate',
-                        'role_override',
-                      ],
-                    },
-                    'data': {
+                  'oneOf': [
+                    {
                       'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['project_edit'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['set_tempo'],
+                            },
+                            'tempo_bpm': {
+                              'type': 'number',
+                              'minimum': 20,
+                              'maximum': 999,
+                            },
+                            'bpm': {
+                              'type': 'number',
+                              'minimum': 20,
+                              'maximum': 999,
+                            },
+                          },
+                          'required': ['operation'],
+                          'anyOf': [
+                            {
+                              'required': ['tempo_bpm'],
+                            },
+                            {
+                              'required': ['bpm'],
+                            },
+                          ],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
                     },
-                  },
-                  'required': ['type', 'data'],
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['sample_insert'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': [
+                                'insert_audio_clips',
+                                'replace_audio_clips',
+                              ],
+                            },
+                            'items': {
+                              'type': 'array',
+                              'minItems': 1,
+                              'items': {
+                                'type': 'object',
+                                'properties': {
+                                  'library_path': {'type': 'string'},
+                                  'target': _dawTargetSchema(),
+                                  'row_index': {
+                                    'type': 'integer',
+                                    'minimum': 0,
+                                  },
+                                  'start_ms': {'type': 'number'},
+                                  'start_measure': {'type': 'number'},
+                                  'start_beat': {'type': 'number'},
+                                  'repeat_count': {
+                                    'type': 'integer',
+                                    'minimum': 1,
+                                  },
+                                  'length_ms': {'type': 'number'},
+                                  'length_measures': {'type': 'number'},
+                                  'length_beats': {'type': 'number'},
+                                  'until_ms': {'type': 'number'},
+                                  'until_measure': {'type': 'number'},
+                                  'until_beat': {'type': 'number'},
+                                  'step_ms': {'type': 'number'},
+                                  'step_measures': {'type': 'number'},
+                                  'step_beats': {'type': 'number'},
+                                  'delta_rows': {
+                                    'type': 'integer',
+                                  },
+                                },
+                                'required': ['library_path'],
+                                'additionalProperties': true,
+                              },
+                            },
+                          },
+                          'required': ['operation', 'items'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['tutorial'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'topic': {'type': 'string'},
+                            'steps': {
+                              'type': 'array',
+                              'minItems': 1,
+                              'items': {
+                                'type': 'object',
+                                'properties': {
+                                  'text': {'type': 'string'},
+                                  'target_id': {'type': 'string'},
+                                },
+                                'required': ['text'],
+                                'additionalProperties': true,
+                              },
+                            },
+                          },
+                          'anyOf': [
+                            {
+                              'required': ['topic'],
+                            },
+                            {
+                              'required': ['steps'],
+                            },
+                          ],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['clarify'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'question': {'type': 'string'},
+                            'options': {
+                              'type': 'array',
+                              'items': {'type': 'string'},
+                              'minItems': 2,
+                            },
+                          },
+                          'required': ['question', 'options'],
+                          'additionalProperties': false,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['clip_edit'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': [
+                                'trim',
+                                'auto_trim',
+                                'cut',
+                                'stretch',
+                                'move',
+                                'tempo_follow',
+                                'auto_bpm_align',
+                                'tempo_detect_set_project',
+                                'duplicate',
+                                'delete',
+                                'dialog_cleanup',
+                                'dialog_remove_range',
+                                'dialog_tighten_pauses',
+                                'dialog_lift_quiet',
+                              ],
+                            },
+                            'target': _dawTargetSchema(),
+                            'trim_side': {
+                              'type': 'string',
+                              'enum': ['start', 'end'],
+                            },
+                            'new_start_ms': {'type': 'number'},
+                            'paste_start_ms': {'type': 'number'},
+                            'delta_ms': {'type': 'number'},
+                            'new_start_measure': {'type': 'number'},
+                            'paste_start_measure': {'type': 'number'},
+                            'delta_measures': {'type': 'number'},
+                            'step_ms': {'type': 'number'},
+                            'step_measures': {'type': 'number'},
+                            'step_beats': {'type': 'number'},
+                            'repeat_count': {
+                              'type': 'integer',
+                              'minimum': 1,
+                            },
+                            'length_ms': {'type': 'number'},
+                            'length_measures': {'type': 'number'},
+                            'length_beats': {'type': 'number'},
+                            'until_ms': {'type': 'number'},
+                            'until_measure': {'type': 'number'},
+                            'until_beat': {'type': 'number'},
+                            'direction': {
+                              'type': 'string',
+                              'enum': ['left', 'right', 'up', 'down'],
+                            },
+                            'new_row_index': {
+                              'type': 'integer',
+                              'minimum': 0,
+                            },
+                            'timeline_duration_ms': {'type': 'number'},
+                            'duration_ms': {'type': 'number'},
+                            'beats_per_bar': {'type': 'number'},
+                            'from_ms': {'type': 'number'},
+                            'to_ms': {'type': 'number'},
+                            'ranges': {
+                              'type': 'array',
+                              'items': {
+                                'type': 'object',
+                                'properties': {
+                                  'from_ms': {'type': 'number'},
+                                  'to_ms': {'type': 'number'},
+                                },
+                                'required': ['from_ms', 'to_ms'],
+                                'additionalProperties': false,
+                              },
+                            },
+                            'max_edits': {
+                              'type': 'integer',
+                              'minimum': 1,
+                            },
+                            'boost_db': {'type': 'number'},
+                            'max_gain': {'type': 'number'},
+                            'min_quiet_ms': {'type': 'number'},
+                            'min_pause_ms': {'type': 'number'},
+                            'keep_pause_ms': {'type': 'number'},
+                          },
+                          'required': ['operation', 'target'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['effect_edit'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': [
+                                'add',
+                                'remove',
+                                'bypass',
+                                'unbypass',
+                                'toggle_bypass',
+                              ],
+                            },
+                            'target': _dawTargetSchema(allowMasterScope: true),
+                          },
+                          'required': ['operation', 'target'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['automation_edit'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': [
+                                'set_points',
+                                'add_ramp',
+                                'clear',
+                                'create_clip',
+                                'duplicate_clip',
+                                'move_clip',
+                                'delete_clip',
+                                'clear_clips',
+                                'mute_clip',
+                                'unmute_clip',
+                                'toggle_clip_mute',
+                                'set_clip_points',
+                                'make_unique_clip',
+                                'apply_template',
+                              ],
+                            },
+                            'target': _dawTargetSchema(),
+                            'template': {'type': 'string'},
+                            'points': {
+                              'type': 'array',
+                              'minItems': 1,
+                              'items': {
+                                'type': 'object',
+                                'properties': {
+                                  'time_ms': {'type': 'number'},
+                                  'value': {'type': 'number'},
+                                },
+                                'required': ['time_ms', 'value'],
+                                'additionalProperties': true,
+                              },
+                            },
+                            'start_ms': {'type': 'number'},
+                            'length_ms': {'type': 'number'},
+                            'delta_ms': {'type': 'number'},
+                            'source_clip_index': {
+                              'type': 'integer',
+                              'minimum': 0,
+                            },
+                            'source_row_index': {
+                              'type': 'integer',
+                              'minimum': 0,
+                            },
+                            'source_role': {'type': 'string'},
+                            'min_spacing_ms': {'type': 'number'},
+                            'duck_value': {'type': 'number'},
+                            'recover_value': {'type': 'number'},
+                            'direction': {
+                              'type': 'string',
+                              'enum': ['left', 'right'],
+                            },
+                            'from_ms': {'type': 'number'},
+                            'to_ms': {'type': 'number'},
+                            'start_value': {'type': 'number'},
+                            'end_value': {'type': 'number'},
+                            'value_mode': {
+                              'type': 'string',
+                              'enum': ['normalized', 'real'],
+                            },
+                          },
+                          'required': ['operation', 'target'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['midi_compose'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': [
+                                'create_clip',
+                                'compose_bassline',
+                                'compose_pattern',
+                                'replace_notes',
+                                'append_notes',
+                                'transpose_notes',
+                                'convert_audio_to_midi',
+                              ],
+                            },
+                            'target': _dawTargetSchema(),
+                            'notes': {
+                              'type': 'array',
+                              'minItems': 1,
+                              'items': _midiNoteSchema(),
+                            },
+                            'progression': {
+                              'oneOf': [
+                                {
+                                  'type': 'array',
+                                  'items': {'type': 'string'},
+                                  'minItems': 1,
+                                },
+                                {
+                                  'type': 'string',
+                                },
+                              ],
+                            },
+                            'beats_per_chord': {'type': 'number'},
+                            'notes_per_chord': {
+                              'type': 'integer',
+                              'minimum': 1
+                            },
+                            'octave': {'type': 'integer'},
+                            'semitones': {'type': 'number'},
+                            'octaves': {'type': 'number'},
+                            'instrument_id': {
+                              'type': 'string',
+                              'description':
+                                  'Built-in instrument id from LIBRARY_SNAPSHOT, for example mixroom.sub_bass or mixroom.air_pluck. Use this when creating a new MIDI clip on a packaged instrument. For generic harmony, chord, or piano MIDI requests with no specified instrument, prefer sfz.vsco.upright_piano when it is available in LIBRARY_SNAPSHOT.',
+                            },
+                            'instrument_name': {'type': 'string'},
+                            'start_ms': {'type': 'number'},
+                            'create_new_clip': {'type': 'boolean'},
+                            'preserve_existing_notes': {'type': 'boolean'},
+                          },
+                          'required': ['operation', 'target'],
+                          'anyOf': [
+                            {
+                              'required': ['notes'],
+                            },
+                            {
+                              'required': ['progression'],
+                            },
+                            {
+                              'properties': {
+                                'operation': {'const': 'transpose_notes'},
+                              },
+                              'required': ['semitones'],
+                            },
+                            {
+                              'properties': {
+                                'operation': {'const': 'transpose_notes'},
+                              },
+                              'required': ['octaves'],
+                            },
+                            {
+                              'properties': {
+                                'operation': {
+                                  'const': 'convert_audio_to_midi',
+                                },
+                              },
+                            },
+                            {
+                              'properties': {
+                                'operation': {
+                                  'enum': ['replace_notes', 'append_notes'],
+                                },
+                                'preserve_existing_notes': {'const': true},
+                              },
+                              'anyOf': [
+                                {
+                                  'required': ['length_measures'],
+                                },
+                                {
+                                  'required': ['length_beats'],
+                                },
+                              ],
+                            },
+                          ],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['midi_compose'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['chop_notes'],
+                            },
+                            'target': _dawTargetSchema(),
+                            'subdivision': {
+                              'type': 'integer',
+                              'minimum': 1,
+                            },
+                            'velocity_decay_per_slice': {
+                              'type': 'number',
+                            },
+                            'velocity_jitter': {
+                              'type': 'number',
+                            },
+                            'velocity_floor': {
+                              'type': 'number',
+                            },
+                          },
+                          'required': ['operation', 'target', 'subdivision'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['stem_separate'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['vocal_instrumental'],
+                            },
+                            'target': _dawTargetSchema(),
+                          },
+                          'required': ['operation', 'target'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['role_override'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['set'],
+                            },
+                            'target': _dawTargetSchema(),
+                            'role': {
+                              'type': 'string',
+                              'enum': [
+                                'vocals',
+                                'drums',
+                                'bass',
+                                'guitar',
+                                'synth',
+                                'other',
+                              ],
+                            },
+                          },
+                          'required': ['operation', 'target', 'role'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['role_override'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['clear'],
+                            },
+                            'target': _dawTargetSchema(),
+                          },
+                          'required': ['operation', 'target'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                  ],
                 },
               },
             },
             'required': ['assistant_message', 'actions'],
+            'additionalProperties': false,
           },
         },
-        {
+        <String, dynamic>{
           'type': 'function',
           'name': 'mix_model_request',
-          'parameters': {
+          'strict': false,
+          'description':
+              'Use only for sonic mix changes on existing project material. Never use for clip movement, plugin CRUD, automation edits, MIDI writing, tutorials, stem separation, or unsupported features. Use reset_fx only for true reset/remix cases or when the current chain clearly conflicts with the requested broad vibe.',
+          'parameters': <String, dynamic>{
             'type': 'object',
-            'properties': {
+            'properties': <String, dynamic>{
               'mode': {
                 'type': 'string',
                 'enum': ['execute', 'propose'],
+                'description':
+                    'Use execute for clear actionable mix changes. Use propose only for alternative approaches that need approval.',
               },
               'assistant_message': {
                 'type': 'string',
                 'description':
-                    'Required single unified message describing the overall mix change; must be specific and non-placeholder.',
+                    'Single short user-facing message describing the overall mix action in the user language.',
               },
-              'asks_permission': {'type': 'boolean'},
+              'asks_permission': {
+                'type': 'boolean',
+              },
               'actions': {
                 'type': 'array',
-                'description': 'List of mix actions to apply',
+                'minItems': 1,
+                'description': 'One or more mix actions to apply.',
                 'items': {
                   'type': 'object',
                   'properties': {
                     'goal': {
                       'type': 'object',
                       'properties': {
-                        'type': {'type': 'string'},
+                        'type': {
+                          'type': 'string',
+                          'enum': ['mix_request'],
+                          'description':
+                              'Always mix_request. Put the sonic intent in intents[].kind.',
+                        },
                         'intents': {
                           'type': 'array',
+                          'minItems': 1,
                           'items': {
                             'type': 'object',
                             'properties': {
@@ -362,7 +1089,17 @@ class CloudLlmService {
                               },
                               'direction': {
                                 'type': 'string',
-                                'enum': ['up', 'down', 'left', 'right', 'center', 'widen', 'narrow', 'remove', 'null'],
+                                'enum': [
+                                  'up',
+                                  'down',
+                                  'left',
+                                  'right',
+                                  'center',
+                                  'widen',
+                                  'narrow',
+                                  'remove',
+                                  'null'
+                                ],
                               },
                               'descriptor': {
                                 'type': 'string',
@@ -419,9 +1156,88 @@ class CloudLlmService {
                           ],
                         },
                         'intensity': {'type': 'number'},
-                        'reset_fx': {'type': 'boolean'},
+                        'execution_profile': {
+                          'type': 'string',
+                          'enum': [
+                            'producer_safe',
+                            'creative_bold',
+                            'experimental_extreme',
+                          ],
+                          'description':
+                              'How conservative or stylized the mix lane should be. producer_safe = tasteful standard mix decisions, creative_bold = obvious/stylized but still musical, experimental_extreme = intentionally exaggerated or destructive.',
+                        },
+                        'audibility': {
+                          'type': 'string',
+                          'enum': [
+                            'subtle',
+                            'noticeable',
+                            'obvious',
+                            'extreme',
+                          ],
+                          'description':
+                              'How audible the result should feel to the user, independent of the intent kind.',
+                        },
+                        'reference_target': {
+                          'type': 'object',
+                          'oneOf': [
+                            {
+                              'properties': {
+                                'row_index': {
+                                  'type': 'integer',
+                                  'minimum': 0,
+                                },
+                                'confidence': {'type': 'number'},
+                              },
+                              'required': ['row_index', 'confidence'],
+                              'additionalProperties': false,
+                            },
+                            {
+                              'properties': {
+                                'prefer_selected': {
+                                  'type': 'boolean',
+                                  'enum': [true]
+                                },
+                                'confidence': {'type': 'number'},
+                              },
+                              'required': ['prefer_selected', 'confidence'],
+                              'additionalProperties': false,
+                            },
+                          ],
+                          'description':
+                              'Optional in-project reference row for mix matching. Use row_index when clear from PROJECT_SNAPSHOT, especially when labels, filenames, coverage, source_type, or reference cues make one row obviously reference-like. Use prefer_selected when the reference track is currently selected.',
+                        },
+                        'reference_mode': {
+                          'type': 'string',
+                          'enum': [
+                            'tone',
+                            'loudness',
+                            'width',
+                            'glue',
+                            'full_mix',
+                          ],
+                          'description':
+                              'Which dimensions of the in-project reference to match. full_mix means broad tone+loudness+width+glue matching.',
+                        },
+                        'reference_closeness': {
+                          'type': 'string',
+                          'enum': ['loose', 'balanced', 'close'],
+                          'description':
+                              'How tightly to chase the in-project reference profile.',
+                        },
+                        'reset_fx': {
+                          'type': 'boolean',
+                          'description':
+                              'Set true only when a reset/remix or clean rebuild is clearly preferable to tweaking the current chain. Leave false for ordinary incremental mix moves.',
+                        },
                       },
-                      'required': ['type', 'intents', 'target', 'intensity'],
+                      'required': [
+                        'type',
+                        'intents',
+                        'target',
+                        'intensity',
+                        'execution_profile',
+                        'audibility',
+                      ],
                     },
                   },
                   'required': ['goal'],
@@ -429,10 +1245,26 @@ class CloudLlmService {
               },
             },
             'required': ['mode', 'assistant_message', 'actions'],
+            'additionalProperties': false,
           },
         },
-      ],
+      ];
+
+  Map<String, dynamic> _buildOpenAiRequestBody({
+    required List<Map<String, dynamic>> inputMessages,
+    String? aiFeature,
+  }) {
+    final normalizedAiFeature = _normalizeAiFeatureForProxy(aiFeature);
+    final body = <String, dynamic>{
+      'model': model,
+      'instructions': _effectiveSystemPrompt,
+      'prompt_cache_key': _promptCacheKeyForFeature(normalizedAiFeature),
+      'prompt_cache_retention': _promptCacheRetention,
+      'input': inputMessages,
+      'tools': _directOpenAiToolSchemas(),
       'tool_choice': 'required',
+      'parallel_tool_calls': false,
+      'max_output_tokens': _directOpenAiMaxOutputTokens,
     };
     if (_supportsTemperature) {
       body['temperature'] = 0.2;
@@ -449,6 +1281,7 @@ class CloudLlmService {
     required String userText,
     required String projectSnapshot,
     required String selectionSnapshot,
+    required String librarySnapshot,
     String? promptTraceId,
     String? projectId,
     String? aiFeature,
@@ -464,8 +1297,12 @@ class CloudLlmService {
           .toList(),
       'user_text': userText,
       'project_snapshot': projectSnapshot,
-      if (selectionSnapshot.trim().isNotEmpty) 'selection_snapshot': selectionSnapshot,
-      if ((promptTraceId ?? '').trim().isNotEmpty) 'prompt_trace_id': promptTraceId!.trim(),
+      if (selectionSnapshot.trim().isNotEmpty)
+        'selection_snapshot': selectionSnapshot,
+      if (librarySnapshot.trim().isNotEmpty)
+        'library_snapshot': librarySnapshot,
+      if ((promptTraceId ?? '').trim().isNotEmpty)
+        'prompt_trace_id': promptTraceId!.trim(),
       if ((projectId ?? '').trim().isNotEmpty) 'project_id': projectId,
       if (normalizedAiFeature.isNotEmpty) 'ai_feature': normalizedAiFeature,
       if (pendingMix != null) 'pending_mix': pendingMix.toJson(),
@@ -489,13 +1326,16 @@ class CloudLlmService {
 
   Uri _resolveProxyUri({String? pathOverride}) {
     final base = proxyApiBaseUrl.trim();
-    final path = (pathOverride ?? proxyPath).trim().isEmpty ? '/v1/llm/responses' : (pathOverride ?? proxyPath);
+    final path = (pathOverride ?? proxyPath).trim().isEmpty
+        ? '/v1/llm/responses'
+        : (pathOverride ?? proxyPath);
     final normalizedPath = path.startsWith('/') ? path : '/$path';
     return Uri.parse('$base$normalizedPath');
   }
 
   Future<String?> _resolveProxyAuthToken({bool forceRefresh = false}) async {
-    final primaryProvider = forceRefresh ? refreshAuthTokenProvider : authTokenProvider;
+    final primaryProvider =
+        forceRefresh ? refreshAuthTokenProvider : authTokenProvider;
     final primaryToken = await primaryProvider?.call();
     final safePrimaryToken = primaryToken?.trim() ?? '';
     if (safePrimaryToken.isNotEmpty) return safePrimaryToken;
@@ -514,6 +1354,7 @@ class CloudLlmService {
     required String userText,
     required String projectSnapshot,
     required String selectionSnapshot,
+    required String librarySnapshot,
     required String? promptTraceId,
     required String? projectId,
     required String? aiFeature,
@@ -530,6 +1371,7 @@ class CloudLlmService {
         userText: userText,
         projectSnapshot: projectSnapshot,
         selectionSnapshot: selectionSnapshot,
+        librarySnapshot: librarySnapshot,
         promptTraceId: promptTraceId,
         projectId: projectId,
         aiFeature: aiFeature,
@@ -550,6 +1392,7 @@ class CloudLlmService {
     required Uri uri,
     required Map<String, String> headers,
     required Map<String, dynamic> body,
+    Duration? timeoutOverride,
   }) {
     return _httpClient
         .post(
@@ -557,7 +1400,7 @@ class CloudLlmService {
           headers: headers,
           body: jsonEncode(body),
         )
-        .timeout(requestTimeout);
+        .timeout(timeoutOverride ?? requestTimeout);
   }
 
   Future<http.Response> _getJson({
@@ -632,8 +1475,10 @@ class CloudLlmService {
     final responseModel = payload['model']?.toString().trim() ?? '';
     if (responseId.isNotEmpty || responseModel.isNotEmpty) {
       meta['observability'] = <String, dynamic>{
-        if (meta['observability'] is Map<String, dynamic>) ...(meta['observability'] as Map<String, dynamic>),
-        if (meta['observability'] is Map) ...(meta['observability'] as Map).cast<String, dynamic>(),
+        if (meta['observability'] is Map<String, dynamic>)
+          ...(meta['observability'] as Map<String, dynamic>),
+        if (meta['observability'] is Map)
+          ...(meta['observability'] as Map).cast<String, dynamic>(),
         if (responseId.isNotEmpty) 'provider_response_id': responseId,
         if (responseModel.isNotEmpty) 'effective_model': responseModel,
       };
@@ -650,8 +1495,10 @@ class CloudLlmService {
     };
     final existingObservability = merged['observability'];
     final observability = <String, dynamic>{
-      if (existingObservability is Map<String, dynamic>) ...existingObservability,
-      if (existingObservability is Map) ...existingObservability.cast<String, dynamic>(),
+      if (existingObservability is Map<String, dynamic>)
+        ...existingObservability,
+      if (existingObservability is Map)
+        ...existingObservability.cast<String, dynamic>(),
       ...localObservability,
     };
     merged['observability'] = observability;
@@ -677,11 +1524,15 @@ class CloudLlmService {
     if (remaining.inSeconds <= 0) return 'a moment';
     if (remaining.inDays >= 1) {
       final hours = remaining.inHours.remainder(24);
-      return hours > 0 ? '${remaining.inDays}d ${hours}h' : '${remaining.inDays}d';
+      return hours > 0
+          ? '${remaining.inDays}d ${hours}h'
+          : '${remaining.inDays}d';
     }
     if (remaining.inHours >= 1) {
       final minutes = remaining.inMinutes.remainder(60);
-      return minutes > 0 ? '${remaining.inHours}h ${minutes}m' : '${remaining.inHours}h';
+      return minutes > 0
+          ? '${remaining.inHours}h ${minutes}m'
+          : '${remaining.inHours}h';
     }
     if (remaining.inMinutes >= 1) {
       return '${remaining.inMinutes}m';
@@ -691,7 +1542,8 @@ class CloudLlmService {
 
   String _rateLimitMessage(AiPromptRateLimitStatus? status, String fallback) {
     if (status == null) return fallback;
-    final limitLabel = status.blockedBy == 'weekly_prompts' ? 'weekly' : 'daily';
+    final limitLabel =
+        status.blockedBy == 'weekly_prompts' ? 'weekly' : 'daily';
     final wait = _formatResetCountdown(status.blockedResetAt);
     if (wait.isEmpty) {
       return 'You have reached the $limitLabel prompt limit. Please try again later.';
@@ -756,6 +1608,26 @@ class CloudLlmService {
     }
   }
 
+  String _invalidToolCallFallbackText(
+    String toolName,
+    dynamic rawArgs, {
+    required String userText,
+  }) {
+    final decoded = _decodeToolArgs(rawArgs);
+    final candidate = decoded == null
+        ? ''
+        : _sanitizeUserFacingText(
+            decoded['assistant_message'] ?? decoded['message'],
+            toolName: toolName,
+            userText: userText,
+            allowFallback: false,
+          );
+    if (candidate.isNotEmpty) {
+      return '$candidate\n\nI understood the intent, but the action payload was incomplete or invalid, so nothing changed.';
+    }
+    return "I understood the intent, but the action payload was incomplete or invalid, so nothing changed.";
+  }
+
   String _sanitizeUserFacingText(
     Object? value, {
     required String toolName,
@@ -767,11 +1639,8 @@ class CloudLlmService {
     if (raw.isEmpty) return allowFallback ? fallback : '';
 
     final lowered = raw.toLowerCase();
-    if (lowered.contains('mix_model_request') ||
-        lowered.contains('daw_assistant_actions') ||
-        lowered.contains('informational_response') ||
-        lowered.contains('"assistant_message"') ||
-        lowered.contains('"row_index"') ||
+    if (_toolTextLeakMarkers.any(lowered.contains) ||
+        RegExp(r'\bisempty\s*=\s*(true|false)\b').hasMatch(lowered) ||
         raw.startsWith('{') ||
         raw.startsWith('[')) {
       return allowFallback ? fallback : '';
@@ -780,9 +1649,32 @@ class CloudLlmService {
     return raw;
   }
 
+  static const Set<String> _toolTextLeakMarkers = <String>{
+    'mix_model_request',
+    'daw_assistant_actions',
+    'informational_response',
+    '"assistant_message"',
+    '"row_index"',
+    '"target_id"',
+    'project snapshot',
+    'selection snapshot',
+    'project_snapshot',
+    'selection_snapshot',
+    'pending_mix_proposal',
+    'isempty = true',
+    'isempty = false',
+    'isempty=true',
+    'isempty=false',
+    'clip_index',
+    'clip_indices',
+    'row_index:',
+  };
+
   static const Set<String> _dawAssistantActionTypes = <String>{
     'tutorial',
     'clarify',
+    'project_edit',
+    'sample_insert',
     'clip_edit',
     'effect_edit',
     'automation_edit',
@@ -791,11 +1683,623 @@ class CloudLlmService {
     'role_override',
   };
 
+  static const Set<String> _allowedClipEditOperations = <String>{
+    'trim',
+    'auto_trim',
+    'cut',
+    'stretch',
+    'move',
+    'tempo_follow',
+    'auto_bpm_align',
+    'tempo_detect_set_project',
+    'duplicate',
+    'delete',
+    'dialog_cleanup',
+    'dialog_remove_range',
+    'dialog_tighten_pauses',
+    'dialog_lift_quiet',
+  };
+
+  static const Set<String> _allowedEffectEditOperations = <String>{
+    'add',
+    'remove',
+    'bypass',
+    'unbypass',
+    'toggle_bypass',
+  };
+
+  static const Set<String> _allowedAutomationEditOperations = <String>{
+    'set_points',
+    'add_ramp',
+    'clear',
+    'create_clip',
+    'duplicate_clip',
+    'move_clip',
+    'delete_clip',
+    'clear_clips',
+    'mute_clip',
+    'unmute_clip',
+    'toggle_clip_mute',
+    'set_clip_points',
+    'make_unique_clip',
+    'apply_template',
+  };
+
+  static const Set<String> _allowedMidiComposeOperations = <String>{
+    'create_clip',
+    'compose_bassline',
+    'compose_pattern',
+    'replace_notes',
+    'append_notes',
+    'chop_notes',
+    'transpose_notes',
+    'convert_audio_to_midi',
+  };
+
+  static const Set<String> _allowedStemSeparateOperations = <String>{
+    'vocal_instrumental',
+  };
+
+  static const Set<String> _allowedProjectEditOperations = <String>{
+    'set_tempo',
+  };
+
+  static const Set<String> _allowedSampleInsertOperations = <String>{
+    'insert_audio_clips',
+    'replace_audio_clips',
+  };
+
+  static const Set<String> _allowedRoleOverrideOperations = <String>{
+    'set',
+    'clear',
+  };
+
+  String _normalizeActionToken(Object? raw) {
+    return raw
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+  }
+
+  String _normalizeClipEditOperation(Object? raw) {
+    final token = _normalizeActionToken(raw);
+    const aliases = <String, String>{
+      'split': 'cut',
+      'split_clip': 'cut',
+      'cut_clip': 'cut',
+      'resize': 'stretch',
+      'resize_clip': 'stretch',
+      'move_clip': 'move',
+      'reposition': 'move',
+      'shift': 'move',
+      'nudge': 'move',
+      'copy': 'duplicate',
+      'copy_clip': 'duplicate',
+      'remove': 'delete',
+      'remove_clip': 'delete',
+      'delete_clip': 'delete',
+      'tempo_follow_project': 'tempo_follow',
+      'align_tempo': 'auto_bpm_align',
+      'align_to_project_tempo': 'auto_bpm_align',
+      'detect_tempo_set_project': 'tempo_detect_set_project',
+    };
+    return aliases[token] ?? token;
+  }
+
+  String _normalizeEffectEditOperation(Object? raw) {
+    final token = _normalizeActionToken(raw);
+    const aliases = <String, String>{
+      'delete': 'remove',
+      'delete_effect': 'remove',
+      'remove_effect': 'remove',
+      'take_out': 'remove',
+      'insert': 'add',
+      'ensure': 'add',
+      'ensure_effect': 'add',
+      'add_effect': 'add',
+      'insert_effect': 'add',
+      'disable': 'bypass',
+      'mute': 'bypass',
+      'enable': 'unbypass',
+      'unmute': 'unbypass',
+      'toggle': 'toggle_bypass',
+    };
+    return aliases[token] ?? token;
+  }
+
+  String _normalizeAutomationEditOperation(Object? raw) {
+    return _normalizeActionToken(raw);
+  }
+
+  String _normalizeProjectEditOperation(Object? raw) {
+    final token = _normalizeActionToken(raw);
+    const aliases = <String, String>{
+      'set_bpm': 'set_tempo',
+      'change_bpm': 'set_tempo',
+      'set_project_bpm': 'set_tempo',
+      'change_project_bpm': 'set_tempo',
+      'set_project_tempo': 'set_tempo',
+      'change_tempo': 'set_tempo',
+    };
+    return aliases[token] ?? token;
+  }
+
+  String _normalizeSampleInsertOperation(Object? raw) {
+    final token = _normalizeActionToken(raw);
+    const aliases = <String, String>{
+      'insert_audio_clip': 'insert_audio_clips',
+      'insert_sample': 'insert_audio_clips',
+      'insert_samples': 'insert_audio_clips',
+      'add_sample': 'insert_audio_clips',
+      'add_samples': 'insert_audio_clips',
+      'insert_library_audio': 'insert_audio_clips',
+      'replace_audio_clip': 'replace_audio_clips',
+      'replace_sample': 'replace_audio_clips',
+      'replace_samples': 'replace_audio_clips',
+      'swap_sample': 'replace_audio_clips',
+      'swap_samples': 'replace_audio_clips',
+      'swap_audio_clips': 'replace_audio_clips',
+      'change_sample': 'replace_audio_clips',
+    };
+    return aliases[token] ?? token;
+  }
+
+  String _normalizeMidiComposeOperation(Object? raw) {
+    final token = _normalizeActionToken(raw);
+    const aliases = <String, String>{
+      'compose': 'compose_pattern',
+      'create': 'create_clip',
+      'create_clip': 'create_clip',
+      'new_clip': 'create_clip',
+      'new_midi_clip': 'create_clip',
+      'compose_notes': 'compose_pattern',
+      'write_pattern': 'compose_pattern',
+      'generate_pattern': 'compose_pattern',
+      'make_pattern': 'compose_pattern',
+      'compose_bass': 'compose_bassline',
+      'write_bassline': 'compose_bassline',
+      'generate_bassline': 'compose_bassline',
+      'make_bassline': 'compose_bassline',
+      'replace': 'replace_notes',
+      'overwrite_notes': 'replace_notes',
+      'set_notes': 'replace_notes',
+      'append': 'append_notes',
+      'add_notes': 'append_notes',
+      'extend_notes': 'append_notes',
+      'transpose': 'transpose_notes',
+      'transpose_note': 'transpose_notes',
+      'transpose_notes': 'transpose_notes',
+      'shift_pitch': 'transpose_notes',
+      'pitch_shift': 'transpose_notes',
+      'octave_up': 'transpose_notes',
+      'octave_down': 'transpose_notes',
+      'audio_to_midi': 'convert_audio_to_midi',
+      'convert_to_midi': 'convert_audio_to_midi',
+      'transcribe_audio': 'convert_audio_to_midi',
+      'extract_midi': 'convert_audio_to_midi',
+      'chop': 'chop_notes',
+      'chop_note': 'chop_notes',
+      'note_chop': 'chop_notes',
+      'note_chopper': 'chop_notes',
+      'splice_notes': 'chop_notes',
+      'slice_notes': 'chop_notes',
+      'split_notes': 'chop_notes',
+      'grid_chop': 'chop_notes',
+      'ratchet': 'chop_notes',
+      'stutter': 'chop_notes',
+    };
+    return aliases[token] ?? token;
+  }
+
+  String _normalizeRoleOverrideOperation(Object? raw) {
+    final token = _normalizeActionToken(raw);
+    if (token == 'remove' || token == 'unset' || token == 'delete') {
+      return 'clear';
+    }
+    return token;
+  }
+
+  bool _isKnownAutomationTemplate(String templateRaw) {
+    final template = templateRaw.trim().toLowerCase();
+    return template == 'sidechain' ||
+        template == 'sidechain_pump' ||
+        template == 'pump' ||
+        template == 'sidechain_from_kick' ||
+        template == 'kick_sidechain' ||
+        template == 'duck_to_kick' ||
+        template == 'kick_duck' ||
+        template == 'reverb_tail' ||
+        template == 'tail' ||
+        template == 'decay' ||
+        template == 'filter_sweep' ||
+        template == 'sweep' ||
+        template == 'lowpass_sweep' ||
+        template == 'highpass_sweep' ||
+        template == 'auto_pan' ||
+        template == 'autopan' ||
+        template == 'stereo_motion' ||
+        template == 'stereo_direction' ||
+        template == 'pan_motion' ||
+        template == 'left_right_motion';
+  }
+
+  Map<String, dynamic> _actionTargetMap(Map<String, dynamic> data) {
+    final rawTarget = data['target'];
+    if (rawTarget is Map<String, dynamic>) {
+      return Map<String, dynamic>.from(rawTarget);
+    }
+    if (rawTarget is Map) {
+      return Map<String, dynamic>.from(rawTarget);
+    }
+    return <String, dynamic>{};
+  }
+
+  bool _hasExplicitDialogRangePayload(Map<String, dynamic> data) {
+    final target = _actionTargetMap(data);
+    final fromMs = _parseActionDouble(data['from_ms'] ?? target['from_ms']);
+    final toMs = _parseActionDouble(data['to_ms'] ?? target['to_ms']);
+    if (fromMs != null && toMs != null) return true;
+    final rawRanges = data['ranges'] ?? target['ranges'];
+    if (rawRanges is! List) return false;
+    for (final raw in rawRanges) {
+      if (raw is! Map) continue;
+      final range = Map<String, dynamic>.from(raw);
+      final rangeFrom = _parseActionDouble(range['from_ms']);
+      final rangeTo = _parseActionDouble(range['to_ms']);
+      if (rangeFrom != null && rangeTo != null) return true;
+    }
+    return false;
+  }
+
+  bool _hasExplicitDialogAnchorPayload(Map<String, dynamic> data) {
+    final target = _actionTargetMap(data);
+    return _parseActionDouble(data['at_ms'] ?? target['at_ms']) != null ||
+        _parseActionDouble(data['time_ms'] ?? target['time_ms']) != null;
+  }
+
+  bool _hasCompleteDialogRemoveRangePayload(Map<String, dynamic> data) {
+    return _hasExplicitDialogRangePayload(data) ||
+        _hasExplicitDialogAnchorPayload(data);
+  }
+
+  bool _hasAnyExplicitActionValue(
+    Map<String, dynamic> data,
+    List<String> keys,
+  ) {
+    final target = _actionTargetMap(data);
+    for (final key in keys) {
+      final value = data.containsKey(key) ? data[key] : target[key];
+      if (value == null) continue;
+      if (value is String && value.trim().isEmpty) continue;
+      if (value is List && value.isEmpty) continue;
+      return true;
+    }
+    return false;
+  }
+
+  bool _hasMeaningfulMovePayload(Map<String, dynamic> data) {
+    if (_hasAnyExplicitActionValue(data, const <String>[
+      'new_start_ms',
+      'start_ms',
+      'paste_start_ms',
+      'start_measure',
+      'new_start_measure',
+      'paste_start_measure',
+      'start_bar',
+      'new_start_bar',
+      'paste_start_bar',
+      'start_beat',
+      'new_start_beat',
+      'paste_start_beat',
+    ])) {
+      return true;
+    }
+
+    if (_hasAnyExplicitActionValue(data, const <String>[
+      'direction',
+      'move_to',
+      'align_to',
+    ])) {
+      return true;
+    }
+
+    final numericKeys = <String>[
+      'delta_ms',
+      'move_ms',
+      'shift_ms',
+      'delta_beats',
+      'move_beats',
+      'shift_beats',
+      'delta_measures',
+      'move_measures',
+      'shift_measures',
+      'delta_bars',
+      'move_bars',
+      'shift_bars',
+    ];
+    for (final key in numericKeys) {
+      final value =
+          _parseActionDouble(data[key] ?? _actionTargetMap(data)[key]);
+      if (value != null && value.abs() > 1e-9) return true;
+    }
+
+    final integerKeys = <String>[
+      'row_index',
+      'target_row_index',
+      'dest_row_index',
+      'new_row_index',
+      'row',
+      'target_row',
+      'row_delta',
+      'delta_rows',
+      'step_rows',
+    ];
+    for (final key in integerKeys) {
+      final value = _parseActionInt(data[key] ?? _actionTargetMap(data)[key]);
+      if (value != null) {
+        if (key.contains('delta') || key.contains('step')) {
+          if (value != 0) return true;
+        } else {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  bool _hasSupportedCutPayload(Map<String, dynamic> data) {
+    final target = _actionTargetMap(data);
+    final scope = (target['scope'] ?? data['scope'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (scope == 'all' ||
+        scope == 'all_audio' ||
+        scope == 'all_selected_audio') {
+      return false;
+    }
+    if (_hasExplicitDialogRangePayload(data)) {
+      return false;
+    }
+    final clipIndices =
+        (data['clip_indices'] as List?) ?? (target['clip_indices'] as List?);
+    if (clipIndices != null && clipIndices.length > 1) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _hasMidiLengthPayload(Map<String, dynamic> data) {
+    final target = _actionTargetMap(data);
+    final lengthMeasures = _parseActionDouble(
+        data['length_measures'] ?? target['length_measures']);
+    if (lengthMeasures != null &&
+        lengthMeasures.isFinite &&
+        lengthMeasures > 0.0) {
+      return true;
+    }
+    final lengthBeats =
+        _parseActionDouble(data['length_beats'] ?? target['length_beats']);
+    return lengthBeats != null && lengthBeats.isFinite && lengthBeats > 0.0;
+  }
+
+  bool _parseActionBool(dynamic raw) {
+    if (raw is bool) return raw;
+    if (raw is num) return raw != 0;
+    if (raw is String) {
+      final token = raw.trim().toLowerCase();
+      return token == 'true' || token == '1' || token == 'yes';
+    }
+    return false;
+  }
+
+  bool _hasPreserveExistingMidiPayload(Map<String, dynamic> data) {
+    final target = _actionTargetMap(data);
+    final preserve = _parseActionBool(
+      data['preserve_existing_notes'] ?? target['preserve_existing_notes'],
+    );
+    if (!preserve) return false;
+    final operation = data['operation']?.toString().trim().toLowerCase() ?? '';
+    if (operation != 'replace_notes' && operation != 'append_notes') {
+      return false;
+    }
+    if (!_hasMidiLengthPayload(data) || _hasMidiPayload(data)) {
+      return false;
+    }
+    if (AssistantActionUtils.hasStyleDrivenMidiGenerationDirectives(
+      data,
+      target: target,
+    )) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _looksLikePackagedLibraryReference(String libraryPath) {
+    final normalized = libraryPath.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+    if (normalized.startsWith('role:')) return true;
+    return normalized.contains('/') || normalized.contains('\\');
+  }
+
+  bool _looksLikeLoopLibraryReference(String libraryPath) {
+    final normalized = libraryPath.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+    return normalized.contains('/loops/') ||
+        normalized.contains('\\loops\\') ||
+        RegExp(r'(^|[/\\])loops?([/\\]|$)').hasMatch(normalized) ||
+        RegExp(r'\bloop\b').hasMatch(normalized);
+  }
+
+  bool _hasMusicalSpanPayload(Map<String, dynamic> data) {
+    final target = _actionTargetMap(data);
+    for (final key in const <String>[
+      'length_ms',
+      'length_measures',
+      'length_beats',
+      'until_ms',
+      'until_measure',
+      'until_beat',
+    ]) {
+      final value = _parseActionDouble(data[key] ?? target[key]);
+      if (value != null && value.isFinite && value > 0.0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _hasRepeatingPlacementPayload(Map<String, dynamic> data) {
+    final target = _actionTargetMap(data);
+    final repeatCount = _parseActionInt(
+      data['repeat_count'] ??
+          target['repeat_count'] ??
+          data['copies'] ??
+          target['copies'] ??
+          data['count'] ??
+          target['count'],
+    );
+    if (repeatCount != null && repeatCount > 1) {
+      return true;
+    }
+    for (final key in const <String>[
+      'step_ms',
+      'step_measures',
+      'step_beats',
+      'spacing_ms',
+      'spacing_measures',
+      'spacing_beats',
+    ]) {
+      final value = _parseActionDouble(data[key] ?? target[key]);
+      if (value != null && value.isFinite && value > 0.0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isValidSampleInsertItem(
+    Map<String, dynamic> item, {
+    required String operation,
+  }) {
+    final rawTarget = item['target'];
+    final target = rawTarget is Map<String, dynamic>
+        ? rawTarget
+        : (rawTarget is Map
+            ? Map<String, dynamic>.from(rawTarget)
+            : const <String, dynamic>{});
+    final libraryPath =
+        (item['library_path'] ?? target['library_path'])?.toString().trim() ??
+            '';
+    if (!_looksLikePackagedLibraryReference(libraryPath)) {
+      return false;
+    }
+    if (operation == 'replace_audio_clips') {
+      return target.isNotEmpty ||
+          item.containsKey('clip_index') ||
+          item.containsKey('clip_indices') ||
+          item.containsKey('row_index');
+    }
+    if (_hasMusicalSpanPayload(item) &&
+        !_looksLikeLoopLibraryReference(libraryPath) &&
+        !_hasRepeatingPlacementPayload(item)) {
+      return false;
+    }
+    return true;
+  }
+
+  String _normalizeTutorialTargetId(Object? raw) {
+    final targetId = raw?.toString().trim() ?? '';
+    final match = RegExp(r'^(row:\d+:)fx_index:([^:]+)(:param:.+)?$')
+        .firstMatch(targetId);
+    if (match == null) return targetId;
+    final effectRef = (match.group(2) ?? '').trim();
+    if (RegExp(r'^\d+$').hasMatch(effectRef)) return targetId;
+    final suffix = match.group(3) ?? '';
+    return '${match.group(1)}fx_contains:$effectRef$suffix';
+  }
+
   int? _parseActionInt(dynamic raw) {
     if (raw is int) return raw;
     if (raw is num) return raw.toInt();
     if (raw is String) return int.tryParse(raw.trim());
     return null;
+  }
+
+  double? _parseActionDouble(dynamic raw) {
+    if (raw is double) return raw;
+    if (raw is num) return raw.toDouble();
+    if (raw is String) return double.tryParse(raw.trim());
+    return null;
+  }
+
+  Map<String, dynamic> _normalizeMidiNotePayload(Map<String, dynamic> rawNote) {
+    final note = Map<String, dynamic>.from(rawNote);
+    final pitch = AssistantActionUtils.midiPitchFromRaw(
+      note['pitch'] ?? note['midi'] ?? note['note'] ?? note['note_name'],
+      fallbackOctave: 3,
+    );
+    if (pitch != null) {
+      note['pitch'] = pitch.clamp(0, 127).toInt();
+    }
+
+    final startBeat = AssistantActionUtils.resolveMidiNoteStartBeat(note);
+    if (startBeat != null) {
+      note['start_beat'] = startBeat;
+    }
+
+    final lengthBeats = AssistantActionUtils.resolveMidiNoteLengthBeats(note);
+    if (lengthBeats != null) {
+      note['length_beats'] = lengthBeats;
+    }
+
+    final velocity =
+        AssistantActionUtils.normalizeMidiVelocity(note['velocity']);
+    if (velocity != null) {
+      note['velocity'] = velocity;
+    }
+
+    return note;
+  }
+
+  List<Map<String, dynamic>> _normalizeMidiNotesPayload(dynamic rawNotes) {
+    if (rawNotes is! List) return const <Map<String, dynamic>>[];
+    final normalized = <Map<String, dynamic>>[];
+    for (final raw in rawNotes) {
+      if (raw is! Map) continue;
+      normalized.add(_normalizeMidiNotePayload(Map<String, dynamic>.from(raw)));
+    }
+    if (_looksLikeOneBasedBeatGrid(normalized)) {
+      for (final note in normalized) {
+        final startBeat = _parseActionDouble(note['start_beat']);
+        if (startBeat == null) continue;
+        note['start_beat'] = math.max(0.0, startBeat - 1.0);
+      }
+    }
+    return normalized;
+  }
+
+  bool _looksLikeOneBasedBeatGrid(List<Map<String, dynamic>> notes) {
+    if (notes.isEmpty) return false;
+    double? minStartBeat;
+    var sawExactOne = false;
+    for (final note in notes) {
+      final startBeat = _parseActionDouble(note['start_beat']);
+      if (startBeat == null || !startBeat.isFinite || startBeat <= 0.0) {
+        return false;
+      }
+      minStartBeat =
+          minStartBeat == null ? startBeat : math.min(minStartBeat, startBeat);
+      if ((startBeat - 1.0).abs() < 1e-6) {
+        sawExactOne = true;
+      }
+    }
+    return sawExactOne &&
+        minStartBeat != null &&
+        (minStartBeat - 1.0).abs() < 1e-6;
   }
 
   int? _parseRowAlias(dynamic raw, {required bool oneBased}) {
@@ -830,6 +2334,214 @@ class CloudLlmService {
         pick(const ['row_number', 'track_number', 'track'], oneBased: true);
   }
 
+  Map<String, dynamic> _normalizeSampleInsertItem(
+    Map<String, dynamic> rawItem,
+  ) {
+    final item = Map<String, dynamic>.from(rawItem);
+    final rawTarget = item['target'];
+    final target = rawTarget is Map<String, dynamic>
+        ? Map<String, dynamic>.from(rawTarget)
+        : (rawTarget is Map
+            ? Map<String, dynamic>.from(rawTarget)
+            : <String, dynamic>{});
+    final rowIndex = _extractNormalizedRowIndex(item, target);
+    if (rowIndex != null) {
+      item['row_index'] = rowIndex;
+      target['row_index'] = rowIndex;
+    }
+    item['target'] = target;
+    return item;
+  }
+
+  List<Map<String, dynamic>> _postProcessNormalizedActions(
+    List<Map<String, dynamic>> actions,
+  ) {
+    final normalized = actions
+        .map((action) => <String, dynamic>{
+              'type': action['type'],
+              'data': Map<String, dynamic>.from(
+                action['data'] as Map<String, dynamic>,
+              ),
+            })
+        .toList(growable: false);
+    final tempoBpm = _normalizedProjectTempoBpm(normalized);
+    for (final action in normalized) {
+      final type = action['type']?.toString().trim().toLowerCase() ?? '';
+      if (type != 'sample_insert') continue;
+      _repairBackbeatSampleInsert(
+        action['data'] as Map<String, dynamic>,
+        tempoBpm: tempoBpm,
+      );
+    }
+    return normalized;
+  }
+
+  double? _normalizedProjectTempoBpm(List<Map<String, dynamic>> actions) {
+    for (final action in actions) {
+      final type = action['type']?.toString().trim().toLowerCase() ?? '';
+      if (type != 'project_edit') continue;
+      final data = action['data'] as Map<String, dynamic>? ?? const {};
+      final operation =
+          data['operation']?.toString().trim().toLowerCase() ?? '';
+      if (operation != 'set_tempo') continue;
+      final tempo = _parseActionDouble(data['tempo_bpm'] ?? data['bpm']);
+      if (tempo != null) return tempo;
+    }
+    return null;
+  }
+
+  double? _sampleInsertItemStartBeat(Map<String, dynamic> item) {
+    final target = _actionTargetMap(item);
+    return _parseActionDouble(
+      item['new_start_beat'] ??
+          item['paste_start_beat'] ??
+          item['start_beat'] ??
+          item['at_beat'] ??
+          target['new_start_beat'] ??
+          target['paste_start_beat'] ??
+          target['start_beat'] ??
+          target['at_beat'] ??
+          item['beat'] ??
+          target['beat'] ??
+          item['beat_index'] ??
+          target['beat_index'],
+    );
+  }
+
+  double? _sampleInsertItemStepBeats(Map<String, dynamic> item) {
+    final target = _actionTargetMap(item);
+    return _parseActionDouble(
+      item['step_beats'] ??
+          target['step_beats'] ??
+          item['spacing_beats'] ??
+          target['spacing_beats'],
+    );
+  }
+
+  bool _isRepeatedSampleScaffold(Map<String, dynamic> item) {
+    final target = _actionTargetMap(item);
+    final repeatCount = _parseActionInt(
+          item['repeat_count'] ??
+              target['repeat_count'] ??
+              item['copies'] ??
+              target['copies'] ??
+              item['count'] ??
+              target['count'],
+        ) ??
+        1;
+    return repeatCount > 1 ||
+        _hasRepeatingPlacementPayload(item) ||
+        _hasMusicalSpanPayload(item);
+  }
+
+  bool _sampleInsertItemsShareBeatGrid(
+    Map<String, dynamic> first,
+    Map<String, dynamic> second,
+  ) {
+    final firstStart = _sampleInsertItemStartBeat(first) ?? 1.0;
+    final secondStart = _sampleInsertItemStartBeat(second) ?? 1.0;
+    if ((firstStart - secondStart).abs() > 1e-6) return false;
+
+    final firstStep = _sampleInsertItemStepBeats(first);
+    final secondStep = _sampleInsertItemStepBeats(second);
+    if (firstStep == null || secondStep == null) {
+      return true;
+    }
+    return (firstStep - secondStep).abs() < 1e-6;
+  }
+
+  void _repairBackbeatSampleInsert(
+    Map<String, dynamic> data, {
+    required double? tempoBpm,
+  }) {
+    final operation = data['operation']?.toString().trim().toLowerCase() ?? '';
+    if (operation != 'insert_audio_clips' && operation != 'insert_audio_clip') {
+      return;
+    }
+    final rawItems = data['items'];
+    if (rawItems is! List || rawItems.isEmpty) return;
+
+    final grouped = <String, List<Map<String, dynamic>>>{};
+    final kickItems = <Map<String, dynamic>>[];
+    for (final rawItem in rawItems) {
+      if (rawItem is! Map) continue;
+      final item = rawItem is Map<String, dynamic>
+          ? rawItem
+          : Map<String, dynamic>.from(rawItem);
+      final target = _actionTargetMap(item);
+      final libraryPath =
+          (item['library_path'] ?? target['library_path'])?.toString().trim() ??
+              '';
+      final role = AssistantActionUtils.primarySampleRoleFromText(libraryPath);
+      if (role == 'kick') {
+        kickItems.add(item);
+      }
+      if (role != 'snare' && role != 'clap') continue;
+      grouped.putIfAbsent(role!, () => <Map<String, dynamic>>[]).add(item);
+    }
+
+    for (final roleItems in grouped.values) {
+      final repeated = roleItems.where(_isRepeatedSampleScaffold).toList();
+      if (repeated.length != 1) continue;
+
+      final item = repeated.single;
+      final startBeat = _sampleInsertItemStartBeat(item);
+      if (startBeat != null && (startBeat - 1.0).abs() > 1e-6) {
+        continue;
+      }
+      if (_parseActionDouble(
+            item['start_ms'] ?? _actionTargetMap(item)['start_ms'],
+          ) !=
+          null) {
+        continue;
+      }
+
+      final target = _actionTargetMap(item);
+      final explicitStepBeats = _parseActionDouble(
+        item['step_beats'] ??
+            target['step_beats'] ??
+            item['spacing_beats'] ??
+            target['spacing_beats'],
+      );
+      final hasMeasureStep = _parseActionDouble(
+            item['step_measures'] ??
+                target['step_measures'] ??
+                item['spacing_measures'] ??
+                target['spacing_measures'] ??
+                item['step_bars'] ??
+                target['step_bars'] ??
+                item['spacing_bars'] ??
+                target['spacing_bars'],
+          ) !=
+          null;
+      if (hasMeasureStep) {
+        continue;
+      }
+
+      final collidingKickItems = kickItems
+          .where(_isRepeatedSampleScaffold)
+          .where((kick) => _sampleInsertItemsShareBeatGrid(item, kick))
+          .toList(growable: false);
+      if (collidingKickItems.isEmpty) {
+        continue;
+      }
+
+      final wantsHalfTimeBackbeat =
+          tempoBpm != null && tempoBpm >= 135.0 ||
+              kickItems.any((kick) {
+                final kickStart = _sampleInsertItemStartBeat(kick);
+                return kickStart != null && (kickStart - 3.0).abs() < 1e-6;
+              });
+      item['start_beat'] = wantsHalfTimeBackbeat ? 3 : 2;
+
+      if (explicitStepBeats == null ||
+          (explicitStepBeats - 2.0).abs() < 1e-6 ||
+          (explicitStepBeats - 4.0).abs() < 1e-6) {
+        item['step_beats'] = wantsHalfTimeBackbeat ? 4 : 2;
+      }
+    }
+  }
+
   String? _extractEffectToken(
     Map<String, dynamic> data,
     Map<String, dynamic> target,
@@ -856,23 +2568,22 @@ class CloudLlmService {
   Map<String, dynamic> _normalizeDawActionData(
     String actionType,
     Map<String, dynamic> rawData,
+    String userText,
   ) {
     final data = Map<String, dynamic>.from(rawData);
-    final rawTarget = data['target'];
-    final target = rawTarget is Map<String, dynamic>
-        ? Map<String, dynamic>.from(rawTarget)
-        : (rawTarget is Map ? Map<String, dynamic>.from(rawTarget) : <String, dynamic>{});
+    final target = _actionTargetMap(data);
 
-    final scopeValue = (data['scope'] ?? target['scope'])?.toString().trim().toLowerCase();
+    final scopeValue =
+        (data['scope'] ?? target['scope'])?.toString().trim().toLowerCase();
     if (scopeValue != null && scopeValue.isNotEmpty) {
       data['scope'] = scopeValue;
       target['scope'] = scopeValue;
     }
 
     final rowIndex = _extractNormalizedRowIndex(data, target);
-    final isMasterScope =
-        (target['scope']?.toString().trim().toLowerCase() ?? data['scope']?.toString().trim().toLowerCase()) ==
-            'master';
+    final isMasterScope = (target['scope']?.toString().trim().toLowerCase() ??
+            data['scope']?.toString().trim().toLowerCase()) ==
+        'master';
     if (!isMasterScope && rowIndex != null) {
       data['row_index'] = rowIndex;
       target['row_index'] = rowIndex;
@@ -888,6 +2599,56 @@ class CloudLlmService {
       }
     }
 
+    if (actionType == 'tutorial') {
+      final steps = data['steps'];
+      if (steps is List) {
+        data['steps'] = steps.map((step) {
+          if (step is! Map) return step;
+          final repaired = Map<String, dynamic>.from(step);
+          repaired['target_id'] = _normalizeTutorialTargetId(
+            repaired['target_id'],
+          );
+          return repaired;
+        }).toList(growable: false);
+      }
+    }
+
+    if (actionType == 'project_edit') {
+      data['operation'] = _normalizeProjectEditOperation(data['operation']);
+      final tempo = _parseActionDouble(data['tempo_bpm'] ?? data['bpm']);
+      if (tempo != null) {
+        data['tempo_bpm'] = tempo;
+      }
+    }
+
+    if (actionType == 'sample_insert') {
+      data['operation'] = _normalizeSampleInsertOperation(data['operation']);
+      final rawItems = data['items'];
+      if (rawItems is List && rawItems.isNotEmpty) {
+        data['items'] = rawItems
+            .whereType<Map>()
+            .map((raw) => _normalizeSampleInsertItem(
+                  Map<String, dynamic>.from(raw),
+                ))
+            .toList(growable: false);
+      } else if ((data['library_path']?.toString().trim().isNotEmpty ??
+              false) ||
+          (target['library_path']?.toString().trim().isNotEmpty ?? false)) {
+        data['items'] = <Map<String, dynamic>>[
+          _normalizeSampleInsertItem(data),
+        ];
+      }
+    }
+
+    if (actionType == 'clip_edit') {
+      final operation =
+          data['operation']?.toString().trim().toLowerCase() ?? '';
+      if (operation == 'dialog_remove_range' &&
+          !_hasCompleteDialogRemoveRangePayload(data)) {
+        data['operation'] = 'dialog_remove_range';
+      }
+    }
+
     if (actionType == 'role_override') {
       final role = (data['role']?.toString().trim().toLowerCase() ?? '');
       if (role.isNotEmpty) {
@@ -895,27 +2656,182 @@ class CloudLlmService {
       }
     }
 
+    if (actionType == 'midi_compose' && data['notes'] is List) {
+      data['notes'] = _normalizeMidiNotesPayload(data['notes']);
+    }
+
+    if (actionType == 'midi_compose') {
+      final operation =
+          data['operation']?.toString().trim().toLowerCase() ?? '';
+      if (operation == 'replace_notes' &&
+          !_hasMidiPayload(data) &&
+          _hasMidiLengthPayload(data) &&
+          !AssistantActionUtils.hasStyleDrivenMidiGenerationDirectives(
+            data,
+            target: target,
+          )) {
+        data['preserve_existing_notes'] = true;
+      }
+    }
+
     data['target'] = target;
     return data;
   }
 
-  List<Map<String, dynamic>> _normalizeDawAssistantActions(List rawActions) {
+  bool _hasMidiPayload(Map<String, dynamic> data) {
+    final notes = data['notes'];
+    final progression = data['progression'];
+    final hasNotes = notes is List && notes.isNotEmpty;
+    final hasProgression = (progression is List && progression.isNotEmpty) ||
+        (progression is String && progression.trim().isNotEmpty);
+    return hasNotes || hasProgression;
+  }
+
+  bool _isValidDawActionData(
+    String type,
+    Map<String, dynamic> data, {
+    required String userText,
+  }) {
+    switch (type) {
+      case 'tutorial':
+        final topic = data['topic']?.toString().trim() ?? '';
+        final steps = data['steps'];
+        return topic.isNotEmpty || (steps is List && steps.isNotEmpty);
+      case 'clarify':
+        final question = data['question']?.toString().trim() ?? '';
+        return question.isNotEmpty;
+      case 'project_edit':
+        return _allowedProjectEditOperations.contains(data['operation']) &&
+            _parseActionDouble(data['tempo_bpm'] ?? data['bpm']) != null;
+      case 'sample_insert':
+        if (!_allowedSampleInsertOperations.contains(data['operation'])) {
+          return false;
+        }
+        final items = data['items'];
+        return items is List &&
+            items.isNotEmpty &&
+            items.whereType<Map>().every((raw) {
+              final item = Map<String, dynamic>.from(raw);
+              return _isValidSampleInsertItem(
+                item,
+                operation:
+                    data['operation']?.toString().trim().toLowerCase() ?? '',
+              );
+            });
+      case 'clip_edit':
+        final operation = data['operation']?.toString().trim().toLowerCase();
+        if (!_allowedClipEditOperations.contains(operation)) return false;
+        if (operation == 'dialog_remove_range') {
+          return _hasCompleteDialogRemoveRangePayload(data);
+        }
+        if (operation == 'move') {
+          return _hasMeaningfulMovePayload(data);
+        }
+        if (operation == 'cut') {
+          return _hasSupportedCutPayload(data);
+        }
+        return true;
+      case 'effect_edit':
+        return _allowedEffectEditOperations.contains(data['operation']);
+      case 'automation_edit':
+        if (!_allowedAutomationEditOperations.contains(data['operation'])) {
+          return false;
+        }
+        final operation = data['operation']?.toString().trim().toLowerCase();
+        final target = _actionTargetMap(data);
+        if (operation == 'apply_template') {
+          final template = (data['template'] ??
+                  target['template'] ??
+                  data['pattern'] ??
+                  target['pattern'] ??
+                  '')
+              .toString();
+          if (!_isKnownAutomationTemplate(template)) {
+            return false;
+          }
+        }
+        return true;
+      case 'midi_compose':
+        final operation = data['operation'];
+        if (!_allowedMidiComposeOperations.contains(operation)) return false;
+        if (operation == 'chop_notes') return true;
+        if (operation == 'transpose_notes') {
+          return _parseActionDouble(data['semitones']) != null ||
+              _parseActionDouble(data['octaves']) != null;
+        }
+        if (operation == 'convert_audio_to_midi') return true;
+        return _hasMidiPayload(data) || _hasPreserveExistingMidiPayload(data);
+      case 'stem_separate':
+        return _allowedStemSeparateOperations.contains(data['operation']);
+      case 'role_override':
+        return _allowedRoleOverrideOperations.contains(data['operation']);
+    }
+    return false;
+  }
+
+  List<Map<String, dynamic>> _normalizeDawAssistantActions(
+    List rawActions, {
+    required String userText,
+  }) {
     final out = <Map<String, dynamic>>[];
+    var droppedInvalid = false;
     for (final rawAction in rawActions) {
-      if (rawAction is! Map) continue;
+      if (rawAction is! Map) {
+        droppedInvalid = true;
+        continue;
+      }
       final action = Map<String, dynamic>.from(rawAction);
       final type = (action['type']?.toString().trim().toLowerCase() ?? '');
-      if (!_dawAssistantActionTypes.contains(type)) continue;
+      if (!_dawAssistantActionTypes.contains(type)) {
+        droppedInvalid = true;
+        continue;
+      }
       final rawData = action['data'];
       final data = rawData is Map<String, dynamic>
           ? Map<String, dynamic>.from(rawData)
-          : (rawData is Map ? Map<String, dynamic>.from(rawData) : <String, dynamic>{});
+          : (rawData is Map
+              ? Map<String, dynamic>.from(rawData)
+              : <String, dynamic>{});
+      if (type == 'project_edit') {
+        data['operation'] = _normalizeProjectEditOperation(data['operation']);
+      } else if (type == 'sample_insert') {
+        data['operation'] = _normalizeSampleInsertOperation(data['operation']);
+      } else if (type == 'clip_edit') {
+        data['operation'] = _normalizeClipEditOperation(data['operation']);
+      } else if (type == 'effect_edit') {
+        data['operation'] = _normalizeEffectEditOperation(data['operation']);
+      } else if (type == 'automation_edit') {
+        data['operation'] =
+            _normalizeAutomationEditOperation(data['operation']);
+      } else if (type == 'midi_compose') {
+        data['operation'] = _normalizeMidiComposeOperation(data['operation']);
+      } else if (type == 'stem_separate') {
+        data['operation'] = _normalizeActionToken(data['operation']);
+      } else if (type == 'role_override') {
+        data['operation'] = _normalizeRoleOverrideOperation(
+          data['operation'] ?? 'set',
+        );
+      }
+      final normalizedData = _normalizeDawActionData(type, data, userText);
+      if (!_isValidDawActionData(type, normalizedData, userText: userText)) {
+        droppedInvalid = true;
+        continue;
+      }
       out.add({
         'type': type,
-        'data': _normalizeDawActionData(type, data),
+        'data': normalizedData,
       });
     }
-    return out;
+    final normalized = _postProcessNormalizedActions(out);
+    if (droppedInvalid &&
+        normalized.isNotEmpty &&
+        normalized.every(
+          (action) =>
+              action['type']?.toString().trim().toLowerCase() == 'project_edit',
+        )) {
+      return const <Map<String, dynamic>>[];
+    }
+    return normalized;
   }
 
   Map<String, dynamic>? _decodeToolArgs(dynamic raw) {
@@ -944,6 +2860,97 @@ class CloudLlmService {
     return current is Map ? Map<String, dynamic>.from(current) : null;
   }
 
+  String _normalizeMixExecutionProfile(dynamic raw) {
+    final value = raw?.toString().trim().toLowerCase() ?? '';
+    switch (value) {
+      case 'creative_bold':
+      case 'experimental_extreme':
+        return value;
+      case 'producer_safe':
+      default:
+        return 'producer_safe';
+    }
+  }
+
+  String _normalizeMixAudibility(dynamic raw) {
+    final value = raw?.toString().trim().toLowerCase() ?? '';
+    switch (value) {
+      case 'subtle':
+      case 'obvious':
+      case 'extreme':
+        return value;
+      case 'noticeable':
+      default:
+        return 'noticeable';
+    }
+  }
+
+  List<String> _normalizeMixStyleTags(dynamic raw) {
+    final values =
+        raw is List ? raw : (raw is String ? <String>[raw] : const <String>[]);
+    final out = <String>[];
+    final seen = <String>{};
+    for (final value in values) {
+      final normalized = value?.toString().trim().toLowerCase() ?? '';
+      if (normalized.isEmpty || normalized == 'null') continue;
+      final canonical = normalized.replaceAll(RegExp(r'\s+'), '_');
+      if (canonical.isEmpty || canonical.length > 40) continue;
+      if (seen.add(canonical)) {
+        out.add(canonical);
+      }
+      if (out.length >= 8) break;
+    }
+    return out;
+  }
+
+  String _normalizeMixReferenceMode(dynamic raw) {
+    final value = raw?.toString().trim().toLowerCase() ?? '';
+    switch (value) {
+      case 'tone':
+      case 'loudness':
+      case 'width':
+      case 'glue':
+        return value;
+      case 'full_mix':
+      default:
+        return 'full_mix';
+    }
+  }
+
+  String _normalizeMixReferenceCloseness(dynamic raw) {
+    final value = raw?.toString().trim().toLowerCase() ?? '';
+    switch (value) {
+      case 'loose':
+      case 'close':
+        return value;
+      case 'balanced':
+      default:
+        return 'balanced';
+    }
+  }
+
+  Map<String, dynamic>? _normalizeMixReferenceTarget(dynamic raw) {
+    if (raw is! Map) return null;
+    final normalized = Map<String, dynamic>.from(raw);
+    final rowIndex = normalized['row_index'];
+    if (rowIndex is num) {
+      final canonicalRow = rowIndex.toInt();
+      if (canonicalRow < 0) return null;
+      normalized
+        ..['row_index'] = canonicalRow
+        ..remove('prefer_selected');
+    } else if (normalized['prefer_selected'] == true) {
+      normalized
+        ..['prefer_selected'] = true
+        ..remove('row_index');
+    } else {
+      return null;
+    }
+    normalized['confidence'] =
+        ((normalized['confidence'] ?? 0.5) as num).toDouble().clamp(0.0, 1.0);
+    return normalized;
+  }
+
   Map<String, dynamic>? _normalizeToolArgs(
     String toolName,
     dynamic rawArgs, {
@@ -965,7 +2972,10 @@ class CloudLlmService {
     if (toolName == 'daw_assistant_actions') {
       final actions = args['actions'];
       if (actions is! List || actions.isEmpty) return null;
-      final normalizedActions = _normalizeDawAssistantActions(actions);
+      final normalizedActions = _normalizeDawAssistantActions(
+        actions,
+        userText: userText,
+      );
       if (normalizedActions.isEmpty) return null;
       final assistantMessage = _sanitizeUserFacingText(
         args['assistant_message'],
@@ -988,7 +2998,37 @@ class CloudLlmService {
         if (action is! Map) return null;
         final goal = action['goal'];
         if (goal is! Map) return null;
-        final target = goal['target'];
+        final normalizedGoal = Map<String, dynamic>.from(goal);
+        normalizedGoal['type'] = 'mix_request';
+        normalizedGoal['execution_profile'] = _normalizeMixExecutionProfile(
+          normalizedGoal['execution_profile'],
+        );
+        normalizedGoal['audibility'] = _normalizeMixAudibility(
+          normalizedGoal['audibility'],
+        );
+        normalizedGoal['style_tags'] = _normalizeMixStyleTags(
+          normalizedGoal['style_tags'],
+        );
+        normalizedGoal['destructive_ok'] =
+            normalizedGoal['destructive_ok'] == true;
+        final normalizedReferenceTarget = _normalizeMixReferenceTarget(
+          normalizedGoal['reference_target'],
+        );
+        if (normalizedReferenceTarget != null) {
+          normalizedGoal['reference_target'] = normalizedReferenceTarget;
+          normalizedGoal['reference_mode'] = _normalizeMixReferenceMode(
+            normalizedGoal['reference_mode'],
+          );
+          normalizedGoal['reference_closeness'] =
+              _normalizeMixReferenceCloseness(
+            normalizedGoal['reference_closeness'],
+          );
+        } else {
+          normalizedGoal.remove('reference_target');
+          normalizedGoal.remove('reference_mode');
+          normalizedGoal.remove('reference_closeness');
+        }
+        final target = normalizedGoal['target'];
         if (target is! Map) return null;
 
         final normalizedTarget = Map<String, dynamic>.from(target);
@@ -1006,13 +3046,14 @@ class CloudLlmService {
             return null;
           }
         }
-        goal['target'] = normalizedTarget;
+        normalizedGoal['target'] = normalizedTarget;
 
-        final intents = goal['intents'];
+        final intents = normalizedGoal['intents'];
         if (intents is! List || intents.isEmpty) return null;
         for (final intent in intents) {
           if (intent is! Map) return null;
         }
+        action['goal'] = normalizedGoal;
       }
 
       final assistantMessage = _sanitizeUserFacingText(
@@ -1033,6 +3074,7 @@ class CloudLlmService {
     required String userText,
     required String projectSnapshot,
     String selectionSnapshot = '',
+    String librarySnapshot = '',
     String? promptTraceId,
     String? projectId,
     String? aiFeature,
@@ -1040,6 +3082,7 @@ class CloudLlmService {
   }) async {
     final requestStopwatch = Stopwatch();
     final parseStopwatch = Stopwatch();
+    var directRetriedWithoutPendingMix = false;
     late http.Response response;
     try {
       if (_isProxyEnabled) {
@@ -1058,6 +3101,7 @@ class CloudLlmService {
           userText: userText,
           projectSnapshot: projectSnapshot,
           selectionSnapshot: selectionSnapshot,
+          librarySnapshot: librarySnapshot,
           promptTraceId: promptTraceId,
           projectId: projectId,
           aiFeature: aiFeature,
@@ -1076,22 +3120,91 @@ class CloudLlmService {
           userText: userText,
           projectSnapshot: projectSnapshot,
           selectionSnapshot: selectionSnapshot,
+          librarySnapshot: librarySnapshot,
           pendingMix: pendingMix,
         );
 
-        requestStopwatch.start();
-        response = await _postJson(
-          uri: Uri.parse(_apiUrl),
-          headers: {
-            'Authorization': 'Bearer $apiKey',
-            'Content-Type': 'application/json',
-          },
-          body: _buildOpenAiRequestBody(
-            inputMessages: inputMessages,
-            aiFeature: aiFeature,
-          ),
+        final requestBody = _buildOpenAiRequestBody(
+          inputMessages: inputMessages,
+          aiFeature: aiFeature,
         );
-        requestStopwatch.stop();
+        aiDebugLog(
+          'direct-openai',
+          'request route=$_llmRouteLabel model=${model.trim()} '
+              'reasoning=${requestBody['reasoning']} '
+              'tool_choice=${requestBody['tool_choice']} '
+              'tool_count=${(requestBody['tools'] as List?)?.length ?? 0} '
+              'prompt_cache_retention=${requestBody['prompt_cache_retention']}',
+        );
+
+        final hasLibrarySnapshot = librarySnapshot.trim().isNotEmpty;
+        final hasRetryDroppableContext = pendingMix != null;
+        final initialTimeout = hasRetryDroppableContext
+            ? Duration(
+                milliseconds: math.min(
+                  requestTimeout.inMilliseconds,
+                  12000,
+                ),
+              )
+            : requestTimeout;
+
+        requestStopwatch.start();
+        try {
+          response = await _postJson(
+            uri: Uri.parse(_apiUrl),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json',
+            },
+            body: requestBody,
+            timeoutOverride: initialTimeout,
+          );
+          requestStopwatch.stop();
+        } on TimeoutException {
+          requestStopwatch.stop();
+          final canRetryWithoutHeavyContext = hasRetryDroppableContext &&
+              initialTimeout.inMilliseconds < requestTimeout.inMilliseconds;
+          if (!canRetryWithoutHeavyContext) rethrow;
+
+          directRetriedWithoutPendingMix = true;
+          final remainingTimeout = Duration(
+            milliseconds: math.max(
+              4000,
+              requestTimeout.inMilliseconds - initialTimeout.inMilliseconds,
+            ),
+          );
+          aiDebugLog(
+            'direct-openai',
+            'request timeout -> retrying without pending mix '
+                '(library_retained=$hasLibrarySnapshot, '
+                'retry_timeout_ms=${remainingTimeout.inMilliseconds})',
+          );
+          final retryInputMessages = _buildInputMessages(
+            conversation: conversation,
+            userText: userText,
+            projectSnapshot: projectSnapshot,
+            selectionSnapshot: selectionSnapshot,
+            librarySnapshot: librarySnapshot,
+            pendingMix: null,
+          );
+          final retryRequestBody = _buildOpenAiRequestBody(
+            inputMessages: retryInputMessages,
+            aiFeature: aiFeature,
+          );
+          requestStopwatch
+            ..reset()
+            ..start();
+          response = await _postJson(
+            uri: Uri.parse(_apiUrl),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json',
+            },
+            body: retryRequestBody,
+            timeoutOverride: remainingTimeout,
+          );
+          requestStopwatch.stop();
+        }
       } else {
         return LlmResult.text(
           'AI is not configured. Launch with --dart-define=LLM_PROXY_API_BASE_URL=... or --dart-define=OPENAI_API_KEY=... --dart-define=OPENAI_MODEL=...',
@@ -1109,7 +3222,8 @@ class CloudLlmService {
     var payload = _decodeJsonObject(response.body);
     var responseMeta = _buildResponseMeta(payload);
     responseMeta = _mergeMetaObservability(responseMeta, <String, dynamic>{
-      if ((promptTraceId ?? '').trim().isNotEmpty) 'prompt_trace_id': promptTraceId!.trim(),
+      if ((promptTraceId ?? '').trim().isNotEmpty)
+        'prompt_trace_id': promptTraceId!.trim(),
       'proxy_roundtrip_ms': requestStopwatch.elapsedMilliseconds,
       'http_status_code': response.statusCode,
       'llm_route': _llmRouteLabel,
@@ -1117,6 +3231,8 @@ class CloudLlmService {
       if (!_isProxyEnabled && _canUseDirectOpenAi) ...<String, dynamic>{
         'provider': 'openai',
         'effective_model': model.trim(),
+        if (directRetriedWithoutPendingMix)
+          'direct_retry_without_pending_mix': true,
       },
     });
     var promptRateLimit = _parsePromptRateLimitStatus(
@@ -1129,6 +3245,13 @@ class CloudLlmService {
         'response_parse_ms': parseStopwatch.elapsedMilliseconds,
       },
     );
+
+    if (!_isProxyEnabled && response.statusCode != 200) {
+      aiDebugLog(
+        'direct-openai',
+        'error status=${response.statusCode} body=${payload ?? response.body}',
+      );
+    }
 
     if (response.statusCode != 200) {
       if (response.statusCode == 429) {
@@ -1150,7 +3273,8 @@ class CloudLlmService {
       if (response.statusCode == 401 || response.statusCode == 403) {
         if (_isProxyEnabled && refreshAuthTokenProvider != null) {
           try {
-            final refreshedToken = await _resolveProxyAuthToken(forceRefresh: true);
+            final refreshedToken =
+                await _resolveProxyAuthToken(forceRefresh: true);
             if (refreshedToken != null && refreshedToken.isNotEmpty) {
               requestStopwatch
                 ..reset()
@@ -1161,6 +3285,7 @@ class CloudLlmService {
                 userText: userText,
                 projectSnapshot: projectSnapshot,
                 selectionSnapshot: selectionSnapshot,
+                librarySnapshot: librarySnapshot,
                 promptTraceId: promptTraceId,
                 projectId: projectId,
                 aiFeature: aiFeature,
@@ -1175,7 +3300,8 @@ class CloudLlmService {
               responseMeta = _mergeMetaObservability(
                 responseMeta,
                 <String, dynamic>{
-                  if ((promptTraceId ?? '').trim().isNotEmpty) 'prompt_trace_id': promptTraceId!.trim(),
+                  if ((promptTraceId ?? '').trim().isNotEmpty)
+                    'prompt_trace_id': promptTraceId!.trim(),
                   'proxy_roundtrip_ms': requestStopwatch.elapsedMilliseconds,
                   'http_status_code': response.statusCode,
                   'llm_route': _llmRouteLabel,
@@ -1209,7 +3335,8 @@ class CloudLlmService {
                   },
                   meta: responseMeta,
                 );
-              } else if (response.statusCode == 401 || response.statusCode == 403) {
+              } else if (response.statusCode == 401 ||
+                  response.statusCode == 403) {
                 return _recoverableTextResult(
                   _recoverableAuthMessage,
                   softErrorCode: 'auth_rejected',
@@ -1262,9 +3389,14 @@ class CloudLlmService {
           userText: userText,
         );
         if (args == null) {
+          final fallbackText = _invalidToolCallFallbackText(
+            name,
+            o['arguments'],
+            userText: userText,
+          );
           return LlmResult.text(
-            _fallbackAssistantText('informational_response'),
-            null,
+            fallbackText,
+            <String, dynamic>{'message': fallbackText},
             meta: responseMeta,
           );
         }
@@ -1304,9 +3436,14 @@ class CloudLlmService {
               userText: userText,
             );
             if (args == null) {
+              final fallbackText = _invalidToolCallFallbackText(
+                'mix_model_request',
+                text,
+                userText: userText,
+              );
               return LlmResult.text(
-                _fallbackAssistantText('informational_response'),
-                null,
+                fallbackText,
+                <String, dynamic>{'message': fallbackText},
                 meta: responseMeta,
               );
             }
@@ -1321,7 +3458,9 @@ class CloudLlmService {
           }
 
           // Normal assistant text
-          if (text is String && text.trim().isNotEmpty && assistantText == null) {
+          if (text is String &&
+              text.trim().isNotEmpty &&
+              assistantText == null) {
             assistantText = _sanitizeUserFacingText(
               text,
               toolName: 'informational_response',
@@ -1333,8 +3472,10 @@ class CloudLlmService {
     }
 
     if (toolResults.isNotEmpty) {
-      final informationalResults = toolResults.where((t) => t.toolName == 'informational_response');
-      final nonInformationalResults = toolResults.where((t) => t.toolName != 'informational_response');
+      final informationalResults =
+          toolResults.where((t) => t.toolName == 'informational_response');
+      final nonInformationalResults =
+          toolResults.where((t) => t.toolName != 'informational_response');
 
       if (nonInformationalResults.isEmpty) {
         final firstInfo = informationalResults.first;
@@ -1360,10 +3501,14 @@ class CloudLlmService {
         );
       }
 
-      final callArgs =
-          nonInformationalResults.map((t) => t.toolArgs).whereType<Map<String, dynamic>>().toList(growable: false);
+      final callArgs = nonInformationalResults
+          .map((t) => t.toolArgs)
+          .whereType<Map<String, dynamic>>()
+          .toList(growable: false);
       final userFacingText = assistantText ??
-          nonInformationalResults.map((t) => t.text?.trim() ?? '').firstWhere((t) => t.isNotEmpty, orElse: () => '');
+          nonInformationalResults
+              .map((t) => t.text?.trim() ?? '')
+              .firstWhere((t) => t.isNotEmpty, orElse: () => '');
 
       if (callArgs.length == 1) {
         return LlmResult.tool(
@@ -1383,7 +3528,8 @@ class CloudLlmService {
     }
 
     // Only reach here if NO tool-like structure existed
-    if (assistantText != null && assistantText != _fallbackAssistantText('informational_response')) {
+    if (assistantText != null &&
+        assistantText != _fallbackAssistantText('informational_response')) {
       return LlmResult.text(assistantText, null, meta: responseMeta);
     }
 

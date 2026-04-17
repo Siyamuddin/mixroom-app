@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/helpers/app_popup.dart';
+import 'package:mixroom/helpers/app_update_prompt_service.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
@@ -11,6 +13,7 @@ import 'package:mixroom/helpers/feedback_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/remote_announcement_manager.dart';
 import 'package:mixroom/l10n/l10n.dart';
+import 'package:mixroom/models/app_update_policy.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/providers/locale_provider.dart';
@@ -20,6 +23,7 @@ import 'package:mixroom/screens/projects.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
 import 'package:mixroom/widgets/remote_announcement_widgets.dart';
 import 'package:mixroom/widgets/remote_welcome_onboarding_screen.dart';
+import 'package:mixroom/widgets/soft_update_dialog.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -35,14 +39,16 @@ class _SignedInShellState extends State<SignedInShell> {
   static const String _welcomeMediaType = 'local_4step';
   static const String _welcomeMediaVersion = '2026-03-30';
 
-  MixroomMainTab _selectedTab = MixroomMainTab.home;
+  MixroomMainTab _selectedTab = MixroomMainTab.projects;
   MixroomMainTab? _lastTrackedTab;
-  bool _showAddMenu = false;
   bool _creatingProject = false;
+  final AppUpdatePromptService _appUpdatePromptService =
+      AppUpdatePromptService();
   final RemoteAnnouncementManager _remoteAnnouncementManager =
       RemoteAnnouncementManager();
   bool _welcomeCheckStarted = false;
   bool _welcomeDialogOpen = false;
+  bool _appUpdateDialogOpen = false;
   RemoteAnnouncement? _activeAnnouncement;
   bool _announcementModalOpen = false;
   String? _trackedAnnouncementBannerVersion;
@@ -66,7 +72,7 @@ class _SignedInShellState extends State<SignedInShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _trackSelectedTab();
-      unawaited(_initializeRemoteEntryContent());
+      unawaited(_initializeEntryContent());
     });
   }
 
@@ -77,14 +83,19 @@ class _SignedInShellState extends State<SignedInShell> {
   }
 
   void _handleAppUserChanged() {
-    if (!mounted || _welcomeDialogOpen || _announcementModalOpen) {
+    if (!mounted ||
+        _welcomeDialogOpen ||
+        _appUpdateDialogOpen ||
+        _announcementModalOpen) {
       return;
     }
-    unawaited(_initializeRemoteEntryContent());
+    unawaited(_initializeEntryContent());
   }
 
-  Future<void> _initializeRemoteEntryContent() async {
+  Future<void> _initializeEntryContent() async {
     await _maybePresentRemoteWelcome();
+    if (!mounted) return;
+    await _maybePresentAppUpdatePrompt();
     if (!mounted) return;
     await _refreshRemoteAnnouncementState(presentModal: true);
   }
@@ -154,6 +165,122 @@ class _SignedInShellState extends State<SignedInShell> {
       ),
     );
     await appUser.stageWelcomeOnboardingSeen();
+  }
+
+  Future<void> _maybePresentAppUpdatePrompt() async {
+    if (_welcomeDialogOpen || _appUpdateDialogOpen || _announcementModalOpen) {
+      return;
+    }
+
+    final decision = await _appUpdatePromptService.evaluate();
+    if (!mounted || decision == null || !decision.isUpdateAvailable) {
+      return;
+    }
+
+    _appUpdateDialogOpen = true;
+    await _appUpdatePromptService.markPromptShown(decision);
+    unawaited(
+      AnalyticsService.instance.track(
+        AnalyticsEvents.appUpdatePromptShown(
+          promptType: decision.type.name,
+          currentVersion: decision.currentVersion,
+          latestVersion: decision.latestVersion,
+        ),
+      ),
+    );
+
+    if (!mounted) {
+      _appUpdateDialogOpen = false;
+      return;
+    }
+
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    final action = await showDialog<String>(
+      context: context,
+      barrierDismissible: decision.type != AppUpdatePromptType.force,
+      builder: (_) => SoftUpdateDialog(
+        decision: decision,
+        onUpdatePressed: () => rootNavigator.pop('update'),
+        onLaterPressed: () => rootNavigator.pop('later'),
+      ),
+    );
+    _appUpdateDialogOpen = false;
+    if (!mounted) return;
+    await _handleAppUpdateAction(decision, action ?? 'dismissed');
+  }
+
+  Future<void> _handleAppUpdateAction(
+    AppUpdateDecision decision,
+    String action,
+  ) async {
+    if (action == 'update') {
+      final uri = Uri.tryParse(decision.storeUrl.trim());
+      if (uri == null) {
+        showAppSnackBar(
+          context,
+          L10n.translate(context, 'Update link is not configured yet.'),
+        );
+        unawaited(
+          AnalyticsService.instance.track(
+            AnalyticsEvents.appUpdatePromptInteracted(
+              action: 'update_invalid_url',
+              promptType: decision.type.name,
+              currentVersion: decision.currentVersion,
+              latestVersion: decision.latestVersion,
+              errorCode: 'invalid_url',
+            ),
+          ),
+        );
+        return;
+      }
+
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!mounted) return;
+      if (!launched) {
+        showAppSnackBar(
+          context,
+          L10n.translate(context, 'Unable to open the store right now.'),
+        );
+        unawaited(
+          AnalyticsService.instance.track(
+            AnalyticsEvents.appUpdatePromptInteracted(
+              action: 'update_launch_failed',
+              promptType: decision.type.name,
+              currentVersion: decision.currentVersion,
+              latestVersion: decision.latestVersion,
+              errorCode: 'launch_failed',
+            ),
+          ),
+        );
+        return;
+      }
+
+      unawaited(
+        AnalyticsService.instance.track(
+          AnalyticsEvents.appUpdatePromptInteracted(
+            action: 'update',
+            promptType: decision.type.name,
+            currentVersion: decision.currentVersion,
+            latestVersion: decision.latestVersion,
+          ),
+        ),
+      );
+      return;
+    }
+
+    unawaited(
+      AnalyticsService.instance.track(
+        AnalyticsEvents.appUpdatePromptInteracted(
+          action: action,
+          promptType: decision.type.name,
+          currentVersion: decision.currentVersion,
+          latestVersion: decision.latestVersion,
+        ),
+      ),
+    );
   }
 
   Future<void> _refreshRemoteAnnouncementState({
@@ -329,13 +456,11 @@ class _SignedInShellState extends State<SignedInShell> {
 
   void _setTab(MixroomMainTab tab) {
     if (_selectedTab == tab) {
-      setState(() => _showAddMenu = false);
       return;
     }
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _selectedTab = tab;
-      _showAddMenu = false;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -383,7 +508,6 @@ class _SignedInShellState extends State<SignedInShell> {
     }
     if (!mounted) return;
     _creatingProject = true;
-    setState(() => _showAddMenu = false);
     final isProEntitled = context
         .read<EntitlementService>()
         .canUseCapability(SubscriptionCapability.proEditor);
@@ -429,14 +553,6 @@ class _SignedInShellState extends State<SignedInShell> {
         }
       }
     }
-  }
-
-  void _showVideoProjectPlaceholder() {
-    setState(() => _showAddMenu = false);
-    showAppSnackBar(
-      context,
-      L10n.translate(context, 'Video projects are coming soon.'),
-    );
   }
 
   Widget _buildPage(MixroomMainTab tab) {
@@ -496,49 +612,8 @@ class _SignedInShellState extends State<SignedInShell> {
             child: MixroomMainBottomDock(
               selectedTab: _selectedTab,
               onTabSelected: _setTab,
-              addMenuOpen: _showAddMenu,
-              onAddTap: () {
-                setState(() => _showAddMenu = !_showAddMenu);
-              },
-            ),
-          ),
-          Positioned(
-            left: 27,
-            right: 27,
-            bottom: mixroomShellDockBottomInset(context) +
-                kMixroomMainDockHeight +
-                12,
-            child: IgnorePointer(
-              ignoring: !_showAddMenu,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                opacity: _showAddMenu ? 1 : 0,
-                child: AnimatedSlide(
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOutCubic,
-                  offset: _showAddMenu ? Offset.zero : const Offset(0, 0.18),
-                  child: TweenAnimationBuilder<double>(
-                    tween: Tween<double>(
-                      begin: _showAddMenu ? 0.94 : 1.0,
-                      end: _showAddMenu ? 1.0 : 0.94,
-                    ),
-                    duration: const Duration(milliseconds: 260),
-                    curve: Curves.easeOutCubic,
-                    builder: (context, scale, child) {
-                      return Transform.scale(
-                        scale: scale,
-                        alignment: Alignment.bottomCenter,
-                        child: child,
-                      );
-                    },
-                    child: _AddProjectMenu(
-                      onCreateMusicProject: _createMusicProject,
-                      onCreateVideoProject: _showVideoProjectPlaceholder,
-                    ),
-                  ),
-                ),
-              ),
+              addMenuOpen: false,
+              onAddTap: _createMusicProject,
             ),
           ),
         ],
@@ -593,8 +668,55 @@ class _HomeTab extends StatelessWidget {
   }
 }
 
-class _PlatformTab extends StatelessWidget {
+class _PlatformTab extends StatefulWidget {
   const _PlatformTab();
+
+  @override
+  State<_PlatformTab> createState() => _PlatformTabState();
+}
+
+class _PlatformTabState extends State<_PlatformTab> {
+  late final Future<AppVersionStatus?> _versionStatusFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _versionStatusFuture = AppUpdatePromptService().getVersionStatus();
+  }
+
+  Future<void> _openStore(String storeUrl) async {
+    final uri = Uri.tryParse(storeUrl.trim());
+    if (uri == null) {
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Update link is not configured yet.'),
+      );
+      return;
+    }
+
+    final launched = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!mounted || launched) return;
+    showAppSnackBar(
+      context,
+      L10n.translate(context, 'Unable to open the store right now.'),
+    );
+  }
+
+  String _storeCtaLabel(BuildContext context) {
+    if (kIsWeb) {
+      return L10n.translate(context, 'Open Store');
+    }
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      return L10n.translate(context, 'Open in App Store');
+    }
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return L10n.translate(context, 'Open Store');
+    }
+    return L10n.translate(context, 'Open in Play Store');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -637,28 +759,137 @@ class _PlatformTab extends StatelessWidget {
                             fit: BoxFit.contain,
                             filterQuality: FilterQuality.high,
                           ),
-                          const SizedBox(height: 12),
-                          RichText(
-                            textAlign: TextAlign.center,
-                            text: TextSpan(
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                color: Color(0xFFF4F4F4),
-                                fontSize: 18,
-                                height: 22 / 18,
-                              ),
-                              children: [
-                                TextSpan(
-                                  text:
-                                      '${L10n.translate(context, 'Platform')} ',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                TextSpan(
-                                  text: L10n.translate(context, 'Coming Soon'),
-                                ),
-                              ],
+                          const SizedBox(height: 22),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 300),
+                            child: FutureBuilder<AppVersionStatus?>(
+                              future: _versionStatusFuture,
+                              builder: (context, snapshot) {
+                                final status = snapshot.data;
+                                final currentVersion =
+                                    status?.currentVersion.trim() ?? '';
+                                final canUpdate = status != null &&
+                                    status.isUpdateAvailable &&
+                                    status.hasStoreUrl;
+                                final statusLabel = switch (status) {
+                                  null => L10n.translate(
+                                      context,
+                                      'Version unavailable',
+                                    ),
+                                  _ when status.isUpdateAvailable =>
+                                    L10n.translate(
+                                      context,
+                                      'A newer version is ready!',
+                                    ),
+                                  _ when status.hasLatestVersion =>
+                                    L10n.translate(
+                                      context,
+                                      'Latest version installed',
+                                    ),
+                                  _ => '',
+                                };
+
+                                return Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      L10n.translate(
+                                        context,
+                                        'App Version',
+                                      ),
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        color: Colors.white.withValues(
+                                          alpha: 0.68,
+                                        ),
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        height: 18 / 13,
+                                        letterSpacing: 1.2,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      currentVersion.isEmpty
+                                          ? '...'
+                                          : currentVersion,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        color: Color(0xFFF4F4F4),
+                                        fontSize: 30,
+                                        fontWeight: FontWeight.w700,
+                                        height: 34 / 30,
+                                        letterSpacing: -0.5,
+                                      ),
+                                    ),
+                                    if (statusLabel.isNotEmpty) ...[
+                                      const SizedBox(height: 10),
+                                      Text(
+                                        statusLabel,
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontFamily: 'Pretendard',
+                                          color:
+                                              status?.isUpdateAvailable == true
+                                                  ? const Color(0xFFFFE4A8)
+                                                  : Colors.white.withValues(
+                                                      alpha: 0.78,
+                                                    ),
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                          height: 18 / 14,
+                                        ),
+                                      ),
+                                    ],
+                                    if (canUpdate) ...[
+                                      const SizedBox(height: 12),
+                                      FilledButton(
+                                        onPressed: () =>
+                                            _openStore(status.storeUrl),
+                                        style: FilledButton.styleFrom(
+                                          foregroundColor:
+                                              const Color(0xFFF4F4F4),
+                                          backgroundColor: const Color.fromRGBO(
+                                            118,
+                                            170,
+                                            220,
+                                            0.26,
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 10,
+                                          ),
+                                          minimumSize: Size.zero,
+                                          tapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                          ),
+                                          side: BorderSide(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.16,
+                                            ),
+                                            width: 0.8,
+                                          ),
+                                          elevation: 0,
+                                          textStyle: const TextStyle(
+                                            fontFamily: 'Pretendard',
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            height: 18 / 13,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          _storeCtaLabel(context),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                );
+                              },
                             ),
                           ),
                         ],
@@ -671,98 +902,6 @@ class _PlatformTab extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _AddProjectMenu extends StatelessWidget {
-  const _AddProjectMenu({
-    required this.onCreateMusicProject,
-    required this.onCreateVideoProject,
-  });
-
-  final VoidCallback onCreateMusicProject;
-  final VoidCallback onCreateVideoProject;
-
-  @override
-  Widget build(BuildContext context) {
-    return MixroomShellSurface(
-      radius: 26,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      color: const Color.fromRGBO(151, 184, 216, 0.58),
-      strong: true,
-      child: Row(
-        children: [
-          Expanded(
-            child: _AddProjectMenuAction(
-              label: L10n.translate(context, 'New Music Project'),
-              icon: Icons.music_note_rounded,
-              onTap: onCreateMusicProject,
-            ),
-          ),
-          Container(
-            width: 1,
-            height: 54,
-            color: Colors.white.withValues(alpha: 0.28),
-          ),
-          Expanded(
-            child: _AddProjectMenuAction(
-              label: L10n.translate(context, 'New Video Project'),
-              icon: Icons.video_library_outlined,
-              onTap: onCreateVideoProject,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AddProjectMenuAction extends StatelessWidget {
-  const _AddProjectMenuAction({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 72),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, color: Colors.white, size: 18),
-                const SizedBox(height: 8),
-                Text(
-                  label,
-                  maxLines: 2,
-                  textAlign: TextAlign.center,
-                  overflow: TextOverflow.visible,
-                  softWrap: true,
-                  style: const TextStyle(
-                    fontFamily: 'Pretendard',
-                    color: Color(0xFFF4F4F4),
-                    fontSize: 13.5,
-                    height: 1.15,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

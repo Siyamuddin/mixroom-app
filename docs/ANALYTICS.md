@@ -26,7 +26,8 @@ Rules:
 
 - Do not call PostHog directly from random widgets.
 - Add new product events in `AnalyticsEvents` and send them through `AnalyticsService`.
-- Do not send raw AI prompts, emails beyond identify usage, or other sensitive content in event payloads.
+- Do not send raw AI prompts, emails beyond identify usage, or other sensitive content in PostHog event payloads.
+- Save-time project telemetry uploads are separate from PostHog; assistant chat history should only be included when the in-app telemetry toggle is enabled.
 - Use backend analytics for authoritative actions when the backend is the source of truth.
 
 ## Global Event Properties

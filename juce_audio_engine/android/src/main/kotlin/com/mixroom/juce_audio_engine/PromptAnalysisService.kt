@@ -27,12 +27,18 @@ internal class PromptAnalysisService(
   @Volatile
   private var yamnetSession: OrtSession? = null
 
-  fun analyzeClip(path: String): Map<String, Any> {
+  fun analyzeClip(
+    path: String,
+    trimStartMs: Double = 0.0,
+    trimEndMs: Double = -1.0,
+  ): Map<String, Any> {
     val nativeResult =
       JuceBridge.analyzeAudioForPromptJNI(
         path,
         YAMNET_WINDOW_SAMPLES,
         YAMNET_WINDOW_COUNT,
+        trimStartMs,
+        trimEndMs,
       )
     val audioStats = nativeResult.doubleMap("audioStats")
     val windows = nativeResult.floatArrayList("windows")

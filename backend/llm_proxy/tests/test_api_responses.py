@@ -253,7 +253,7 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertIn("AI Co-Producer", provider.request_body["instructions"])
         self.assertEqual(
             provider.request_body["prompt_cache_key"],
-            "mixroom-daw-v20260316:ai_chat",
+            "mixroom-daw-v20260416c:ai_chat:legacy",
         )
         self.assertEqual(provider.request_body["prompt_cache_retention"], "in_memory")
         self.assertEqual(provider.request_body["tools"][0]["name"], "informational_response")
@@ -465,7 +465,7 @@ class ApiResponsesTests(unittest.TestCase):
         request_context = log_request.call_args.kwargs["request_context"]
         self.assertEqual(
             request_context["prompt_cache_key"],
-            "mixroom-daw-v20260316:ai_chat",
+            "mixroom-daw-v20260416c:ai_chat:legacy",
         )
         self.assertEqual(request_context["prompt_cache_retention"], "in_memory")
         self.assertEqual(request_context["prompt_tokens"], 8099)
@@ -813,6 +813,814 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertNotIn("row_index", arguments["actions"][0]["goal"]["target"])
         self.assertNotIn("role", arguments["actions"][0]["goal"]["target"])
 
+    def test_handler_repairs_legacy_mix_goal_type_to_mix_request(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_legacy_goal_type",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "mix_model_request",
+                        "arguments": {
+                            "mode": "execute",
+                            "assistant_message": "Added some space to the bass.",
+                            "actions": [
+                                {
+                                    "goal": {
+                                        "type": "reverb",
+                                        "intents": [
+                                            {
+                                                "kind": "reverb",
+                                                "direction": "up",
+                                                "confidence": 0.72,
+                                            }
+                                        ],
+                                        "target": {
+                                            "scope": "row",
+                                            "row_index": 2,
+                                            "confidence": 0.84,
+                                        },
+                                        "intensity": 0.18,
+                                        "execution_profile": "creative_bold",
+                                        "audibility": "obvious",
+                                        "style_tags": ["washed", "club"],
+                                        "destructive_ok": False,
+                                    }
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 120,
+                    "output_tokens": 80,
+                    "total_tokens": 200,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": "add more wetness",
+                        }
+                    ],
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "mix_model_request")
+        arguments = output["arguments"]
+        self.assertEqual(arguments["actions"][0]["goal"]["type"], "mix_request")
+        self.assertEqual(
+            arguments["actions"][0]["goal"]["execution_profile"], "creative_bold"
+        )
+        self.assertEqual(arguments["actions"][0]["goal"]["audibility"], "obvious")
+        self.assertEqual(
+            arguments["actions"][0]["goal"]["style_tags"], ["washed", "club"]
+        )
+        self.assertFalse(arguments["actions"][0]["goal"]["destructive_ok"])
+        self.assertEqual(arguments["actions"][0]["goal"]["intents"][0]["kind"], "reverb")
+
+    def test_handler_preserves_reference_mix_goal_fields(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_reference_goal",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "mix_model_request",
+                        "arguments": {
+                            "mode": "execute",
+                            "assistant_message": "Matching the project toward the reference track.",
+                            "actions": [
+                                {
+                                    "goal": {
+                                        "type": "balance",
+                                        "intents": [
+                                            {
+                                                "kind": "balance",
+                                                "confidence": 0.88,
+                                            }
+                                        ],
+                                        "target": {
+                                            "scope": "row",
+                                            "row_index": 1,
+                                            "confidence": 0.9,
+                                        },
+                                        "reference_target": {
+                                            "prefer_selected": True,
+                                            "confidence": 0.82,
+                                        },
+                                        "reference_mode": "full_mix",
+                                        "reference_closeness": "close",
+                                        "intensity": 0.42,
+                                        "execution_profile": "creative_bold",
+                                        "audibility": "obvious",
+                                        "style_tags": ["wide", "glue"],
+                                        "destructive_ok": False,
+                                    }
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 120,
+                    "output_tokens": 80,
+                    "total_tokens": 200,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": "mix this close to the reference track",
+                        }
+                    ],
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "mix_model_request")
+        goal = output["arguments"]["actions"][0]["goal"]
+        self.assertEqual(goal["type"], "mix_request")
+        self.assertTrue(goal["reference_target"]["prefer_selected"])
+        self.assertEqual(goal["reference_target"]["confidence"], 0.82)
+        self.assertEqual(goal["reference_mode"], "full_mix")
+        self.assertEqual(goal["reference_closeness"], "close")
+        self.assertEqual(goal["execution_profile"], "creative_bold")
+        self.assertEqual(goal["audibility"], "obvious")
+        self.assertEqual(goal["style_tags"], ["wide", "glue"])
+        self.assertFalse(goal["destructive_ok"])
+
+    def test_handler_normalizes_legacy_midi_note_payload_shape(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_midi_notes",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "I’ll replace the current notes.",
+                            "actions": [
+                                {
+                                    "type": "midi_compose",
+                                    "data": {
+                                        "operation": "replace_notes",
+                                        "target": {"prefer_selected": True},
+                                        "notes": [
+                                            {
+                                                "pitch": "C4",
+                                                "start_measure": 1,
+                                                "duration_measures": 1,
+                                                "velocity": 82,
+                                            }
+                                        ],
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 110,
+                    "output_tokens": 90,
+                    "total_tokens": 200,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "replace the selected midi notes",
+                    "project_snapshot": "Track 1: MIDI Chords",
+                    "selection_snapshot": "selected_clip_indices=0",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        note = output["arguments"]["actions"][0]["data"]["notes"][0]
+        self.assertEqual(note["pitch"], 60)
+        self.assertEqual(note["start_beat"], 0.0)
+        self.assertEqual(note["length_beats"], 4.0)
+        self.assertAlmostEqual(note["velocity"], 82 / 127.0, places=4)
+
+    def test_handler_accepts_create_clip_with_chord_pitch_blocks(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_midi_create_clip",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "I’ll lay down jazz chords on piano.",
+                            "actions": [
+                                {
+                                    "type": "midi_compose",
+                                    "data": {
+                                        "operation": "create_clip",
+                                        "target": {"row_index": 0},
+                                        "instrument_id": "sfz.vsco.upright_piano",
+                                        "length_measures": 8,
+                                        "notes": [
+                                            {
+                                                "measure": 1,
+                                                "beat": 1,
+                                                "duration_beats": 4,
+                                                "pitches": ["C3", "E3", "G3", "B3"],
+                                                "velocity": 90,
+                                            }
+                                        ],
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 120,
+                    "output_tokens": 88,
+                    "total_tokens": 208,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "jazz chords",
+                    "project_snapshot": "Track 1: MIDI Chords",
+                    "selection_snapshot": "",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "midi_compose")
+        self.assertEqual(action["data"]["operation"], "create_clip")
+        note = action["data"]["notes"][0]
+        self.assertEqual(note["pitches"], [48, 52, 55, 59])
+        self.assertEqual(note["start_beat"], 0.0)
+        self.assertEqual(note["length_beats"], 4.0)
+        self.assertAlmostEqual(note["velocity"], 90 / 127.0, places=4)
+
+    def test_handler_accepts_time_beats_alias_for_midi_notes(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_midi_time_beats",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "I’ll reharmonize that clip in minor.",
+                            "actions": [
+                                {
+                                    "type": "midi_compose",
+                                    "data": {
+                                        "operation": "replace_notes",
+                                        "target": {"prefer_selected": True},
+                                        "notes": [
+                                            {
+                                                "time_beats": 12,
+                                                "lengthBeats": 4,
+                                                "pitch": "E3",
+                                                "velocity": 75,
+                                            }
+                                        ],
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 80,
+                    "output_tokens": 60,
+                    "total_tokens": 140,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "make minor key now",
+                    "project_snapshot": "Track 1: MIDI Chords",
+                    "selection_snapshot": "selected_clip_indices=0",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        note = output["arguments"]["actions"][0]["data"]["notes"][0]
+        self.assertEqual(note["start_beat"], 12.0)
+        self.assertEqual(note["length_beats"], 4.0)
+        self.assertEqual(note["pitch"], 52)
+
+    def test_handler_accepts_audio_to_midi_without_note_payload(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_audio_to_midi",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "I’ll convert that vocal to MIDI.",
+                            "actions": [
+                                {
+                                    "type": "midi_compose",
+                                    "data": {
+                                        "operation": "audio_to_midi",
+                                        "target": {"prefer_selected": True},
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 72,
+                    "output_tokens": 44,
+                    "total_tokens": 116,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "convert this vocal to midi",
+                    "project_snapshot": "Track 1: Lead Vocal",
+                    "selection_snapshot": "selected_clip_indices=0",
+                    "client_context": {
+                        "ai_capabilities": ["daw.midi_compose.audio_to_midi"],
+                    },
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "midi_compose")
+        self.assertEqual(action["data"]["operation"], "convert_audio_to_midi")
+        self.assertNotIn("notes", action["data"])
+        self.assertNotIn("progression", action["data"])
+
+    def test_handler_soft_fails_project_edit_for_legacy_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_project_edit_legacy",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "Setting the project tempo to 156 BPM.",
+                            "actions": [
+                                {
+                                    "type": "project_edit",
+                                    "data": {
+                                        "operation": "set_bpm",
+                                        "tempo_bpm": 156,
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 80,
+                    "output_tokens": 40,
+                    "total_tokens": 120,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "808 beat 156 bpm",
+                    "project_snapshot": "Track 1: empty",
+                    "selection_snapshot": "",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "informational_response")
+        self.assertEqual(payload["soft_error"]["code"], "invalid_structured_output")
+
+    def test_handler_preserves_project_edit_for_capable_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_project_edit_capable",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "Setting the project tempo to 156 BPM.",
+                            "actions": [
+                                {
+                                    "type": "project_edit",
+                                    "data": {
+                                        "operation": "set_bpm",
+                                        "bpm": "156",
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 80,
+                    "output_tokens": 40,
+                    "total_tokens": 120,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "set bpm to 156",
+                    "project_snapshot": "Track 1: empty",
+                    "selection_snapshot": "",
+                    "ai_feature": "assistant_chat",
+                    "client_context": {
+                        "ai_capabilities": ["daw.project_edit.set_tempo"],
+                    },
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "project_edit")
+        self.assertEqual(action["data"]["operation"], "set_tempo")
+        self.assertEqual(action["data"]["tempo_bpm"], 156.0)
+        tool_defs = provider.request_body["tools"]
+        daw_tool = next(
+            tool for tool in tool_defs if tool.get("name") == "daw_assistant_actions"
+        )
+        action_types = (
+            daw_tool["parameters"]["properties"]["actions"]["items"]["properties"][
+                "type"
+            ]["enum"]
+        )
+        self.assertIn("project_edit", action_types)
+
+    def test_handler_soft_fails_sample_insert_for_legacy_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_sample_insert_legacy",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "I’ll drop in a kick and snare loop.",
+                            "actions": [
+                                {
+                                    "type": "sample_insert",
+                                    "data": {
+                                        "operation": "insert_sample",
+                                        "items": [
+                                            {
+                                                "library_path": "Starter Kit v1/Processed Drums/Kick-01.flac",
+                                                "row_index": 0,
+                                                "start_measure": 1,
+                                            }
+                                        ],
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 90,
+                    "output_tokens": 60,
+                    "total_tokens": 150,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "add a kick",
+                    "project_snapshot": "Track 1: empty",
+                    "selection_snapshot": "",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "informational_response")
+        self.assertEqual(payload["soft_error"]["code"], "invalid_structured_output")
+        tool_defs = provider.request_body["tools"]
+        daw_tool = next(
+            tool for tool in tool_defs if tool.get("name") == "daw_assistant_actions"
+        )
+        action_types = (
+            daw_tool["parameters"]["properties"]["actions"]["items"]["properties"][
+                "type"
+            ]["enum"]
+        )
+        self.assertNotIn("project_edit", action_types)
+        self.assertNotIn("sample_insert", action_types)
+
+    def test_handler_preserves_sample_insert_for_capable_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_sample_insert_capable",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "I’ll drop in a kick and snare loop.",
+                            "actions": [
+                                {
+                                    "type": "sample_insert",
+                                    "data": {
+                                        "operation": "insert_sample",
+                                        "items": [
+                                            {
+                                                "library_path": "Starter Kit v1/Processed Drums/Kick-01.flac",
+                                                "row_index": 0,
+                                                "start_measure": 1,
+                                            }
+                                        ],
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 90,
+                    "output_tokens": 60,
+                    "total_tokens": 150,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "add a kick",
+                    "project_snapshot": "Track 1: empty",
+                    "selection_snapshot": "",
+                    "ai_feature": "assistant_chat",
+                    "client_context": {
+                        "ai_capabilities": ["daw.sample_insert.library"],
+                    },
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "sample_insert")
+        self.assertEqual(action["data"]["operation"], "insert_audio_clips")
+        item = action["data"]["items"][0]
+        self.assertEqual(
+            item["library_path"],
+            "Starter Kit v1/Processed Drums/Kick-01.flac",
+        )
+        self.assertEqual(item["row_index"], 0)
+        self.assertEqual(item["start_measure"], 1.0)
+        tool_defs = provider.request_body["tools"]
+        daw_tool = next(
+            tool for tool in tool_defs if tool.get("name") == "daw_assistant_actions"
+        )
+        action_types = (
+            daw_tool["parameters"]["properties"]["actions"]["items"]["properties"][
+                "type"
+            ]["enum"]
+        )
+        self.assertIn("sample_insert", action_types)
+
+    def test_handler_preserves_sample_replace_for_capable_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_sample_replace_capable",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "I’ll swap that hit for a tighter one.",
+                            "actions": [
+                                {
+                                    "type": "sample_insert",
+                                    "data": {
+                                        "operation": "replace_audio_clips",
+                                        "items": [
+                                            {
+                                                "library_path": "Starter Kit v1/Processed Drums/Clap-01.flac",
+                                                "clip_index": 2,
+                                            }
+                                        ],
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 90,
+                    "output_tokens": 60,
+                    "total_tokens": 150,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "swap this clap",
+                    "project_snapshot": "Track 1: clap clip selected",
+                    "selection_snapshot": "",
+                    "ai_feature": "assistant_chat",
+                    "client_context": {
+                        "ai_capabilities": ["daw.sample_insert.library"],
+                    },
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "sample_insert")
+        self.assertEqual(action["data"]["operation"], "replace_audio_clips")
+        item = action["data"]["items"][0]
+        self.assertEqual(
+            item["library_path"],
+            "Starter Kit v1/Processed Drums/Clap-01.flac",
+        )
+        self.assertEqual(item["clip_index"], 2)
+
+    def test_handler_soft_fails_transpose_notes_for_legacy_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_transpose_legacy",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "I’ll raise the chords by an octave.",
+                            "actions": [
+                                {
+                                    "type": "midi_compose",
+                                    "data": {
+                                        "operation": "octave_up",
+                                        "target": {"prefer_selected": True},
+                                        "octaves": 1,
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 75,
+                    "output_tokens": 45,
+                    "total_tokens": 120,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "octave up those chords",
+                    "project_snapshot": "Track 1: MIDI Chords",
+                    "selection_snapshot": "selected_clip_indices=0",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "informational_response")
+        self.assertEqual(payload["soft_error"]["code"], "invalid_structured_output")
+
     def test_handler_normalizes_explicit_all_clips_scope_for_daw_actions(self) -> None:
         provider = _FakeProvider(
             response_body={
@@ -881,6 +1689,109 @@ class ApiResponsesTests(unittest.TestCase):
         arguments = output["arguments"]
         self.assertEqual(len(arguments["actions"]), 1)
         self.assertEqual(arguments["actions"][0]["data"]["target"], {"scope": "all"})
+
+    def test_handler_soft_fails_bare_clip_edit_action(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_bare_clip_edit",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "Moving the selected clip up one row.",
+                            "actions": [
+                                {
+                                    "type": "clip_edit",
+                                    "data": {},
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 160,
+                    "output_tokens": 60,
+                    "total_tokens": 220,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "move this selected clip up a row",
+                    "project_snapshot": "Track 1: vocal\nTrack 2: drums",
+                    "selection_snapshot": "selected_clip_indices=0",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "informational_response")
+        self.assertEqual(
+            output["arguments"]["message"],
+            "I couldn't complete that request just now. Please try again.",
+        )
+        self.assertEqual(payload["soft_error"]["code"], "invalid_structured_output")
+        self.assertTrue(payload["soft_error"]["usage_refunded"])
+
+    def test_handler_sanitizes_internal_leak_in_user_facing_message(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_internal_leak",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "informational_response",
+                        "arguments": {
+                            "message": "There is nothing in project snapshot because isEmpty = true.",
+                            "cancels_pending": False,
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 80,
+                    "output_tokens": 20,
+                    "total_tokens": 100,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": "one button mix",
+                        }
+                    ],
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "informational_response")
+        self.assertEqual(
+            output["arguments"]["message"],
+            "I couldn't complete that request just now. Please try again.",
+        )
+        self.assertNotIn("soft_error", payload)
 
     def test_handler_shortens_tutorial_copy_and_repairs_fx_contains_target(self) -> None:
         provider = _FakeProvider(
@@ -1542,7 +2453,7 @@ class ApiResponsesTests(unittest.TestCase):
                     "usage": {"input_tokens": 10, "output_tokens": 10, "total_tokens": 20},
                 },
                 "prompt": "Make the mix more modern.",
-                "should_refund": False,
+                "should_refund": True,
             },
         ]
 

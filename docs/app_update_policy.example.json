@@ -1,0 +1,14 @@
+{
+  "ios": {
+    "latestVersion": "1.1.1",
+    "minSupportedVersion": "1.1.0",
+    "storeUrl": "https://apps.apple.com/us/app/mixroom-ai-co-producer/id6759779450",
+    "promptCadenceHours": 24
+  },
+  "android": {
+    "latestVersion": "1.1.1",
+    "minSupportedVersion": "1.1.0",
+    "storeUrl": "https://play.google.com/store/apps/details?id=com.mixroom.mixroomapp",
+    "promptCadenceHours": 24
+  }
+}

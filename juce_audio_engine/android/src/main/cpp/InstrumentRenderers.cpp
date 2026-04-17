@@ -38,6 +38,7 @@ struct InstrumentPreset
     double transient = 0.08;
     double pitchDropSemitones = 0.0;
     double noise = 0.02;
+    double padDetuneOffset = 0.008;
 };
 
 struct NoteState
@@ -101,6 +102,15 @@ static double waveFromType(int type, double phase)
     default:
         return p < 0.5 ? (-1.0 + 4.0 * p) : (3.0 - 4.0 * p);
     }
+}
+
+static double softSaturate(double input, double amount)
+{
+    const double drive = juce::jmax(1.0, amount);
+    const double norm = std::tanh(drive);
+    if (norm <= 1.0e-6)
+        return input;
+    return std::tanh(input * drive) / norm;
 }
 
 class InstrumentProcessor
@@ -184,19 +194,52 @@ public:
                        double noteProgress,
                        double) override
     {
-        const double body = waveFromType(2, state.phaseA) * 0.52;
-        const double sub = waveFromType(0, state.phaseB) * 0.66;
-        const double growl = waveFromType(1, state.phaseA) * 0.20;
-        const double transient = (0.04 + preset.transient * 0.22) *
-                                 std::exp(-22.0 * noteProgress) *
-                                 noiseForSample(state.seed, noteSampleIndex);
-        const double dynamicCutoff =
-            preset.cutoffHz * juce::jlimit(0.45, 1.05, 1.0 - noteProgress * 0.55);
-        const double raw =
-            lowPass(body + sub + growl + transient, dynamicCutoff, state.low);
+        const double toneShape = juce::jlimit(0.0, 1.0, preset.tone);
+        const double driveShape = juce::jlimit(0.0, 1.0, preset.drive);
+        const double det = juce::jlimit(0.0, 0.012, preset.detune);
+        const double punch = std::exp(-18.0 * noteProgress);
+        const double pitchRatio = std::pow(
+            2.0,
+            juce::jlimit(0.0, 6.0, preset.pitchDropSemitones) *
+                punch / 12.0);
+        const double fundamentalMix =
+            juce::jlimit(0.76, 0.92, 0.90 - toneShape * 0.08);
+        const double bodyMix =
+            juce::jlimit(0.05, 0.16, 0.06 + toneShape * 0.07);
+        const double secondMix =
+            juce::jlimit(0.03, 0.16, 0.04 + toneShape * 0.07 + driveShape * 0.05);
+        const double thirdMix =
+            juce::jlimit(0.01, 0.10, 0.01 + toneShape * 0.04 + driveShape * 0.05);
+        const double airMix =
+            juce::jlimit(0.0, 0.05, toneShape * 0.02 + driveShape * 0.02);
 
-        advancePhase(state.phaseA, frequencyHz);
-        advancePhase(state.phaseB, frequencyHz * 0.5);
+        const double sub = waveFromType(0, state.phaseA);
+        const double body = waveFromType(3, wrapPhase(state.phaseB + 0.125)) * bodyMix;
+        const double second = waveFromType(0, wrapPhase(state.phaseA * 2.0)) * secondMix;
+        const double third = waveFromType(0, wrapPhase(state.phaseA * 3.0)) * thirdMix;
+        const double air = waveFromType(3, wrapPhase(state.phaseA * 4.0)) * airMix;
+        const double grit = (preset.noise * (0.002 + toneShape * 0.02)) *
+                            punch *
+                            noiseForSample(state.seed + 23, noteSampleIndex);
+        const double transient = (0.001 + preset.transient * 0.012 + toneShape * 0.003) *
+                                 std::exp(-60.0 * noteProgress) *
+                                 noiseForSample(state.seed, noteSampleIndex);
+        const double core =
+            sub * fundamentalMix + body + second + third + air + grit + transient;
+        const double saturated =
+            softSaturate(core, 1.05 + driveShape * 1.5 + toneShape * 0.35);
+        const double cleanBlend =
+            juce::jlimit(0.62, 0.84, 0.80 - toneShape * 0.10);
+        const double shapeBlend =
+            juce::jlimit(0.18, 0.40, 0.22 + toneShape * 0.10 + driveShape * 0.08);
+        const double dynamicCutoff =
+            preset.cutoffHz * juce::jlimit(0.58, 1.38, 0.90 + toneShape * 0.22 + punch * 0.32);
+        const double shaped =
+            lowPass(sub * cleanBlend + saturated * shapeBlend, dynamicCutoff, state.low);
+        const double raw = highPass(shaped, 24.0, state.aux);
+
+        advancePhase(state.phaseA, frequencyHz * pitchRatio);
+        advancePhase(state.phaseB, frequencyHz * pitchRatio * (1.0 + det * 0.35));
         return (float)raw;
     }
 };
@@ -212,7 +255,7 @@ public:
                        double noteProgress,
                        double) override
     {
-        const double det = juce::jlimit(0.001, 0.03, preset.detune + 0.008);
+        const double det = juce::jlimit(0.0, 0.03, preset.detune + preset.padDetuneOffset);
         const double lfo =
             std::sin(juce::MathConstants<double>::twoPi * (double)noteSampleIndex / sampleRate * 0.23);
         const double left = waveFromType(0, state.phaseA);
@@ -297,17 +340,25 @@ public:
         const int style = juce::jlimit(0, 3, preset.oscillator);
         const double keyOpen =
             juce::jlimit(0.6, 1.7, 0.75 + preset.tone * 0.75 + (1.0 - noteProgress) * 0.2);
+        const double warmth = juce::jlimit(0.0, 1.0, 1.0 - preset.tone);
+        const double tineAmount =
+            juce::jlimit(0.04, 0.34, 0.05 + preset.transient * 0.42 + preset.tone * 0.08);
+        const double chorusDepth = juce::jlimit(0.0, 0.035, preset.detune + 0.006);
+        const double timeSec = (double)noteSampleIndex / sampleRate;
 
         if (style == 2)
         {
-            const double fundamental = waveFromType(2, state.phaseA) * 0.48;
-            const double octave = waveFromType(2, state.phaseB) * 0.28;
-            const double twelfth = waveFromType(2, state.phaseB * 1.5) * 0.16;
-            const double chorus = waveFromType(1, state.phaseB + 0.13) * 0.11;
-            const double click = (0.04 + preset.transient * 0.18) *
-                                 std::exp(-52.0 * noteProgress) *
+            const double swirl =
+                std::sin(juce::MathConstants<double>::twoPi * timeSec * 5.2) * chorusDepth;
+            const double drawbar1 = waveFromType(2, state.phaseA) * 0.42;
+            const double drawbar2 = waveFromType(2, state.phaseB + swirl) * 0.24;
+            const double drawbar3 = waveFromType(2, state.phaseB * 1.5) * 0.16;
+            const double drawbar4 = waveFromType(1, state.phaseB * 2.0 - swirl) * 0.07;
+            const double leak = waveFromType(3, state.phaseB * 4.0) * 0.03;
+            const double click = (0.01 + preset.transient * 0.05) *
+                                 std::exp(-72.0 * noteProgress) *
                                  noiseForSample(state.seed + 31, noteSampleIndex);
-            const double raw = lowPass(fundamental + octave + twelfth + chorus + click,
+            const double raw = lowPass(drawbar1 + drawbar2 + drawbar3 + drawbar4 + leak + click,
                                        preset.cutoffHz * keyOpen,
                                        state.low);
 
@@ -316,16 +367,57 @@ public:
             return (float)raw;
         }
 
-        const double inharmonic = 1.0 + juce::jlimit(0.0, 0.005, frequencyHz * 0.0000005);
-        const double hammer = (0.09 + preset.transient * 0.30) *
-                              std::exp(-36.0 * noteProgress) *
+        if (style == 3)
+        {
+            const double body = waveFromType(0, state.phaseA) * 0.34;
+            const double tine1 = waveFromType(0, state.phaseB) * 0.22;
+            const double tine2 = waveFromType(0, state.phaseB * (3.1 + preset.tone * 0.8)) * tineAmount;
+            const double bark = waveFromType(3, state.phaseB * (1.5 + chorusDepth * 4.5)) * 0.10;
+            const double chorus = waveFromType(0, state.phaseA * (1.0 + chorusDepth)) * 0.10;
+            const double thump = (0.04 + preset.transient * 0.20) *
+                                 std::exp(-34.0 * noteProgress) *
+                                 noiseForSample(state.seed + 21, noteSampleIndex);
+            const double raw = lowPass(body + tine1 + tine2 + bark + chorus + thump,
+                                       preset.cutoffHz * keyOpen,
+                                       state.low);
+
+            advancePhase(state.phaseA, frequencyHz);
+            advancePhase(state.phaseB, frequencyHz * 2.0);
+            return (float)raw;
+        }
+
+        if (style == 1)
+        {
+            const double body = waveFromType(0, state.phaseA) * 0.42;
+            const double felt = waveFromType(3, state.phaseA * 0.5 + 0.125) * (0.14 + warmth * 0.10);
+            const double reed = waveFromType(1, state.phaseB) * 0.12;
+            const double bloom = waveFromType(0, state.phaseA * (1.0 + chorusDepth)) * 0.14;
+            const double hammer = (0.06 + preset.transient * 0.16) *
+                                  std::exp(-30.0 * noteProgress) *
+                                  noiseForSample(state.seed + 21, noteSampleIndex);
+            const double raw = lowPass(body + felt + reed + bloom + hammer,
+                                       preset.cutoffHz * keyOpen,
+                                       state.low);
+
+            advancePhase(state.phaseA, frequencyHz);
+            advancePhase(state.phaseB, frequencyHz * 2.0);
+            return (float)raw;
+        }
+
+        const double inharmonic =
+            1.0 + juce::jlimit(0.0, 0.008, frequencyHz * 0.0000012 + preset.transient * 0.002);
+        const double hammer = (0.08 + preset.transient * 0.24) *
+                              std::exp(-34.0 * noteProgress) *
                               noiseForSample(state.seed + 21, noteSampleIndex);
-        const double body = waveFromType(0, state.phaseA) * 0.58;
-        const double second = waveFromType(0, state.phaseB * inharmonic) * 0.26;
-        const double third = waveFromType(style == 1 ? 1 : 0, state.phaseB * 1.5 * inharmonic) * 0.15;
-        const double tine = waveFromType(style == 3 ? 3 : 0, state.phaseB * (2.4 + style * 0.25)) * 0.11;
-        const double raw =
-            lowPass(body + second + third + tine + hammer, preset.cutoffHz * keyOpen, state.low);
+        const double body = waveFromType(0, state.phaseA) * (0.48 + warmth * 0.10);
+        const double bloom = waveFromType(3, state.phaseA * 0.5 + 0.125) * (0.06 + warmth * 0.10);
+        const double second = waveFromType(0, state.phaseB * inharmonic) * (0.18 + preset.tone * 0.10);
+        const double third = waveFromType(3, state.phaseB * 1.5 * inharmonic) * (0.06 + preset.drive * 0.14);
+        const double tine =
+            waveFromType(0, state.phaseB * (2.3 + preset.tone * 1.05)) * tineAmount;
+        const double raw = lowPass(body + bloom + second + third + tine + hammer,
+                                   preset.cutoffHz * keyOpen,
+                                   state.low);
 
         advancePhase(state.phaseA, frequencyHz);
         advancePhase(state.phaseB, frequencyHz * 2.0);
@@ -408,21 +500,65 @@ public:
                        double) override
     {
         const int style = juce::jlimit(0, 3, preset.oscillator);
-        const double modRatio = style <= 1 ? 2.0 : 3.0;
-        const double modDepth = 0.05 + preset.tone * 0.13 + style * 0.02;
-        const double mod = std::sin(juce::MathConstants<double>::twoPi * state.phaseB * modRatio);
+        if (style == 3)
+        {
+            const double det = juce::jlimit(0.001, 0.018, preset.detune + 0.006);
+            const double timeSec = (double)noteSampleIndex / sampleRate;
+            const double drift =
+                std::sin(juce::MathConstants<double>::twoPi * timeSec * 0.18) * det;
+            const double modA = std::sin(juce::MathConstants<double>::twoPi * state.phaseB * 0.75);
+            const double modB = std::sin(juce::MathConstants<double>::twoPi * state.phaseB * 1.255);
+            const double carrierA =
+                wrapPhase(state.phaseA + modA * (0.035 + preset.tone * 0.05) + drift);
+            const double carrierB = wrapPhase(
+                state.phaseA * (1.0 + det) + modB * (0.025 + preset.tone * 0.04) - drift);
+            const double foundation =
+                std::sin(juce::MathConstants<double>::twoPi * carrierA) * 0.36;
+            const double bloom =
+                std::sin(juce::MathConstants<double>::twoPi * carrierB) * 0.24;
+            const double glass =
+                std::sin(2.0 * juce::MathConstants<double>::twoPi * carrierA) * 0.12;
+            const double sub = waveFromType(0, state.phaseA * 0.5) * 0.10;
+            const double air =
+                (preset.noise * 0.16 + 0.01) *
+                noiseForSample(state.seed + 57, noteSampleIndex);
+            const double dynamicCutoff =
+                preset.cutoffHz * juce::jlimit(0.72, 1.04, 0.80 + (1.0 - noteProgress) * 0.18);
+            const double raw =
+                lowPass(foundation + bloom + glass + sub + air, dynamicCutoff, state.low);
+
+            advancePhase(state.phaseA, frequencyHz);
+            advancePhase(state.phaseB, frequencyHz * 0.5);
+            return (float)raw;
+        }
+
+        const double modRatio = style == 0 ? 2.0 : style <= 1 ? 2.4
+                                              : 3.0;
+        const double modDepth =
+            (style == 0 ? 0.09 : 0.05) + preset.tone * 0.13 + style * 0.02 +
+            preset.transient * 0.04;
+        const double mod =
+            std::sin(juce::MathConstants<double>::twoPi * state.phaseB * modRatio);
         const double carrier = wrapPhase(state.phaseA + mod * modDepth);
         const double p = juce::MathConstants<double>::twoPi * carrier;
-        const double body = std::sin(p) * 0.50;
-        const double even = std::sin(2.0 * p) * 0.26;
-        const double odd = std::sin(3.0 * p) * 0.18;
-        const double air = std::sin(5.0 * p) * 0.10;
-        const double sheen = waveFromType(style == 3 ? 1 : 3, state.phaseB) * 0.12;
+        const double body = std::sin(p) * 0.46;
+        const double even = std::sin(2.0 * p) * 0.22;
+        const double odd = std::sin(3.0 * p) * 0.16;
+        const double air = std::sin(5.0 * p) * 0.08;
+        const double bell = style == 0
+                                ? std::sin(6.0 * p) *
+                                      (0.06 + preset.transient * 0.16 + preset.tone * 0.04)
+                                : 0.0;
+        const double sheen = waveFromType(style == 0 ? 2 : 3, state.phaseB) *
+                             (style == 0 ? 0.09 : 0.12);
         const double transient = (0.02 + preset.transient * 0.12) *
                                  std::exp(-24.0 * noteProgress) *
                                  noiseForSample(state.seed + 57, noteSampleIndex);
-        const double dynamicCutoff = preset.cutoffHz * (0.9 + (1.0 - noteProgress) * 0.35);
-        const double raw = lowPass(body + even + odd + air + sheen + transient, dynamicCutoff, state.low);
+        const double dynamicCutoff =
+            preset.cutoffHz * juce::jlimit(0.82, 1.16, 0.92 + (1.0 - noteProgress) * 0.22);
+        const double raw = lowPass(body + even + odd + air + bell + sheen + transient,
+                                   dynamicCutoff,
+                                   state.low);
 
         advancePhase(state.phaseA, frequencyHz);
         advancePhase(state.phaseB, frequencyHz * 0.5);
@@ -607,34 +743,34 @@ static const std::unordered_map<std::string, InstrumentPreset> &presetMap()
 {
     static const std::unordered_map<std::string, InstrumentPreset> map = {
         {"mixroom.basic_synth", {InstrumentFamily::basic, 1, 3200.0, 18.0, 180.0, 0.08, 0.36, 0.002, 0.12, 0.56, 0.08, 0.0, 0.02}},
-        {"mixroom.bass_mono", {InstrumentFamily::bass, 2, 1200.0, 8.0, 220.0, 0.28, 0.34, 0.001, 0.04, 0.52, 0.18, 4.0, 0.04}},
+        {"mixroom.bass_mono", {InstrumentFamily::bass, 2, 760.0, 4.0, 260.0, 0.03, 0.31, 0.0, 0.0, 0.32, 0.02, 1.25, 0.0}},
         {"mixroom.soft_pad", {InstrumentFamily::pad, 3, 2100.0, 80.0, 620.0, 0.02, 0.31, 0.012, 0.28, 0.47, 0.04, 0.0, 0.03}},
         {"mixroom.figbug_wavetable", {InstrumentFamily::wavetable, 1, 5200.0, 6.0, 240.0, 0.18, 0.33, 0.006, 0.16, 0.72, 0.14, 0.0, 0.03}},
-        {"mixroom.sarah_harmonic", {InstrumentFamily::harmonic, 3, 2800.0, 34.0, 540.0, 0.1, 0.32, 0.008, 0.2, 0.54, 0.08, 0.0, 0.03}},
-        {"mixroom.vanilla_poly", {InstrumentFamily::keys, 0, 3600.0, 12.0, 260.0, 0.05, 0.33, 0.004, 0.13, 0.58, 0.1, 0.0, 0.02}},
-        {"mixroom.duck_synth", {InstrumentFamily::bass, 2, 1600.0, 2.0, 140.0, 0.26, 0.35, 0.002, 0.06, 0.62, 0.2, 8.0, 0.03}},
+        {"mixroom.sarah_harmonic", {InstrumentFamily::pad, 3, 1980.0, 72.0, 760.0, 0.03, 0.30, 0.0, 0.10, 0.34, 0.02, 0.0, 0.02, 0.0}},
+        {"mixroom.vanilla_poly", {InstrumentFamily::keys, 0, 3680.0, 5.0, 220.0, 0.03, 0.36, 0.001, 0.03, 0.58, 0.26, 0.0, 0.01}},
+        {"mixroom.duck_synth", {InstrumentFamily::bass, 2, 1780.0, 2.0, 130.0, 0.28, 0.35, 0.003, 0.02, 0.78, 0.24, 9.0, 0.05}},
         {"mixroom.chow_kick", {InstrumentFamily::drum, 0, 900.0, 0.0, 90.0, 0.42, 0.42, 0.0, 0.0, 0.52, 0.4, 16.0, 0.14}},
-        {"mixroom.warm_keys", {InstrumentFamily::keys, 0, 3000.0, 14.0, 320.0, 0.06, 0.32, 0.005, 0.12, 0.52, 0.12, 0.0, 0.02}},
+        {"mixroom.warm_keys", {InstrumentFamily::keys, 1, 1880.0, 20.0, 480.0, 0.06, 0.34, 0.004, 0.07, 0.18, 0.08, 0.0, 0.02}},
         {"mixroom.super_saw", {InstrumentFamily::lead, 1, 6200.0, 4.0, 180.0, 0.22, 0.34, 0.01, 0.2, 0.75, 0.11, 0.0, 0.03}},
         {"mixroom.gentle_pluck", {InstrumentFamily::pluck, 3, 4800.0, 2.0, 130.0, 0.08, 0.33, 0.004, 0.11, 0.68, 0.24, 0.0, 0.03}},
-        {"mixroom.sub_bass", {InstrumentFamily::bass, 2, 900.0, 3.0, 200.0, 0.24, 0.35, 0.001, 0.03, 0.46, 0.12, 5.0, 0.03}},
-        {"mixroom.analog_brass", {InstrumentFamily::brass, 1, 2600.0, 25.0, 300.0, 0.14, 0.33, 0.003, 0.12, 0.55, 0.08, 0.0, 0.02}},
+        {"mixroom.sub_bass", {InstrumentFamily::bass, 2, 560.0, 3.0, 300.0, 0.015, 0.33, 0.0, 0.0, 0.18, 0.01, 0.85, 0.0}},
+        {"mixroom.analog_brass", {InstrumentFamily::brass, 2, 2140.0, 32.0, 340.0, 0.18, 0.35, 0.007, 0.06, 0.34, 0.12, 0.0, 0.06}},
         {"mixroom.drum_acoustic_easy", {InstrumentFamily::drum, 1, 2300.0, 0.0, 120.0, 0.18, 0.41, 0.0, 0.0, 0.52, 0.26, 10.0, 0.15}},
         {"mixroom.drum_808_starter", {InstrumentFamily::drum, 0, 1100.0, 0.0, 190.0, 0.36, 0.44, 0.0, 0.0, 0.6, 0.35, 24.0, 0.18}},
         {"mixroom.drum_lofi", {InstrumentFamily::drum, 3, 1700.0, 1.0, 150.0, 0.28, 0.41, 0.0, 0.0, 0.45, 0.2, 12.0, 0.2}},
         {"mixroom.drum_house", {InstrumentFamily::drum, 1, 2600.0, 0.0, 95.0, 0.24, 0.42, 0.0, 0.0, 0.58, 0.28, 14.0, 0.17}},
         {"mixroom.night_bell", {InstrumentFamily::harmonic, 0, 5600.0, 1.0, 540.0, 0.06, 0.3, 0.002, 0.22, 0.76, 0.16, 0.0, 0.01}},
-        {"mixroom.fm_keys", {InstrumentFamily::harmonic, 0, 4100.0, 5.0, 340.0, 0.07, 0.32, 0.004, 0.14, 0.66, 0.14, 0.0, 0.02}},
+        {"mixroom.fm_keys", {InstrumentFamily::harmonic, 0, 4700.0, 3.0, 320.0, 0.05, 0.31, 0.002, 0.10, 0.78, 0.18, 0.0, 0.01}},
         {"mixroom.vintage_strings", {InstrumentFamily::pad, 1, 2400.0, 32.0, 640.0, 0.08, 0.31, 0.015, 0.24, 0.5, 0.07, 0.0, 0.02}},
-        {"mixroom.neo_brass", {InstrumentFamily::brass, 1, 3100.0, 16.0, 250.0, 0.15, 0.33, 0.004, 0.14, 0.61, 0.08, 0.0, 0.02}},
+        {"mixroom.neo_brass", {InstrumentFamily::brass, 0, 4320.0, 8.0, 210.0, 0.22, 0.36, 0.014, 0.18, 0.84, 0.18, 0.0, 0.03}},
         {"mixroom.reese_bass", {InstrumentFamily::bass, 1, 1300.0, 4.0, 200.0, 0.26, 0.35, 0.015, 0.08, 0.57, 0.16, 5.0, 0.05}},
         {"mixroom.air_pluck", {InstrumentFamily::pluck, 3, 5200.0, 1.0, 210.0, 0.08, 0.33, 0.008, 0.14, 0.72, 0.2, 0.0, 0.05}},
         {"mixroom.cinematic_pad", {InstrumentFamily::pad, 3, 1900.0, 95.0, 760.0, 0.05, 0.3, 0.018, 0.3, 0.44, 0.05, 0.0, 0.03}},
-        {"mixroom.velvet_ep", {InstrumentFamily::keys, 0, 3700.0, 7.0, 380.0, 0.07, 0.32, 0.005, 0.16, 0.66, 0.18, 0.0, 0.02}},
+        {"mixroom.velvet_ep", {InstrumentFamily::keys, 3, 5400.0, 3.0, 520.0, 0.12, 0.36, 0.022, 0.22, 0.88, 0.32, 0.0, 0.03}},
         {"mixroom.house_organ", {InstrumentFamily::keys, 2, 3400.0, 0.0, 210.0, 0.11, 0.33, 0.003, 0.10, 0.62, 0.12, 0.0, 0.02}},
         {"mixroom.glass_pluck", {InstrumentFamily::pluck, 3, 5600.0, 1.0, 170.0, 0.09, 0.33, 0.007, 0.14, 0.74, 0.24, 0.0, 0.03}},
         {"mixroom.neon_lead", {InstrumentFamily::lead, 1, 6400.0, 3.0, 210.0, 0.24, 0.34, 0.012, 0.18, 0.78, 0.13, 0.0, 0.03}},
-        {"mixroom.mellow_sub", {InstrumentFamily::bass, 2, 980.0, 4.0, 260.0, 0.19, 0.35, 0.001, 0.04, 0.42, 0.10, 3.0, 0.02}},
+        {"mixroom.mellow_sub", {InstrumentFamily::bass, 2, 420.0, 6.0, 420.0, 0.008, 0.32, 0.0, 0.0, 0.10, 0.0, 0.35, 0.0}},
         {"mixroom.wide_air_pad", {InstrumentFamily::pad, 3, 2300.0, 74.0, 700.0, 0.04, 0.30, 0.020, 0.30, 0.50, 0.05, 0.0, 0.02}},
         {"mixroom.horn_stack", {InstrumentFamily::brass, 1, 2900.0, 20.0, 280.0, 0.16, 0.33, 0.004, 0.12, 0.58, 0.09, 0.0, 0.02}},
         {"mixroom.drum_trap", {InstrumentFamily::drum, 0, 2100.0, 0.0, 110.0, 0.32, 0.42, 0.0, 0.0, 0.62, 0.32, 18.0, 0.2}},
@@ -701,6 +837,8 @@ static void applyParamOverrides(InstrumentPreset &preset, const juce::NamedValue
         preset.transient = juce::jlimit(0.0, 1.0, rawValue);
     if (readParam(params, "noise", rawValue))
         preset.noise = juce::jlimit(0.0, 0.45, rawValue);
+    if (readParam(params, "padDetuneOffset", rawValue))
+        preset.padDetuneOffset = juce::jlimit(0.0, 0.03, rawValue);
     if (readParam(params, "pitchDropSemitones", rawValue))
         preset.pitchDropSemitones = juce::jlimit(0.0, 36.0, rawValue);
 }
@@ -764,8 +902,16 @@ juce::String renderInstrumentClipToWav(const InstrumentRenderRequest &request)
 
         NoteState noteState;
         noteState.seed = note.pitch * 97 + noteStart * 7 + totalNoteSamples * 13;
-        noteState.phaseA = wrapPhase((double)((note.pitch * 19) % 100) / 100.0);
-        noteState.phaseB = wrapPhase((double)((note.pitch * 37) % 100) / 100.0);
+        if (preset.family == InstrumentFamily::bass)
+        {
+            noteState.phaseA = 0.0;
+            noteState.phaseB = 0.0;
+        }
+        else
+        {
+            noteState.phaseA = wrapPhase((double)((note.pitch * 19) % 100) / 100.0);
+            noteState.phaseB = wrapPhase((double)((note.pitch * 37) % 100) / 100.0);
+        }
 
         for (int i = 0; i < totalNoteSamples; ++i)
         {
@@ -795,7 +941,9 @@ juce::String renderInstrumentClipToWav(const InstrumentRenderRequest &request)
                                                       frequencyHz,
                                                       noteProgress,
                                                       envelope);
-            const double driven = std::tanh((1.0 + preset.drive * 5.0) * (double)raw);
+            const double driveScale =
+                (preset.family == InstrumentFamily::bass) ? 3.0 : 5.0;
+            const double driven = std::tanh((1.0 + preset.drive * driveScale) * (double)raw);
             const double sampleValue = driven * envelope * note.velocity * preset.outputGain;
 
             const double pan = std::sin((double)note.pitch * 0.23 + (double)noteState.seed * 0.013) * preset.stereoWidth;

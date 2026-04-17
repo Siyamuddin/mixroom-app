@@ -44,6 +44,10 @@ static dispatch_queue_t MixroomPromptAnalysisQueue(void) {
 }
 
 static NSString *MixroomRouteKindForPortType(NSString *portType) {
+#if TARGET_OS_OSX
+    #pragma unused(portType)
+    return @"unknown";
+#else
     if (portType == nil) {
         return @"unknown";
     }
@@ -65,9 +69,20 @@ static NSString *MixroomRouteKindForPortType(NSString *portType) {
         return @"speaker";
     }
     return @"unknown";
+#endif
 }
 
 - (NSDictionary<NSString *, id> *)buildAudioRouteInfo {
+#if TARGET_OS_OSX
+    NSString *inputDeviceName = [JuceBridge getCurrentDeviceNameObjC] ?: @"";
+    NSString *outputDeviceName = [JuceBridge getCurrentOutputDeviceNameObjC] ?: @"";
+    return @{
+        @"outputRouteKind": @"unknown",
+        @"outputRouteName": outputDeviceName,
+        @"inputDeviceName": inputDeviceName,
+        @"inputIsBluetoothHeadset": @NO,
+    };
+#else
     AVAudioSession *session = [AVAudioSession sharedInstance];
     AVAudioSessionRouteDescription *route = session.currentRoute;
     AVAudioSessionPortDescription *output = route.outputs.firstObject;
@@ -83,9 +98,13 @@ static NSString *MixroomRouteKindForPortType(NSString *portType) {
         @"inputDeviceName": input.portName ?: ([JuceBridge getCurrentDeviceNameObjC] ?: @""),
         @"inputIsBluetoothHeadset": @(inputIsBluetoothHeadset),
     };
+#endif
 }
 
 - (BOOL)preferNonBluetoothRecordingInput {
+#if TARGET_OS_OSX
+    return NO;
+#else
     AVAudioSession *session = [AVAudioSession sharedInstance];
     NSError *error = nil;
 
@@ -118,9 +137,13 @@ static NSString *MixroomRouteKindForPortType(NSString *portType) {
     [session overrideOutputAudioPort:AVAudioSessionPortOverrideNone error:nil];
     [JuceBridge refreshAudioRouteObjC:@"preferNonBluetoothRecordingInput"];
     return YES;
+#endif
 }
 
 - (void)restoreBluetoothPlaybackAfterRecordingStop {
+#if TARGET_OS_OSX
+    [JuceBridge refreshAudioRouteObjC:@"restoreBluetoothPlaybackAfterRecordingStop"];
+#else
     AVAudioSession *session = [AVAudioSession sharedInstance];
     NSError *error = nil;
 
@@ -133,6 +156,7 @@ static NSString *MixroomRouteKindForPortType(NSString *portType) {
     }
 
     [JuceBridge refreshAudioRouteObjC:@"restoreBluetoothPlaybackAfterRecordingStop"];
+#endif
 }
 
 
@@ -368,8 +392,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"shutdown"]) {
         [JuceBridge shutdownEngineObjC];
         [self restoreBluetoothPlaybackAfterRecordingStop];
+#if !TARGET_OS_OSX
         AVAudioSession *session = [AVAudioSession sharedInstance];
         [session setActive:NO error:nil];
+#endif
         result(nil);
 
     // ----------------------------------------
@@ -440,6 +466,12 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result([JuceBridge consumeLiveMidiInputEventsObjC]);
     } else if ([call.method isEqualToString:@"getConnectedMidiInputDevices"]) {
         result([JuceBridge getConnectedMidiInputDevicesObjC]);
+    } else if ([call.method isEqualToString:@"beginProjectClipLoad"]) {
+        [JuceBridge beginProjectClipLoadObjC];
+        result(nil);
+    } else if ([call.method isEqualToString:@"endProjectClipLoad"]) {
+        [JuceBridge endProjectClipLoadObjC];
+        result(nil);
     } else if ([call.method isEqualToString:@"loadClip"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         NSInteger rowId  = [args[@"rowId"] integerValue];
@@ -448,13 +480,13 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         double startSec = [args[@"startSec"] doubleValue];
         double lengthSec = [args[@"lengthSec"] doubleValue];
         double inFileOffsetSec = [args[@"inFileOffsetSec"] doubleValue];
-        [JuceBridge loadClipObjC:clip
-                           rowId:rowId
-                            path:path
-                        startSec:startSec
-                       lengthSec:lengthSec
-                 inFileOffsetSec:inFileOffsetSec];
-        result(nil);
+        BOOL ok = [JuceBridge loadClipObjC:clip
+                                     rowId:rowId
+                                      path:path
+                                  startSec:startSec
+                                 lengthSec:lengthSec
+                           inFileOffsetSec:inFileOffsetSec];
+        result(@(ok));
     } else if ([call.method isEqualToString:@"unloadClip"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         [JuceBridge unloadClipObjC:clip];
@@ -817,12 +849,39 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSInteger sampleCount = [call.arguments[@"sampleCount"] integerValue];
         NSArray* arr = [JuceBridge getMasterEqWaveformObjC:effect sampleCount:sampleCount];
         result(arr);
+    }
+    else if ([call.method isEqualToString:@"getRowStereoScope"]) {
+        NSInteger row = [call.arguments[@"row"] integerValue];
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSInteger pointCount = [call.arguments[@"pointCount"] integerValue];
+        NSArray* arr = [JuceBridge getRowStereoScopeObjC:row effectIndex:effect pointCount:pointCount];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getMasterStereoScope"]) {
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSInteger pointCount = [call.arguments[@"pointCount"] integerValue];
+        NSArray* arr = [JuceBridge getMasterStereoScopeObjC:effect pointCount:pointCount];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getRowShaperPreview"]) {
+        NSInteger row = [call.arguments[@"row"] integerValue];
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSInteger pointCount = [call.arguments[@"pointCount"] integerValue];
+        NSArray* arr = [JuceBridge getRowShaperPreviewObjC:row effectIndex:effect pointCount:pointCount];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getMasterShaperPreview"]) {
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSInteger pointCount = [call.arguments[@"pointCount"] integerValue];
+        NSArray* arr = [JuceBridge getMasterShaperPreviewObjC:effect pointCount:pointCount];
+        result(arr);
+    }
 
 
     // ----------------------------------------
     // TRANSPORT / DEBUG
     // ----------------------------------------
-    } else if ([call.method isEqualToString:@"setAutomationTransport"]) {
+    else if ([call.method isEqualToString:@"setAutomationTransport"]) {
         double t = [args[@"timeSeconds"] doubleValue];
         [JuceBridge setAutomationTransportObjC:t];
         result(nil);
@@ -856,8 +915,13 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result(samples);
     } else if ([call.method isEqualToString:@"analyzeAudioForPrompt"]) {
         NSString *path = [args[@"path"] copy];
+        double trimStartMs = [args[@"trimStartMs"] doubleValue];
+        NSNumber *trimEndValue = args[@"trimEndMs"];
+        double trimEndMs = trimEndValue == nil ? -1.0 : [trimEndValue doubleValue];
         dispatch_async(MixroomPromptAnalysisQueue(), ^{
-            NSDictionary *analysis = [JuceBridge analyzeAudioForPromptObjC:path];
+            NSDictionary *analysis = [JuceBridge analyzeAudioForPromptObjC:path
+                                                               trimStartMs:trimStartMs
+                                                                 trimEndMs:trimEndMs];
             dispatch_async(dispatch_get_main_queue(), ^{
                 result(analysis);
             });

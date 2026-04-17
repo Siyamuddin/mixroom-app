@@ -699,18 +699,6 @@ class _MixroomInlineFeedbackComposerState
           MixroomShellWordmarkHeader(showWordmark: true),
         if (widget.showBetaNotice) ...[
           SizedBox(height: betaNoticeTopGap),
-          Text(
-            L10n.translate(context, 'Open Beta Version'),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontFamily: 'Pretendard',
-              color: Color(0xFFF4F4F4),
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              height: 22 / 18,
-            ),
-          ),
-          const SizedBox(height: 6),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 272),
             child: Text(

@@ -17,6 +17,13 @@ class AnalyticsService with WidgetsBindingObserver {
   static final AnalyticsService instance = AnalyticsService._();
 
   static const String _deviceIdPreferenceKey = 'mixroom.analytics.device_id.v1';
+  static const List<String> _aiCapabilities = <String>[
+    'daw.project_edit.set_tempo',
+    'daw.sample_insert.library',
+    'daw.midi_compose.instrument_insert',
+    'daw.midi_compose.transpose_notes',
+    'daw.midi_compose.audio_to_midi',
+  ];
 
   final Posthog _posthog = Posthog();
   final Uuid _uuid = const Uuid();
@@ -78,19 +85,22 @@ class AnalyticsService with WidgetsBindingObserver {
   }
 
   Map<String, dynamic> buildRequestContext() {
+    final locale =
+        WidgetsBinding.instance.platformDispatcher.locale.toLanguageTag();
+    final clientContext = <String, Object?>{
+      'app_version': appVersion,
+      'platform': platform,
+      'environment': environment,
+      'locale': locale,
+      'ai_capabilities': _aiCapabilities,
+      if (_collectionEnabled) 'device_id': _deviceId,
+      if (_collectionEnabled) 'distinct_id': distinctId,
+      if (_collectionEnabled) 'session_id': _sessionId,
+    };
+
     return <String, dynamic>{
       'analytics_enabled': _collectionEnabled,
-      if (_collectionEnabled)
-        'client_context': <String, Object?>{
-          'device_id': _deviceId,
-          'distinct_id': distinctId,
-          'session_id': _sessionId,
-          'app_version': appVersion,
-          'platform': platform,
-          'environment': environment,
-          'locale':
-              WidgetsBinding.instance.platformDispatcher.locale.toLanguageTag(),
-        },
+      'client_context': clientContext,
     };
   }
 

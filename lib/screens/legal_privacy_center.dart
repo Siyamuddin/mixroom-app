@@ -3,6 +3,7 @@ import 'package:mixroom/config/legal_config.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/core/privacy/privacy_preferences.dart';
+import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/widgets/app_responsive_body.dart';
@@ -35,6 +36,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
   bool _analyticsEnabled = false;
   bool _recommendationsEnabled = false;
   bool _productEmailsEnabled = false;
+  bool _savingProductEmails = false;
 
   @override
   void initState() {
@@ -43,12 +45,23 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
   }
 
   Future<void> _loadPreferences() async {
+    final auth = context.read<AuthService>();
+    final appUser = context.read<AppUserService>();
+    if (auth.isSignedIn && appUser.supportsRemoteProfileEdits) {
+      try {
+        await appUser.refresh(force: true);
+      } catch (_) {
+        // Fall back to cached or local values if the refresh fails.
+      }
+    }
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
-      _analyticsEnabled = prefs.getBool(_analyticsPrefKey) ?? false;
+      _analyticsEnabled = appUser.current?.telemetryEnabled ??
+          (prefs.getBool(_analyticsPrefKey) ?? true);
       _recommendationsEnabled = prefs.getBool(_recommendationsPrefKey) ?? false;
-      _productEmailsEnabled = prefs.getBool(_productEmailsPrefKey) ?? false;
+      _productEmailsEnabled = appUser.current?.newsletterOptIn ??
+          (prefs.getBool(_productEmailsPrefKey) ?? false);
       _loadingPreferences = false;
     });
   }
@@ -72,6 +85,85 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
       _showMessage(
         L10n.translate(context, 'Could not save preference. Please retry.'),
       );
+    }
+  }
+
+  Future<void> _saveTelemetryToggle(bool value) async {
+    final auth = context.read<AuthService>();
+    final appUser = context.read<AppUserService>();
+    final previousValue = auth.isSignedIn && appUser.supportsRemoteProfileEdits
+        ? (appUser.current?.telemetryEnabled ?? _analyticsEnabled)
+        : _analyticsEnabled;
+
+    setState(() {
+      _analyticsEnabled = value;
+    });
+
+    try {
+      if (auth.isSignedIn && appUser.supportsRemoteProfileEdits) {
+        await appUser.updateTelemetryPreference(
+          telemetryEnabled: value,
+        );
+      } else {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_analyticsPrefKey, value);
+        await AnalyticsService.instance.setCollectionEnabled(value);
+        await CrashReportingService.instance.setCollectionEnabled(value);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _analyticsEnabled = previousValue;
+      });
+      _showMessage(
+        L10n.translate(
+          context,
+          'Could not update telemetry preference. Please retry.',
+        ),
+      );
+    }
+  }
+
+  Future<void> _saveProductEmailsToggle(bool value) async {
+    final auth = context.read<AuthService>();
+    final appUser = context.read<AppUserService>();
+    final previousValue = auth.isSignedIn && appUser.supportsRemoteProfileEdits
+        ? (appUser.current?.newsletterOptIn ?? _productEmailsEnabled)
+        : _productEmailsEnabled;
+
+    setState(() {
+      _productEmailsEnabled = value;
+      _savingProductEmails = true;
+    });
+
+    try {
+      if (auth.isSignedIn && appUser.supportsRemoteProfileEdits) {
+        await appUser.updateNewsletterPreference(
+          newsletterOptIn: value,
+          localeCode: Localizations.localeOf(context).languageCode,
+        );
+      } else {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_productEmailsPrefKey, value);
+        await PrivacyPreferences.setProductEmailsEnabled(value);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _productEmailsEnabled = previousValue;
+      });
+      _showMessage(
+        L10n.translate(
+          context,
+          'Could not update marketing email preference. Please retry.',
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _savingProductEmails = false;
+        });
+      }
     }
   }
 
@@ -147,7 +239,15 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isBusy = context.watch<AuthService>().isBusy;
+    final auth = context.watch<AuthService>();
+    final appUser = context.watch<AppUserService>();
+    final effectiveProductEmailsEnabled = !_savingProductEmails &&
+            auth.isSignedIn &&
+            appUser.supportsRemoteProfileEdits &&
+            appUser.current != null
+        ? appUser.current!.newsletterOptIn
+        : _productEmailsEnabled;
+    final isBusy = auth.isBusy || appUser.isLoading || _savingProductEmails;
     final media = MediaQuery.of(context);
     final bottomInset =
         media.viewPadding.bottom > media.systemGestureInsets.bottom
@@ -269,15 +369,11 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                         ),
                         subtitle: L10n.translate(
                           context,
-                          'Share additional usage data to help improve Mixroom stability and quality.',
+                          'Share app interaction events and diagnostics to help improve Mixroom quality and product decisions.',
                         ),
                         value: _analyticsEnabled,
                         enabled: !_loadingPreferences && !isBusy,
-                        onChanged: (next) => _saveToggle(
-                          key: _analyticsPrefKey,
-                          value: next,
-                          applyLocalValue: (value) => _analyticsEnabled = value,
-                        ),
+                        onChanged: _saveTelemetryToggle,
                       ),
                       _ToggleItem(
                         icon: Icons.auto_awesome_outlined,
@@ -308,14 +404,9 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                           context,
                           'Receive release notes, offers, and feature announcements.',
                         ),
-                        value: _productEmailsEnabled,
+                        value: effectiveProductEmailsEnabled,
                         enabled: !_loadingPreferences && !isBusy,
-                        onChanged: (next) => _saveToggle(
-                          key: _productEmailsPrefKey,
-                          value: next,
-                          applyLocalValue: (value) =>
-                              _productEmailsEnabled = value,
-                        ),
+                        onChanged: _saveProductEmailsToggle,
                       ),
                     ],
                   ),

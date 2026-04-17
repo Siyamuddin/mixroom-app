@@ -1,8 +1,7 @@
 class AppApiConfig {
   const AppApiConfig._();
 
-  static const String _defaultAppApiBaseUrl =
-      'https://guepfr96ah.execute-api.ap-northeast-2.amazonaws.com/prod';
+  static const String _defaultAppApiBaseUrl = 'https://guepfr96ah.execute-api.ap-northeast-2.amazonaws.com/prod';
 
   // Legacy env var kept for backward compatibility with older local scripts.
   static const String legacyApiBaseUrl = String.fromEnvironment(
@@ -38,6 +37,11 @@ class AppApiConfig {
   static const int entitlementCacheTtlMinutes = int.fromEnvironment(
     'SUBSCRIPTION_CACHE_TTL_MINUTES',
     defaultValue: 15,
+  );
+
+  static const bool enableProjectSnapshotTelemetry = bool.fromEnvironment(
+    'APP_ENABLE_PROJECT_SNAPSHOT_TELEMETRY',
+    defaultValue: true,
   );
 
   static String get apiBaseUrl {

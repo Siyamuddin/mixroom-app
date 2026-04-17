@@ -522,6 +522,8 @@ jobject namedValueSetArrayToJavaParameterList(JNIEnv *env, const juce::Array<juc
         putStr(map, "id", entry["id"].toString());
         putStr(map, "name", entry["name"].toString());
         putStr(map, "type", entry["type"].toString());
+        if (entry.contains("unit"))
+            putStr(map, "unit", entry["unit"].toString());
 
         if (entry.contains("min"))
             putFloat(map, "min", (float)entry["min"]);
@@ -862,6 +864,20 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_supportsLiveMidiClipPlaybackJNI(
     juce::MessageManager::getInstance()->callSync([&result]
                                                   { result = JuceEngine::get().supportsLiveMidiClipPlayback(); });
     return result.load() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_beginProjectClipLoadTransactionJNI(JNIEnv *, jclass)
+{
+    juce::MessageManager::getInstance()->callSync([]
+                                                  { JuceEngine::get().beginProjectClipLoadTransaction(); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_endProjectClipLoadTransactionJNI(JNIEnv *, jclass)
+{
+    juce::MessageManager::getInstance()->callSync([]
+                                                  { JuceEngine::get().endProjectClipLoadTransaction(); });
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1361,6 +1377,8 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getPluginParametersJNI(
             putStr(map, "id",   e["id"].toString());
             putStr(map, "name", e["name"].toString());
             putStr(map, "type", e["type"].toString());
+            if (e.contains("unit"))
+                putStr(map, "unit", e["unit"].toString());
 
             // Optional numerics
             if (e.contains("min"))     putFloat(map, "min",     (float)e["min"]);
@@ -1446,7 +1464,7 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_seekVideoAudioJNI(JNIEnv *, jcla
                                     { JuceEngine::get().seekVideoAudio((double)seconds); });
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadClipJNI(JNIEnv *env,
                                                              jclass,
                                                              jint clipIndex,
@@ -1457,20 +1475,22 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadClipJNI(JNIEnv *env,
                                                              jdouble inFileOffsetSec)
 {
     const juce::String jucePath = juceStringFromJString(env, path);
-    juce::MessageManager::getInstance()->callSync([=]
-                                                  { JuceEngine::get().loadClip((int)clipIndex,
-                                                                               (int)rowId,
-                                                                               juce::File(jucePath),
-                                                                               (double)startSec,
-                                                                               (double)lengthSec,
-                                                                               (double)inFileOffsetSec); });
+    bool ok = false;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { ok = JuceEngine::get().loadClip((int)clipIndex,
+                                                                                    (int)rowId,
+                                                                                    juce::File(jucePath),
+                                                                                    (double)startSec,
+                                                                                    (double)lengthSec,
+                                                                                    (double)inFileOffsetSec); });
+    return ok;
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_unloadClipJNI(JNIEnv *, jclass, jint clipIndex)
 {
-    juce::MessageManager::callAsync([clipIndex]
-                                    { JuceEngine::get().unloadClip((int)clipIndex); });
+    juce::MessageManager::getInstance()->callSync([clipIndex]
+                                                  { JuceEngine::get().unloadClip((int)clipIndex); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -2000,7 +2020,14 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioStereo16kJNI(JNIEnv 
 }
 
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioForPromptJNI(JNIEnv *env, jclass, jstring path, jint windowSamples, jint windowCount)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioForPromptJNI(
+    JNIEnv *env,
+    jclass,
+    jstring path,
+    jint windowSamples,
+    jint windowCount,
+    jdouble trimStartMs,
+    jdouble trimEndMs)
 {
     const juce::String jucePath = juceStringFromJString(env, path);
     juce::NamedValueSet stats;
@@ -2008,8 +2035,13 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_analyzeAudioForPromptJNI(JNIEnv 
     juce::MessageManager::getInstance()->callSync([&]
                                                   {
                                                       const auto file = juce::File(jucePath);
-                                                      stats = JuceEngine::get().analyzeAudioPrompt16k(file);
-                                                      windows = JuceEngine::get().sampleAudioMono16kWindows(file, (int)windowSamples, (int)windowCount);
+                                                      stats = JuceEngine::get().analyzeAudioPrompt16k(file, (double)trimStartMs, (double)trimEndMs);
+                                                      windows = JuceEngine::get().sampleAudioMono16kWindows(
+                                                          file,
+                                                          (int)windowSamples,
+                                                          (int)windowCount,
+                                                          (double)trimStartMs,
+                                                          (double)trimEndMs);
                                                   });
     return promptAnalysisToJavaMap(env, stats, windows);
 }
@@ -2263,6 +2295,48 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEqWaveformJNI(JNIEnv *e
                                                   { waveform = JuceEngine::get().getMasterEqWaveform((int)effectIndex,
                                                                                                       (int)sampleCount); });
     return floatVectorToJDoubleArray(env, waveform);
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowStereoScopeJNI(JNIEnv *env, jclass, jint row, jint effectIndex, jint pointCount)
+{
+    std::vector<float> scope;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { scope = JuceEngine::get().getRowStereoScope((int)row,
+                                                                                                (int)effectIndex,
+                                                                                                (int)pointCount); });
+    return floatVectorToJDoubleArray(env, scope);
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterStereoScopeJNI(JNIEnv *env, jclass, jint effectIndex, jint pointCount)
+{
+    std::vector<float> scope;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { scope = JuceEngine::get().getMasterStereoScope((int)effectIndex,
+                                                                                                   (int)pointCount); });
+    return floatVectorToJDoubleArray(env, scope);
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowShaperPreviewJNI(JNIEnv *env, jclass, jint row, jint effectIndex, jint pointCount)
+{
+    std::vector<float> preview;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { preview = JuceEngine::get().getRowShaperPreview((int)row,
+                                                                                                     (int)effectIndex,
+                                                                                                     (int)pointCount); });
+    return floatVectorToJDoubleArray(env, preview);
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterShaperPreviewJNI(JNIEnv *env, jclass, jint effectIndex, jint pointCount)
+{
+    std::vector<float> preview;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { preview = JuceEngine::get().getMasterShaperPreview((int)effectIndex,
+                                                                                                        (int)pointCount); });
+    return floatVectorToJDoubleArray(env, preview);
 }
 
 extern "C" JNIEXPORT jstring JNICALL

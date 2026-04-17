@@ -228,6 +228,142 @@ void main() {
       );
     });
 
+    test('sampleRoleHintsFromText does not classify 808 as kick by itself', () {
+      final roles = AssistantActionUtils.sampleRoleHintsFromText(
+        'Starter Kit v1/808/Long_808_Sub.wav',
+      );
+
+      expect(roles, contains('bass'));
+      expect(roles, isNot(contains('kick')));
+    });
+
+    test('sampleRolePriorityScore prefers kick one-shots over 808 and crash',
+        () {
+      final kickScore = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Drumset/Punch_Kick.wav',
+        'kick',
+      );
+      final bassScore = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/808/Long_808_Sub.wav',
+        'kick',
+      );
+      final crashScore = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Drumset/Crash_01.wav',
+        'kick',
+      );
+
+      expect(kickScore, greaterThan(bassScore));
+      expect(kickScore, greaterThan(crashScore));
+    });
+
+    test('sampleRolePriorityScore favors core drum hits over bad substitutes',
+        () {
+      final kick = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Processed Drums/Kick_Heavy_01.wav',
+        'kick',
+      );
+      final crashForKick = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Processed Drums/Crash_Wash_01.wav',
+        'kick',
+      );
+      final snare = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Drumset/Snare_Tight_01.wav',
+        'snare',
+      );
+      final hat = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Drumset/Hat_Closed_01.wav',
+        'hat',
+      );
+      final loopForHat = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Drum Loops/Trap_Hat_Loop_01.wav',
+        'hat',
+      );
+
+      expect(kick, greaterThan(crashForKick));
+      expect(snare, greaterThan(0));
+      expect(hat, greaterThan(loopForHat));
+    });
+
+    test(
+        'sampleRolePriorityScore prefers low-end one-shots over bass loops for bass role',
+        () {
+      final oneShotScore = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Processed Drums/808-01.flac',
+        'bass',
+      );
+      final loopScore = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Loops/bass 140bpm a.mp3',
+        'bass',
+      );
+
+      expect(oneShotScore, greaterThan(loopScore));
+    });
+
+    test(
+        'sampleRolePriorityScore prefers processed hi-hats over drumset open hats',
+        () {
+      final processedHatScore = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Processed Drums/Hi-Hat-01.flac',
+        'hat',
+      );
+      final drumsetOpenHatScore = AssistantActionUtils.sampleRolePriorityScore(
+        'Starter Kit v1/Drumset/12_Hat_Open.wav',
+        'hat',
+      );
+
+      expect(processedHatScore, greaterThan(drumsetOpenHatScore));
+    });
+
+    test('sample insert defaults pick sane musical roles and timing', () {
+      expect(
+        AssistantActionUtils.primarySampleRoleFromText(
+          'Starter Kit v1/Processed Drums/Kick_Heavy_01.wav',
+        ),
+        'kick',
+      );
+      expect(
+        AssistantActionUtils.defaultSampleInsertStepBeats(
+          'Starter Kit v1/Processed Drums/Kick_Heavy_01.wav',
+          repeatCount: 4,
+        ),
+        1.0,
+      );
+      expect(
+        AssistantActionUtils.defaultSampleInsertStartBeat(
+          'Starter Kit v1/Drumset/Snare_Tight_01.wav',
+        ),
+        1.0,
+      );
+      expect(
+        AssistantActionUtils.defaultSampleInsertStepBeats(
+          'Starter Kit v1/Drumset/Crash_Wash_01.wav',
+          repeatCount: 4,
+        ),
+        8.0,
+      );
+    });
+
+    test('tempoHintsFromText extracts loop bpm tags but ignores ordinals', () {
+      expect(
+        AssistantActionUtils.tempoHintsFromText(
+          'Starter Kit v1/Loops/Trap Drum Loop-11(130).flac',
+        ),
+        <int>[130],
+      );
+      expect(
+        AssistantActionUtils.tempoHintsFromText(
+          'Starter Kit v1/Processed Drums/808-01.flac',
+        ),
+        isEmpty,
+      );
+      expect(
+        AssistantActionUtils.tempoHintsFromText(
+          'House Loop 124bpm final.wav',
+        ),
+        <int>[124],
+      );
+    });
+
     test('resolves musical clip move positions from measures and beats', () {
       final startMs = AssistantActionUtils.resolveMoveMusicalStartMs(
         data: const {'new_start_measure': 3},
@@ -250,6 +386,65 @@ void main() {
       expect(beatMs, 2000.0);
     });
 
+    test('resolves musical aliases for repeated arrangement placement', () {
+      final startMs = AssistantActionUtils.resolveMoveMusicalStartMs(
+        data: const {'paste_start_measure': 5},
+        target: const {},
+        bpm: 120,
+      );
+      final beatStartMs = AssistantActionUtils.resolveMoveMusicalStartMs(
+        data: const {'start_beat': 9},
+        target: const {},
+        bpm: 120,
+      );
+      final stepMs = AssistantActionUtils.resolveMoveMusicalDeltaMs(
+        data: const {'step_measures': 2},
+        target: const {},
+        bpm: 120,
+      );
+      final beatStepMs = AssistantActionUtils.resolveMoveMusicalDeltaMs(
+        data: const {'spacing_beats': 0.5},
+        target: const {},
+        bpm: 120,
+      );
+
+      expect(startMs, 8000.0);
+      expect(beatStartMs, 4000.0);
+      expect(stepMs, 4000.0);
+      expect(beatStepMs, 250.0);
+    });
+
+    test('combines measure and beat anchors when both are provided', () {
+      final startMs = AssistantActionUtils.resolveMoveMusicalStartMs(
+        data: const {
+          'start_measure': 2,
+          'start_beat': 3,
+        },
+        target: const {},
+        bpm: 120,
+      );
+      final endMs = AssistantActionUtils.resolveMoveMusicalEndMs(
+        data: const {
+          'until_measure': 2,
+          'until_beat': 3,
+        },
+        target: const {},
+        bpm: 120,
+      );
+      final stepMs = AssistantActionUtils.resolveMoveMusicalDeltaMs(
+        data: const {
+          'step_measures': 1,
+          'step_beats': 0.5,
+        },
+        target: const {},
+        bpm: 120,
+      );
+
+      expect(startMs, 3000.0);
+      expect(endMs, 3500.0);
+      expect(stepMs, 2250.0);
+    });
+
     test('supports non-4-4 musical clip move timing when specified', () {
       final startMs = AssistantActionUtils.resolveMoveMusicalStartMs(
         data: const {
@@ -261,6 +456,74 @@ void main() {
       );
 
       expect(startMs, 3000.0);
+    });
+
+    test('derives repeat counts from musical span or end markers', () {
+      expect(
+        AssistantActionUtils.resolvePlacementRepeatCount(
+          data: const {
+            'start_measure': 1,
+            'step_beats': 1,
+            'length_measures': 2,
+          },
+          target: const {},
+          bpm: 120,
+          startMs: 0.0,
+          stepMs: 500.0,
+        ),
+        8,
+      );
+
+      expect(
+        AssistantActionUtils.resolvePlacementRepeatCount(
+          data: const {
+            'start_measure': 1,
+            'step_beats': 2,
+            'until_beat': 16,
+          },
+          target: const {},
+          bpm: 120,
+          startMs: 0.0,
+          stepMs: 1000.0,
+        ),
+        8,
+      );
+    });
+
+    test('sample placement can prefer section span over underspecified count',
+        () {
+      expect(
+        AssistantActionUtils.resolvePlacementRepeatCount(
+          data: const {
+            'start_measure': 1,
+            'repeat_count': 8,
+            'step_beats': 1,
+            'length_measures': 8,
+          },
+          target: const {},
+          bpm: 120,
+          startMs: 0.0,
+          stepMs: 500.0,
+          preferSpanCoverageOverExplicitCount: true,
+        ),
+        32,
+      );
+
+      expect(
+        AssistantActionUtils.resolvePlacementRepeatCount(
+          data: const {
+            'start_measure': 1,
+            'repeat_count': 8,
+            'step_beats': 1,
+            'length_measures': 8,
+          },
+          target: const {},
+          bpm: 120,
+          startMs: 0.0,
+          stepMs: 500.0,
+        ),
+        8,
+      );
     });
   });
 
@@ -357,6 +620,14 @@ void main() {
         AssistantActionUtils.progressionTokensFromRaw([' C ', 'Dm', '', 'G']),
         equals(const ['C', 'Dm', 'G']),
       );
+      expect(
+        AssistantActionUtils.progressionTokensFromRaw(const [
+          {'measure': 1, 'chord': 'Dm7'},
+          {'measure': 2, 'chord': 'G13'},
+          {'measure': 3, 'chord': 'Cmaj7'},
+        ]),
+        equals(const ['Dm7', 'G13', 'Cmaj7']),
+      );
     });
 
     test('fallbackMidiNotesFromProgression generates deterministic bassline',
@@ -367,6 +638,7 @@ void main() {
         notesPerChord: 4,
         octave: 2,
         velocity: 0.8,
+        mode: 'bass',
         noteIdPrefix: 't',
         nowMicros: 123,
       );
@@ -380,6 +652,40 @@ void main() {
       expect(notes[8].pitch, 43); // G2
       expect(notes.first.velocity, greaterThan(notes[1].velocity));
       expect(notes.first.id, startsWith('t_123_'));
+    });
+
+    test('fallbackMidiNotesFromProgression can generate chord stacks', () {
+      final notes = AssistantActionUtils.fallbackMidiNotesFromProgression(
+        progressionRaw: const ['Cmaj7', 'Am', 'F', 'G7'],
+        beatsPerChord: 4,
+        notesPerChord: 4,
+        octave: 3,
+        velocity: 0.8,
+        mode: 'chords',
+        noteIdPrefix: 'c',
+        nowMicros: 456,
+      );
+
+      expect(notes.length, 16);
+      expect(notes.first.startBeat, 0.0);
+      expect(notes[1].startBeat, 0.0);
+      expect(notes[4].startBeat, 4.0);
+      expect(notes.first.lengthBeats, closeTo(3.8, 0.01));
+      expect(notes.map((n) => n.pitch).toSet().length, greaterThan(8));
+    });
+
+    test('resolveMidiNoteStartBeat and length accept time/length aliases', () {
+      final startBeat = AssistantActionUtils.resolveMidiNoteStartBeat(const {
+        'time_beats': 12,
+      });
+      final lengthBeats = AssistantActionUtils.resolveMidiNoteLengthBeats(
+        const {
+          'lengthBeats': 4,
+        },
+      );
+
+      expect(startBeat, 12.0);
+      expect(lengthBeats, 4.0);
     });
 
     test('fallbackMidiNotesFromProgression handles empty/invalid progression',

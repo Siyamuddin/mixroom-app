@@ -51,6 +51,18 @@ class _PendingPaintPaste {
   });
 }
 
+class TimelineClipMoveRequest {
+  final int clipIndex;
+  final double newStartMs;
+  final int newRowIndex;
+
+  const TimelineClipMoveRequest({
+    required this.clipIndex,
+    required this.newStartMs,
+    required this.newRowIndex,
+  });
+}
+
 class _TimelineGestureSelectionSnapshot {
   final int selectedClipIndex;
   final List<int> selectedClipIndices;
@@ -317,6 +329,8 @@ class AudioCanvasTimeline extends StatefulWidget {
   final Future<void> Function(int row, int iconId) onSetRowIcon;
   final Future<void> Function(int clipIndex, double newStartMs, int newRowIndex)
       onMoveClipCommit;
+  final Future<void> Function(List<TimelineClipMoveRequest> moves)?
+      onMoveClipsCommit;
   final void Function(int clipIndex, double trimStartMs, double trimEndMs,
       {double? newStartMs}) onTrimClip;
   final void Function(
@@ -387,7 +401,7 @@ class AudioCanvasTimeline extends StatefulWidget {
   final void Function(int clipIndex) onCopyClip;
   final Future<void> Function(int clipIndex) onDeleteClip;
   final bool hasCopiedClip;
-  final void Function(int row, double timeMs) onPasteClipAt;
+  final Future<bool> Function(int row, double timeMs) onPasteClipAt;
   final VoidCallback? onClearCopiedClip;
   final void Function(List<int> clipIndices)? onCopyClips;
   final Future<void> Function(List<int> clipIndices)? onDeleteClips;
@@ -428,6 +442,8 @@ class AudioCanvasTimeline extends StatefulWidget {
       getRowCompressorMeter;
   final Future<List<double>> Function(int row, int effectIndex, int sampleCount)
       getRowEqWaveform;
+  final Future<List<double>> Function(int row, int effectIndex, int pointCount)
+      getRowStereoScope;
   final Future<void> Function(SampleDragData data, int row, double timeMs)?
       onExternalSampleDrop;
   final VoidCallback? onExternalSampleDragEntered;
@@ -476,6 +492,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.onRenameRow,
     required this.onSetRowIcon,
     required this.onMoveClipCommit,
+    this.onMoveClipsCommit,
     required this.onTrimClip,
     required this.onTrimClipCommit,
     required this.transportClockListenable,
@@ -553,6 +570,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.meters,
     required this.getRowCompressorMeter,
     required this.getRowEqWaveform,
+    required this.getRowStereoScope,
     this.onExternalSampleDrop,
     this.onExternalSampleDragEntered,
     this.externalSampleDragActive = false,
@@ -625,9 +643,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double kHeaderWidth = 80.0;
   static const double kTimelineUnderlayLeft = 44.0;
   static const double kRulerHeight = 40.0;
-  static const double kTrimHandleWidth = 12.0;
-  static const double kTrimHitboxPadding =
-      20.0; // === FIX ===: New constant for larger hitbox
+  static const double kTrimHandleWidth = 14.0;
+  static const double kTrimHandleGap = 8.0;
+  static const double kTrimHandleVerticalInset = 5.0;
+  static const double kTrimHandleOuterHitboxPadding = 10.0;
+  static const double kTrimHandleInnerHitboxPadding = 2.0;
   static const double _kTimelineAutomationLaneInset = 2.0;
   static const double _kTimelineAutomationLaneGap = 2.0;
   static const double _kTimelineAutomationLaneExpandedHeight =
@@ -742,6 +762,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   Offset? _selectionBoxCurrent;
   final Set<String> _paintStrokeKeys = <String>{};
   bool _paintStrokeActive = false;
+  bool _paintGesturePlacedClip = false;
   int? _paintStrokeRow;
   double? _paintLastFingerMs;
   double? _paintLastPasteStartMs;
@@ -1008,6 +1029,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     if (isPrimaryLikePointer) {
       if (_activeTool == _TimelineTool.paint && !becameMultiTouch) {
+        _paintGesturePlacedClip = false;
         final tappedClipIndex = _getGestureClipIndexAt(event.localPosition);
         if (tappedClipIndex != null) {
           _handleTapDown(
@@ -1158,7 +1180,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _clearCutPreview();
       return;
     }
-    if (_activeTool == _TimelineTool.paint) {
+    if (_activeTool == _TimelineTool.paint &&
+        (_interactionMode == 'paint' || _paintStrokeActive)) {
       _isUserInteracting = false;
       _interactionMode = '';
       _resetPaintStrokeState();
@@ -1210,10 +1233,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _clearCutPreview();
       return;
     }
-    if (_activeTool == _TimelineTool.paint) {
+    if (_activeTool == _TimelineTool.paint &&
+        (_interactionMode == 'paint' || _paintStrokeActive)) {
       _isUserInteracting = false;
       _interactionMode = '';
       _resetPaintStrokeState();
+      _paintGesturePlacedClip = false;
       return;
     }
     if (_activeTool == _TimelineTool.delete) {
@@ -2449,6 +2474,50 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
   }
 
+  int? _selectionAnchorClipIndex(List<int> selected) {
+    final valid = selected
+        .where((i) => i >= 0 && i < widget.clips.length)
+        .toList(growable: false);
+    if (valid.isEmpty) return null;
+    final ordered = List<int>.from(valid)
+      ..sort((a, b) {
+        final startCompare = widget
+            .getStartMs(widget.clips[a])
+            .compareTo(widget.getStartMs(widget.clips[b]));
+        if (startCompare != 0) return startCompare;
+        final rowCompare =
+            widget.clips[a].rowIndex.compareTo(widget.clips[b].rowIndex);
+        if (rowCompare != 0) return rowCompare;
+        return a.compareTo(b);
+      });
+    return ordered.first;
+  }
+
+  double? _selectionPasteStartMs(List<int> selected) {
+    if (selected.isEmpty) return null;
+    double? maxEndMs;
+    for (final index in selected) {
+      if (index < 0 || index >= widget.clips.length) continue;
+      final clip = widget.clips[index];
+      final endMs =
+          widget.getStartMs(clip) + widget.getTimelineDurationMs(clip);
+      maxEndMs = maxEndMs == null ? endMs : math.max(maxEndMs, endMs);
+    }
+    if (maxEndMs == null) return null;
+    return _magnetEnabled ? _quantizeMsCeil(maxEndMs) : maxEndMs;
+  }
+
+  void _pasteCopiedClipsAfterSelection() {
+    if (!widget.hasCopiedClip) return;
+    final selected = _activeSelectedClipIndices();
+    final anchorIndex = _selectionAnchorClipIndex(selected);
+    final pasteStartMs = _selectionPasteStartMs(selected);
+    if (anchorIndex == null || pasteStartMs == null) return;
+    unawaited(
+      widget.onPasteClipAt(widget.clips[anchorIndex].rowIndex, pasteStartMs),
+    );
+  }
+
   void _resetPaintStrokeState() {
     _paintStrokeActive = false;
     _paintStrokeRow = null;
@@ -2526,16 +2595,32 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   bool _paintPasteAt(int row, double desiredStartMs) {
     if (!widget.hasCopiedClip) return false;
+    if (_pendingPaintPastes.isNotEmpty) return false;
     final startMs = _nextPaintStartForRow(row, desiredStartMs);
     final key = '$row:${startMs.round()}';
     if (_paintStrokeKeys.contains(key)) return false;
 
     final duration = _paintEstimatedClipDurationMs();
     _paintStrokeKeys.add(key);
+    _paintGesturePlacedClip = true;
     _pendingPaintPastes.add(_PendingPaintPaste(row: row, startMs: startMs));
-    widget.onPasteClipAt(row, startMs);
+    unawaited(
+      widget.onPasteClipAt(row, startMs).then((inserted) {
+        if (!mounted || inserted) return;
+        _pendingPaintPastes.removeWhere(
+          (pending) =>
+              pending.row == row && (pending.startMs - startMs).abs() <= 1.0,
+        );
+        _paintStrokeKeys.remove(key);
+        if (_paintLastPasteStartMs != null &&
+            (_paintLastPasteStartMs! - startMs).abs() <= 1.0) {
+          _paintLastPasteStartMs = null;
+          _paintLastPasteEndMs = null;
+        }
+      }),
+    );
     _paintLastPasteStartMs = startMs;
-    _paintLastPasteEndMs = startMs + duration;
+    _paintLastPasteEndMs = null;
     _paintClipDurationEstimateMs = duration;
     return true;
   }
@@ -2585,9 +2670,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
     }
 
-    if (!_magnetEnabled &&
-        _pendingPaintPastes.isNotEmpty &&
-        !resolvedLastPasteFromTimeline) {
+    if (_pendingPaintPastes.isNotEmpty && !resolvedLastPasteFromTimeline) {
       return;
     }
 
@@ -2697,7 +2780,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (oldWidget.clips.length != widget.clips.length) {
       _syncSelectionAfterClipTopologyChange();
       if (_pendingPaintPastes.isNotEmpty) {
+        final remainingPending = <_PendingPaintPaste>[];
         for (final pending in _pendingPaintPastes) {
+          var resolved = false;
           for (int i = widget.clips.length - 1; i >= 0; i--) {
             final clip = widget.clips[i];
             if (clip.rowIndex != pending.row) continue;
@@ -2710,10 +2795,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 (_paintLastPasteStartMs! - pending.startMs).abs() <= 1.0) {
               _paintLastPasteEndMs = pending.startMs + duration;
             }
+            resolved = true;
             break;
           }
+          if (!resolved) {
+            remainingPending.add(pending);
+          }
         }
-        _pendingPaintPastes.clear();
+        _pendingPaintPastes
+          ..clear()
+          ..addAll(remainingPending);
       }
     }
     final bool rowTopologyChanged =
@@ -5395,37 +5486,46 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final hasSingleSelection = selectedIndices.length == 1;
     final singleSelectionIndex =
         hasSingleSelection ? selectedIndices.first : _selectedClipIndex;
-    final int? popupClipIndex = hasSingleSelection &&
-            singleSelectionIndex >= 0 &&
-            singleSelectionIndex < widget.clips.length
-        ? singleSelectionIndex
-        : null;
-    final bool visible = popupClipIndex != null;
-    final rect = popupClipIndex != null ? _getClipRect(popupClipIndex) : null;
-    final double popupWidth =
-        math.min(116.0, math.max(84.0, viewportWidth - 8));
+    Rect? selectionRect;
+    for (final index in selectedIndices) {
+      final rect = _getClipRect(index);
+      if (rect == null) continue;
+      selectionRect = selectionRect?.expandToInclude(rect) ?? rect;
+    }
+    final bool visible = selectionRect != null &&
+        selectedIndices.isNotEmpty &&
+        !_isUserInteracting &&
+        !_selectionBoxActive;
+    final int popupActionCount = hasSingleSelection ? 4 : 3;
+    final double popupWidth = math.min(
+      popupActionCount == 4 ? 152.0 : 116.0,
+      math.max(84.0, viewportWidth - 8),
+    );
     const double popupHeight = 32;
     double left = kHeaderWidth;
     double top = -100;
 
-    if (visible && rect != null) {
-      final clipInTimelineX = rect.right >= 0 && rect.left <= viewportWidth;
-      final clipInTimelineY = rect.bottom >= _verticalScrollOffset &&
-          rect.top <= _verticalScrollOffset + viewportHeight;
+    if (visible) {
+      final clipInTimelineX =
+          selectionRect.right >= 0 && selectionRect.left <= viewportWidth;
+      final clipInTimelineY = selectionRect.bottom >= _verticalScrollOffset &&
+          selectionRect.top <= _verticalScrollOffset + viewportHeight;
       if (clipInTimelineX && clipInTimelineY) {
         final tapAnchorPx = _clipPopupMs == null
             ? double.nan
             : (_clipPopupMs! - _scrollOffsetMs) * _pixelsPerMs;
-        final minAnchorPx = rect.left + 6.0;
-        final maxAnchorPx = rect.right - 6.0;
+        final minAnchorPx = selectionRect.left + 6.0;
+        final maxAnchorPx = selectionRect.right - 6.0;
         final anchorPx = tapAnchorPx.isFinite
             ? tapAnchorPx
                 .clamp(
-                  minAnchorPx <= maxAnchorPx ? minAnchorPx : rect.left,
-                  minAnchorPx <= maxAnchorPx ? maxAnchorPx : rect.right,
+                  minAnchorPx <= maxAnchorPx ? minAnchorPx : selectionRect.left,
+                  minAnchorPx <= maxAnchorPx
+                      ? maxAnchorPx
+                      : selectionRect.right,
                 )
                 .toDouble()
-            : (rect.left + rect.width / 2);
+            : (selectionRect.left + selectionRect.width / 2);
         final minLeft = kHeaderWidth + 4.0;
         final maxLeft =
             math.max(minLeft, kHeaderWidth + viewportWidth - popupWidth - 4.0);
@@ -5438,8 +5538,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           minTop,
           _verticalScrollOffset + viewportHeight - popupHeight - 2.0,
         );
-        final preferredAbove = rect.top - popupHeight - 4.0;
-        final preferredBelow = rect.bottom + 4.0;
+        final preferredAbove = selectionRect.top - popupHeight - 4.0;
+        final preferredBelow = selectionRect.bottom + 4.0;
         if (preferredAbove >= minTop) {
           top = preferredAbove;
         } else if (preferredBelow <= maxTop) {
@@ -5449,6 +5549,58 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         }
       }
     }
+
+    final popupChildren = <Widget>[
+      Expanded(
+        child: _buildClipPopupAction(
+          icon: Icons.copy,
+          color: Colors.white,
+          onTap: () {
+            _copySelectedClips();
+            if (!mounted) return;
+            setState(_clearClipSelection);
+          },
+          tooltip: L10n.translate(context, 'Copy'),
+        ),
+      ),
+      Container(width: 1, height: 16, color: Colors.white24),
+      Expanded(
+        child: _buildClipPopupAction(
+          icon: Icons.content_paste,
+          color: Colors.white,
+          onTap: widget.hasCopiedClip ? _pasteCopiedClipsAfterSelection : null,
+          tooltip: L10n.translate(context, 'Place clone'),
+        ),
+      ),
+    ];
+    if (hasSingleSelection) {
+      popupChildren.addAll(<Widget>[
+        Container(width: 1, height: 16, color: Colors.white24),
+        Expanded(
+          child: _buildClipPopupAction(
+            icon: Icons.tune,
+            color: Colors.white,
+            onTap: () => _openClipSettingsPanel(singleSelectionIndex),
+            tooltip: 'Clip settings',
+          ),
+        ),
+      ]);
+    }
+    popupChildren.addAll(<Widget>[
+      Container(width: 1, height: 16, color: Colors.white24),
+      Expanded(
+        child: _buildClipPopupAction(
+          icon: Icons.delete_outline,
+          color: const Color(0xFFFFA4A4),
+          onTap: () async {
+            if (selectedIndices.isNotEmpty) {
+              await _deleteSelectedClips();
+            }
+          },
+          tooltip: L10n.translate(context, 'Delete'),
+        ),
+      ),
+    ]);
 
     return Positioned(
       left: left,
@@ -5469,46 +5621,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.white24, width: 1),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _buildClipPopupAction(
-                    icon: Icons.copy,
-                    color: Colors.white,
-                    onTap: () {
-                      _copySelectedClips();
-                      setState(_clearClipSelection);
-                    },
-                  ),
-                ),
-                Container(width: 1, height: 16, color: Colors.white24),
-                Expanded(
-                  child: _buildClipPopupAction(
-                    icon: Icons.tune,
-                    color: Colors.white,
-                    onTap: hasSingleSelection
-                        ? () {
-                            if (singleSelectionIndex >= 0) {
-                              _openClipSettingsPanel(singleSelectionIndex);
-                            }
-                          }
-                        : null,
-                  ),
-                ),
-                Container(width: 1, height: 16, color: Colors.white24),
-                Expanded(
-                  child: _buildClipPopupAction(
-                    icon: Icons.delete_outline,
-                    color: const Color(0xFFFFA4A4),
-                    onTap: () async {
-                      if (selectedIndices.isNotEmpty) {
-                        await _deleteSelectedClips();
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
+            child: Row(children: popupChildren),
           ),
         ),
       ),
@@ -5593,7 +5706,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           _canPasteAutomationClipAt(_pasteRow!)) {
                         _pasteAutomationClipAt(_pasteRow!, _pasteMs!);
                       } else {
-                        widget.onPasteClipAt(_pasteRow!, _pasteMs!);
+                        unawaited(widget.onPasteClipAt(_pasteRow!, _pasteMs!));
                       }
                     }
                     _clearPastePopup();
@@ -7380,6 +7493,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         meters: widget.meters,
         getRowCompressorMeter: widget.getRowCompressorMeter,
         getRowEqWaveform: widget.getRowEqWaveform,
+        getRowStereoScope: widget.getRowStereoScope,
         tutorialHighlighter: widget.tutorialHighlighter,
       ),
     );
@@ -8864,6 +8978,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _dragGroupStartMs.isNotEmpty &&
           _dragGroupStartRows.isNotEmpty;
       if (draggingGroup) {
+        final moves = <TimelineClipMoveRequest>[];
         for (final index in selected) {
           final baseMs = _dragGroupStartMs[index];
           final baseRow = _dragGroupStartRows[index];
@@ -8873,7 +8988,24 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           final nextRow = (baseRow + _dragDeltaRows)
               .clamp(0, math.max(0, _rowCount - 1))
               .toInt();
-          await widget.onMoveClipCommit(index, nextStartMs, nextRow);
+          moves.add(
+            TimelineClipMoveRequest(
+              clipIndex: index,
+              newStartMs: nextStartMs,
+              newRowIndex: nextRow,
+            ),
+          );
+        }
+        if (moves.isNotEmpty && widget.onMoveClipsCommit != null) {
+          await widget.onMoveClipsCommit!(moves);
+        } else {
+          for (final move in moves) {
+            await widget.onMoveClipCommit(
+              move.clipIndex,
+              move.newStartMs,
+              move.newRowIndex,
+            );
+          }
         }
       } else {
         await widget.onMoveClipCommit(
@@ -9448,14 +9580,56 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
-  bool _isLocalXInLeftTrimHandleHitbox(Rect clipRect, double localX) {
-    return localX >= clipRect.left - kTrimHitboxPadding &&
-        localX <= clipRect.left + kTrimHandleWidth + kTrimHitboxPadding;
+  Rect _leftTrimHandleRect(Rect clipRect) {
+    return Rect.fromLTWH(
+      clipRect.left - kTrimHandleGap - kTrimHandleWidth,
+      clipRect.top + kTrimHandleVerticalInset,
+      kTrimHandleWidth,
+      math.max(1.0, clipRect.height - (kTrimHandleVerticalInset * 2.0)),
+    );
   }
 
-  bool _isLocalXInRightTrimHandleHitbox(Rect clipRect, double localX) {
-    return localX >= clipRect.right - kTrimHandleWidth - kTrimHitboxPadding &&
-        localX <= clipRect.right + kTrimHitboxPadding;
+  Rect _rightTrimHandleRect(Rect clipRect) {
+    return Rect.fromLTWH(
+      clipRect.right + kTrimHandleGap,
+      clipRect.top + kTrimHandleVerticalInset,
+      kTrimHandleWidth,
+      math.max(1.0, clipRect.height - (kTrimHandleVerticalInset * 2.0)),
+    );
+  }
+
+  Rect _leftTrimHandleHitbox(Rect clipRect) {
+    final handleRect = _leftTrimHandleRect(clipRect);
+    return Rect.fromLTRB(
+      handleRect.left - kTrimHandleOuterHitboxPadding,
+      handleRect.top - kTrimHandleOuterHitboxPadding,
+      handleRect.right + kTrimHandleInnerHitboxPadding,
+      handleRect.bottom + kTrimHandleOuterHitboxPadding,
+    );
+  }
+
+  Rect _rightTrimHandleHitbox(Rect clipRect) {
+    final handleRect = _rightTrimHandleRect(clipRect);
+    return Rect.fromLTRB(
+      handleRect.left - kTrimHandleInnerHitboxPadding,
+      handleRect.top - kTrimHandleOuterHitboxPadding,
+      handleRect.right + kTrimHandleOuterHitboxPadding,
+      handleRect.bottom + kTrimHandleOuterHitboxPadding,
+    );
+  }
+
+  bool _isLocalPositionInLeftTrimHandleHitbox(
+    Rect clipRect,
+    Offset localPosition,
+  ) {
+    return _leftTrimHandleHitbox(clipRect).contains(localPosition);
+  }
+
+  bool _isLocalPositionInRightTrimHandleHitbox(
+    Rect clipRect,
+    Offset localPosition,
+  ) {
+    return _rightTrimHandleHitbox(clipRect).contains(localPosition);
   }
 
   int? _getClipIndexAtInternal(
@@ -9469,6 +9643,26 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (tapRow == null || !_isLocalYInMainTrackLane(tapRow, localY)) {
       return null;
     }
+    if (includeTrimHandleHitbox &&
+        _selectedClipIndices.length == 1 &&
+        _selectedClipIndex >= 0 &&
+        _selectedClipIndex < widget.clips.length) {
+      final selectedClip = widget.clips[_selectedClipIndex];
+      if (selectedClip.rowIndex == tapRow) {
+        final selectedClipRect = _getClipRect(_selectedClipIndex);
+        if (selectedClipRect != null &&
+            (_isLocalPositionInLeftTrimHandleHitbox(
+                  selectedClipRect,
+                  localPosition,
+                ) ||
+                _isLocalPositionInRightTrimHandleHitbox(
+                  selectedClipRect,
+                  localPosition,
+                ))) {
+          return _selectedClipIndex;
+        }
+      }
+    }
     for (int i = widget.clips.length - 1; i >= 0; i--) {
       final clip = widget.clips[i];
       if (clip.rowIndex != tapRow) continue;
@@ -9478,11 +9672,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       if (tapMs >= startMs && tapMs <= endMs) {
         return i;
       }
-      if (!includeTrimHandleHitbox) continue;
+      if (!includeTrimHandleHitbox || !_selectedClipIndices.contains(i)) {
+        continue;
+      }
       final clipRect = _getClipRect(i);
       if (clipRect == null) continue;
-      if (_isLocalXInLeftTrimHandleHitbox(clipRect, localX) ||
-          _isLocalXInRightTrimHandleHitbox(clipRect, localX)) {
+      if (_isLocalPositionInLeftTrimHandleHitbox(clipRect, localPosition) ||
+          _isLocalPositionInRightTrimHandleHitbox(clipRect, localPosition)) {
         return i;
       }
     }
@@ -9619,14 +9815,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return;
     }
 
-    final localX = localPos.dx;
     final tapPopupMs = _scrollOffsetMs + localPos.dx / _pixelsPerMs;
     final draggingGroup = _selectedClipIndices.length > 1 &&
         _selectedClipIndices.contains(tappedClipIndex);
 
     // === 3. PRIORITY 1: TRIM HANDLE HIT? (WINS OVER DRAG) ===
-    final leftHandleHit = _isLocalXInLeftTrimHandleHitbox(clipRect, localX);
-    final rightHandleHit = _isLocalXInRightTrimHandleHitbox(clipRect, localX);
+    final leftHandleHit =
+        _isLocalPositionInLeftTrimHandleHitbox(clipRect, localPos);
+    final rightHandleHit =
+        _isLocalPositionInRightTrimHandleHitbox(clipRect, localPos);
 
     if (!draggingGroup && (leftHandleHit || rightHandleHit)) {
       setState(() {
@@ -9646,7 +9843,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     // === 4. PRIORITY 2: TAP ON CLIP BODY → SELECT FIRST, DRAG ON FOLLOW-UP ===
     if (clipRect.contains(localPos)) {
       final clip = widget.clips[tappedClipIndex];
-      final canBeginDrag = wasAlreadySelected || draggingGroup;
+      final canBeginDrag = _activeTool == _TimelineTool.paint ||
+          wasAlreadySelected ||
+          draggingGroup;
       setState(() {
         _resetTrimInteractionState();
         _clearPendingClipDrag();
@@ -9655,7 +9854,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           preserveExistingSelection: draggingGroup,
           popupMs: tapPopupMs,
         );
-        _tentativeClipSelectionActive = !wasAlreadySelected && !draggingGroup;
+        _tentativeClipSelectionActive =
+            !canBeginDrag && !wasAlreadySelected && !draggingGroup;
         if (canBeginDrag) {
           _pendingDrag = true;
           _pendingDragStartedFromSelection = wasAlreadySelected;
@@ -9736,6 +9936,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
 
     if (_activeTool == _TimelineTool.paint) {
+      if (_paintGesturePlacedClip) {
+        _paintGesturePlacedClip = false;
+        setState(() {
+          _showPastePopup = false;
+          _pasteRow = null;
+          _pasteMs = null;
+          _highlightedSegmentRow = null;
+          _highlightedSegmentStartMs = null;
+          _highlightedSegmentEndMs = null;
+        });
+        return;
+      }
       final topIndex = _getGestureClipIndexAt(details.localPosition);
       if (topIndex != null) {
         setState(() {
@@ -10083,6 +10295,8 @@ class _TimelinePainter extends CustomPainter {
       hash = _hashCombine(hash, clip.instrumentName);
       hash = _hashCombine(hash, clip.clipKind.index);
       hash = _hashCombine(hash, clip.midiNotes.length);
+      hash = _hashCombine(hash, _quantizeDouble(clip.sourceTempoBpm));
+      hash = _hashCombine(hash, _hashMidiNotes(clip.midiNotes));
       hash = _hashCombine(hash, _quantizeDouble(getStartMs(clip)));
       hash = _hashCombine(hash, _quantizeDouble(getTimelineDurationMs(clip)));
       hash = _hashCombine(hash, _quantizeDouble(getTrimStartMs(clip)));
@@ -10090,6 +10304,17 @@ class _TimelinePainter extends CustomPainter {
       hash = _hashCombine(hash, _quantizeDouble(getFullDurationMs(clip)));
       hash = _hashCombine(hash, peaks.length);
       hash = _hashCombine(hash, identityHashCode(peaks));
+    }
+    return _hashFinish(hash);
+  }
+
+  static int _hashMidiNotes(List<MidiNote> notes) {
+    var hash = 0;
+    for (final note in notes) {
+      hash = _hashCombine(hash, note.pitch);
+      hash = _hashCombine(hash, _quantizeDouble(note.startBeat));
+      hash = _hashCombine(hash, _quantizeDouble(note.lengthBeats));
+      hash = _hashCombine(hash, _quantizeDouble(note.velocity));
     }
     return _hashFinish(hash);
   }
@@ -10337,16 +10562,28 @@ class _TimelinePainter extends CustomPainter {
     // ================================================================
 
     final overlapByClip = _computeOverlapByClip();
+    final draggingGroup = draggedClipIndex != null &&
+        selectedClipIndices.length > 1 &&
+        selectedClipIndices.contains(draggedClipIndex) &&
+        draggedClipStartMs != null &&
+        draggedClipRowIndex != null;
 
     // Draw clips
     // ... (Clip drawing logic remains the same, but _drawClip needs modification) ...
     for (int i = 0; i < clips.length; i++) {
-      if (i == draggedClipIndex) continue;
+      if (draggingGroup && selectedClipIndices.contains(i)) continue;
+      if (!draggingGroup && i == draggedClipIndex) continue;
       _drawClip(canvas, i, false, overlapByClip);
     }
-    if (draggedClipIndex != null) {
+    if (draggingGroup) {
+      for (final index in selectedClipIndices) {
+        if (index < 0 || index >= clips.length) continue;
+        _drawClip(canvas, index, true, overlapByClip);
+      }
+    } else if (draggedClipIndex != null) {
       _drawClip(canvas, draggedClipIndex!, true, overlapByClip);
     }
+    _drawSelectedClipHandlesOverlay(canvas);
     _drawTimelineAutomationClips(canvas, size);
     _drawCutPreviewLine(canvas);
 
@@ -10446,17 +10683,34 @@ class _TimelinePainter extends CustomPainter {
     const double overlapEpsilonMs = 0.5;
     final overlap = List<bool>.filled(clips.length, false, growable: false);
     if (clips.length < 2) return overlap;
+    final draggingGroup = draggedClipIndex != null &&
+        selectedClipIndices.length > 1 &&
+        selectedClipIndices.contains(draggedClipIndex) &&
+        draggedClipStartMs != null &&
+        draggedClipRowIndex != null;
+    final draggedOrigin = draggingGroup ? clips[draggedClipIndex!] : null;
+    final dragDeltaMs = draggingGroup && draggedOrigin != null
+        ? draggedClipStartMs! - getStartMs(draggedOrigin)
+        : 0.0;
+    final dragDeltaRows = draggingGroup && draggedOrigin != null
+        ? draggedClipRowIndex! - draggedOrigin.rowIndex
+        : 0;
 
     final spansByRow = <int, List<_ClipOverlapSpan>>{};
 
     for (int i = 0; i < clips.length; i++) {
       final clip = clips[i];
-      final startMs = (i == draggedClipIndex && draggedClipStartMs != null)
-          ? draggedClipStartMs!
-          : getStartMs(clip);
-      final row = (i == draggedClipIndex && draggedClipRowIndex != null)
-          ? draggedClipRowIndex!
-          : clip.rowIndex;
+      final previewedInGroup = draggingGroup && selectedClipIndices.contains(i);
+      final startMs = previewedInGroup
+          ? getStartMs(clip) + dragDeltaMs
+          : (i == draggedClipIndex && draggedClipStartMs != null)
+              ? draggedClipStartMs!
+              : getStartMs(clip);
+      final row = previewedInGroup
+          ? clip.rowIndex + dragDeltaRows
+          : (i == draggedClipIndex && draggedClipRowIndex != null)
+              ? draggedClipRowIndex!
+              : clip.rowIndex;
       final visualDuration = getTimelineDurationMs(clip);
       if (visualDuration <= 0) continue;
 
@@ -10497,17 +10751,36 @@ class _TimelinePainter extends CustomPainter {
   void _drawClip(
       Canvas canvas, int index, bool isDragging, List<bool> overlapByClip) {
     final clip = clips[index];
+    final draggingGroup = draggedClipIndex != null &&
+        selectedClipIndices.length > 1 &&
+        selectedClipIndices.contains(draggedClipIndex) &&
+        draggedClipStartMs != null &&
+        draggedClipRowIndex != null;
+    final previewedInGroup =
+        draggingGroup && isDragging && selectedClipIndices.contains(index);
+    final draggedOrigin = draggingGroup ? clips[draggedClipIndex!] : null;
+    final dragDeltaMs = previewedInGroup && draggedOrigin != null
+        ? draggedClipStartMs! - getStartMs(draggedOrigin)
+        : 0.0;
+    final dragDeltaRows = previewedInGroup && draggedOrigin != null
+        ? draggedClipRowIndex! - draggedOrigin.rowIndex
+        : 0;
 
     // === FIX ===: Use drag state if provided
-    final startMs = isDragging
-        ? (draggedClipStartMs ?? getStartMs(clip))
-        : getStartMs(clip);
+    final startMs = previewedInGroup
+        ? getStartMs(clip) + dragDeltaMs
+        : isDragging
+            ? (draggedClipStartMs ?? getStartMs(clip))
+            : getStartMs(clip);
     final trimStartMs = getTrimStartMs(clip);
     final trimEndMs = getTrimEndMs(clip);
     final peaks = getPeaks(clip);
     final visualDuration = getTimelineDurationMs(clip);
-    final row =
-        isDragging ? (draggedClipRowIndex ?? clip.rowIndex) : clip.rowIndex;
+    final row = previewedInGroup
+        ? clip.rowIndex + dragDeltaRows
+        : isDragging
+            ? (draggedClipRowIndex ?? clip.rowIndex)
+            : clip.rowIndex;
 
     final yOffset = _rowTopForIndex(row);
 
@@ -10536,7 +10809,7 @@ class _TimelinePainter extends CustomPainter {
     // Draw clip background
     final clipPaint = Paint()
       ..color = hasOverlap
-          ? const Color(0xFF8B3A3A)
+          ? const Color(0xFFC06767)
           : (isMidi
               ? (isSelected ? _kTimelineClipMidiSelected : _kTimelineClipMidi)
               : (isSelected
@@ -10618,14 +10891,42 @@ class _TimelinePainter extends CustomPainter {
 
     // Draw edge handles if selected.
     if (showEdgeHandles && !isDragging) {
-      _drawTrimHandles(
-        canvas,
-        rect,
-        asStretchHandles: stretchToolActive && !isMidi,
-        stretchEnabled: clip.stretchToProjectTempo,
-        preservePitch: clip.tempoStretchPreservePitch,
-      );
+      // Handles are painted in a final overlay pass so neighboring clips never
+      // cover them when clips are adjacent.
     }
+  }
+
+  void _drawSelectedClipHandlesOverlay(Canvas canvas) {
+    if (selectedClipIndices.length != 1) return;
+    if (selectedClipIndex < 0 || selectedClipIndex >= clips.length) return;
+    if (draggedClipIndex == selectedClipIndex) return;
+
+    final clip = clips[selectedClipIndex];
+    final startMs = getStartMs(clip);
+    final trimStartMs = getTrimStartMs(clip);
+    final trimEndMs = getTrimEndMs(clip);
+    final visualDuration = getTimelineDurationMs(clip);
+    final x = (startMs - scrollOffsetMs) * pixelsPerMs;
+    final y = _rowTopForIndex(clip.rowIndex) + 2;
+    final width = visualDuration * pixelsPerMs;
+    const double height = _AudioCanvasTimelineState.kRowHeight - 4;
+    final leftExtension = leftVisibleExtensionPx ?? 0.0;
+    if (x + width < -leftExtension || x > viewportWidth) return;
+
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(x, y, width, height),
+      const Radius.circular(6),
+    );
+    final isMidi = clip.clipKind == ClipKind.midi;
+    if (visualDuration <= 0 || (trimEndMs - trimStartMs) <= 0) return;
+
+    _drawTrimHandles(
+      canvas,
+      rect,
+      asStretchHandles: stretchToolActive && !isMidi,
+      stretchEnabled: clip.stretchToProjectTempo,
+      preservePitch: clip.tempoStretchPreservePitch,
+    );
   }
 
   Color _automationColorForTarget(
@@ -11092,6 +11393,8 @@ class _TimelinePainter extends CustomPainter {
     required bool preservePitch,
   }) {
     const handleWidth = _AudioCanvasTimelineState.kTrimHandleWidth;
+    const handleGap = _AudioCanvasTimelineState.kTrimHandleGap;
+    const verticalInset = _AudioCanvasTimelineState.kTrimHandleVerticalInset;
     final handleColor = !asStretchHandles
         ? const Color(0xFF397FBE)
         : (!stretchEnabled
@@ -11102,31 +11405,36 @@ class _TimelinePainter extends CustomPainter {
     final handlePaint = Paint()
       ..color = handleColor
       ..style = PaintingStyle.fill;
+    final shadowPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.16)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+    final handleHeight = math.max(1.0, rect.height - (verticalInset * 2.0));
+    final leftRect = Rect.fromLTWH(
+      rect.left - handleGap - handleWidth,
+      rect.top + verticalInset,
+      handleWidth,
+      handleHeight,
+    );
+    final rightRect = Rect.fromLTWH(
+      rect.right + handleGap,
+      rect.top + verticalInset,
+      handleWidth,
+      handleHeight,
+    );
+    final leftRRect = RRect.fromRectAndRadius(
+      leftRect,
+      const Radius.circular(6),
+    );
+    final rightRRect = RRect.fromRectAndRadius(
+      rightRect,
+      const Radius.circular(6),
+    );
     // Left trim handle
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-            rect.left + 1.5,
-            rect.top + 1.5,
-            handleWidth - 3,
-            rect.height - 3,
-          ),
-          const Radius.circular(4)),
-      handlePaint,
-    );
+    canvas.drawRRect(leftRRect.shift(const Offset(0, 1)), shadowPaint);
+    canvas.drawRRect(leftRRect, handlePaint);
     // Right trim handle
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          rect.right - handleWidth + 1.5,
-          rect.top + 1.5,
-          handleWidth - 3,
-          rect.height - 3,
-        ),
-        const Radius.circular(4),
-      ),
-      handlePaint,
-    );
+    canvas.drawRRect(rightRRect.shift(const Offset(0, 1)), shadowPaint);
+    canvas.drawRRect(rightRRect, handlePaint);
     // Draw handle grips
     final gripPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.62)
@@ -11134,11 +11442,17 @@ class _TimelinePainter extends CustomPainter {
     for (int i = 0; i < 3; i++) {
       final y = rect.top + rect.height / 2 + (i - 1) * 6;
       // Left grip
-      canvas.drawLine(Offset(rect.left + 4, y),
-          Offset(rect.left + handleWidth - 4, y), gripPaint);
+      canvas.drawLine(
+        Offset(leftRect.left + 4, y),
+        Offset(leftRect.right - 4, y),
+        gripPaint,
+      );
       // Right grip
-      canvas.drawLine(Offset(rect.right - handleWidth + 4, y),
-          Offset(rect.right - 4, y), gripPaint);
+      canvas.drawLine(
+        Offset(rightRect.left + 4, y),
+        Offset(rightRect.right - 4, y),
+        gripPaint,
+      );
     }
   }
 

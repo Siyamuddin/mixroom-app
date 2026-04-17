@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.1+22
+version: 1.2.0+25
 
 environment:
   sdk: ^3.6.0
@@ -45,7 +45,7 @@ dependencies:
   file_picker: ^10.3.3
   accessing_security_scoped_resource: ^3.4.0
 
-  # FFmpeg backend. (iOS = new_full, Android = 16kb) Switch with:
+  # (This might be unnecessary now, can just all use new_full) FFmpeg backend. (iOS = new_full, Android = 16kb) Switch with:
   #   dart run tool/switch_ffmpeg_backend.dart new_full
   #   dart run tool/switch_ffmpeg_backend.dart 16kb
   ffmpeg_kit_flutter_new_full: ^1.2.0
@@ -144,14 +144,14 @@ flutter_native_splash:
     # so the full-screen background remains visible without a center mark.
     image: assets/android12_transparent.png
     icon_background_color: "#000000"
-  # background_image: assets/home_background.png  # Blurred guitar background
+  # background_image:
 
 # command to refresh: dart run flutter_launcher_icons
 flutter_icons:
   android: "launcher_icon"
   ios: true
   remove_alpha_ios: true
-  image_path: "assets/app_icon_shadow.png" # "assets/mixroom_logo_202.png" #mixroom_icon_logo_noword.jpg"
+  image_path: "assets/app_icon_shadow.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -169,23 +169,11 @@ flutter:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
   assets:
-    - assets/impulse/church-small-trim.wav
-    - assets/impulse/large-dark-plate-trim.wav
-    - assets/explore_guitar.png
-    - assets/home_background.png
-    - assets/basic_icon.png
-    - assets/pro_icon.png
-    - assets/fading_w_logo.png
-    - assets/fading_w_logo_crop.png
     - assets/tiktok_icon.png
     - assets/ig_icon.png
     - assets/youtube_icon.png
     - assets/soundcloud_icon.png
-    - assets/mixroom_logo_202.png
-    - assets/mixroom_logo202_home_4x.png
-    - assets/mixroom_logo202_home.png
     - assets/mixroom_launch_screen.webp
-    - assets/short_white.png
     - assets/auth/
     - assets/auth/onboarding/
     - assets/daw/
@@ -193,13 +181,34 @@ flutter:
     - assets/demo_projects/
     - assets/magnet-solid-full.svg
     - assets/instruments/
+    - assets/instruments/VSCO-2-CE-1.1.0/
+    - assets/instruments/VSCO-2-CE-1.1.0/Brass/Trumpet/stac/
+    - assets/instruments/VSCO-2-CE-1.1.0/Brass/Tuba/stac/
+    - assets/instruments/VSCO-2-CE-1.1.0/Keys/Organ/Loud/
+    - assets/instruments/VSCO-2-CE-1.1.0/Keys/Organ/Quiet/
+    - assets/instruments/VSCO-2-CE-1.1.0/Keys/UprightPiano/
+    - assets/instruments/VSCO-2-CE-1.1.0/Percussion/
+    - assets/instruments/VSCO-2-CE-1.1.0/Percussion/Glock/
+    - assets/instruments/VSCO-2-CE-1.1.0/Percussion/Marimba/
+    - assets/instruments/VSCO-2-CE-1.1.0/Percussion/Xylo/
+    - assets/instruments/VSCO-2-CE-1.1.0/Strings/Violin Section/Pizz/
+    - assets/instruments/VSCO-2-CE-1.1.0/Woodwinds/Bassoon/stac/
+    - assets/instruments/VSCO-2-CE-1.1.0/Woodwinds/Clarinet/stac/
+    - assets/instruments/VSCO-2-CE-1.1.0/Woodwinds/Flute/stac/
+    - assets/instruments/VSCO-2-CE-1.1.0/Woodwinds/Oboe/Stacc/
+    - assets/instruments/VSCO-2-CE-1.1.0/Woodwinds/Piccolo/Stac/
+    - assets/instruments/VSCO-2-CE-1.1.0/Woodwinds/Piccolo/Sus/
     - assets/sample_packs/
     - assets/sample_packs/starter_kit_v1/Drumset/
     - assets/sample_packs/starter_kit_v1/FX/
     - assets/sample_packs/starter_kit_v1/Instrument Samples/
     - assets/sample_packs/starter_kit_v1/Loops/
     - assets/sample_packs/starter_kit_v1/Processed Drums/
-    - assets/models/
+    - assets/models/yamnet.onnx
+    - assets/models/basic_pitch_nmp.onnx
+    - assets/models/spleeter_vocals.fp16.onnx
+    - assets/models/spleeter_accompaniment.fp16.onnx
+    - assets/licenses/basic_pitch/
     # Enable after exporting trained models:
     # - assets/models/phi3-mini.gguf (don't use)
     # - assets/models/hammer-2.1-0.5b-gpu-int8.task

@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Last updated: 2026-04-02
+Last updated: 2026-04-15
 
 This document tracks third-party software and content used by Mixroom. It is
 intended as a central index for license and attribution obligations.
@@ -31,6 +31,17 @@ Mixroom provides an in-app open-source license viewer through Flutter's
 4. Third-party instrument references
    - Source: `docs/THIRD_PARTY_INSTRUMENT_CREDITS.md`
    - Current usage is tracked as reference/inspiration unless otherwise noted
+5. Basic Pitch audio-to-MIDI model by Spotify
+   - Source: https://github.com/spotify/basic-pitch/tree/v0.4.0
+   - Local path:
+     `assets/models/basic_pitch_nmp.onnx`,
+     `assets/licenses/basic_pitch/LICENSE`,
+     `assets/licenses/basic_pitch/NOTICE`
+   - License: Apache License 2.0
+   - Usage: bundled ONNX model for on-device audio-to-MIDI transcription
+   - Release requirement: keep the Apache 2.0 license text and upstream
+     `NOTICE` bundled with app distributions and surfaced in the in-app license
+     view; do not imply Spotify endorsement
 
 ## Bundled Audio Assets
 
@@ -73,7 +84,11 @@ Mixroom provides an in-app open-source license viewer through Flutter's
    - record source URL and commit hash,
    - include full license text in this repo,
    - include attribution required by the source license.
-7. Ensure App Store / Play Store disclosures remain consistent with actual app
+7. If any third-party model weights are bundled with the app:
+   - record the exact upstream tag / commit and source URL,
+   - verify redistribution rights for the exact weights you ship,
+   - ensure any model-specific LICENSE / NOTICE text is included in the app.
+8. Ensure App Store / Play Store disclosures remain consistent with actual app
    behavior and included SDKs.
 
 ## Contact

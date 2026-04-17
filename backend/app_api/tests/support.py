@@ -76,11 +76,13 @@ class FakeBillingRepo:
         self.billing_events = {}
         self.subscriptions = {}
         self.entitlements = {}
+        self.user_profiles = {}
         self.catalog_mappings = {}
         self.customer_links = {}
         self.purchase_tokens = {}
         self.queued_projection_ids = []
         self.reconciliation_jobs = []
+        self.user_profile_upserts = []
 
     def put_billing_event_if_new(self, event):
         event_id = str(event["event_id"])
@@ -157,6 +159,27 @@ class FakeBillingRepo:
 
     def delete_entitlement(self, user_id):
         self.entitlements.pop(user_id, None)
+
+    def get_user_profile(self, user_id):
+        item = self.user_profiles.get(user_id)
+        return dict(item) if isinstance(item, dict) else None
+
+    def get_user_profile_by_email(self, email_lc):
+        normalized = str(email_lc or "").strip().lower()
+        for item in self.user_profiles.values():
+            if str(item.get("email_lc") or item.get("email") or "").strip().lower() == normalized:
+                return dict(item)
+        return None
+
+    def upsert_user_profile(self, profile, *, previous_username_lc=None):
+        payload = dict(profile)
+        self.user_profiles[str(payload["user_id"])] = payload
+        self.user_profile_upserts.append(
+            {
+                "profile": payload,
+                "previous_username_lc": previous_username_lc,
+            }
+        )
 
     def scan_subscriptions(self):
         for item in self.subscriptions.values():

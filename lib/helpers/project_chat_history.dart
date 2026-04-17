@@ -2,15 +2,17 @@ import 'package:flutter_chat_core/flutter_chat_core.dart';
 
 const ProjectChatHistoryLimits kDefaultProjectChatHistoryLimits =
     ProjectChatHistoryLimits(
-  maxStoredMessages: 48,
-  maxStoredCharacters: 16000,
-  maxStoredMessageCharacters: 2000,
+  // Keep project history character-bounded instead of count-bounded so older
+  // short messages are not discarded just because the turn count grows.
+  maxStoredMessages: null,
+  maxStoredCharacters: 240000,
+  maxStoredMessageCharacters: 6000,
   maxConversationMessages: 24,
   maxConversationCharacters: 12000,
 );
 
 class ProjectChatHistoryLimits {
-  final int maxStoredMessages;
+  final int? maxStoredMessages;
   final int maxStoredCharacters;
   final int maxStoredMessageCharacters;
   final int maxConversationMessages;
@@ -264,7 +266,7 @@ class ProjectChatHistory {
     List<ProjectChatHistoryEntry> source, {
     required ProjectChatHistoryLimits limits,
     required bool preserveTruncated,
-    required int maxMessages,
+    required int? maxMessages,
     required int maxCharacters,
   }) {
     bool truncated = preserveTruncated;
@@ -277,9 +279,10 @@ class ProjectChatHistory {
       normalized.add(entry.copyWith(text: trimmedText));
     }
 
-    final afterCountLimit = normalized.length > maxMessages
-        ? normalized.sublist(normalized.length - maxMessages)
-        : normalized;
+    final afterCountLimit =
+        (maxMessages != null && normalized.length > maxMessages)
+            ? normalized.sublist(normalized.length - maxMessages)
+            : normalized;
     if (afterCountLimit.length != normalized.length) truncated = true;
 
     final limited = <ProjectChatHistoryEntry>[];

@@ -37,9 +37,14 @@ _ALLOWED_MODEL_OVERRIDES = frozenset(
         "gpt-5.1-codex-mini",
         "gpt-5.1-chat-latest",
         "gpt-5.2",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
     }
 )
-_ALLOWED_REASONING_EFFORT_OVERRIDES = frozenset({"minimal", "low", "medium", "high"})
+_ALLOWED_REASONING_EFFORT_OVERRIDES = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh"}
+)
 _ALLOWED_PROMPT_CACHE_RETENTION_OVERRIDES = frozenset({"in_memory", "24h"})
 _runtime_cache: dict[str, dict[str, Any]] = {}
 _runtime_cache_loaded_at: dict[str, datetime] = {}

@@ -344,7 +344,7 @@ SPEC CHECKSUMS:
   DKImagePickerController: 946cec48c7873164274ecc4624d19e3da4c1ef3c
   DKPhotoGallery: b3834fecb755ee09a593d7c9e389d8b5d6deed60
   easy_video_editor: 3b4b38c40be7344935f79698115ee36077df8a57
-  ffmpeg_kit_flutter_new_full: 210bbf416486a8ccc19a4c6dfb725fa446e798f2
+  ffmpeg_kit_flutter_new_full: 409b012eb2c900b377f6c904bea43f6572daa9e6
   file_picker: a0560bc09d61de87f12d246fc47d2119e6ef37be
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_appauth: d4abcf54856e5d8ba82ed7646ffc83245d4aa448
@@ -363,7 +363,7 @@ SPEC CHECKSUMS:
   image_gallery_saver: 14711d79da40581063e8842a11acf1969d781ed7
   in_app_purchase_storekit: 22cca7d08eebca9babdf4d07d0baccb73325d3c8
   integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
-  juce_audio_engine: dd3276a77abb8a86c20632166aaafc9671878eb6
+  juce_audio_engine: bc22f3defc42e046cee20c59e6ede4c84863997a
   just_audio: 4e391f57b79cad2b0674030a00453ca5ce817eed
   kakao_flutter_sdk_common: 682b3606698f87467788598dc2dc09d4e6867fbd
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
@@ -391,6 +391,6 @@ SPEC CHECKSUMS:
   wakelock_plus: e29112ab3ef0b318e58cfa5c32326458be66b556
   WebRTC-SDK: 40d4f5ba05cadff14e4db5614aec402a633f007e
 
-PODFILE CHECKSUM: 3a9cb0e062cf36fea2227b5e87ffb4e1a22d41a7
+PODFILE CHECKSUM: 0ffd8c37f91ec3217270ae545b8390f69c45bce6
 
 COCOAPODS: 1.16.2

@@ -29,7 +29,7 @@ Parameters:
     Type: String
   OpenAiModel:
     Type: String
-    Default: gpt-4.1-mini
+    Default: gpt-5.4-mini
   AiChatDefaultTemperature:
     Type: String
     Default: '0.2'
@@ -38,7 +38,7 @@ Parameters:
     Default: '0.1'
   AiChatExtendedPromptCacheRetentionModels:
     Type: String
-    Default: 'gpt-4.1,gpt-5,gpt-5-codex,gpt-5.1,gpt-5.1-codex,gpt-5.1-codex-mini,gpt-5.1-chat-latest,gpt-5.2'
+    Default: 'gpt-4.1,gpt-5,gpt-5-codex,gpt-5.1,gpt-5.1-codex,gpt-5.1-codex-mini,gpt-5.1-chat-latest,gpt-5.2,gpt-5.4-mini'
   AllowClientModelOverride:
     Type: String
     AllowedValues:
@@ -55,7 +55,31 @@ Parameters:
     Default: 200000
   LlmMaxOutputTokens:
     Type: Number
-    Default: 1024
+    Default: 4096
+  MixApplyModelPath:
+    Type: String
+    Default: ''
+  MixMagnitudeModelPath:
+    Type: String
+    Default: ''
+  MixModelManifestUrl:
+    Type: String
+    Default: ''
+  MixModelManifestTimeoutSeconds:
+    Type: Number
+    Default: 4
+  MixModelDownloadTimeoutSeconds:
+    Type: Number
+    Default: 12
+  MixModelCacheDirectory:
+    Type: String
+    Default: /tmp/mixroom_mix_models
+  MixModelBundleVersion:
+    Type: String
+    Default: server-default
+  MixResolveMaxActions:
+    Type: Number
+    Default: 64
   ApiThrottleBurstLimit:
     Type: Number
     Default: 200
@@ -116,6 +140,14 @@ Globals:
         AI_PROMPT_LIMIT_SETTINGS_TABLE: !Ref AiPromptLimitSettingsTable
         ENTITLEMENTS_TABLE: !Ref EntitlementsTableName
         LLM_MAX_OUTPUT_TOKENS: !Ref LlmMaxOutputTokens
+        MIX_APPLY_MODEL_PATH: !Ref MixApplyModelPath
+        MIX_MAGNITUDE_MODEL_PATH: !Ref MixMagnitudeModelPath
+        MIX_MODEL_MANIFEST_URL: !Ref MixModelManifestUrl
+        MIX_MODEL_MANIFEST_TIMEOUT_SECONDS: !Ref MixModelManifestTimeoutSeconds
+        MIX_MODEL_DOWNLOAD_TIMEOUT_SECONDS: !Ref MixModelDownloadTimeoutSeconds
+        MIX_MODEL_CACHE_DIRECTORY: !Ref MixModelCacheDirectory
+        MIX_MODEL_BUNDLE_VERSION: !Ref MixModelBundleVersion
+        MIX_RESOLVE_MAX_ACTIONS: !Ref MixResolveMaxActions
 
 Conditions:
   HasWebAclArn: !Not
@@ -270,6 +302,32 @@ Resources:
             Path: /v1/llm/limits
             Method: GET
 
+  MixResolveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_mix_resolve.handler
+      Timeout: 15
+      MemorySize: 1024
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - !Ref AppAuthSecretArn
+        - DynamoDBReadPolicy:
+            TableName: !Ref AuthAccountsTableName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthSessionsTableName
+      Events:
+        MixResolve:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LlmApi
+            Path: /v1/mix/resolve
+            Method: POST
+
   LlmApi5xxAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: HasAlarmTopicArn
@@ -325,6 +383,27 @@ Resources:
       Dimensions:
         - Name: FunctionName
           Value: !Ref ProxyResponsesFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopicArn
+
+  MixResolveFunctionErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlarmTopicArn
+    Properties:
+      AlarmName: !Sub mixroom-llm-proxy-${StageName}-mix-resolve-errors
+      AlarmDescription: !Sub Mix resolve Lambda is returning errors in ${StageName}.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref MixResolveFunction
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1

@@ -226,4 +226,29 @@ void main() {
       );
     }
   });
+
+  test('native sampled resolver does not hardcode bundled SFZ asset paths',
+      () async {
+    final repoRoot = Directory.current;
+    final nativeFiles = <String>[
+      p.join(repoRoot.path, 'juce_audio_engine', 'android', 'src', 'main',
+          'cpp', 'JuceEngine.h'),
+      p.join(repoRoot.path, 'juce_audio_engine', 'android', 'src', 'main',
+          'cpp', 'TimelineMidiClipProcessor.h'),
+      p.join(repoRoot.path, 'juce_audio_engine', 'ios', 'Classes',
+          'JuceEngine.h'),
+    ];
+
+    for (final path in nativeFiles) {
+      final file = File(path);
+      expect(file.existsSync(), isTrue, reason: 'Missing source file: $path');
+      final text = await file.readAsString();
+      expect(
+        _extractStaticSfzPaths(text),
+        isEmpty,
+        reason: 'Native sampled resolver should use sfz_asset paths, not '
+            'hardcoded bundled SFZ asset constants: $path',
+      );
+    }
+  });
 }

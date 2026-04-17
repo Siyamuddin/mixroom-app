@@ -609,6 +609,156 @@ bool DistortionAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts
 }
 #endif
 
+// ****DEGRADE****
+
+DegradeAudioProcessor::DegradeAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+#if !JucePlugin_IsMidiEffect
+#if !JucePlugin_IsSynth
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+#endif
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)
+#endif
+                         ),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterChoice>(
+        "mode",
+        "Mode",
+        degradeModes,
+        0));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "tone",
+        "Tone",
+        juce::NormalisableRange<float>(20.0f, 20000.0f, 1.0f, 0.25f),
+        6000.0f,
+        "Hz"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "depth",
+        "Depth",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+        35.0f,
+        "%"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "spread",
+        "Spread",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+        40.0f,
+        "%"));
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void DegradeAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    degrade.prepare(sampleRate, samplesPerBlock);
+    degrade.setParameters(parameters);
+    setLatencySamples(0);
+    waveformRing.fill(0.0f);
+    waveformWritePos.store(0, std::memory_order_relaxed);
+}
+
+void DegradeAudioProcessor::reset()
+{
+    degrade.reset();
+    waveformRing.fill(0.0f);
+    waveformWritePos.store(0, std::memory_order_relaxed);
+}
+
+void DegradeAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+    for (auto ch = getTotalNumInputChannels(); ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    degrade.setParameters(parameters);
+    degrade.process(buffer);
+    pushWaveformSamples(buffer);
+}
+
+void DegradeAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffer,
+                                                 juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (auto ch = getTotalNumInputChannels(); ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    degrade.reset();
+}
+
+void DegradeAudioProcessor::pushWaveformSamples(const juce::AudioBuffer<float> &buffer) noexcept
+{
+    const int numSamples = buffer.getNumSamples();
+    const int channels = juce::jmin(buffer.getNumChannels(), 2);
+    if (numSamples <= 0 || channels <= 0)
+        return;
+
+    const float *left = buffer.getReadPointer(0);
+    const float *right = channels > 1 ? buffer.getReadPointer(1) : nullptr;
+
+    int writePos = waveformWritePos.load(std::memory_order_relaxed);
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float mono = right != nullptr ? 0.5f * (left[i] + right[i]) : left[i];
+        waveformRing[(size_t)writePos] = juce::jlimit(-1.0f, 1.0f, mono);
+        writePos = (writePos + 1) % kWaveformRingSize;
+    }
+    waveformWritePos.store(writePos, std::memory_order_release);
+}
+
+std::vector<float> DegradeAudioProcessor::getRecentWaveform(int sampleCount) const
+{
+    const int count = juce::jlimit(16, kWaveformRingSize, sampleCount);
+    std::vector<float> out((size_t)count, 0.0f);
+
+    const int writePos = waveformWritePos.load(std::memory_order_acquire);
+    int readPos = writePos - count;
+    while (readPos < 0)
+        readPos += kWaveformRingSize;
+
+    for (int i = 0; i < count; ++i)
+    {
+        out[(size_t)i] = waveformRing[(size_t)readPos];
+        readPos = (readPos + 1) % kWaveformRingSize;
+    }
+
+    return out;
+}
+
+void DegradeAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> xml(parameters.state.createXml());
+    copyXmlToBinary(*xml, destData);
+}
+
+void DegradeAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
+    if (xml != nullptr && xml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*xml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool DegradeAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
 // ****DE-ESSER****
 
 DeesserAudioProcessor::DeesserAudioProcessor()
@@ -1486,6 +1636,806 @@ void VibratoAudioProcessor::setStateInformation(const void *data, int sizeInByte
 
 #ifndef JucePlugin_PreferredChannelConfigurations
 bool VibratoAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
+// =================
+// **** STEREO ****
+// =================
+
+StereoAudioProcessor::StereoAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "width", "Width",
+            juce::NormalisableRange<float>(0.0f, 200.0f, 1.0f),
+            100.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "lowBypass", "Low Bypass",
+            juce::NormalisableRange<float>(20.0f, 2000.0f, 1.0f, 0.35f),
+            160.0f, "Hz"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterBool>(
+            "mono", "Mono",
+            false));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void StereoAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    stereoFx.prepare(sampleRate, samplesPerBlock);
+    stereoFx.setParameters(parameters);
+    stereoFx.syncParameters();
+    bypassSampleRate = sanitiseEffectSampleRate(sampleRate);
+    bypassRampSamples = juce::jmax(1, (int)std::round(bypassSampleRate * 0.004));
+    bypassRampRemaining = 0;
+    bypassRampDirection = BypassRampDirection::none;
+    lastBlockWasBypassed = false;
+    ensureBypassBufferCapacity(samplesPerBlock);
+}
+
+void StereoAudioProcessor::reset()
+{
+    stereoFx.reset();
+    bypassDryBuffer.clear();
+    bypassWetBuffer.clear();
+    bypassRampRemaining = 0;
+    bypassRampDirection = BypassRampDirection::none;
+    lastBlockWasBypassed = false;
+}
+
+void StereoAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    if (lastBlockWasBypassed)
+        beginBypassRamp(BypassRampDirection::toWet);
+
+    if (bypassRampDirection == BypassRampDirection::toWet)
+    {
+        ensureBypassBufferCapacity(buffer.getNumSamples());
+        bypassDryBuffer.makeCopyOf(buffer, true);
+    }
+
+    stereoFx.setParameters(parameters);
+    stereoFx.process(buffer);
+
+    if (bypassRampDirection == BypassRampDirection::toWet)
+        applyBypassRamp(buffer, bypassDryBuffer, buffer);
+
+    lastBlockWasBypassed = false;
+}
+
+void StereoAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    if (!lastBlockWasBypassed)
+        beginBypassRamp(BypassRampDirection::toDry);
+
+    if (bypassRampDirection == BypassRampDirection::toDry)
+    {
+        ensureBypassBufferCapacity(buffer.getNumSamples());
+        bypassDryBuffer.makeCopyOf(buffer, true);
+        bypassWetBuffer.makeCopyOf(buffer, true);
+        stereoFx.setParameters(parameters);
+        stereoFx.process(bypassWetBuffer);
+        applyBypassRamp(buffer, bypassDryBuffer, bypassWetBuffer);
+    }
+
+    lastBlockWasBypassed = true;
+}
+
+void StereoAudioProcessor::ensureBypassBufferCapacity(int numSamples)
+{
+    const int channels = juce::jmax(1, getTotalNumOutputChannels());
+    const int samples = juce::jmax(1, numSamples);
+    if (bypassDryBuffer.getNumChannels() != channels ||
+        bypassDryBuffer.getNumSamples() < samples)
+        bypassDryBuffer.setSize(channels, samples, false, false, true);
+    if (bypassWetBuffer.getNumChannels() != channels ||
+        bypassWetBuffer.getNumSamples() < samples)
+        bypassWetBuffer.setSize(channels, samples, false, false, true);
+}
+
+void StereoAudioProcessor::beginBypassRamp(BypassRampDirection direction)
+{
+    bypassRampDirection = direction;
+    bypassRampRemaining = bypassRampSamples;
+}
+
+void StereoAudioProcessor::applyBypassRamp(juce::AudioBuffer<float> &output,
+                                           const juce::AudioBuffer<float> &dry,
+                                           const juce::AudioBuffer<float> &wet)
+{
+    if (bypassRampDirection == BypassRampDirection::none)
+        return;
+
+    const int totalSamples = juce::jmax(1, bypassRampSamples);
+    const int fadeSamples = juce::jmin(output.getNumSamples(), bypassRampRemaining);
+    const int rampStart = juce::jmax(0, totalSamples - bypassRampRemaining);
+    const int channels = juce::jmin(output.getNumChannels(),
+                                    juce::jmin(dry.getNumChannels(), wet.getNumChannels()));
+
+    for (int ch = 0; ch < channels; ++ch)
+    {
+        const float *dryPtr = dry.getReadPointer(ch);
+        const float *wetPtr = wet.getReadPointer(ch);
+        float *outPtr = output.getWritePointer(ch);
+
+        for (int sample = 0; sample < output.getNumSamples(); ++sample)
+        {
+            float wetMix = (bypassRampDirection == BypassRampDirection::toWet) ? 1.0f : 0.0f;
+            if (sample < fadeSamples)
+            {
+                const float progress =
+                    (float)(rampStart + sample + 1) / (float)totalSamples;
+                wetMix = (bypassRampDirection == BypassRampDirection::toWet)
+                             ? progress
+                             : (1.0f - progress);
+            }
+
+            outPtr[sample] =
+                dryPtr[sample] + ((wetPtr[sample] - dryPtr[sample]) * wetMix);
+        }
+    }
+
+    bypassRampRemaining -= fadeSamples;
+    if (bypassRampRemaining <= 0)
+    {
+        bypassRampRemaining = 0;
+        bypassRampDirection = BypassRampDirection::none;
+    }
+}
+
+void StereoAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void StereoAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool StereoAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
+// =====================
+// **** STEREO PRO ****
+// =====================
+
+StereoProAudioProcessor::StereoProAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "gain", "Gain",
+            juce::NormalisableRange<float>(-18.0f, 18.0f, 0.1f),
+            0.0f, "dB"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "width", "Width",
+            juce::NormalisableRange<float>(0.0f, 300.0f, 1.0f),
+            100.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "asymmetry", "Asymmetry",
+            juce::NormalisableRange<float>(-100.0f, 100.0f, 1.0f),
+            0.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "rotation", "Rotation",
+            juce::NormalisableRange<float>(-90.0f, 90.0f, 1.0f),
+            0.0f, "deg"));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void StereoProAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    stereoProFx.prepare(sampleRate, samplesPerBlock);
+    stereoProFx.setParameters(parameters);
+    stereoProFx.syncParameters();
+    bypassSampleRate = sanitiseEffectSampleRate(sampleRate);
+    bypassRampSamples = juce::jmax(1, (int)std::round(bypassSampleRate * 0.004));
+    bypassRampRemaining = 0;
+    bypassRampDirection = BypassRampDirection::none;
+    lastBlockWasBypassed = false;
+    ensureBypassBufferCapacity(samplesPerBlock);
+    scopeRing.fill(0.0f);
+    scopeWritePos.store(0, std::memory_order_relaxed);
+}
+
+void StereoProAudioProcessor::reset()
+{
+    stereoProFx.reset();
+    bypassDryBuffer.clear();
+    bypassWetBuffer.clear();
+    bypassRampRemaining = 0;
+    bypassRampDirection = BypassRampDirection::none;
+    lastBlockWasBypassed = false;
+    scopeRing.fill(0.0f);
+    scopeWritePos.store(0, std::memory_order_relaxed);
+}
+
+void StereoProAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    if (lastBlockWasBypassed)
+        beginBypassRamp(BypassRampDirection::toWet);
+
+    if (bypassRampDirection == BypassRampDirection::toWet)
+    {
+        ensureBypassBufferCapacity(buffer.getNumSamples());
+        bypassDryBuffer.makeCopyOf(buffer, true);
+    }
+
+    stereoProFx.setParameters(parameters);
+    stereoProFx.process(buffer);
+
+    if (bypassRampDirection == BypassRampDirection::toWet)
+        applyBypassRamp(buffer, bypassDryBuffer, buffer);
+
+    pushScopeSamples(buffer);
+    lastBlockWasBypassed = false;
+}
+
+void StereoProAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    if (!lastBlockWasBypassed)
+        beginBypassRamp(BypassRampDirection::toDry);
+
+    if (bypassRampDirection == BypassRampDirection::toDry)
+    {
+        ensureBypassBufferCapacity(buffer.getNumSamples());
+        bypassDryBuffer.makeCopyOf(buffer, true);
+        bypassWetBuffer.makeCopyOf(buffer, true);
+        stereoProFx.setParameters(parameters);
+        stereoProFx.process(bypassWetBuffer);
+        applyBypassRamp(buffer, bypassDryBuffer, bypassWetBuffer);
+    }
+
+    lastBlockWasBypassed = true;
+}
+
+void StereoProAudioProcessor::ensureBypassBufferCapacity(int numSamples)
+{
+    const int channels = juce::jmax(1, getTotalNumOutputChannels());
+    const int samples = juce::jmax(1, numSamples);
+    if (bypassDryBuffer.getNumChannels() != channels ||
+        bypassDryBuffer.getNumSamples() < samples)
+        bypassDryBuffer.setSize(channels, samples, false, false, true);
+    if (bypassWetBuffer.getNumChannels() != channels ||
+        bypassWetBuffer.getNumSamples() < samples)
+        bypassWetBuffer.setSize(channels, samples, false, false, true);
+}
+
+void StereoProAudioProcessor::beginBypassRamp(BypassRampDirection direction)
+{
+    bypassRampDirection = direction;
+    bypassRampRemaining = bypassRampSamples;
+}
+
+void StereoProAudioProcessor::applyBypassRamp(juce::AudioBuffer<float> &output,
+                                              const juce::AudioBuffer<float> &dry,
+                                              const juce::AudioBuffer<float> &wet)
+{
+    if (bypassRampDirection == BypassRampDirection::none)
+        return;
+
+    const int totalSamples = juce::jmax(1, bypassRampSamples);
+    const int fadeSamples = juce::jmin(output.getNumSamples(), bypassRampRemaining);
+    const int rampStart = juce::jmax(0, totalSamples - bypassRampRemaining);
+    const int channels = juce::jmin(output.getNumChannels(),
+                                    juce::jmin(dry.getNumChannels(), wet.getNumChannels()));
+
+    for (int ch = 0; ch < channels; ++ch)
+    {
+        const float *dryPtr = dry.getReadPointer(ch);
+        const float *wetPtr = wet.getReadPointer(ch);
+        float *outPtr = output.getWritePointer(ch);
+
+        for (int sample = 0; sample < output.getNumSamples(); ++sample)
+        {
+            float wetMix = (bypassRampDirection == BypassRampDirection::toWet) ? 1.0f : 0.0f;
+            if (sample < fadeSamples)
+            {
+                const float progress =
+                    (float)(rampStart + sample + 1) / (float)totalSamples;
+                wetMix = (bypassRampDirection == BypassRampDirection::toWet)
+                             ? progress
+                             : (1.0f - progress);
+            }
+
+            outPtr[sample] =
+                dryPtr[sample] + ((wetPtr[sample] - dryPtr[sample]) * wetMix);
+        }
+    }
+
+    bypassRampRemaining -= fadeSamples;
+    if (bypassRampRemaining <= 0)
+    {
+        bypassRampRemaining = 0;
+        bypassRampDirection = BypassRampDirection::none;
+    }
+}
+
+void StereoProAudioProcessor::pushScopeSamples(const juce::AudioBuffer<float> &buffer) noexcept
+{
+    const int numSamples = buffer.getNumSamples();
+    const int channels = juce::jmin(buffer.getNumChannels(), 2);
+    if (numSamples <= 0 || channels <= 0)
+        return;
+
+    const float *left = buffer.getReadPointer(0);
+    const float *right = channels > 1 ? buffer.getReadPointer(1) : nullptr;
+
+    int writePos = scopeWritePos.load(std::memory_order_relaxed);
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float l = juce::jlimit(-2.0f, 2.0f, left[i]);
+        const float r = juce::jlimit(-2.0f, 2.0f, right != nullptr ? right[i] : left[i]);
+        scopeRing[(size_t)(writePos * 2)] = l;
+        scopeRing[(size_t)(writePos * 2 + 1)] = r;
+        writePos = (writePos + 1) % kScopeRingSize;
+    }
+
+    scopeWritePos.store(writePos, std::memory_order_release);
+}
+
+std::vector<float> StereoProAudioProcessor::getRecentScope(int pointCount) const
+{
+    const int count = juce::jlimit(32, kScopeRingSize, pointCount);
+    std::vector<float> out((size_t)(count * 2), 0.0f);
+
+    const int writePos = scopeWritePos.load(std::memory_order_acquire);
+    int readPos = writePos - count;
+    while (readPos < 0)
+        readPos += kScopeRingSize;
+
+    for (int i = 0; i < count; ++i)
+    {
+        out[(size_t)(i * 2)] = scopeRing[(size_t)(readPos * 2)];
+        out[(size_t)(i * 2 + 1)] = scopeRing[(size_t)(readPos * 2 + 1)];
+        readPos = (readPos + 1) % kScopeRingSize;
+    }
+
+    return out;
+}
+
+void StereoProAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void StereoProAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool StereoProAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
+// ==========================
+// **** VOLUME SHAPER ****
+// ==========================
+
+VolumeShaperAudioProcessor::VolumeShaperAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "depth", "Depth",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            100.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "mix", "Mix",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            100.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "smooth", "Smooth",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            18.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "swing", "Swing",
+            juce::NormalisableRange<float>(0.0f, 75.0f, 1.0f),
+            0.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterChoice>(
+            "rate", "Rate",
+            VolumeShaperModule::rateChoices(),
+            3));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterChoice>(
+            "shape", "Shape",
+            VolumeShaperModule::shapeChoices(),
+            0));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void VolumeShaperAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    shaper.prepare(sampleRate, samplesPerBlock);
+    shaper.setParameters(parameters);
+    shaper.syncParameters();
+    previewPhase.store(0.0f, std::memory_order_relaxed);
+    previewGain.store(1.0f, std::memory_order_relaxed);
+}
+
+void VolumeShaperAudioProcessor::reset()
+{
+    shaper.reset();
+    previewPhase.store(0.0f, std::memory_order_relaxed);
+    previewGain.store(1.0f, std::memory_order_relaxed);
+}
+
+void VolumeShaperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    const bool shouldAdvancePreview = mixroom::fx::getGlobalTransportPlaying();
+    const float heldPhase = previewPhase.load(std::memory_order_relaxed);
+    const float heldGain = previewGain.load(std::memory_order_relaxed);
+    shaper.setParameters(parameters);
+    shaper.process(buffer,
+                   mixroom::fx::getGlobalTransportSeconds(),
+                   previewPhase,
+                   previewGain);
+
+    if (!shouldAdvancePreview)
+    {
+        previewPhase.store(heldPhase, std::memory_order_relaxed);
+        previewGain.store(heldGain, std::memory_order_relaxed);
+    }
+}
+
+void VolumeShaperAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    const bool shouldAdvancePreview = mixroom::fx::getGlobalTransportPlaying();
+    const float heldPhase = previewPhase.load(std::memory_order_relaxed);
+    const float heldGain = previewGain.load(std::memory_order_relaxed);
+    shaper.setParameters(parameters);
+    if (shouldAdvancePreview)
+    {
+        const double bpm = mixroom::fx::getGlobalTempoBpm();
+        const int rateIndex = juce::jlimit(
+            0,
+            (int)VolumeShaperModule::rateBeats.size() - 1,
+            (int)parameters.getRawParameterValue("rate")->load());
+        const double cycleBeats = VolumeShaperModule::rateBeats[(size_t)rateIndex];
+        const double beatPos = mixroom::fx::getGlobalTransportSeconds() * bpm / 60.0;
+        const double cyclePos = std::fmod(beatPos / juce::jmax(0.125, cycleBeats), 1.0);
+        const float phase = (float)(cyclePos >= 0.0 ? cyclePos : cyclePos + 1.0);
+        previewPhase.store(phase, std::memory_order_relaxed);
+        previewGain.store(1.0f, std::memory_order_relaxed);
+        return;
+    }
+
+    previewPhase.store(heldPhase, std::memory_order_relaxed);
+    previewGain.store(heldGain, std::memory_order_relaxed);
+}
+
+std::vector<float> VolumeShaperAudioProcessor::getPreviewCurve(int pointCount) const
+{
+    const auto *shapeParam = parameters.getRawParameterValue("shape");
+    const auto *depthParam = parameters.getRawParameterValue("depth");
+    const auto *smoothParam = parameters.getRawParameterValue("smooth");
+    const auto *swingParam = parameters.getRawParameterValue("swing");
+    if (shapeParam == nullptr || depthParam == nullptr ||
+        smoothParam == nullptr || swingParam == nullptr)
+        return std::vector<float>((size_t)(juce::jlimit(32, 512, pointCount) + 1), 1.0f);
+
+    return VolumeShaperModule::buildPreviewCurve(
+        pointCount,
+        (int)shapeParam->load(),
+        depthParam->load(),
+        smoothParam->load(),
+        swingParam->load(),
+        previewPhase.load(std::memory_order_relaxed));
+}
+
+void VolumeShaperAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void VolumeShaperAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool VolumeShaperAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
+// ========================
+// **** TIME SHAPER ****
+// ========================
+
+TimeShaperAudioProcessor::TimeShaperAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "amount", "Amount",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            100.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "mix", "Mix",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            100.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "smooth", "Smooth",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            18.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterChoice>(
+            "rate", "Rate",
+            TimeShaperModule::rateChoices(),
+            1));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterChoice>(
+            "pattern", "Pattern",
+            TimeShaperModule::patternChoices(),
+            0));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void TimeShaperAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    shaper.prepare(sampleRate, samplesPerBlock);
+    shaper.setParameters(parameters);
+    shaper.syncParameters();
+    previewPhase.store(0.0f, std::memory_order_relaxed);
+    previewReadNorm.store(1.0f, std::memory_order_relaxed);
+}
+
+void TimeShaperAudioProcessor::reset()
+{
+    shaper.reset();
+    previewPhase.store(0.0f, std::memory_order_relaxed);
+    previewReadNorm.store(1.0f, std::memory_order_relaxed);
+    transportWasPlaying = false;
+}
+
+bool TimeShaperAudioProcessor::handleStoppedTransport(bool transportPlaying,
+                                                      float heldPhase,
+                                                      float heldReadNorm)
+{
+    if (transportPlaying)
+    {
+        transportWasPlaying = true;
+        return false;
+    }
+
+    if (transportWasPlaying)
+    {
+        shaper.reset();
+        transportWasPlaying = false;
+    }
+
+    previewPhase.store(heldPhase, std::memory_order_relaxed);
+    previewReadNorm.store(heldReadNorm, std::memory_order_relaxed);
+    return true;
+}
+
+void TimeShaperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    const bool shouldAdvancePreview = mixroom::fx::getGlobalTransportPlaying();
+    const float heldPhase = previewPhase.load(std::memory_order_relaxed);
+    const float heldReadNorm = previewReadNorm.load(std::memory_order_relaxed);
+    if (handleStoppedTransport(shouldAdvancePreview, heldPhase, heldReadNorm))
+        return;
+
+    shaper.setParameters(parameters);
+    shaper.process(buffer,
+                   mixroom::fx::getGlobalTransportSeconds(),
+                   previewPhase,
+                   previewReadNorm);
+}
+
+void TimeShaperAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    const bool shouldAdvancePreview = mixroom::fx::getGlobalTransportPlaying();
+    const float heldPhase = previewPhase.load(std::memory_order_relaxed);
+    const float heldReadNorm = previewReadNorm.load(std::memory_order_relaxed);
+    if (handleStoppedTransport(shouldAdvancePreview, heldPhase, heldReadNorm))
+        return;
+
+    shaper.setParameters(parameters);
+    shaper.updateHistory(buffer,
+                         mixroom::fx::getGlobalTransportSeconds(),
+                         previewPhase,
+                         previewReadNorm);
+}
+
+std::vector<float> TimeShaperAudioProcessor::getPreviewCurve(int pointCount) const
+{
+    const auto *patternParam = parameters.getRawParameterValue("pattern");
+    const auto *amountParam = parameters.getRawParameterValue("amount");
+    const auto *smoothParam = parameters.getRawParameterValue("smooth");
+    if (patternParam == nullptr || amountParam == nullptr || smoothParam == nullptr)
+        return std::vector<float>((size_t)(juce::jlimit(32, 512, pointCount) + 1), 1.0f);
+
+    return TimeShaperModule::buildPreviewCurve(
+        pointCount,
+        (int)patternParam->load(),
+        amountParam->load(),
+        smoothParam->load(),
+        previewPhase.load(std::memory_order_relaxed));
+}
+
+void TimeShaperAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void TimeShaperAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool TimeShaperAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
 {
 #if JucePlugin_IsMidiEffect
     juce::ignoreUnused(layouts);

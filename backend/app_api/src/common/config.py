@@ -23,6 +23,9 @@ PRODUCER_CAPTURE_WHITELIST_TABLE = os.environ.get(
     "PRODUCER_CAPTURE_WHITELIST_TABLE", ""
 ).strip()
 FEEDBACK_SUBMISSIONS_TABLE = os.environ.get("FEEDBACK_SUBMISSIONS_TABLE", "").strip()
+TELEMETRY_PROJECT_SNAPSHOTS_BUCKET = os.environ.get(
+    "TELEMETRY_PROJECT_SNAPSHOTS_BUCKET", ""
+).strip()
 ADMIN_ALLOWLIST_TABLE = os.environ.get("ADMIN_ALLOWLIST_TABLE", "").strip()
 ADMIN_COGNITO_APP_CLIENT_ID = os.environ.get(
     "ADMIN_COGNITO_APP_CLIENT_ID", ""
@@ -109,6 +112,39 @@ POSTMARK_API_BASE_URL = os.environ.get(
 POSTMARK_MESSAGE_STREAM = os.environ.get(
     "POSTMARK_MESSAGE_STREAM", ""
 ).strip()
+STIBEE_ACCESS_TOKEN = os.environ.get("STIBEE_ACCESS_TOKEN", "").strip()
+STIBEE_ACCESS_TOKEN_SECRET_ARN = os.environ.get(
+    "STIBEE_ACCESS_TOKEN_SECRET_ARN", ""
+).strip()
+STIBEE_API_BASE_URL = os.environ.get(
+    "STIBEE_API_BASE_URL", "https://api.stibee.com/v2"
+).strip() or "https://api.stibee.com/v2"
+STIBEE_APP_SIGNUPS_LIST_ID = os.environ.get("STIBEE_APP_SIGNUPS_LIST_ID", "").strip()
+STIBEE_NEWSLETTER_LIST_ID = os.environ.get("STIBEE_NEWSLETTER_LIST_ID", "").strip()
+STIBEE_LANGUAGE_FIELD_KEY = (
+    os.environ.get("STIBEE_LANGUAGE_FIELD_KEY", "language").strip() or "language"
+)
+STIBEE_NAME_FIELD_KEY = os.environ.get("STIBEE_NAME_FIELD_KEY", "").strip()
+STIBEE_SOURCE_FIELD_KEY = os.environ.get("STIBEE_SOURCE_FIELD_KEY", "").strip()
+STIBEE_DATE_FIELD_KEY = os.environ.get("STIBEE_DATE_FIELD_KEY", "").strip()
+STIBEE_USER_ID_FIELD_KEY = os.environ.get("STIBEE_USER_ID_FIELD_KEY", "").strip()
+STIBEE_SUBSCRIPTION_STATUS_FIELD_KEY = os.environ.get(
+    "STIBEE_SUBSCRIPTION_STATUS_FIELD_KEY", ""
+).strip()
+STIBEE_WEBHOOK_SHARED_SECRET = os.environ.get(
+    "STIBEE_WEBHOOK_SHARED_SECRET", ""
+).strip()
+STIBEE_WEBHOOK_SHARED_SECRET_ARN = os.environ.get(
+    "STIBEE_WEBHOOK_SHARED_SECRET_ARN", ""
+).strip()
+STIBEE_WEBHOOK_ALLOWED_IPS = frozenset(
+    value.strip()
+    for value in os.environ.get(
+        "STIBEE_WEBHOOK_ALLOWED_IPS",
+        "52.78.132.66",
+    ).split(",")
+    if value.strip()
+)
 GOOGLE_OAUTH_CLIENT_IDS = [
     value.strip()
     for value in os.environ.get("GOOGLE_OAUTH_CLIENT_IDS", "").split(",")

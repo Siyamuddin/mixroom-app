@@ -55,8 +55,11 @@ const AI_MODEL_OPTIONS = [
   "gpt-5.1-codex-mini",
   "gpt-5.1-chat-latest",
   "gpt-5.2",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
 ];
-const AI_REASONING_EFFORT_OPTIONS = ["", "minimal", "low", "medium", "high"];
+const AI_REASONING_EFFORT_OPTIONS = ["", "none", "minimal", "low", "medium", "high", "xhigh"];
 const AI_PROMPT_CACHE_RETENTION_OPTIONS = ["", "in_memory", "24h"];
 
 function buildOverviewIncludes() {

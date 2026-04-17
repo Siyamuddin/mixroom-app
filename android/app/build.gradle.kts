@@ -24,6 +24,10 @@ android {
     namespace = "com.mixroom.mixroomapp"
     compileSdk = 36 // Ensure this matches the latest Flutter-supported version
     ndkVersion = "28.2.13676358"
+    assetPacks += listOf(
+        ":assetpacks:instruments",
+        ":assetpacks:sample_packs",
+    )
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -91,6 +95,34 @@ android {
         }
         getByName("debug") {
             // Debug build type configuration
+        }
+    }
+}
+
+val isBundleReleaseBuild =
+    gradle.startParameter.taskNames.any { taskName ->
+        val normalized = taskName.lowercase()
+        normalized.contains("bundle") && normalized.contains("release")
+    }
+
+if (isBundleReleaseBuild) {
+    tasks.matching { task ->
+        (
+            task.name.contains("Release") &&
+                task.name.startsWith("merge") &&
+                task.name.endsWith("Assets")
+        ) ||
+            task.name == "copyFlutterAssetsRelease"
+    }.configureEach {
+        doLast {
+            this.outputs.files.files
+                .filter { it.isDirectory }
+                .forEach { outDir: File ->
+                    delete(File(outDir, "assets/instruments"))
+                    delete(File(outDir, "assets/sample_packs"))
+                    delete(File(outDir, "flutter_assets/assets/instruments"))
+                    delete(File(outDir, "flutter_assets/assets/sample_packs"))
+                }
         }
     }
 }

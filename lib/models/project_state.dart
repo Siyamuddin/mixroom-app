@@ -34,6 +34,17 @@ class ProjectState {
         'overlap_ratio_matrix': overlapRatioMatrix,
       };
 
+  Map<String, dynamic> toMagnitudeResolverJson() => {
+        'bpm': bpm,
+        'master_gain_0to3': masterGain0to3,
+        'master_pan_0to1': masterPan0to1,
+        'max_rows': maxRows,
+        'rows': rows.map((r) => r.toMagnitudeResolverJson()).toList(),
+        'master_effects': masterEffects.map((e) => e.toJson()).toList(),
+        'overlap_matrix': overlapMatrix,
+        'overlap_ratio_matrix': overlapRatioMatrix,
+      };
+
   String toPrettyJson() => const JsonEncoder.withIndent('  ').convert(toJson());
 }
 
@@ -131,6 +142,16 @@ class RowState {
         'mix': {'gain_0to3': gain0to3, 'pan_0to1': pan0To1},
         'effects': effects.map((e) => e.toJson()).toList(),
         'volumeAutomation': volumeAutomation.map((v) => v.toJson()).toList(),
+        'hasAudio': hasAudio,
+      };
+
+  Map<String, dynamic> toMagnitudeResolverJson() => {
+        'row': rowIndex,
+        'features': {'approx_rms': approxRms, 'approx_crest': approxCrest},
+        'role_probs': roleProbs,
+        'audio_stats': audioStats,
+        'mix': {'gain_0to3': gain0to3, 'pan_0to1': pan0To1},
+        'effects': effects.map((e) => e.toJson()).toList(),
         'hasAudio': hasAudio,
       };
 }
