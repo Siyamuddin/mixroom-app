@@ -1,6 +1,7 @@
 #include "JuceEngine.h"
 #include <algorithm>
 #include <cmath>
+#include <unordered_set>
 
 using namespace juce;
 
@@ -68,6 +69,55 @@ int getKnownDeviceBufferSize(const juce::AudioDeviceManager &deviceManager, int 
             return bs;
     }
     return fallbackBufferSize;
+}
+
+class OfflineExportPlayHead final : public juce::AudioPlayHead
+{
+public:
+    void setTransport(double timeSeconds, double sampleRate, double bpm, bool isPlaying)
+    {
+        juce::AudioPlayHead::PositionInfo next;
+        const double safeSeconds = juce::jmax(0.0, timeSeconds);
+        const double safeSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+        const double safeBpm = juce::jlimit(1.0, 400.0, bpm);
+        const double ppq = safeSeconds * safeBpm / 60.0;
+        constexpr int numerator = 4;
+        constexpr int denominator = 4;
+        const double beatsPerBar =
+            (double)numerator * (4.0 / (double)denominator);
+        const double lastBarStartPpq =
+            std::floor(ppq / juce::jmax(1.0, beatsPerBar)) *
+            juce::jmax(1.0, beatsPerBar);
+
+        next.setTimeInSeconds(safeSeconds);
+        next.setTimeInSamples((int64_t)std::llround(safeSeconds * safeSampleRate));
+        next.setBpm(safeBpm);
+        next.setTimeSignature(juce::AudioPlayHead::TimeSignature{numerator, denominator});
+        next.setPpqPosition(ppq);
+        next.setPpqPositionOfLastBarStart(lastBarStartPpq);
+        next.setIsPlaying(isPlaying);
+        next.setIsRecording(false);
+        position = next;
+    }
+
+    juce::Optional<juce::AudioPlayHead::PositionInfo> getPosition() const override
+    {
+        return position;
+    }
+
+private:
+    juce::AudioPlayHead::PositionInfo position;
+};
+
+void prepareGraphForOfflineRender(juce::AudioProcessorGraph &graph,
+                                  double sampleRate,
+                                  int blockSize)
+{
+    graph.setNonRealtime(true);
+    graph.setPlayConfigDetails(0, 2, sampleRate, blockSize);
+    graph.releaseResources();
+    graph.prepareToPlay(sampleRate, blockSize);
+    graph.reset();
 }
 
 void connectStereo(juce::AudioProcessorGraph &graph,
@@ -773,12 +823,15 @@ void JuceEngine::ensureBusGraphInitialised()
         auto mg = std::make_unique<SimpleGainProcessor>();
         masterGainProcessor = mg.get();
         masterGainNode = graph.addNode(std::move(mg), std::nullopt, kBatchGraphUpdate);
-        masterGainProcessor->gain->setValueNotifyingHost(kGainUiUnity / kGainUiMax);
+        masterGainProcessor->gain->setValueNotifyingHost(
+            juce::jlimit(kGainUiMin, kGainUiMax, masterGainUi) / kGainUiMax);
+        masterGainProcessor->setMuted(masterMuted);
 
         auto mp = std::make_unique<StereoPanProcessor>();
         masterPanProcessor = mp.get();
         masterPanNode = graph.addNode(std::move(mp), std::nullopt, kBatchGraphUpdate);
-        masterPanProcessor->pan->setValueNotifyingHost(0.5f);
+        masterPanProcessor->pan->setValueNotifyingHost(
+            panUIToNormalized(masterPanUi));
 
         if (masterInputNode != nullptr)
             connectStereo(graph, masterInputNode->nodeID, masterGainNode->nodeID, kBatchGraphUpdate);
@@ -846,7 +899,7 @@ bool JuceEngine::loadClip(int clipId, int rowId, const juce::File &file,
         file,
         &blockTransportStartSec,
         &hostSampleRateAtomic,
-        &isPlayingAtomic);
+        &blockIsPlayingAtomic);
 
     player->setTimeline(safeStartSec, resolvedLengthSec, safeOffsetSec);
     player->setStretchOptions(1.0, false);
@@ -871,6 +924,14 @@ bool JuceEngine::loadClip(int clipId, int rowId, const juce::File &file,
     c.reversed = false;
     c.tempoRatio = 1.0;
     c.preservePitch = false;
+    c.gainUi = kGainUiUnity;
+    c.panNormalized = 0.0f;
+    c.sourceFilePath = file.getFullPathName();
+    c.midiInstrumentId = {};
+    c.midiInstrumentName = {};
+    c.midiNotes.clear();
+    c.midiParams = {};
+    c.midiSourceTempoBpm = 120.0;
 
     c.playerNode = playerNode;
     c.fxChain.clear();
@@ -923,9 +984,19 @@ bool JuceEngine::loadMidiClip(int clipId,
     auto player = std::make_unique<TimelineMidiClipProcessor>(
         &blockTransportStartSec,
         &hostSampleRateAtomic,
-        &isPlayingAtomic);
+        &blockIsPlayingAtomic);
     player->setTimeline(safeStartSec, resolvedLengthSec, safeOffsetSec);
     player->setStretchOptions(1.0, true);
+    if (!TimelineMidiClipProcessor::canResolveSampledInstrument(
+            instrumentId,
+            instrumentName))
+    {
+        juce::Logger::writeToLog(
+            "iOS live MIDI load failed sampled instrument resolution. instrumentId=" +
+            instrumentId +
+            " instrumentName=" + instrumentName);
+        return false;
+    }
     player->setMidiData(notes, instrumentId, instrumentName, params, safeSourceTempo);
 
     constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
@@ -944,6 +1015,14 @@ bool JuceEngine::loadMidiClip(int clipId,
     c.reversed = false;
     c.tempoRatio = 1.0;
     c.preservePitch = true;
+    c.gainUi = kGainUiUnity;
+    c.panNormalized = 0.0f;
+    c.sourceFilePath = {};
+    c.midiInstrumentId = instrumentId;
+    c.midiInstrumentName = instrumentName;
+    c.midiNotes = notes;
+    c.midiParams = params;
+    c.midiSourceTempoBpm = safeSourceTempo;
 
     c.playerNode = playerNode;
     c.fxChain.clear();
@@ -997,6 +1076,17 @@ bool JuceEngine::updateMidiClipEvents(int clipId,
                                       const juce::NamedValueSet &params,
                                       double sourceTempoBpm)
 {
+    if (!TimelineMidiClipProcessor::canResolveSampledInstrument(
+            instrumentId,
+            instrumentName))
+    {
+        juce::Logger::writeToLog(
+            "iOS live MIDI update failed sampled instrument resolution. instrumentId=" +
+            instrumentId +
+            " instrumentName=" + instrumentName);
+        return false;
+    }
+
     if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
         return false;
 
@@ -1008,7 +1098,13 @@ bool JuceEngine::updateMidiClipEvents(int clipId,
     if (p == nullptr)
         return false;
 
-    p->setMidiData(notes, instrumentId, instrumentName, params, clampSourceTempo(sourceTempoBpm));
+    const double safeSourceTempo = clampSourceTempo(sourceTempoBpm);
+    c.midiInstrumentId = instrumentId;
+    c.midiInstrumentName = instrumentName;
+    c.midiNotes = notes;
+    c.midiParams = params;
+    c.midiSourceTempoBpm = safeSourceTempo;
+    p->setMidiData(notes, instrumentId, instrumentName, params, safeSourceTempo);
     return true;
 }
 
@@ -1031,6 +1127,56 @@ bool JuceEngine::setLiveMidiInputTargetClip(int clipId)
     const std::lock_guard<std::mutex> lock(liveMidiInputQueueMutex);
     liveMidiInputPendingForAudio.clear();
     liveMidiInputPendingForFlutter.clear();
+    return true;
+}
+
+bool JuceEngine::playPreviewMidiNote(int clipId,
+                                     int pitch,
+                                     float velocity,
+                                     int durationMs)
+{
+    if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
+        return false;
+
+    auto &c = clips[(size_t)clipId];
+    if (!c.alive || !c.isMidi || c.playerNode == nullptr)
+        return false;
+
+    auto *proc = dynamic_cast<TimelineMidiClipProcessor *>(c.playerNode->getProcessor());
+    if (proc == nullptr)
+        return false;
+
+    const int safePitch = juce::jlimit(0, 127, pitch);
+    const float safeVelocity = juce::jlimit(0.0f, 1.0f, velocity);
+    const int safeDurationMs = juce::jlimit(60, 4000, durationMs);
+
+    proc->enqueueLiveMidiEvent(false, 1, safePitch, 0.0f);
+    proc->enqueueLiveMidiEvent(true, 1, safePitch, safeVelocity);
+    juce::Timer::callAfterDelay(
+        safeDurationMs,
+        [clipId, safePitch]
+        {
+            juce::MessageManager::callAsync(
+                [clipId, safePitch]
+                {
+                    auto &engine = JuceEngine::get();
+                    if (engine.clips.empty() ||
+                        clipId < 0 ||
+                        clipId >= (int)engine.clips.size())
+                        return;
+
+                    auto &clip = engine.clips[(size_t)clipId];
+                    if (!clip.alive || !clip.isMidi || clip.playerNode == nullptr)
+                        return;
+
+                    auto *activeProc = dynamic_cast<TimelineMidiClipProcessor *>(
+                        clip.playerNode->getProcessor());
+                    if (activeProc == nullptr)
+                        return;
+
+                    activeProc->enqueueLiveMidiEvent(false, 1, safePitch, 0.0f);
+                });
+        });
     return true;
 }
 
@@ -1412,7 +1558,7 @@ void applyTpdfDither(juce::AudioBuffer<float> &buffer, int bitDepth)
         return;
 
     const float lsb = 1.0f / (float)(1 << (bitDepth - 1));
-    juce::Random rng;
+    juce::Random rng(0x4d697852);
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
     {
         float *data = buffer.getWritePointer(ch);
@@ -1470,7 +1616,1489 @@ void sanitiseAutomationPoints(std::vector<AutomationPoint> &points, float maxVal
               [](const AutomationPoint &a, const AutomationPoint &b)
               { return a.timeMs < b.timeMs; });
 }
+
+bool resolveKnownPluginDescription(const juce::KnownPluginList &list,
+                                   const juce::String &idOrName,
+                                   juce::PluginDescription &outDesc);
+
+juce::String getProcessorParameterIdentifier(juce::AudioProcessorParameter *parameter)
+{
+    if (parameter == nullptr)
+        return {};
+
+    if (auto *withID = dynamic_cast<juce::AudioProcessorParameterWithID *>(parameter))
+        return withID->paramID;
+
+    return parameter->getName(128).trim();
+}
+
+float normalizePanUiValue(float uiPan)
+{
+    return juce::jlimit(0.0f, 1.0f, uiPan);
+}
+
+bool isBuiltInEffectIdentifier(const juce::String &pluginId)
+{
+    static const juce::StringArray builtInEffects{
+        "Gain",
+        "EQ 3-Band",
+        "Compressor",
+        "Limiter",
+        "Clipper",
+        "De-Esser",
+        "Distortion",
+        "Degrade",
+        "Delay",
+        "Reverb",
+        "EQ Parametric",
+        "Pitch Shift",
+        "Chorus",
+        "Vibrato",
+        "Stereo",
+        "Stereo Pro",
+        "Volume Shaper",
+        "Time Shaper",
+    };
+
+    return builtInEffects.contains(pluginId);
+}
+
+struct ExportParameterSnapshot
+{
+    juce::String identifier;
+    float normalizedValue = 0.0f;
+};
+
+struct ExportEffectSnapshot
+{
+    juce::String pluginId;
+    juce::MemoryBlock state;
+    std::vector<ExportParameterSnapshot> parameters;
+    bool bypassed = false;
+};
+
+struct ExportEffectAutomationLane
+{
+    int effectIndex = -1;
+    juce::String paramId;
+    float minValue = 0.0f;
+    float maxValue = 1.0f;
+    std::vector<AutomationPoint> points;
+    float lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+};
+
+struct ExportClipSnapshot
+{
+    bool alive = false;
+    bool isMidi = false;
+    bool muted = false;
+    int clipId = -1;
+    int rowId = 0;
+    double startSec = 0.0;
+    double lengthSec = 0.0;
+    double inFileOffsetSec = 0.0;
+    float pitchSemitones = 0.0f;
+    bool reversed = false;
+    double tempoRatio = 1.0;
+    bool preservePitch = false;
+    float gainUi = SimpleGainProcessor::kUiUnity;
+    float panNormalized = 0.0f;
+    juce::String sourceFilePath;
+    juce::String midiInstrumentId;
+    juce::String midiInstrumentName;
+    juce::Array<TimelineMidiNote> midiNotes;
+    juce::NamedValueSet midiParams;
+    double midiSourceTempoBpm = 120.0;
+};
+
+struct ExportRowSnapshot
+{
+    int rowId = 0;
+    float gainUi = SimpleGainProcessor::kUiUnity;
+    float panUi = 0.5f;
+    bool muted = false;
+    std::vector<AutomationPoint> automationPoints;
+    std::vector<AutomationPoint> gainAutomationPoints;
+    std::vector<AutomationPoint> panAutomationPoints;
+    std::vector<ExportEffectAutomationLane> effectAutomationLanes;
+    std::vector<ExportEffectSnapshot> effects;
+};
+
+struct ExportProjectSnapshot
+{
+    std::vector<ExportClipSnapshot> clips;
+    std::vector<ExportRowSnapshot> rows;
+    std::vector<ExportEffectSnapshot> masterEffects;
+    std::vector<ExportEffectAutomationLane> masterEffectAutomationLanes;
+    std::vector<AutomationPoint> masterGainAutomationPoints;
+    std::vector<AutomationPoint> masterPanAutomationPoints;
+    float masterGainUi = SimpleGainProcessor::kUiUnity;
+    float masterPanUi = 0.5f;
+    bool masterMuted = false;
+    double tempoBpm = 120.0;
+};
+
+struct OfflineClipRenderState
+{
+    ExportClipSnapshot clip;
+    TimelineClipProcessorBase *processor = nullptr;
+    juce::AudioProcessorGraph::Node::Ptr playerNode;
+};
+
+struct OfflineRowRenderState
+{
+    int rowId = 0;
+    float gainUi = SimpleGainProcessor::kUiUnity;
+    float panUi = 0.5f;
+    bool muted = false;
+    VolumeAutomationProcessor *automationProc = nullptr;
+    SimpleGainProcessor *gainProc = nullptr;
+    StereoPanProcessor *panProc = nullptr;
+    juce::AudioProcessorGraph::Node::Ptr inputNode;
+    std::vector<AutomationPoint> automationPoints;
+    std::vector<AutomationPoint> gainAutomationPoints;
+    std::vector<AutomationPoint> panAutomationPoints;
+    std::vector<ExportEffectAutomationLane> effectAutomationLanes;
+    juce::Array<juce::AudioProcessorGraph::NodeID> fxChain;
+    float lastAppliedGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+    float lastAppliedPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+};
+
+struct OfflineMasterRenderState
+{
+    float gainUi = SimpleGainProcessor::kUiUnity;
+    float panUi = 0.5f;
+    bool muted = false;
+    TrackInputProcessor *inputProc = nullptr;
+    SimpleGainProcessor *gainProc = nullptr;
+    StereoPanProcessor *panProc = nullptr;
+    juce::AudioProcessorGraph::Node::Ptr inputNode;
+    juce::Array<juce::AudioProcessorGraph::NodeID> fxChain;
+    std::vector<AutomationPoint> gainAutomationPoints;
+    std::vector<AutomationPoint> panAutomationPoints;
+    std::vector<ExportEffectAutomationLane> effectAutomationLanes;
+    float lastAppliedGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+    float lastAppliedPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
+};
+
+struct OfflineExportContext
+{
+    juce::AudioProcessorGraph graph;
+    juce::AudioProcessorGraph::Node::Ptr outputNode;
+    std::vector<OfflineClipRenderState> clips;
+    std::vector<OfflineRowRenderState> rows;
+    std::unordered_map<int, int> rowIdToIndex;
+    OfflineMasterRenderState master;
+    OfflineExportPlayHead playHead;
+    std::atomic<double> blockTransportStartSec{0.0};
+    std::atomic<double> hostSampleRate{44100.0};
+    std::atomic<bool> blockIsPlaying{true};
+};
+
+std::vector<ExportParameterSnapshot> captureProcessorParameters(juce::AudioProcessor &processor)
+{
+    std::vector<ExportParameterSnapshot> snapshots;
+    const auto parameters = processor.getParameters();
+    snapshots.reserve(parameters.size());
+
+    for (auto *parameter : parameters)
+    {
+        if (parameter == nullptr)
+            continue;
+
+        const auto identifier = getProcessorParameterIdentifier(parameter);
+        if (identifier.isEmpty())
+            continue;
+
+        ExportParameterSnapshot snapshot;
+        snapshot.identifier = identifier;
+        snapshot.normalizedValue = juce::jlimit(0.0f, 1.0f, parameter->getValue());
+        snapshots.push_back(std::move(snapshot));
+    }
+
+    return snapshots;
+}
+
+ExportEffectSnapshot captureEffectSnapshot(const juce::String &pluginId,
+                                          const juce::AudioProcessorGraph::Node::Ptr &node)
+{
+    ExportEffectSnapshot snapshot;
+    snapshot.pluginId = pluginId;
+
+    if (node == nullptr || node->getProcessor() == nullptr)
+        return snapshot;
+
+    node->getProcessor()->getStateInformation(snapshot.state);
+    snapshot.parameters = captureProcessorParameters(*node->getProcessor());
+    snapshot.bypassed = node->isBypassed();
+    return snapshot;
+}
+
+void applyNormalizedParameterSnapshots(
+    juce::AudioProcessor &processor,
+    const std::vector<ExportParameterSnapshot> &snapshots)
+{
+    for (const auto &snapshot : snapshots)
+    {
+        for (auto *parameter : processor.getParameters())
+        {
+            if (parameter == nullptr)
+                continue;
+
+            const bool matches =
+                getProcessorParameterIdentifier(parameter) == snapshot.identifier ||
+                parameter->getName(128) == snapshot.identifier;
+            if (!matches)
+                continue;
+
+            parameter->setValueNotifyingHost(
+                juce::jlimit(0.0f, 1.0f, snapshot.normalizedValue));
+            break;
+        }
+    }
+}
+
+void setProcessorParameterValue(juce::AudioProcessor &processor,
+                                const juce::String &paramName,
+                                const juce::var &newValue)
+{
+    for (auto *parameter : processor.getParameters())
+    {
+        if (parameter == nullptr)
+            continue;
+
+        bool matchesParam = (parameter->getName(128) == paramName);
+        if (!matchesParam)
+            if (auto *withID = dynamic_cast<juce::AudioProcessorParameterWithID *>(parameter))
+                matchesParam = (withID->paramID == paramName);
+
+        if (!matchesParam)
+            continue;
+
+        float normalized = 0.0f;
+
+        if (newValue.isBool())
+        {
+            normalized = (bool)newValue ? 1.0f : 0.0f;
+        }
+        else if (newValue.isDouble() || newValue.isInt())
+        {
+            normalized = (float)newValue;
+        }
+        else
+        {
+            const auto text = newValue.toString();
+            const int steps = parameter->getNumSteps();
+            for (int i = 0; i < steps; ++i)
+            {
+                const float stepNormalized = (steps > 1) ? (float)i / (steps - 1) : 0.0f;
+                if (parameter->getText(stepNormalized, 128) == text)
+                {
+                    normalized = stepNormalized;
+                    break;
+                }
+            }
+        }
+
+        if (auto *withID = dynamic_cast<juce::AudioProcessorParameterWithID *>(parameter))
+        {
+            if (auto *floatParameter = dynamic_cast<juce::AudioParameterFloat *>(parameter))
+            {
+                const auto &range = floatParameter->range;
+                const float clamped = juce::jlimit(range.start, range.end, normalized);
+                const float normalizedValue = range.convertTo0to1(clamped);
+                floatParameter->setValueNotifyingHost(normalizedValue);
+            }
+            else
+            {
+                withID->setValueNotifyingHost(normalized);
+            }
+        }
+        else
+        {
+            parameter->setValueNotifyingHost(normalized);
+        }
+
+        return;
+    }
+}
+
+std::unique_ptr<juce::AudioProcessor> createEffectProcessorFromIdentifier(
+    juce::AudioPluginFormatManager &pluginFormatManager,
+    const juce::KnownPluginList &pluginList,
+    const juce::String &pluginId,
+    double sampleRate,
+    int blockSize,
+    juce::String &error)
+{
+    if (isBuiltInEffectIdentifier(pluginId))
+    {
+        if (pluginId == "Reverb")
+            return std::make_unique<ReverbAudioProcessor>();
+        if (pluginId == "EQ Parametric")
+            return std::make_unique<EQAudioProcessor>();
+        if (pluginId == "EQ 3-Band")
+            return std::make_unique<EQ3AudioProcessor>();
+        if (pluginId == "Delay")
+            return std::make_unique<DelayAudioProcessor>();
+        if (pluginId == "Distortion")
+            return std::make_unique<DistortionAudioProcessor>();
+        if (pluginId == "Degrade")
+            return std::make_unique<DegradeAudioProcessor>();
+        if (pluginId == "De-Esser")
+            return std::make_unique<DeesserAudioProcessor>();
+        if (pluginId == "Compressor")
+            return std::make_unique<CompressorAudioProcessor>();
+        if (pluginId == "Limiter")
+            return std::make_unique<LimiterAudioProcessor>();
+        if (pluginId == "Clipper")
+            return std::make_unique<ClipperAudioProcessor>();
+        if (pluginId == "Pitch Shift")
+            return std::make_unique<PitchShiftAudioProcessor>();
+        if (pluginId == "Chorus")
+            return std::make_unique<ChorusAudioProcessor>();
+        if (pluginId == "Vibrato")
+            return std::make_unique<VibratoAudioProcessor>();
+        if (pluginId == "Stereo")
+            return std::make_unique<StereoAudioProcessor>();
+        if (pluginId == "Stereo Pro")
+            return std::make_unique<StereoProAudioProcessor>();
+        if (pluginId == "Volume Shaper")
+            return std::make_unique<VolumeShaperAudioProcessor>();
+        if (pluginId == "Time Shaper")
+            return std::make_unique<TimeShaperAudioProcessor>();
+        if (pluginId == "Gain")
+            return std::make_unique<SimpleGainProcessor>();
+
+        error = "Unknown built-in effect: " + pluginId;
+        return {};
+    }
+
+    const auto requestedId = pluginId.trim();
+    if (requestedId.isEmpty())
+    {
+        error = "Empty plugin identifier";
+        return {};
+    }
+
+    juce::PluginDescription description;
+    const bool resolved = resolveKnownPluginDescription(pluginList, requestedId, description);
+    if (!resolved)
+    {
+        description.fileOrIdentifier = requestedId;
+#if JUCE_IOS
+        description.pluginFormatName = "AudioUnit";
+#endif
+    }
+
+    try
+    {
+        return pluginFormatManager.createPluginInstance(
+            description,
+            sampleRate,
+            blockSize,
+            error);
+    }
+    catch (const std::exception &exception)
+    {
+        error = "exception: " + juce::String(exception.what());
+    }
+    catch (...)
+    {
+        error = "unknown exception";
+    }
+
+    return {};
+}
+
+void applyClipSnapshotToProcessor(const ExportClipSnapshot &clip,
+                                  TimelineClipProcessorBase &processor)
+{
+    processor.setTimeline(clip.startSec, clip.lengthSec, clip.inFileOffsetSec);
+    processor.setStretchOptions(clip.tempoRatio, clip.preservePitch);
+    processor.setPitchSemitones(clip.pitchSemitones);
+    processor.setReversed(clip.reversed);
+    processor.setMuted(clip.muted);
+    processor.setGainUi(clip.gainUi);
+    processor.setPanNormalized(clip.panNormalized);
+}
+
+bool shouldUseOfflineStaticAudioClipProcessor(const ExportClipSnapshot &clip)
+{
+    constexpr double epsilon = 1.0e-6;
+    return !clip.reversed &&
+           std::abs(clip.tempoRatio - 1.0) <= epsilon &&
+           std::abs((double)clip.pitchSemitones) <= epsilon;
+}
+
+double readJsonDoubleProperty(juce::DynamicObject *object,
+                              const char *propertyName,
+                              double fallback)
+{
+    if (object == nullptr || !object->hasProperty(propertyName))
+        return fallback;
+
+    const auto value = object->getProperty(propertyName);
+    if (value.isDouble() || value.isInt() || value.isInt64())
+        return (double)value;
+
+    return fallback;
+}
+
+int readJsonIntProperty(juce::DynamicObject *object,
+                        const char *propertyName,
+                        int fallback)
+{
+    return (int)std::lround(readJsonDoubleProperty(object, propertyName, (double)fallback));
+}
+
+bool readJsonBoolProperty(juce::DynamicObject *object,
+                          const char *propertyName,
+                          bool fallback)
+{
+    if (object == nullptr || !object->hasProperty(propertyName))
+        return fallback;
+
+    const auto value = object->getProperty(propertyName);
+    if (value.isBool())
+        return (bool)value;
+    if (value.isDouble() || value.isInt() || value.isInt64())
+        return std::abs((double)value) > 0.5;
+
+    const auto text = value.toString().trim().toLowerCase();
+    if (text == "true" || text == "1")
+        return true;
+    if (text == "false" || text == "0")
+        return false;
+    return fallback;
+}
+
+juce::String readJsonStringProperty(juce::DynamicObject *object,
+                                    const char *propertyName,
+                                    const juce::String &fallback = {})
+{
+    if (object == nullptr || !object->hasProperty(propertyName))
+        return fallback;
+    return object->getProperty(propertyName).toString();
+}
+
+void parseJsonMidiNotes(const juce::var &rawNotes,
+                        juce::Array<TimelineMidiNote> &notesOut)
+{
+    notesOut.clear();
+    const auto *notesArray = rawNotes.getArray();
+    if (notesArray == nullptr)
+        return;
+
+    for (const auto &noteVar : *notesArray)
+    {
+        auto *noteObject = noteVar.getDynamicObject();
+        if (noteObject == nullptr)
+            continue;
+
+        TimelineMidiNote note;
+        note.noteId = readJsonStringProperty(noteObject, "id");
+        note.pitch = juce::jlimit(0, 127, readJsonIntProperty(noteObject, "pitch", 60));
+        note.startBeat = juce::jmax(0.0, readJsonDoubleProperty(noteObject, "startBeat", 0.0));
+        note.lengthBeats = juce::jmax(0.001, readJsonDoubleProperty(noteObject, "lengthBeats", 1.0));
+        note.velocity = juce::jlimit(0.0, 1.0, readJsonDoubleProperty(noteObject, "velocity", 0.8));
+        notesOut.add(note);
+    }
+}
+
+void parseJsonNamedValueSet(const juce::var &rawValues,
+                            juce::NamedValueSet &valuesOut)
+{
+    valuesOut = {};
+    auto *valueObject = rawValues.getDynamicObject();
+    if (valueObject == nullptr)
+        return;
+
+    const auto &properties = valueObject->getProperties();
+    for (int propertyIndex = 0; propertyIndex < properties.size(); ++propertyIndex)
+        valuesOut.set(properties.getName(propertyIndex), properties.getValueAt(propertyIndex));
+}
+
+bool parseExportClipSnapshotJson(const juce::String &clipSnapshotJson,
+                                 std::vector<ExportClipSnapshot> &clipsOut,
+                                 juce::String &error)
+{
+    clipsOut.clear();
+    if (clipSnapshotJson.trim().isEmpty())
+        return true;
+
+    const auto parsed = juce::JSON::parse(clipSnapshotJson);
+    if (parsed.isVoid())
+    {
+        error = "Export clip snapshot JSON could not be parsed.";
+        return false;
+    }
+
+    const auto *clipArray = parsed.getArray();
+    if (clipArray == nullptr)
+    {
+        error = "Export clip snapshot JSON must be an array.";
+        return false;
+    }
+
+    clipsOut.reserve((size_t)clipArray->size());
+    for (const auto &clipVar : *clipArray)
+    {
+        auto *clipObject = clipVar.getDynamicObject();
+        if (clipObject == nullptr)
+            continue;
+
+        if (!clipObject->hasProperty("clipId"))
+        {
+            error = "Export clip snapshot JSON is missing clipId.";
+            return false;
+        }
+
+        if (!clipObject->hasProperty("rowId") ||
+            !clipObject->hasProperty("startSec") ||
+            !clipObject->hasProperty("lengthSec"))
+        {
+            error = "Export clip snapshot JSON is missing required clip timing or routing fields.";
+            return false;
+        }
+
+        ExportClipSnapshot clip;
+        clip.alive = readJsonBoolProperty(clipObject, "alive", true);
+        clip.isMidi = readJsonBoolProperty(clipObject, "isMidi", false);
+        clip.muted = readJsonBoolProperty(clipObject, "muted", false);
+        clip.clipId = readJsonIntProperty(clipObject, "clipId", -1);
+        clip.rowId = readJsonIntProperty(clipObject, "rowId", 0);
+        clip.startSec = juce::jmax(0.0, readJsonDoubleProperty(clipObject, "startSec", 0.0));
+        clip.lengthSec = juce::jmax(0.0, readJsonDoubleProperty(clipObject, "lengthSec", 0.0));
+        clip.inFileOffsetSec = juce::jmax(0.0, readJsonDoubleProperty(clipObject, "inFileOffsetSec", 0.0));
+        clip.pitchSemitones = (float)juce::jlimit(-24.0, 24.0, readJsonDoubleProperty(clipObject, "pitchSemitones", 0.0));
+        clip.reversed = readJsonBoolProperty(clipObject, "reversed", false);
+        clip.tempoRatio = juce::jlimit(0.05, 20.0, readJsonDoubleProperty(clipObject, "tempoRatio", 1.0));
+        clip.preservePitch = readJsonBoolProperty(clipObject, "preservePitch", false);
+        clip.gainUi = (float)juce::jlimit(
+            (double)SimpleGainProcessor::kUiMin,
+            (double)SimpleGainProcessor::kUiMax,
+            readJsonDoubleProperty(clipObject, "gainUi", SimpleGainProcessor::kUiUnity));
+        clip.panNormalized = (float)juce::jlimit(-1.0, 1.0, readJsonDoubleProperty(clipObject, "panNormalized", 0.0));
+        clip.sourceFilePath = readJsonStringProperty(clipObject, "sourceFilePath");
+        clip.midiInstrumentId = readJsonStringProperty(clipObject, "midiInstrumentId");
+        clip.midiInstrumentName = readJsonStringProperty(clipObject, "midiInstrumentName");
+        clip.midiSourceTempoBpm =
+            juce::jlimit(1.0, 400.0, readJsonDoubleProperty(clipObject, "midiSourceTempoBpm", 120.0));
+        if (clipObject->hasProperty("midiNotes"))
+            parseJsonMidiNotes(clipObject->getProperty("midiNotes"), clip.midiNotes);
+        if (clipObject->hasProperty("midiParams"))
+            parseJsonNamedValueSet(clipObject->getProperty("midiParams"), clip.midiParams);
+
+        if (clip.clipId < 0)
+            continue;
+
+        clipsOut.push_back(std::move(clip));
+    }
+
+    return true;
+}
+
+bool mergeExportClipSnapshotsIntoProject(std::vector<ExportClipSnapshot> &projectClips,
+                                         std::vector<ExportClipSnapshot> &&overrideClips,
+                                         juce::String &error)
+{
+    if (overrideClips.empty())
+        return true;
+
+    std::unordered_map<int, size_t> projectIndexByClipId;
+    projectIndexByClipId.reserve(projectClips.size());
+    for (size_t i = 0; i < projectClips.size(); ++i)
+        projectIndexByClipId[projectClips[i].clipId] = i;
+
+    std::unordered_set<int> seenOverrideClipIds;
+    seenOverrideClipIds.reserve(overrideClips.size());
+
+    for (auto &overrideClip : overrideClips)
+    {
+        if (!seenOverrideClipIds.insert(overrideClip.clipId).second)
+        {
+            error = "Export clip snapshot JSON contains duplicate clip ids.";
+            return false;
+        }
+
+        const auto projectIt = projectIndexByClipId.find(overrideClip.clipId);
+        if (projectIt != projectIndexByClipId.end())
+        {
+            projectClips[projectIt->second] = std::move(overrideClip);
+            continue;
+        }
+
+        projectIndexByClipId[overrideClip.clipId] = projectClips.size();
+        projectClips.push_back(std::move(overrideClip));
+    }
+
+    return true;
+}
+
+void applyEffectSnapshotToNode(const ExportEffectSnapshot &snapshot,
+                               const juce::AudioProcessorGraph::Node::Ptr &node)
+{
+    if (node == nullptr || node->getProcessor() == nullptr)
+        return;
+
+    if (!snapshot.state.isEmpty())
+        node->getProcessor()->setStateInformation(snapshot.state.getData(),
+                                                  (int)snapshot.state.getSize());
+    applyNormalizedParameterSnapshots(*node->getProcessor(), snapshot.parameters);
+    node->setBypassed(snapshot.bypassed);
+}
+
+void reapplyOfflineEffectSnapshots(OfflineExportContext &context,
+                                   const ExportProjectSnapshot &snapshot)
+{
+    for (int effectIndex = 0; effectIndex < context.master.fxChain.size() &&
+                              effectIndex < (int)snapshot.masterEffects.size();
+         ++effectIndex)
+    {
+        applyEffectSnapshotToNode(
+            snapshot.masterEffects[(size_t)effectIndex],
+            context.graph.getNodeForId(context.master.fxChain.getReference(effectIndex)));
+    }
+
+    for (size_t rowIndex = 0; rowIndex < context.rows.size() &&
+                              rowIndex < snapshot.rows.size();
+         ++rowIndex)
+    {
+        auto &row = context.rows[rowIndex];
+        const auto &rowSnapshot = snapshot.rows[rowIndex];
+        for (int effectIndex = 0; effectIndex < row.fxChain.size() &&
+                                  effectIndex < (int)rowSnapshot.effects.size();
+             ++effectIndex)
+        {
+            applyEffectSnapshotToNode(
+                rowSnapshot.effects[(size_t)effectIndex],
+                context.graph.getNodeForId(row.fxChain.getReference(effectIndex)));
+        }
+    }
+}
+
+void applyOfflineRowStaticState(OfflineRowRenderState &row,
+                                std::atomic<double> &blockTransportStartSec)
+{
+    if (row.automationProc != nullptr)
+    {
+        row.automationProc->setBlockTransportPtr(&blockTransportStartSec);
+        row.automationProc->setAutomationPoints(row.automationPoints);
+    }
+
+    if (row.gainProc != nullptr)
+    {
+        row.gainProc->gain->setValueNotifyingHost(
+            juce::jlimit(SimpleGainProcessor::kUiMin, SimpleGainProcessor::kUiMax, row.gainUi) /
+            SimpleGainProcessor::kUiMax);
+        row.gainProc->setMuted(row.muted);
+    }
+
+    if (row.panProc != nullptr)
+        row.panProc->pan->setValueNotifyingHost(normalizePanUiValue(row.panUi));
+}
+
+void applyOfflineMasterStaticState(OfflineMasterRenderState &master)
+{
+    if (master.gainProc != nullptr)
+    {
+        master.gainProc->gain->setValueNotifyingHost(
+            juce::jlimit(SimpleGainProcessor::kUiMin, SimpleGainProcessor::kUiMax, master.gainUi) /
+            SimpleGainProcessor::kUiMax);
+        master.gainProc->setMuted(master.muted);
+    }
+
+    if (master.panProc != nullptr)
+        master.panProc->pan->setValueNotifyingHost(normalizePanUiValue(master.panUi));
+}
+
+bool buildOfflineExportContext(
+    const ExportProjectSnapshot &snapshot,
+    double sampleRate,
+    int blockSize,
+    juce::AudioFormatManager &formatManager,
+    juce::AudioPluginFormatManager &pluginFormatManager,
+    const juce::KnownPluginList &pluginList,
+    OfflineExportContext &context,
+    juce::String &error)
+{
+    constexpr int numChannels = 2;
+
+    context.blockTransportStartSec.store(0.0, std::memory_order_relaxed);
+    context.hostSampleRate.store(sampleRate, std::memory_order_relaxed);
+    context.blockIsPlaying.store(false, std::memory_order_relaxed);
+    context.rows.clear();
+    context.rowIdToIndex.clear();
+    context.clips.clear();
+    context.playHead.setTransport(0.0, sampleRate, snapshot.tempoBpm, false);
+    context.graph.setPlayHead(&context.playHead);
+    context.graph.setPlayConfigDetails(0, numChannels, sampleRate, blockSize);
+
+    context.outputNode = context.graph.addNode(
+        std::make_unique<juce::AudioProcessorGraph::AudioGraphIOProcessor>(
+            juce::AudioProcessorGraph::AudioGraphIOProcessor::audioOutputNode),
+        std::nullopt,
+        kBatchGraphUpdate);
+    if (context.outputNode == nullptr)
+    {
+        error = "Offline export graph could not create output node.";
+        return false;
+    }
+    if (auto *outputProcessor = context.outputNode->getProcessor())
+        outputProcessor->setPlayConfigDetails(numChannels, 0, sampleRate, blockSize);
+
+    {
+        auto inputProcessor = std::make_unique<TrackInputProcessor>();
+        context.master.inputProc = inputProcessor.get();
+        context.master.inputNode = context.graph.addNode(
+            std::move(inputProcessor),
+            std::nullopt,
+            kBatchGraphUpdate);
+
+        auto gainProcessor = std::make_unique<SimpleGainProcessor>();
+        context.master.gainProc = gainProcessor.get();
+        auto masterGainNode = context.graph.addNode(
+            std::move(gainProcessor),
+            std::nullopt,
+            kBatchGraphUpdate);
+
+        auto panProcessor = std::make_unique<StereoPanProcessor>();
+        context.master.panProc = panProcessor.get();
+        auto masterPanNode = context.graph.addNode(
+            std::move(panProcessor),
+            std::nullopt,
+            kBatchGraphUpdate);
+
+        if (context.master.inputNode == nullptr || masterGainNode == nullptr || masterPanNode == nullptr)
+        {
+            error = "Offline export graph could not create master bus nodes.";
+            return false;
+        }
+
+        context.master.gainUi = snapshot.masterGainUi;
+        context.master.panUi = snapshot.masterPanUi;
+        context.master.muted = snapshot.masterMuted;
+        context.master.gainAutomationPoints = snapshot.masterGainAutomationPoints;
+        context.master.panAutomationPoints = snapshot.masterPanAutomationPoints;
+        context.master.effectAutomationLanes = snapshot.masterEffectAutomationLanes;
+
+        juce::AudioProcessorGraph::NodeID previousNodeId = context.master.inputNode->nodeID;
+        for (const auto &effectSnapshot : snapshot.masterEffects)
+        {
+            juce::String pluginError;
+            auto processor = createEffectProcessorFromIdentifier(
+                pluginFormatManager,
+                pluginList,
+                effectSnapshot.pluginId,
+                sampleRate,
+                blockSize,
+                pluginError);
+            if (!processor)
+            {
+                error = "Offline export could not create master effect '" +
+                        effectSnapshot.pluginId + "': " + pluginError;
+                return false;
+            }
+
+            if (!effectSnapshot.state.isEmpty())
+                processor->setStateInformation(effectSnapshot.state.getData(),
+                                               (int)effectSnapshot.state.getSize());
+            applyNormalizedParameterSnapshots(*processor, effectSnapshot.parameters);
+
+            auto node = context.graph.addNode(
+                std::move(processor),
+                std::nullopt,
+                kBatchGraphUpdate);
+            if (node == nullptr)
+            {
+                error = "Offline export graph could not add master effect node.";
+                return false;
+            }
+
+            node->setBypassed(effectSnapshot.bypassed);
+            context.master.fxChain.add(node->nodeID);
+            connectStereo(context.graph, previousNodeId, node->nodeID, kBatchGraphUpdate);
+            previousNodeId = node->nodeID;
+        }
+
+        connectStereo(context.graph, previousNodeId, masterGainNode->nodeID, kBatchGraphUpdate);
+        connectStereo(context.graph, masterGainNode->nodeID, masterPanNode->nodeID, kBatchGraphUpdate);
+        connectStereo(context.graph, masterPanNode->nodeID, context.outputNode->nodeID, kBatchGraphUpdate);
+    }
+
+    context.rows.reserve(snapshot.rows.size());
+    for (const auto &rowSnapshot : snapshot.rows)
+    {
+        OfflineRowRenderState row;
+        row.rowId = rowSnapshot.rowId;
+        row.gainUi = rowSnapshot.gainUi;
+        row.panUi = rowSnapshot.panUi;
+        row.muted = rowSnapshot.muted;
+        row.automationPoints = rowSnapshot.automationPoints;
+        row.gainAutomationPoints = rowSnapshot.gainAutomationPoints;
+        row.panAutomationPoints = rowSnapshot.panAutomationPoints;
+        row.effectAutomationLanes = rowSnapshot.effectAutomationLanes;
+
+        auto inputProcessor = std::make_unique<TrackInputProcessor>();
+        row.inputNode = context.graph.addNode(
+            std::move(inputProcessor),
+            std::nullopt,
+            kBatchGraphUpdate);
+
+        auto automationProcessor = std::make_unique<VolumeAutomationProcessor>();
+        row.automationProc = automationProcessor.get();
+        auto automationNode = context.graph.addNode(
+            std::move(automationProcessor),
+            std::nullopt,
+            kBatchGraphUpdate);
+
+        auto gainProcessor = std::make_unique<SimpleGainProcessor>();
+        row.gainProc = gainProcessor.get();
+        auto gainNode = context.graph.addNode(
+            std::move(gainProcessor),
+            std::nullopt,
+            kBatchGraphUpdate);
+
+        auto panProcessor = std::make_unique<StereoPanProcessor>();
+        row.panProc = panProcessor.get();
+        auto panNode = context.graph.addNode(
+            std::move(panProcessor),
+            std::nullopt,
+            kBatchGraphUpdate);
+
+        if (row.inputNode == nullptr || automationNode == nullptr || gainNode == nullptr || panNode == nullptr)
+        {
+            error = "Offline export graph could not create row bus nodes.";
+            return false;
+        }
+
+        row.automationProc->setBlockTransportPtr(&context.blockTransportStartSec);
+        row.automationProc->setAutomationPoints(rowSnapshot.automationPoints);
+
+        juce::AudioProcessorGraph::NodeID previousNodeId = row.inputNode->nodeID;
+        for (const auto &effectSnapshot : rowSnapshot.effects)
+        {
+            juce::String pluginError;
+            auto processor = createEffectProcessorFromIdentifier(
+                pluginFormatManager,
+                pluginList,
+                effectSnapshot.pluginId,
+                sampleRate,
+                blockSize,
+                pluginError);
+            if (!processor)
+            {
+                error = "Offline export could not create row effect '" +
+                        effectSnapshot.pluginId + "': " + pluginError;
+                return false;
+            }
+
+            if (!effectSnapshot.state.isEmpty())
+                processor->setStateInformation(effectSnapshot.state.getData(),
+                                               (int)effectSnapshot.state.getSize());
+            applyNormalizedParameterSnapshots(*processor, effectSnapshot.parameters);
+
+            auto node = context.graph.addNode(
+                std::move(processor),
+                std::nullopt,
+                kBatchGraphUpdate);
+            if (node == nullptr)
+            {
+                error = "Offline export graph could not add row effect node.";
+                return false;
+            }
+
+            node->setBypassed(effectSnapshot.bypassed);
+            row.fxChain.add(node->nodeID);
+            connectStereo(context.graph, previousNodeId, node->nodeID, kBatchGraphUpdate);
+            previousNodeId = node->nodeID;
+        }
+
+        connectStereo(context.graph, previousNodeId, automationNode->nodeID, kBatchGraphUpdate);
+        connectStereo(context.graph, automationNode->nodeID, gainNode->nodeID, kBatchGraphUpdate);
+        connectStereo(context.graph, gainNode->nodeID, panNode->nodeID, kBatchGraphUpdate);
+        connectStereo(context.graph, panNode->nodeID, context.master.inputNode->nodeID, kBatchGraphUpdate);
+
+        context.rowIdToIndex[row.rowId] = (int)context.rows.size();
+        context.rows.push_back(std::move(row));
+    }
+
+    context.clips.reserve(snapshot.clips.size());
+    for (const auto &clipSnapshot : snapshot.clips)
+    {
+        if (!clipSnapshot.alive)
+            continue;
+
+        const auto rowIt = context.rowIdToIndex.find(clipSnapshot.rowId);
+        if (rowIt == context.rowIdToIndex.end())
+        {
+            error = "Offline export clip could not resolve its destination row.";
+            return false;
+        }
+        const int rowIndex = rowIt->second;
+
+        OfflineClipRenderState clip;
+        clip.clip = clipSnapshot;
+
+        const juce::File renderedSourceFile(clipSnapshot.sourceFilePath);
+        const bool canUseRenderedSource =
+            clipSnapshot.isMidi &&
+            clipSnapshot.midiNotes.isEmpty() &&
+            clipSnapshot.sourceFilePath.isNotEmpty() &&
+            renderedSourceFile.existsAsFile();
+
+        if (canUseRenderedSource || !clipSnapshot.isMidi)
+        {
+            const juce::File sourceFile =
+                canUseRenderedSource ? renderedSourceFile
+                                     : juce::File(clipSnapshot.sourceFilePath);
+            std::unique_ptr<juce::AudioFormatReader> reader(
+                formatManager.createReaderFor(sourceFile));
+            if (!reader)
+            {
+                if (!canUseRenderedSource)
+                {
+                    error = "Offline export could not reopen clip source file: " +
+                            clipSnapshot.sourceFilePath;
+                    return false;
+                }
+            }
+
+            if (reader)
+            {
+                if (shouldUseOfflineStaticAudioClipProcessor(clipSnapshot))
+                {
+                    auto processor = std::make_unique<OfflineStaticAudioClipProcessor>(
+                        std::move(reader),
+                        sourceFile,
+                        &context.blockTransportStartSec,
+                        &context.hostSampleRate,
+                        &context.blockIsPlaying);
+                    applyClipSnapshotToProcessor(clipSnapshot, *processor);
+                    clip.processor = processor.get();
+                    clip.playerNode = context.graph.addNode(
+                        std::move(processor),
+                        std::nullopt,
+                        kBatchGraphUpdate);
+                }
+                else
+                {
+                    const auto totalLength = reader->lengthInSamples;
+                    auto readerSource =
+                        std::make_unique<juce::AudioFormatReaderSource>(reader.release(), true);
+                    auto processor = std::make_unique<TimelineClipProcessor>(
+                        std::move(readerSource),
+                        totalLength,
+                        sourceFile,
+                        &context.blockTransportStartSec,
+                        &context.hostSampleRate,
+                        &context.blockIsPlaying);
+                    applyClipSnapshotToProcessor(clipSnapshot, *processor);
+                    clip.processor = processor.get();
+                    clip.playerNode = context.graph.addNode(
+                        std::move(processor),
+                        std::nullopt,
+                        kBatchGraphUpdate);
+                }
+            }
+        }
+
+        if (clip.playerNode == nullptr && clipSnapshot.isMidi)
+        {
+            if (!TimelineMidiClipProcessor::canResolveSampledInstrument(
+                    clipSnapshot.midiInstrumentId,
+                    clipSnapshot.midiInstrumentName))
+            {
+                error = "Offline export could not resolve MIDI instrument for clip " +
+                        juce::String(clipSnapshot.clipId) + ".";
+                return false;
+            }
+
+            auto processor = std::make_unique<TimelineMidiClipProcessor>(
+                &context.blockTransportStartSec,
+                &context.hostSampleRate,
+                &context.blockIsPlaying);
+            processor->setMidiData(
+                clipSnapshot.midiNotes,
+                clipSnapshot.midiInstrumentId,
+                clipSnapshot.midiInstrumentName,
+                clipSnapshot.midiParams,
+                clipSnapshot.midiSourceTempoBpm);
+            applyClipSnapshotToProcessor(clipSnapshot, *processor);
+            clip.processor = processor.get();
+            clip.playerNode = context.graph.addNode(
+                std::move(processor),
+                std::nullopt,
+                kBatchGraphUpdate);
+        }
+
+        if (clip.playerNode == nullptr)
+        {
+            error = "Offline export clip is missing a renderable source.";
+            return false;
+        }
+
+        if (clip.playerNode == nullptr || clip.processor == nullptr)
+        {
+            error = "Offline export graph could not add clip node.";
+            return false;
+        }
+
+        connectStereo(context.graph,
+                      clip.playerNode->nodeID,
+                      context.rows[(size_t)rowIndex].inputNode->nodeID,
+                      kBatchGraphUpdate);
+        context.clips.push_back(std::move(clip));
+    }
+
+    context.graph.rebuild();
+    prepareGraphForOfflineRender(context.graph, sampleRate, blockSize);
+
+    reapplyOfflineEffectSnapshots(context, snapshot);
+    applyOfflineMasterStaticState(context.master);
+    for (auto &row : context.rows)
+        applyOfflineRowStaticState(row, context.blockTransportStartSec);
+    for (auto &clip : context.clips)
+    {
+        if (clip.processor == nullptr)
+            continue;
+
+        applyClipSnapshotToProcessor(clip.clip, *clip.processor);
+        clip.processor->primeForOfflineRender();
+    }
+
+    return true;
+}
+
+void applyOfflineAutomationAtTimeSeconds(OfflineExportContext &context, double timeSeconds)
+{
+    constexpr float kAutomationEpsilon = 1.0e-4f;
+    const double timeMs = juce::jmax(0.0, timeSeconds) * 1000.0;
+
+    for (auto &row : context.rows)
+    {
+        if (!row.gainAutomationPoints.empty())
+        {
+            const float normalized = juce::jlimit(
+                0.0f,
+                1.0f,
+                (float)evaluateAutomationValueAtMs(row.gainAutomationPoints, timeMs, 0.0));
+            if (!std::isfinite(row.lastAppliedGainAutomationNormalized) ||
+                std::abs(normalized - row.lastAppliedGainAutomationNormalized) > kAutomationEpsilon)
+            {
+                const float gain = SimpleGainProcessor::kUiMin +
+                                   (SimpleGainProcessor::kUiMax - SimpleGainProcessor::kUiMin) *
+                                       normalized;
+                row.gainUi = gain;
+                if (row.gainProc != nullptr)
+                {
+                    row.gainProc->gain->setValueNotifyingHost(gain / SimpleGainProcessor::kUiMax);
+                    row.gainProc->setMuted(row.muted);
+                }
+                row.lastAppliedGainAutomationNormalized = normalized;
+            }
+        }
+
+        if (!row.panAutomationPoints.empty())
+        {
+            const float pan = juce::jlimit(
+                0.0f,
+                1.0f,
+                (float)evaluateAutomationValueAtMs(row.panAutomationPoints, timeMs, 0.5));
+            if (!std::isfinite(row.lastAppliedPanAutomationNormalized) ||
+                std::abs(pan - row.lastAppliedPanAutomationNormalized) > kAutomationEpsilon)
+            {
+                row.panUi = pan;
+                if (row.panProc != nullptr)
+                    row.panProc->pan->setValueNotifyingHost(normalizePanUiValue(pan));
+                row.lastAppliedPanAutomationNormalized = pan;
+            }
+        }
+
+        for (auto &lane : row.effectAutomationLanes)
+        {
+            if (lane.effectIndex < 0 || lane.effectIndex >= row.fxChain.size())
+                continue;
+            if (lane.paramId.trim().isEmpty() || lane.points.empty())
+                continue;
+
+            const float normalized = juce::jlimit(
+                0.0f,
+                1.0f,
+                (float)evaluateAutomationValueAtMs(lane.points, timeMs, 0.0));
+            if (std::isfinite(lane.lastAppliedNormalized) &&
+                std::abs(normalized - lane.lastAppliedNormalized) <= kAutomationEpsilon)
+                continue;
+
+            auto node = context.graph.getNodeForId(row.fxChain.getReference(lane.effectIndex));
+            if (node == nullptr || node->getProcessor() == nullptr)
+                continue;
+
+            const float value = lane.minValue + (lane.maxValue - lane.minValue) * normalized;
+            setProcessorParameterValue(*node->getProcessor(), lane.paramId, juce::var((double)value));
+            lane.lastAppliedNormalized = normalized;
+        }
+    }
+
+    if (!context.master.gainAutomationPoints.empty())
+    {
+        const float normalized = juce::jlimit(
+            0.0f,
+            1.0f,
+            (float)evaluateAutomationValueAtMs(context.master.gainAutomationPoints, timeMs, 0.0));
+        if (!std::isfinite(context.master.lastAppliedGainAutomationNormalized) ||
+            std::abs(normalized - context.master.lastAppliedGainAutomationNormalized) > kAutomationEpsilon)
+        {
+            const float gain = SimpleGainProcessor::kUiMin +
+                               (SimpleGainProcessor::kUiMax - SimpleGainProcessor::kUiMin) *
+                                   normalized;
+            context.master.gainUi = gain;
+            if (context.master.gainProc != nullptr)
+            {
+                context.master.gainProc->gain->setValueNotifyingHost(
+                    gain / SimpleGainProcessor::kUiMax);
+                context.master.gainProc->setMuted(context.master.muted);
+            }
+            context.master.lastAppliedGainAutomationNormalized = normalized;
+        }
+    }
+
+    if (!context.master.panAutomationPoints.empty())
+    {
+        const float pan = juce::jlimit(
+            0.0f,
+            1.0f,
+            (float)evaluateAutomationValueAtMs(context.master.panAutomationPoints, timeMs, 0.5));
+        if (!std::isfinite(context.master.lastAppliedPanAutomationNormalized) ||
+            std::abs(pan - context.master.lastAppliedPanAutomationNormalized) > kAutomationEpsilon)
+        {
+            context.master.panUi = pan;
+            if (context.master.panProc != nullptr)
+                context.master.panProc->pan->setValueNotifyingHost(normalizePanUiValue(pan));
+            context.master.lastAppliedPanAutomationNormalized = pan;
+        }
+    }
+
+    for (auto &lane : context.master.effectAutomationLanes)
+    {
+        if (lane.effectIndex < 0 || lane.effectIndex >= context.master.fxChain.size())
+            continue;
+        if (lane.paramId.trim().isEmpty() || lane.points.empty())
+            continue;
+
+        const float normalized = juce::jlimit(
+            0.0f,
+            1.0f,
+            (float)evaluateAutomationValueAtMs(lane.points, timeMs, 0.0));
+        if (std::isfinite(lane.lastAppliedNormalized) &&
+            std::abs(normalized - lane.lastAppliedNormalized) <= kAutomationEpsilon)
+            continue;
+
+        auto node = context.graph.getNodeForId(context.master.fxChain.getReference(lane.effectIndex));
+        if (node == nullptr || node->getProcessor() == nullptr)
+            continue;
+
+        const float value = lane.minValue + (lane.maxValue - lane.minValue) * normalized;
+        setProcessorParameterValue(*node->getProcessor(), lane.paramId, juce::var((double)value));
+        lane.lastAppliedNormalized = normalized;
+    }
+}
+
+double getSnapshotEndTimeSeconds(const ExportProjectSnapshot &snapshot)
+{
+    double endTime = 0.0;
+    for (const auto &clip : snapshot.clips)
+    {
+        if (!clip.alive)
+            continue;
+        endTime = juce::jmax(endTime, clip.startSec + clip.lengthSec);
+    }
+    return endTime;
+}
+
+juce::String renderOfflineSnapshotToFile(
+    const ExportProjectSnapshot &snapshot,
+    const juce::File &outFile,
+    const JuceEngine::ExportOptions &options,
+    int blockSize,
+    double contentDurationSeconds,
+    juce::AudioFormatManager &formatManager,
+    juce::AudioPluginFormatManager &pluginFormatManager,
+    const juce::KnownPluginList &pluginList,
+    const std::function<void(double)> &progressCallback)
+{
+    if (options.format == "mp3")
+    {
+        juceLogToFlutter("❌ JUCE native MP3 export is not available on this iOS build.");
+        return {};
+    }
+
+    juce::WavAudioFormat format;
+    auto stream = std::unique_ptr<juce::FileOutputStream>(outFile.createOutputStream());
+    if (!stream)
+        return {};
+
+    const double sampleRate = options.sampleRate;
+    const int clampedBlockSize = juce::jlimit(64, 4096, blockSize > 0 ? blockSize : 512);
+    constexpr int numChannels = 2;
+    const int bitDepth = options.wavBitDepth;
+
+    auto writer = std::unique_ptr<juce::AudioFormatWriter>(
+        format.createWriterFor(stream.get(),
+                               sampleRate,
+                               (unsigned int)numChannels,
+                               bitDepth,
+                               {},
+                               0));
+    if (!writer)
+        return {};
+
+    stream.release();
+
+    OfflineExportContext context;
+    juce::String error;
+    if (!buildOfflineExportContext(snapshot,
+                                   sampleRate,
+                                   clampedBlockSize,
+                                   formatManager,
+                                   pluginFormatManager,
+                                   pluginList,
+                                   context,
+                                   error))
+    {
+        if (error.isNotEmpty())
+            juceLogToFlutter(error.toRawUTF8());
+        return {};
+    }
+
+    const double tailSeconds = getGraphTailLengthSeconds(context.graph);
+    const int64 totalSamples =
+        (int64)std::ceil((contentDurationSeconds + tailSeconds) * sampleRate);
+    if (totalSamples <= 0)
+    {
+        if (progressCallback)
+            progressCallback(1.0);
+        return outFile.getFullPathName();
+    }
+
+    juce::AudioBuffer<float> buffer(numChannels, clampedBlockSize);
+    juce::MidiBuffer midi;
+    constexpr double kOfflineStartupPrerollSeconds = 4.0;
+    const int64 minPrerollSamples = std::max<int64>(
+        (int64)clampedBlockSize * 2,
+        (int64)std::ceil(kOfflineStartupPrerollSeconds * sampleRate));
+    const int64 prerollSamples =
+        ((minPrerollSamples + (int64)clampedBlockSize - 1) / (int64)clampedBlockSize) *
+        (int64)clampedBlockSize;
+    const int64 totalRenderSamples = prerollSamples + totalSamples;
+    double transportSeconds = -((double)prerollSamples / sampleRate);
+
+    context.blockTransportStartSec.store(transportSeconds, std::memory_order_relaxed);
+    context.blockIsPlaying.store(false, std::memory_order_relaxed);
+    context.playHead.setTransport(0.0, sampleRate, snapshot.tempoBpm, false);
+    mixroom::fx::setGlobalTransportSeconds(0.0);
+    mixroom::fx::setGlobalTransportPlaying(false);
+
+    int64 rendered = 0;
+    int64 written = 0;
+    while (rendered < totalRenderSamples)
+    {
+        const int samplesThisBlock =
+            (int)std::min<int64>((int64)clampedBlockSize, totalRenderSamples - rendered);
+        if (buffer.getNumSamples() != samplesThisBlock)
+            buffer.setSize(numChannels, samplesThisBlock, false, false, true);
+        buffer.clear();
+        midi.clear();
+
+        const bool hostIsPlaying = transportSeconds >= 0.0;
+        const double hostTransportSeconds = hostIsPlaying ? transportSeconds : 0.0;
+        context.blockTransportStartSec.store(transportSeconds, std::memory_order_relaxed);
+        context.blockIsPlaying.store(hostIsPlaying, std::memory_order_relaxed);
+        context.playHead.setTransport(hostTransportSeconds, sampleRate, snapshot.tempoBpm, hostIsPlaying);
+        mixroom::fx::setGlobalTransportSeconds(hostTransportSeconds);
+        mixroom::fx::setGlobalTransportPlaying(hostIsPlaying);
+        const double automationSeconds = hostTransportSeconds;
+        applyOfflineAutomationAtTimeSeconds(context, automationSeconds);
+        context.graph.processBlock(buffer, midi);
+
+        const int64 validStartSample = std::max<int64>(
+            0,
+            prerollSamples - rendered);
+        const int64 validEndSample = std::min<int64>(
+            (int64)samplesThisBlock,
+            (prerollSamples + totalSamples) - rendered);
+        const int validCount = (int)std::max<int64>(
+            0,
+            validEndSample - validStartSample);
+        if (validCount > 0)
+        {
+            if (options.wavDithering)
+                applyTpdfDither(buffer, bitDepth);
+            writer->writeFromAudioSampleBuffer(
+                buffer,
+                (int)validStartSample,
+                validCount);
+            written += (int64)validCount;
+        }
+
+        transportSeconds += (double)samplesThisBlock / sampleRate;
+        rendered += samplesThisBlock;
+
+        if (progressCallback)
+        {
+            progressCallback(
+                juce::jlimit(0.0, 1.0, (double)written / (double)totalSamples));
+        }
+    }
+
+    if (progressCallback)
+        progressCallback(1.0);
+    return outFile.getFullPathName();
+}
 } // namespace
+
+void JuceEngine::reapplyClipProcessorStateLocked()
+{
+    for (auto &clip : clips)
+    {
+        if (!clip.alive || clip.playerNode == nullptr)
+            continue;
+
+        if (auto *processor = asTimelineProcessor(clip.playerNode))
+        {
+            processor->setTimeline(
+                clip.startSec,
+                clip.lengthSec,
+                clip.inFileOffsetSec);
+            processor->setStretchOptions(
+                clip.tempoRatio,
+                clip.preservePitch);
+            processor->setPitchSemitones(clip.pitchSemitones);
+            processor->setReversed(clip.reversed);
+            processor->setMuted(clip.muted);
+            processor->setGainUi(clip.gainUi);
+            processor->setPanNormalized(clip.panNormalized);
+        }
+    }
+}
+
+void JuceEngine::rebuildClipProcessorsFromStoredStateLocked(
+    juce::AudioProcessorGraph::UpdateKind updateKind)
+{
+    ensureBusGraphInitialised();
+
+    auto applyClipProcessorState = [](ClipState &clip, TimelineClipProcessorBase &processor)
+    {
+        processor.setTimeline(
+            clip.startSec,
+            clip.lengthSec,
+            clip.inFileOffsetSec);
+        processor.setStretchOptions(
+            clip.tempoRatio,
+            clip.preservePitch);
+        processor.setPitchSemitones(clip.pitchSemitones);
+        processor.setReversed(clip.reversed);
+        processor.setMuted(clip.muted);
+        processor.setGainUi(clip.gainUi);
+        processor.setPanNormalized(clip.panNormalized);
+    };
+
+    bool rebuiltAny = false;
+
+    for (size_t clipIndex = 0; clipIndex < clips.size(); ++clipIndex)
+    {
+        auto &clip = clips[clipIndex];
+        if (!clip.alive)
+            continue;
+
+        juce::AudioProcessorGraph::Node::Ptr rebuiltPlayerNode;
+
+        if (clip.isMidi)
+        {
+            if (!TimelineMidiClipProcessor::canResolveSampledInstrument(
+                    clip.midiInstrumentId,
+                    clip.midiInstrumentName))
+            {
+                juceLogToFlutter(
+                    "Skipping clip rebuild for export: unresolved MIDI instrument.");
+                continue;
+            }
+
+            auto player = std::make_unique<TimelineMidiClipProcessor>(
+                &blockTransportStartSec,
+                &hostSampleRateAtomic,
+                &blockIsPlayingAtomic);
+            player->setMidiData(
+                clip.midiNotes,
+                clip.midiInstrumentId,
+                clip.midiInstrumentName,
+                clip.midiParams,
+                clip.midiSourceTempoBpm);
+            applyClipProcessorState(clip, *player);
+            rebuiltPlayerNode = graph.addNode(std::move(player), std::nullopt, updateKind);
+        }
+        else
+        {
+            if (clip.sourceFilePath.isEmpty())
+            {
+                juceLogToFlutter(
+                    "Skipping clip rebuild for export: missing audio source path.");
+                continue;
+            }
+
+            const juce::File sourceFile(clip.sourceFilePath);
+            std::unique_ptr<juce::AudioFormatReader> reader(
+                formatManager.createReaderFor(sourceFile));
+            if (!reader)
+            {
+                juceLogToFlutter(
+                    "Skipping clip rebuild for export: could not reopen audio source.");
+                continue;
+            }
+
+            const auto totalLength = reader->lengthInSamples;
+            auto readerSource =
+                std::make_unique<juce::AudioFormatReaderSource>(reader.release(), true);
+            auto player = std::make_unique<TimelineClipProcessor>(
+                std::move(readerSource),
+                totalLength,
+                sourceFile,
+                &blockTransportStartSec,
+                &hostSampleRateAtomic,
+                &blockIsPlayingAtomic);
+            applyClipProcessorState(clip, *player);
+            rebuiltPlayerNode = graph.addNode(std::move(player), std::nullopt, updateKind);
+        }
+
+        if (rebuiltPlayerNode == nullptr)
+            continue;
+
+        const auto previousNode = clip.playerNode;
+        clip.playerNode = rebuiltPlayerNode;
+        clip.wired = false;
+        clip.lastRowInputNodeUid = 0;
+        if (previousNode != nullptr)
+            graph.removeNode(previousNode->nodeID, updateKind);
+        rewireTrackChain((int)clipIndex, updateKind);
+        rebuiltAny = true;
+    }
+
+    if (rebuiltAny)
+        graph.rebuild();
+}
+
+void JuceEngine::primeClipProcessorsForOfflineRenderLocked()
+{
+    for (auto &clip : clips)
+    {
+        if (!clip.alive || clip.playerNode == nullptr)
+            continue;
+
+        if (auto *processor = asTimelineProcessor(clip.playerNode))
+            processor->primeForOfflineRender();
+    }
+}
 
 juce::String JuceEngine::exportMix(const juce::File &outFile)
 {
@@ -1499,8 +3127,6 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
         std::atomic<bool> &active;
     } exportProgressGuard(exportInProgressAtomic);
 
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
-
     const bool hadLiveCallback = (metronomeCallback != nullptr);
     if (hadLiveCallback)
         deviceManager.removeAudioCallback(metronomeCallback.get());
@@ -1516,123 +3142,168 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
                 engine.deviceManager.addAudioCallback(engine.metronomeCallback.get());
         }
     } liveCallbackRestoreGuard{*this, hadLiveCallback};
+    liveCallbackRestoreGuard.shouldRestore = hadLiveCallback;
 
-    if (options.format == "mp3")
-    {
-        juceLogToFlutter("❌ JUCE native MP3 export is not available on this iOS build.");
-        return {};
-    }
-
-    juce::WavAudioFormat fmt;
-    auto fs = std::unique_ptr<juce::FileOutputStream>(outFile.createOutputStream());
-    if (!fs)
-        return {};
-
-    const double sr = options.sampleRate;
-    const double liveSampleRate =
-        getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
-    const int liveBlockSize = getKnownDeviceBufferSize(deviceManager, 512);
-    const int bs = juce::jlimit(64, 4096, liveBlockSize > 0 ? liveBlockSize : 512);
-    const int nc = 2;
-    const int bitDepth = options.wavBitDepth;
-
-    auto w = std::unique_ptr<juce::AudioFormatWriter>(
-        fmt.createWriterFor(fs.get(), sr, (unsigned int)nc, bitDepth, {}, 0));
-    if (!w)
-        return {};
-
-    fs.release();
-
-    // compute end time from clips
-    double endTime = 0.0;
-    for (const auto &c : clips)
-    {
-        if (c.alive)
-            endTime = juce::jmax(endTime, c.startSec + c.lengthSec);
-    }
-
-    // offline render loop
-    juce::AudioBuffer<float> buf(nc, bs);
-    juce::MidiBuffer midi;
-
-    // Snapshot live state so export doesn't permanently alter transport/engine timing.
-    const double previousHostRate = hostSampleRateAtomic.load(std::memory_order_relaxed);
-    const double previousTransport = transportSec.load(std::memory_order_relaxed);
-    const bool wasPlaying = isPlayingAtomic.exchange(true, std::memory_order_relaxed);
+    constexpr int offlineRenderBlockSize = 512;
+    const double previousFxSeconds = mixroom::fx::getGlobalTransportSeconds();
     const bool previousFxPlaying = mixroom::fx::getGlobalTransportPlaying();
-
-    // Prepare graph for offline SR/BS
-    hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
-    graph.prepareToPlay(sr, bs);
-
-    // set transport to 0 for offline render
-    transportSec.store(0.0, std::memory_order_relaxed);
-    mixroom::fx::setGlobalTransportSeconds(0.0);
-    mixroom::fx::setGlobalTransportPlaying(true);
-
-    const double tailSeconds = getGraphTailLengthSeconds(graph);
-    const int64 totalSamples = (int64)std::ceil((endTime + tailSeconds) * sr);
-    if (totalSamples <= 0)
+    const double previousTempoBpm = mixroom::fx::getGlobalTempoBpm();
+    const auto copyAutomationLane = [](const auto &lane)
     {
-        exportProgressAtomic.store(1.0, std::memory_order_relaxed);
-        graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
-                            liveBlockSize > 0 ? liveBlockSize : 512);
-        hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
-        transportSec.store(previousTransport, std::memory_order_relaxed);
-        mixroom::fx::setGlobalTransportSeconds(previousTransport);
-        mixroom::fx::setGlobalTransportPlaying(previousFxPlaying);
-        isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
-        return outFile.getFullPathName();
+        ExportEffectAutomationLane snapshotLane;
+        snapshotLane.effectIndex = lane.effectIndex;
+        snapshotLane.paramId = lane.paramId;
+        snapshotLane.minValue = lane.minValue;
+        snapshotLane.maxValue = lane.maxValue;
+        snapshotLane.points = lane.points;
+        snapshotLane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+        return snapshotLane;
+    };
+
+    ExportProjectSnapshot snapshot;
+    std::vector<ExportClipSnapshot> exportClipSnapshotsFromDart;
+    {
+        GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+
+        snapshot.tempoBpm = mixroom::fx::getGlobalTempoBpm();
+        snapshot.masterGainUi = masterGainUi;
+        snapshot.masterPanUi = masterPanUi;
+        snapshot.masterMuted = masterMuted;
+        compactMasterFxChain();
+        snapshot.masterGainAutomationPoints = masterGainAutomationPoints;
+        snapshot.masterPanAutomationPoints = masterPanAutomationPoints;
+        snapshot.masterEffectAutomationLanes.clear();
+        snapshot.masterEffectAutomationLanes.reserve(masterEffectAutomationLanes.size());
+        for (const auto &lane : masterEffectAutomationLanes)
+            snapshot.masterEffectAutomationLanes.push_back(copyAutomationLane(lane));
+        if (masterEffectChain != nullptr)
+        {
+            for (int i = 0; i < masterEffectChain->size(); ++i)
+            {
+                const auto nodeId = masterEffectChain->getReference(i);
+                auto node = graph.getNodeForId(nodeId);
+                if (node == nullptr)
+                    continue;
+
+                const auto pluginId =
+                    (i >= 0 && i < masterEffectIds.size())
+                        ? masterEffectIds[i]
+                        : (node->getProcessor() != nullptr ? node->getProcessor()->getName() : juce::String{});
+                snapshot.masterEffects.push_back(captureEffectSnapshot(pluginId, node));
+            }
+        }
+
+        snapshot.rows.reserve(rows.size());
+        for (int rowIndex = 0; rowIndex < (int)rows.size(); ++rowIndex)
+        {
+            compactRowFxChain(rowIndex);
+            const auto &rowState = rows[(size_t)rowIndex];
+
+            ExportRowSnapshot rowSnapshot;
+            rowSnapshot.rowId = rowState.rowId;
+            rowSnapshot.gainUi = rowState.gainUi;
+            rowSnapshot.panUi = rowState.panUi;
+            rowSnapshot.muted = rowState.muted;
+            rowSnapshot.automationPoints = rowState.automationPoints;
+            rowSnapshot.gainAutomationPoints = rowState.gainAutomationPoints;
+            rowSnapshot.panAutomationPoints = rowState.panAutomationPoints;
+            rowSnapshot.effectAutomationLanes.clear();
+            rowSnapshot.effectAutomationLanes.reserve(rowState.effectAutomationLanes.size());
+            for (const auto &lane : rowState.effectAutomationLanes)
+                rowSnapshot.effectAutomationLanes.push_back(copyAutomationLane(lane));
+
+            for (int fxIndex = 0; fxIndex < rowState.fxChain.size(); ++fxIndex)
+            {
+                const auto nodeId = rowState.fxChain.getReference(fxIndex);
+                auto node = graph.getNodeForId(nodeId);
+                if (node == nullptr)
+                    continue;
+
+                const auto pluginId =
+                    (fxIndex >= 0 && fxIndex < rowState.fxIds.size())
+                        ? rowState.fxIds[fxIndex]
+                        : (node->getProcessor() != nullptr ? node->getProcessor()->getName() : juce::String{});
+                rowSnapshot.effects.push_back(captureEffectSnapshot(pluginId, node));
+            }
+
+            snapshot.rows.push_back(std::move(rowSnapshot));
+        }
+
+        snapshot.clips.reserve(clips.size());
+        for (const auto &clip : clips)
+        {
+            if (!clip.alive)
+                continue;
+
+            ExportClipSnapshot clipSnapshot;
+            clipSnapshot.alive = clip.alive;
+            clipSnapshot.isMidi = clip.isMidi;
+            clipSnapshot.muted = clip.muted;
+            clipSnapshot.clipId = clip.clipId;
+            clipSnapshot.rowId = clip.rowId;
+            clipSnapshot.startSec = clip.startSec;
+            clipSnapshot.lengthSec = clip.lengthSec;
+            clipSnapshot.inFileOffsetSec = clip.inFileOffsetSec;
+            clipSnapshot.pitchSemitones = clip.pitchSemitones;
+            clipSnapshot.reversed = clip.reversed;
+            clipSnapshot.tempoRatio = clip.tempoRatio;
+            clipSnapshot.preservePitch = clip.preservePitch;
+            clipSnapshot.gainUi = clip.gainUi;
+            clipSnapshot.panNormalized = clip.panNormalized;
+            clipSnapshot.sourceFilePath = clip.sourceFilePath;
+            clipSnapshot.midiInstrumentId = clip.midiInstrumentId;
+            clipSnapshot.midiInstrumentName = clip.midiInstrumentName;
+            clipSnapshot.midiNotes = clip.midiNotes;
+            clipSnapshot.midiParams = clip.midiParams;
+            clipSnapshot.midiSourceTempoBpm = clip.midiSourceTempoBpm;
+            snapshot.clips.push_back(std::move(clipSnapshot));
+        }
     }
 
-    auto runOfflinePass = [&]()
+    juce::String clipSnapshotError;
+    if (!parseExportClipSnapshotJson(
+            options.clipSnapshotJson,
+            exportClipSnapshotsFromDart,
+            clipSnapshotError))
     {
-        graph.prepareToPlay(sr, bs);
-        transportSec.store(0.0, std::memory_order_relaxed);
-        resetTrackEffectAutomationLatches();
+        if (clipSnapshotError.isNotEmpty())
+            juceLogToFlutter(clipSnapshotError.toRawUTF8());
+        return {};
+    }
+    if (!mergeExportClipSnapshotsIntoProject(
+            snapshot.clips,
+            std::move(exportClipSnapshotsFromDart),
+            clipSnapshotError))
+    {
+        if (clipSnapshotError.isNotEmpty())
+            juceLogToFlutter(clipSnapshotError.toRawUTF8());
+        return {};
+    }
 
-        int64 processed = 0;
-        while (processed < totalSamples)
+    mixroom::fx::setGlobalTempoBpm(snapshot.tempoBpm);
+    const auto result = renderOfflineSnapshotToFile(
+        snapshot,
+        outFile,
+        options,
+        offlineRenderBlockSize,
+        getSnapshotEndTimeSeconds(snapshot),
+        formatManager,
+        pluginFormatManager,
+        pluginList,
+        [this](double progress)
         {
-            const int toDo = (int)juce::jmin<int64>(bs, totalSamples - processed);
-            if (buf.getNumSamples() != toDo)
-                buf.setSize(nc, toDo, false, false, true);
-            buf.clear();
-            midi.clear();
-
-            const double currentTransportSec = transportSec.load(std::memory_order_relaxed);
-            blockTransportStartSec.store(currentTransportSec,
-                                         std::memory_order_relaxed);
-            mixroom::fx::setGlobalTransportSeconds(currentTransportSec);
-            applyTrackEffectAutomationAtCurrentBlockStart();
-            graph.processBlock(buf, midi);
-
-            if (options.wavDithering)
-                applyTpdfDither(buf, bitDepth);
-            w->writeFromAudioSampleBuffer(buf, 0, toDo);
-
-            const double nextTransportSec = currentTransportSec + ((double)toDo / sr);
-            transportSec.store(nextTransportSec,
-                               std::memory_order_relaxed);
-            mixroom::fx::setGlobalTransportSeconds(nextTransportSec);
-            processed += toDo;
             exportProgressAtomic.store(
-                juce::jlimit(0.0, 1.0, (double)processed / (double)totalSamples),
+                juce::jlimit(0.0, 1.0, progress),
                 std::memory_order_relaxed);
-        }
-    };
-    runOfflinePass();
+        });
 
-    // Restore live graph timing + transport state.
-    graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
-                        liveBlockSize > 0 ? liveBlockSize : 512);
-    hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
-    transportSec.store(previousTransport, std::memory_order_relaxed);
-    mixroom::fx::setGlobalTransportSeconds(previousTransport);
+    mixroom::fx::setGlobalTempoBpm(previousTempoBpm);
+    mixroom::fx::setGlobalTransportSeconds(previousFxSeconds);
     mixroom::fx::setGlobalTransportPlaying(previousFxPlaying);
-    isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
-    exportProgressAtomic.store(1.0, std::memory_order_relaxed);
-    return outFile.getFullPathName();
+    exportProgressAtomic.store(
+        result.isNotEmpty() ? 1.0 : 0.0,
+        std::memory_order_relaxed);
+    return result;
 }
 
 // (Your exportTrack implementation – unchanged)
@@ -1659,8 +3330,6 @@ juce::String JuceEngine::exportTrack(int trackIndex,
         std::atomic<bool> &active;
     } exportProgressGuard(exportInProgressAtomic);
 
-    std::unique_lock<std::recursive_mutex> renderLock(graphRenderMutex);
-
     const bool hadLiveCallback = (metronomeCallback != nullptr);
     if (hadLiveCallback)
         deviceManager.removeAudioCallback(metronomeCallback.get());
@@ -1676,176 +3345,159 @@ juce::String JuceEngine::exportTrack(int trackIndex,
                 engine.deviceManager.addAudioCallback(engine.metronomeCallback.get());
         }
     } liveCallbackRestoreGuard{*this, hadLiveCallback};
+    liveCallbackRestoreGuard.shouldRestore = hadLiveCallback;
 
-    if (options.format == "mp3")
+    constexpr int offlineRenderBlockSize = 512;
+    const double previousFxSeconds = mixroom::fx::getGlobalTransportSeconds();
+    const bool previousFxPlaying = mixroom::fx::getGlobalTransportPlaying();
+    const double previousTempoBpm = mixroom::fx::getGlobalTempoBpm();
+    const auto copyAutomationLane = [](const auto &lane)
     {
-        juceLogToFlutter("❌ JUCE native MP3 export is not available on this iOS build.");
-        return {};
-    }
-
-    if (trackIndex < 0 || trackIndex >= (int)clips.size())
-        return {};
-
-    auto &targetClip = clips[(size_t)trackIndex];
-    if (!targetClip.alive || targetClip.playerNode == nullptr)
-        return {};
-
-    auto *targetProcessor = asTimelineProcessor(targetClip.playerNode);
-    if (targetProcessor == nullptr)
-        return {};
-
-    juce::WavAudioFormat fmt;
-    auto fs = std::unique_ptr<juce::FileOutputStream>(outFile.createOutputStream());
-    if (!fs)
-        return {};
-
-    const double sr = options.sampleRate;
-    const double liveSampleRate =
-        getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
-    const int liveBlockSize = getKnownDeviceBufferSize(deviceManager, 512);
-    const int bs = juce::jlimit(64, 4096, liveBlockSize > 0 ? liveBlockSize : 512);
-    const int nc = 2;
-    const int bitDepth = options.wavBitDepth;
-
-    auto w = std::unique_ptr<juce::AudioFormatWriter>(
-        fmt.createWriterFor(fs.get(), sr, (unsigned int)nc, bitDepth, {}, 0));
-    if (!w)
-        return {};
-
-    fs.release();
-
-    struct ClipExportSnapshot
-    {
-        bool muted = false;
-        double startSec = 0.0;
-        double lengthSec = 0.0;
-        double inFileOffsetSec = 0.0;
+        ExportEffectAutomationLane snapshotLane;
+        snapshotLane.effectIndex = lane.effectIndex;
+        snapshotLane.paramId = lane.paramId;
+        snapshotLane.minValue = lane.minValue;
+        snapshotLane.maxValue = lane.maxValue;
+        snapshotLane.points = lane.points;
+        snapshotLane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+        return snapshotLane;
     };
 
-    std::vector<ClipExportSnapshot> snapshots(clips.size());
-    auto restoreClips = [&]()
+    ExportProjectSnapshot snapshot;
+    double targetLengthSeconds = 0.0;
+    bool foundTargetClip = false;
     {
-        for (size_t i = 0; i < clips.size(); ++i)
+        GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+
+        snapshot.tempoBpm = mixroom::fx::getGlobalTempoBpm();
+        snapshot.masterGainUi = masterGainUi;
+        snapshot.masterPanUi = masterPanUi;
+        snapshot.masterMuted = masterMuted;
+        compactMasterFxChain();
+        snapshot.masterGainAutomationPoints = masterGainAutomationPoints;
+        snapshot.masterPanAutomationPoints = masterPanAutomationPoints;
+        snapshot.masterEffectAutomationLanes.clear();
+        snapshot.masterEffectAutomationLanes.reserve(masterEffectAutomationLanes.size());
+        for (const auto &lane : masterEffectAutomationLanes)
+            snapshot.masterEffectAutomationLanes.push_back(copyAutomationLane(lane));
+        if (masterEffectChain != nullptr)
         {
-            auto &clip = clips[i];
+            for (int i = 0; i < masterEffectChain->size(); ++i)
+            {
+                const auto nodeId = masterEffectChain->getReference(i);
+                auto node = graph.getNodeForId(nodeId);
+                if (node == nullptr)
+                    continue;
+
+                const auto pluginId =
+                    (i >= 0 && i < masterEffectIds.size())
+                        ? masterEffectIds[i]
+                        : (node->getProcessor() != nullptr ? node->getProcessor()->getName() : juce::String{});
+                snapshot.masterEffects.push_back(captureEffectSnapshot(pluginId, node));
+            }
+        }
+
+        snapshot.rows.reserve(rows.size());
+        for (int rowIndex = 0; rowIndex < (int)rows.size(); ++rowIndex)
+        {
+            compactRowFxChain(rowIndex);
+            const auto &rowState = rows[(size_t)rowIndex];
+
+            ExportRowSnapshot rowSnapshot;
+            rowSnapshot.rowId = rowState.rowId;
+            rowSnapshot.gainUi = rowState.gainUi;
+            rowSnapshot.panUi = rowState.panUi;
+            rowSnapshot.muted = rowState.muted;
+            rowSnapshot.automationPoints = rowState.automationPoints;
+            rowSnapshot.gainAutomationPoints = rowState.gainAutomationPoints;
+            rowSnapshot.panAutomationPoints = rowState.panAutomationPoints;
+            rowSnapshot.effectAutomationLanes.clear();
+            rowSnapshot.effectAutomationLanes.reserve(rowState.effectAutomationLanes.size());
+            for (const auto &lane : rowState.effectAutomationLanes)
+                rowSnapshot.effectAutomationLanes.push_back(copyAutomationLane(lane));
+
+            for (int fxIndex = 0; fxIndex < rowState.fxChain.size(); ++fxIndex)
+            {
+                const auto nodeId = rowState.fxChain.getReference(fxIndex);
+                auto node = graph.getNodeForId(nodeId);
+                if (node == nullptr)
+                    continue;
+
+                const auto pluginId =
+                    (fxIndex >= 0 && fxIndex < rowState.fxIds.size())
+                        ? rowState.fxIds[fxIndex]
+                        : (node->getProcessor() != nullptr ? node->getProcessor()->getName() : juce::String{});
+                rowSnapshot.effects.push_back(captureEffectSnapshot(pluginId, node));
+            }
+
+            snapshot.rows.push_back(std::move(rowSnapshot));
+        }
+
+        snapshot.clips.reserve(clips.size());
+        for (const auto &clip : clips)
+        {
             if (!clip.alive)
                 continue;
 
-            clip.muted = snapshots[i].muted;
-            clip.startSec = snapshots[i].startSec;
-            clip.lengthSec = snapshots[i].lengthSec;
-            clip.inFileOffsetSec = snapshots[i].inFileOffsetSec;
+            ExportClipSnapshot clipSnapshot;
+            clipSnapshot.alive = clip.alive;
+            clipSnapshot.isMidi = clip.isMidi;
+            clipSnapshot.muted = (clip.clipId == trackIndex) ? clip.muted : true;
+            clipSnapshot.clipId = clip.clipId;
+            clipSnapshot.rowId = clip.rowId;
+            clipSnapshot.startSec = (clip.clipId == trackIndex) ? 0.0 : clip.startSec;
+            clipSnapshot.lengthSec = clip.lengthSec;
+            clipSnapshot.inFileOffsetSec = clip.inFileOffsetSec;
+            clipSnapshot.pitchSemitones = clip.pitchSemitones;
+            clipSnapshot.reversed = clip.reversed;
+            clipSnapshot.tempoRatio = clip.tempoRatio;
+            clipSnapshot.preservePitch = clip.preservePitch;
+            clipSnapshot.gainUi = clip.gainUi;
+            clipSnapshot.panNormalized = clip.panNormalized;
+            clipSnapshot.sourceFilePath = clip.sourceFilePath;
+            clipSnapshot.midiInstrumentId = clip.midiInstrumentId;
+            clipSnapshot.midiInstrumentName = clip.midiInstrumentName;
+            clipSnapshot.midiNotes = clip.midiNotes;
+            clipSnapshot.midiParams = clip.midiParams;
+            clipSnapshot.midiSourceTempoBpm = clip.midiSourceTempoBpm;
 
-            if (auto *processor = asTimelineProcessor(clip.playerNode))
+            if (clip.clipId == trackIndex)
             {
-                processor->setTimeline(
-                    clip.startSec,
-                    clip.lengthSec,
-                    clip.inFileOffsetSec);
-                processor->setMuted(clip.muted);
+                targetLengthSeconds = clip.lengthSec;
+                foundTargetClip = true;
             }
+
+            snapshot.clips.push_back(std::move(clipSnapshot));
         }
-    };
-
-    for (size_t i = 0; i < clips.size(); ++i)
-    {
-        auto &clip = clips[i];
-        snapshots[i] = ClipExportSnapshot{
-            clip.muted,
-            clip.startSec,
-            clip.lengthSec,
-            clip.inFileOffsetSec,
-        };
-
-        if (!clip.alive)
-            continue;
-
-        if (auto *processor = asTimelineProcessor(clip.playerNode))
-            processor->setMuted((int)i == trackIndex ? clip.muted : true);
     }
 
-    targetClip.startSec = 0.0;
-    targetProcessor->setTimeline(0.0, targetClip.lengthSec, targetClip.inFileOffsetSec);
+    if (!foundTargetClip)
+        return {};
 
-    juce::AudioBuffer<float> buf(nc, bs);
-    juce::MidiBuffer midi;
+    mixroom::fx::setGlobalTempoBpm(snapshot.tempoBpm);
+    const auto result = renderOfflineSnapshotToFile(
+        snapshot,
+        outFile,
+        options,
+        offlineRenderBlockSize,
+        targetLengthSeconds,
+        formatManager,
+        pluginFormatManager,
+        pluginList,
+        [this](double progress)
+        {
+            exportProgressAtomic.store(
+                juce::jlimit(0.0, 1.0, progress),
+                std::memory_order_relaxed);
+        });
 
-    const double previousHostRate = hostSampleRateAtomic.load(std::memory_order_relaxed);
-    const double previousTransport = transportSec.load(std::memory_order_relaxed);
-    const bool wasPlaying = isPlayingAtomic.exchange(true, std::memory_order_relaxed);
-    const bool previousFxPlaying = mixroom::fx::getGlobalTransportPlaying();
-
-    hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
-    graph.prepareToPlay(sr, bs);
-    transportSec.store(0.0, std::memory_order_relaxed);
-    mixroom::fx::setGlobalTransportSeconds(0.0);
-    mixroom::fx::setGlobalTransportPlaying(true);
-
-    const double tailSeconds = getGraphTailLengthSeconds(graph);
-    const int64 totalSamples =
-        (int64)std::ceil((targetClip.lengthSec + tailSeconds) * sr);
-    if (totalSamples <= 0)
-    {
-        exportProgressAtomic.store(1.0, std::memory_order_relaxed);
-        restoreClips();
-        graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
-                            liveBlockSize > 0 ? liveBlockSize : 512);
-        hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
-        transportSec.store(previousTransport, std::memory_order_relaxed);
-        mixroom::fx::setGlobalTransportSeconds(previousTransport);
-        mixroom::fx::setGlobalTransportPlaying(previousFxPlaying);
-        isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
-        return outFile.getFullPathName();
-    }
-
-    graph.prepareToPlay(sr, bs);
-    transportSec.store(0.0, std::memory_order_relaxed);
-    resetTrackEffectAutomationLatches();
-
-    int64 processed = 0;
-    while (processed < totalSamples)
-    {
-        const int toDo = (int)juce::jmin<int64>(bs, totalSamples - processed);
-        if (buf.getNumSamples() != toDo)
-            buf.setSize(nc, toDo, false, false, true);
-        buf.clear();
-        midi.clear();
-
-        const double currentTransportSec =
-            transportSec.load(std::memory_order_relaxed);
-        blockTransportStartSec.store(
-            currentTransportSec,
-            std::memory_order_relaxed);
-        mixroom::fx::setGlobalTransportSeconds(currentTransportSec);
-        applyTrackEffectAutomationAtCurrentBlockStart();
-        graph.processBlock(buf, midi);
-
-        if (options.wavDithering)
-            applyTpdfDither(buf, bitDepth);
-        w->writeFromAudioSampleBuffer(buf, 0, toDo);
-
-        const double nextTransportSec =
-            currentTransportSec + ((double)toDo / sr);
-        transportSec.store(
-            nextTransportSec,
-            std::memory_order_relaxed);
-        mixroom::fx::setGlobalTransportSeconds(nextTransportSec);
-        processed += toDo;
-        exportProgressAtomic.store(
-            juce::jlimit(0.0, 1.0, (double)processed / (double)totalSamples),
-            std::memory_order_relaxed);
-    }
-
-    restoreClips();
-    graph.prepareToPlay(liveSampleRate > 0.0 ? liveSampleRate : 44100.0,
-                        liveBlockSize > 0 ? liveBlockSize : 512);
-    hostSampleRateAtomic.store(previousHostRate, std::memory_order_relaxed);
-    transportSec.store(previousTransport, std::memory_order_relaxed);
-    mixroom::fx::setGlobalTransportSeconds(previousTransport);
+    mixroom::fx::setGlobalTempoBpm(previousTempoBpm);
+    mixroom::fx::setGlobalTransportSeconds(previousFxSeconds);
     mixroom::fx::setGlobalTransportPlaying(previousFxPlaying);
-    isPlayingAtomic.store(wasPlaying, std::memory_order_relaxed);
-    exportProgressAtomic.store(1.0, std::memory_order_relaxed);
-    return outFile.getFullPathName();
+    exportProgressAtomic.store(
+        result.isNotEmpty() ? 1.0 : 0.0,
+        std::memory_order_relaxed);
+    return result;
 }
 
 // ============================================================
@@ -3739,21 +5391,25 @@ bool JuceEngine::getMasterEffectBypassState(int effectIndex)
 
 void JuceEngine::setMasterGain(float gain)
 {
+    masterGainUi = juce::jlimit(kGainUiMin, kGainUiMax, gain);
     if (masterGainProcessor)
         masterGainProcessor->gain->setValueNotifyingHost(
-            juce::jlimit(kGainUiMin, kGainUiMax, gain) / kGainUiMax);
+            masterGainUi / kGainUiMax);
 }
 
 void JuceEngine::muteMaster(bool mute)
 {
+    masterMuted = mute;
     if (masterGainProcessor)
         masterGainProcessor->setMuted(mute);
 }
 
 void JuceEngine::setMasterPan(float pan)
 {
+    masterPanUi = juce::jlimit(0.0f, 1.0f, pan);
     if (masterPanProcessor)
-        masterPanProcessor->pan->setValueNotifyingHost(panUIToNormalized(pan));
+        masterPanProcessor->pan->setValueNotifyingHost(
+            panUIToNormalized(masterPanUi));
 }
 
 // ============================================================
@@ -3816,8 +5472,10 @@ void JuceEngine::setClipGain(int clipIndex, float gain)
     if (!c.alive || c.playerNode == nullptr)
         return;
 
+    c.gainUi = juce::jlimit(kGainUiMin, kGainUiMax, gain);
+
     if (auto *p = asTimelineProcessor(c.playerNode))
-        p->setGainUi(juce::jlimit(kGainUiMin, kGainUiMax, gain));
+        p->setGainUi(c.gainUi);
 }
 
 void JuceEngine::muteClip(int clipIndex, bool shouldMute)
@@ -3828,6 +5486,8 @@ void JuceEngine::muteClip(int clipIndex, bool shouldMute)
     auto &c = clips[(size_t)clipIndex];
     if (!c.alive || c.playerNode == nullptr)
         return;
+
+    c.muted = shouldMute;
 
     if (auto *p = asTimelineProcessor(c.playerNode))
         p->setMuted(shouldMute);
@@ -3842,8 +5502,10 @@ void JuceEngine::setClipPan(int clipIndex, float pan)
     if (!c.alive || c.playerNode == nullptr)
         return;
 
+    c.panNormalized = panUIToNormalized(pan);
+
     if (auto *p = asTimelineProcessor(c.playerNode))
-        p->setPanNormalized(panUIToNormalized(pan));
+        p->setPanNormalized(c.panNormalized);
 }
 
 void JuceEngine::setClipPitch(int clipIndex, float semitones)

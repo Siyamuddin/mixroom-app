@@ -60,11 +60,15 @@ if "botocore.exceptions" not in sys.modules:
     botocore_stub = ModuleType("botocore")
     exceptions_stub = ModuleType("botocore.exceptions")
 
+    class _BotoCoreError(Exception):
+        pass
+
     class _ClientError(Exception):
         def __init__(self, response: dict, operation_name: str = "") -> None:
             super().__init__(operation_name)
             self.response = response
 
+    exceptions_stub.BotoCoreError = _BotoCoreError
     exceptions_stub.ClientError = _ClientError
     botocore_stub.exceptions = exceptions_stub
     sys.modules["botocore"] = botocore_stub

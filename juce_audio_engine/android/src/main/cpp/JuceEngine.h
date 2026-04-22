@@ -608,6 +608,7 @@ public:
     virtual void setPitchSemitones(float semitones) = 0;
     virtual void setReversed(bool shouldReverse) = 0;
     virtual void setStretchOptions(double tempoRatio, bool preservePitch) = 0;
+    virtual void primeForOfflineRender() = 0;
 };
 
 inline float mixroomUiGainToLinear(float gainUi)
@@ -672,6 +673,215 @@ inline void applyMixroomGainAndPan(juce::AudioBuffer<float> &buffer,
         right[i] *= rightGain;
     }
 }
+
+class OfflineStaticAudioClipProcessor : public juce::AudioProcessor, public TimelineClipProcessorBase
+{
+public:
+    OfflineStaticAudioClipProcessor(std::unique_ptr<juce::AudioFormatReader> readerIn,
+                                    const juce::File &file,
+                                    std::atomic<double> *blockTransportStartSecPtr,
+                                    std::atomic<double> *hostSampleRatePtr,
+                                    std::atomic<bool> *isPlayingPtr)
+        : juce::AudioProcessor(BusesProperties()
+                                   .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+          sourceFile(file),
+          reader(std::move(readerIn)),
+          blockTransportStartSec(blockTransportStartSecPtr),
+          hostSampleRate(hostSampleRatePtr),
+          isPlaying(isPlayingPtr)
+    {
+        if (reader != nullptr)
+        {
+            totalLength = reader->lengthInSamples;
+            fileSampleRate = reader->sampleRate;
+        }
+    }
+
+    void setTimeline(double startSec, double lengthSec, double inFileOffsetSec = 0.0) override
+    {
+        clipStartSec.store(startSec, std::memory_order_relaxed);
+        clipLengthSec.store(lengthSec, std::memory_order_relaxed);
+        fileOffsetSec.store(inFileOffsetSec, std::memory_order_relaxed);
+    }
+
+    void setMuted(bool m) override { muted.store(m, std::memory_order_relaxed); }
+    void setGainUi(float gainUi) override
+    {
+        clipGainUi.store(std::clamp(gainUi,
+                                    SimpleGainProcessor::kUiMin,
+                                    SimpleGainProcessor::kUiMax),
+                         std::memory_order_relaxed);
+    }
+    void setPanNormalized(float panNormalized) override
+    {
+        clipPanNormalized.store(std::clamp(panNormalized, -1.0f, 1.0f),
+                                std::memory_order_relaxed);
+    }
+    void setPitchSemitones(float semitones) override
+    {
+        juce::ignoreUnused(semitones);
+    }
+    void setReversed(bool shouldReverse) override
+    {
+        juce::ignoreUnused(shouldReverse);
+    }
+    void setStretchOptions(double tempoRatio, bool preservePitch) override
+    {
+        juce::ignoreUnused(tempoRatio, preservePitch);
+    }
+
+    void prepareToPlay(double deviceSampleRate, int samplesPerBlock) override
+    {
+        if (hostSampleRate)
+            hostSampleRate->store(deviceSampleRate, std::memory_order_relaxed);
+        setPlayConfigDetails(0, 2, deviceSampleRate, samplesPerBlock);
+    }
+
+    void releaseResources() override {}
+    void reset() override {}
+    void primeForOfflineRender() override {}
+
+    void processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &) override
+    {
+        buffer.clear();
+
+        if (muted.load(std::memory_order_relaxed))
+            return;
+        if (reader == nullptr || blockTransportStartSec == nullptr || hostSampleRate == nullptr)
+            return;
+        if (isPlaying != nullptr && !isPlaying->load(std::memory_order_relaxed))
+            return;
+
+        const double sr = hostSampleRate->load(std::memory_order_relaxed);
+        if (sr <= 0.0 || fileSampleRate <= 0.0 || totalLength <= 0)
+            return;
+
+        const int numSamples = buffer.getNumSamples();
+        if (numSamples <= 0)
+            return;
+
+        const double blockStart = blockTransportStartSec->load(std::memory_order_relaxed);
+        const double blockEnd = blockStart + (double)numSamples / sr;
+        const double cs = clipStartSec.load(std::memory_order_relaxed);
+        const double cl = clipLengthSec.load(std::memory_order_relaxed);
+        const double ce = cs + cl;
+
+        if (blockEnd <= cs || blockStart >= ce)
+            return;
+
+        const int writeStart = juce::jlimit(
+            0, numSamples,
+            (int)std::ceil((cs - blockStart) * sr));
+        const int writeEnd = juce::jlimit(
+            0, numSamples,
+            (int)std::ceil((ce - blockStart) * sr));
+        const int framesToRead = juce::jmax(0, writeEnd - writeStart);
+        if (framesToRead <= 0)
+            return;
+
+        const double inFile = fileOffsetSec.load(std::memory_order_relaxed);
+        const double firstSourceFrame =
+            (inFile + (blockStart + ((double)writeStart / sr) - cs)) * fileSampleRate;
+        const double lastSourceFrame =
+            (inFile + (blockStart + ((double)(writeStart + framesToRead - 1) / sr) - cs)) * fileSampleRate;
+
+        const auto readStartFrame = juce::jlimit<juce::int64>(
+            juce::int64{0},
+            std::max<juce::int64>(juce::int64{0}, totalLength - 1),
+            (juce::int64)std::floor(firstSourceFrame));
+        const auto readEndFrameExclusive = juce::jlimit<juce::int64>(
+            readStartFrame + 1,
+            totalLength,
+            (juce::int64)std::ceil(lastSourceFrame) + 2);
+        const int readFrameCount = (int)std::max<juce::int64>(
+            juce::int64{0},
+            readEndFrameExclusive - readStartFrame);
+        if (readFrameCount <= 0)
+            return;
+
+        sourceScratch.setSize(2, readFrameCount, false, false, true);
+        sourceScratch.clear();
+        reader->read(&sourceScratch,
+                     0,
+                     readFrameCount,
+                     readStartFrame,
+                     true,
+                     true);
+
+        temp.setSize(2, framesToRead, false, false, true);
+        temp.clear();
+
+        for (int ch = 0; ch < juce::jmin(2, temp.getNumChannels()); ++ch)
+        {
+            const float *src = sourceScratch.getReadPointer(ch);
+            float *dst = temp.getWritePointer(ch);
+
+            for (int i = 0; i < framesToRead; ++i)
+            {
+                const double timelineSec =
+                    blockStart + ((double)(writeStart + i) / sr);
+                const double sourceFrame =
+                    (inFile + (timelineSec - cs)) * fileSampleRate;
+                const double localFrame = sourceFrame - (double)readStartFrame;
+                const int frameIndex = juce::jlimit(
+                    0,
+                    juce::jmax(0, readFrameCount - 1),
+                    (int)std::floor(localFrame));
+                const int nextFrameIndex =
+                    juce::jmin(frameIndex + 1, readFrameCount - 1);
+                const float frac = (float)juce::jlimit(
+                    0.0,
+                    1.0,
+                    localFrame - (double)frameIndex);
+                dst[i] = src[frameIndex] + ((src[nextFrameIndex] - src[frameIndex]) * frac);
+            }
+        }
+
+        applyMixroomGainAndPan(temp,
+                               clipGainUi.load(std::memory_order_relaxed),
+                               clipPanNormalized.load(std::memory_order_relaxed));
+
+        for (int ch = 0; ch < juce::jmin(2, buffer.getNumChannels()); ++ch)
+            buffer.copyFrom(ch, writeStart, temp, ch, 0, framesToRead);
+    }
+
+    const juce::String getName() const override { return "OfflineStaticAudioClipProcessor"; }
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void getStateInformation(juce::MemoryBlock &) override {}
+    void setStateInformation(const void *, int) override {}
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override
+    {
+        const auto out = layouts.getMainOutputChannelSet();
+        return out == juce::AudioChannelSet::mono() ||
+               out == juce::AudioChannelSet::stereo();
+    }
+    bool hasEditor() const override { return false; }
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+
+private:
+    juce::File sourceFile;
+    std::unique_ptr<juce::AudioFormatReader> reader;
+    juce::AudioBuffer<float> sourceScratch;
+    juce::AudioBuffer<float> temp;
+    juce::int64 totalLength = 0;
+    double fileSampleRate = 44100.0;
+    std::atomic<double> *blockTransportStartSec = nullptr;
+    std::atomic<double> *hostSampleRate = nullptr;
+    std::atomic<bool> *isPlaying = nullptr;
+    std::atomic<double> clipStartSec{0.0};
+    std::atomic<double> clipLengthSec{0.0};
+    std::atomic<double> fileOffsetSec{0.0};
+    std::atomic<float> clipGainUi{SimpleGainProcessor::kUiUnity};
+    std::atomic<float> clipPanNormalized{0.0f};
+    std::atomic<bool> muted{false};
+};
 
 class TimelineClipProcessor : public juce::AudioProcessor, public TimelineClipProcessorBase
 {
@@ -800,6 +1010,11 @@ public:
         lastClipStartSec = clipStartSec.load(std::memory_order_relaxed);
         lastReverseState = reversed.load(std::memory_order_relaxed);
         lastTimelineSpeedRatio = getTempoPlaybackRatio();
+    }
+
+    void primeForOfflineRender() override
+    {
+        reset();
     }
 
     void processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &) override
@@ -1263,6 +1478,29 @@ public:
 
     void releaseResources() override {}
 
+    void reset() override
+    {
+        {
+            const juce::ScopedLock lock(liveStateLock);
+            pendingLiveMidiEvents.clear();
+        }
+
+        activeLiveNotes.clear();
+        cachedNotes.clear();
+        cachedSampledDefinition.reset();
+        cachedSampledAttackOverride = false;
+        cachedSampledReleaseOverride = false;
+        cachedSourceTempoBpm = 120.0;
+        cachedVersion = 0;
+        liveSampleSequenceCounter = 0;
+    }
+
+    void primeForOfflineRender() override
+    {
+        reset();
+        refreshCachedState();
+    }
+
     void processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &) override
     {
         buffer.clear();
@@ -1330,29 +1568,93 @@ public:
                 {
                     const double inFile = fileOffsetSec.load(std::memory_order_relaxed);
                     const double startTimelineSec = blockStart + ((double)writeStart / sr);
+                    const double endTimelineSec =
+                        startTimelineSec + ((double)framesToRender / sr);
+                    const double blockSourceStartSec =
+                        ((startTimelineSec - cs) * safeRatio) + inFile;
+                    const double blockSourceEndSec =
+                        ((endTimelineSec - cs) * safeRatio) + inFile;
+                    const double pitchOffsetSemitones =
+                        (double)pitchSemitones.load(std::memory_order_relaxed);
+                    const bool keepOriginalPitch =
+                        preserveTempoPitch.load(std::memory_order_relaxed);
+                    const double tempoPitchOffsetSemitones =
+                        (!keepOriginalPitch && safeRatio > 0.0)
+                            ? 12.0 * (std::log(safeRatio) / std::log(2.0))
+                            : 0.0;
+                    std::vector<size_t> blockNoteIndices;
+                    std::vector<int> blockNotePitches;
                     std::vector<const SampledRegion *> timelineRegions;
+                    blockNoteIndices.reserve(cachedNotes.size());
+                    blockNotePitches.reserve(cachedNotes.size());
                     if (sampledMode)
                     {
-                            timelineRegions.reserve(cachedNotes.size());
-                        for (size_t noteIndex = 0; noteIndex < cachedNotes.size(); ++noteIndex)
+                        timelineRegions.reserve(cachedNotes.size());
+                    }
+
+                    for (size_t noteIndex = 0; noteIndex < cachedNotes.size(); ++noteIndex)
+                    {
+                        const auto &note = cachedNotes[noteIndex];
+                        const int notePitchBase = sampledMode
+                            ? sampledMidiPitchForInstrument(cachedInstrumentId, note.pitch)
+                            : juce::jlimit(0, 127, note.pitch);
+                        const int midiVelocity = juce::jlimit(
+                            0,
+                            127,
+                            (int)std::lround(
+                                juce::jlimit(0.0, 1.0, note.velocity) * 127.0));
+                        const SampledRegion *sampledRegion =
+                            sampledMode
+                                ? pickSampledRegion(
+                                      *cachedSampledDefinition,
+                                      notePitchBase,
+                                      midiVelocity,
+                                      (int)noteIndex)
+                                : nullptr;
+                        if (sampledMode && sampledRegion == nullptr)
+                            continue;
+
+                        double noteReleaseSec = releaseSec;
+                        if (sampledRegion != nullptr &&
+                            !cachedSampledReleaseOverride)
                         {
-                            const auto &note = cachedNotes[noteIndex];
-                            const int sampledPitch =
-                                sampledMidiPitchForInstrument(
-                                    cachedInstrumentId,
-                                    note.pitch);
-                            const int midiVelocity = juce::jlimit(
-                                0,
-                                127,
-                                (int)std::lround(
-                                    juce::jlimit(0.0, 1.0, note.velocity) * 127.0));
-                            timelineRegions.push_back(
-                                pickSampledRegion(
-                                    *cachedSampledDefinition,
-                                    sampledPitch,
-                                    midiVelocity,
-                                    (int)noteIndex));
+                            noteReleaseSec =
+                                juce::jmax(0.02, sampledRegion->releaseSec);
                         }
+
+                        const double noteStartSourceSec =
+                            note.startBeat * sourceSecPerBeat;
+                        double noteLengthSourceSec =
+                            juce::jmax(0.001, note.lengthBeats * sourceSecPerBeat);
+                        const double notePitchWithOffsets =
+                            (double)notePitchBase +
+                            pitchOffsetSemitones +
+                            tempoPitchOffsetSemitones;
+                        if (sampledRegion != nullptr && sampledRegion->oneShot)
+                        {
+                            const double oneShotDurationSec =
+                                sampledPlayableDurationSec(
+                                    *sampledRegion,
+                                    notePitchWithOffsets,
+                                    sr);
+                            noteLengthSourceSec = juce::jmax(
+                                noteLengthSourceSec,
+                                oneShotDurationSec * safeRatio);
+                        }
+                        const double noteEndSourceSec =
+                            noteStartSourceSec +
+                            noteLengthSourceSec +
+                            (noteReleaseSec * safeRatio);
+                        if (noteEndSourceSec <= blockSourceStartSec ||
+                            noteStartSourceSec >= blockSourceEndSec)
+                        {
+                            continue;
+                        }
+
+                        blockNoteIndices.push_back(noteIndex);
+                        blockNotePitches.push_back(notePitchBase);
+                        if (sampledMode)
+                            timelineRegions.push_back(sampledRegion);
                     }
 
                     for (int i = 0; i < framesToRender; ++i)
@@ -1362,19 +1664,13 @@ public:
                         float mixL = 0.0f;
                         float mixR = 0.0f;
 
-                        for (size_t noteIndex = 0; noteIndex < cachedNotes.size(); ++noteIndex)
+                        for (size_t activeIndex = 0; activeIndex < blockNoteIndices.size(); ++activeIndex)
                         {
+                            const size_t noteIndex = blockNoteIndices[activeIndex];
                             const auto &note = cachedNotes[noteIndex];
                             const SampledRegion *sampledRegion =
-                                sampledMode ? timelineRegions[noteIndex] : nullptr;
-                            if (sampledMode && sampledRegion == nullptr)
-                                continue;
-                            const int sampledPitch =
-                                sampledMode
-                                    ? sampledMidiPitchForInstrument(
-                                          cachedInstrumentId,
-                                          note.pitch)
-                                    : juce::jlimit(0, 127, note.pitch);
+                                sampledMode ? timelineRegions[activeIndex] : nullptr;
+                            const int sampledPitch = blockNotePitches[activeIndex];
 
                             double noteAttackSec = attackSec;
                             double noteReleaseSec = releaseSec;
@@ -1388,9 +1684,10 @@ public:
                                         juce::jmax(0.02, sampledRegion->releaseSec);
                             }
                             const double releaseSourceSec = noteReleaseSec * safeRatio;
-                            double notePitch = (double)sampledPitch + (double)pitchSemitones.load(std::memory_order_relaxed);
-                            if (!preserveTempoPitch.load(std::memory_order_relaxed) && safeRatio > 0.0)
-                                notePitch += 12.0 * (std::log(safeRatio) / std::log(2.0));
+                            double notePitch =
+                                (double)sampledPitch +
+                                pitchOffsetSemitones +
+                                tempoPitchOffsetSemitones;
 
                             const double noteStartSourceSec = note.startBeat * sourceSecPerBeat;
                             double noteLengthSourceSec = juce::jmax(0.001, note.lengthBeats * sourceSecPerBeat);
@@ -1926,6 +2223,13 @@ private:
         juce::String path = rawPath.trim().replaceCharacter('\\', '/');
         while (path.contains("//"))
             path = path.replace("//", "/");
+        const bool preserveLeadingSlash =
+            juce::File::isAbsolutePath(path) ||
+            path.startsWith("./") ||
+            path.startsWith("../") ||
+            path.startsWithChar('~');
+        if (preserveLeadingSlash)
+            return path;
         while (path.startsWithChar('/'))
             path = path.substring(1);
         return path;
@@ -2243,7 +2547,11 @@ private:
 
         const juce::File sampleFile = resolveFlutterAssetFile(normalized);
         if (!sampleFile.existsAsFile())
+        {
+            juce::Logger::writeToLog(
+                "Sampled instrument missing sample file: " + normalized);
             return nullptr;
+        }
 
         juce::AudioFormatManager formats;
         formats.registerBasicFormats();
@@ -2316,7 +2624,11 @@ private:
 
         const juce::File sfzFile = resolveFlutterAssetFile(sfzAssetPath);
         if (!sfzFile.existsAsFile())
+        {
+            juce::Logger::writeToLog(
+                "Sampled instrument missing sfz file: " + sfzAssetPath);
             return nullptr;
+        }
 
         const juce::String sfzText = sfzFile.loadFileAsString();
         if (sfzText.isEmpty())
@@ -2490,7 +2802,11 @@ private:
         }
 
         if (definition->regions.empty())
+        {
+            juce::Logger::writeToLog(
+                "Sampled instrument produced no playable regions: " + sfzAssetPath);
             return nullptr;
+        }
 
         {
             const juce::ScopedLock lock(cache.lock);
@@ -3312,6 +3628,7 @@ public:
         int wavBitDepth{16};
         bool wavDithering{true};
         int mp3BitrateKbps{192};
+        juce::String clipSnapshotJson;
     };
 
     static JuceEngine &get();
@@ -3605,6 +3922,10 @@ private:
     void rewireTrackChain(int trackIdx,
                           juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync); // clip-level FX+gain+pan → row
     void rewireMasterFxChain();                  // master FX chain
+    void rebuildClipProcessorsFromStoredStateLocked(
+        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::none);
+    void reapplyClipProcessorStateLocked();
+    void primeClipProcessorsForOfflineRenderLocked();
     void armOutputSafetyForCurrentRoute(bool fadeIn = false) noexcept;
     void ensureBusGraphInitialised();            // rows + master
     void rewireTrackBusFxChain(int trackRow);    // row-level FX between input and automation
@@ -3707,6 +4028,16 @@ private:
         bool reversed = false;
         double tempoRatio = 1.0;
         bool preservePitch = false;
+        float gainUi = kGainUiUnity;
+        float panNormalized = 0.0f;
+
+        // authoritative source state used to rebuild fresh player nodes
+        juce::String sourceFilePath;
+        juce::String midiInstrumentId;
+        juce::String midiInstrumentName;
+        juce::Array<TimelineMidiNote> midiNotes;
+        juce::NamedValueSet midiParams;
+        double midiSourceTempoBpm = 120.0;
 
         // nodes/processors
         juce::AudioProcessorGraph::Node::Ptr playerNode; // TimelineClipProcessor / TimelineMidiClipProcessor
@@ -3849,6 +4180,9 @@ private:
 
     StereoPanProcessor *masterPanProcessor = nullptr;
     juce::AudioProcessorGraph::Node::Ptr masterPanNode;
+    float masterGainUi = kGainUiUnity;
+    float masterPanUi = 0.5f;
+    bool masterMuted = false;
 
     bool busGraphInitialised = false;
     int projectClipLoadTransactionDepth = 0;

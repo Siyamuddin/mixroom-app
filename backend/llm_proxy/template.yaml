@@ -86,6 +86,12 @@ Parameters:
   ApiThrottleRateLimit:
     Type: Number
     Default: 100
+  ApiDetailedMetricsEnabled:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
   WebAclArn:
     Type: String
     Default: ''
@@ -150,6 +156,7 @@ Globals:
         MIX_RESOLVE_MAX_ACTIONS: !Ref MixResolveMaxActions
 
 Conditions:
+  ApiDetailedMetricsEnabledCondition: !Equals [!Ref ApiDetailedMetricsEnabled, 'true']
   HasWebAclArn: !Not
     - !Equals
       - !Ref WebAclArn
@@ -249,7 +256,7 @@ Resources:
     Properties:
       StageName: !Ref StageName
       DefaultRouteSettings:
-        DetailedMetricsEnabled: true
+        DetailedMetricsEnabled: !If [ApiDetailedMetricsEnabledCondition, true, false]
         ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
         ThrottlingRateLimit: !Ref ApiThrottleRateLimit
       CorsConfiguration:

@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/ai/debug_system_prompt.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mixroom/ai/cloud_llm_service.dart';
@@ -11,6 +13,22 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('CloudLlmService', () {
+    test('kDebugSystemPrompt stays in sync with the server prompt', () {
+      final serverText = File(
+        'backend/llm_proxy/src/common/llm_contract.py',
+      ).readAsStringSync();
+      const startMarker = 'SYSTEM_PROMPT_V3 = """';
+      final start = serverText.indexOf(startMarker);
+      expect(start, isNot(-1));
+
+      final promptStart = start + startMarker.length;
+      final promptEnd = serverText.indexOf('""".strip()', promptStart);
+      expect(promptEnd, greaterThan(promptStart));
+
+      final serverPrompt = serverText.substring(promptStart, promptEnd).trim();
+      expect(kDebugSystemPrompt.trim(), serverPrompt);
+    });
+
     test('preserves wrapped master tool args without prompt-based rewrites',
         () async {
       final client = MockClient((_) async {
@@ -542,7 +560,8 @@ void main() {
       );
     });
 
-    test('does not retry direct OpenAI solely because library snapshot is present',
+    test(
+        'does not retry direct OpenAI solely because library snapshot is present',
         () async {
       final requestBodies = <Map<String, dynamic>>[];
       var callCount = 0;
@@ -574,7 +593,8 @@ void main() {
       expect(requestBodies, hasLength(1));
     });
 
-    test('retries direct OpenAI by dropping pending mix while retaining library snapshot',
+    test(
+        'retries direct OpenAI by dropping pending mix while retaining library snapshot',
         () async {
       final requestBodies = <Map<String, dynamic>>[];
       var callCount = 0;
@@ -614,7 +634,9 @@ void main() {
         librarySnapshot:
             'sample_packs:\n- Starter Kit v1/Processed Drums/Kick-01.flac',
         pendingMix: MixingResult(
-          actions: [MixAction('set_row_gain', {'row': 0, 'delta': 1.5})],
+          actions: [
+            MixAction('set_row_gain', {'row': 0, 'delta': 1.5})
+          ],
           summary: 'Raised lead vocal slightly.',
           isNoOp: false,
         ),
@@ -634,16 +656,14 @@ void main() {
             (entry as Map)['content'].toString().contains('LIBRARY_SNAPSHOT:'),
       );
       final firstHasPendingMix = firstInput.any(
-        (entry) => (entry as Map)
-            ['content']
-                .toString()
-                .contains('PENDING_MIX_PROPOSAL:'),
+        (entry) => (entry as Map)['content']
+            .toString()
+            .contains('PENDING_MIX_PROPOSAL:'),
       );
       final secondHasPendingMix = secondInput.any(
-        (entry) => (entry as Map)
-            ['content']
-                .toString()
-                .contains('PENDING_MIX_PROPOSAL:'),
+        (entry) => (entry as Map)['content']
+            .toString()
+            .contains('PENDING_MIX_PROPOSAL:'),
       );
 
       expect(firstHasLibrary, isTrue);
@@ -1437,7 +1457,8 @@ void main() {
       );
     });
 
-    test('repairs lower-tempo colliding drum placements onto a 2-and-4 backbeat',
+    test(
+        'repairs lower-tempo colliding drum placements onto a 2-and-4 backbeat',
         () async {
       final client = MockClient((_) async {
         return http.Response(
@@ -2271,6 +2292,49 @@ void main() {
       );
     });
 
+    test('forwards conversation to proxy without hidden request-style hints',
+        () async {
+      late Map<String, dynamic> requestBody;
+      final client = MockClient((request) async {
+        requestBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'output': [
+              {
+                'type': 'function_call',
+                'name': 'informational_response',
+                'arguments': {
+                  'message': 'Done.',
+                  'cancels_pending': false,
+                },
+              }
+            ],
+          }),
+          200,
+        );
+      });
+
+      final service = CloudLlmService(
+        proxyApiBaseUrl: 'https://proxy.mixroom.test',
+        authTokenProvider: () async => 'session-token',
+        httpClient: client,
+      );
+      await service.send(
+        conversation: const [
+          {'role': 'assistant', 'content': '추천해줄게.'},
+        ],
+        userText: '군대 가기전에 듣는 노래',
+        projectSnapshot: 'Track 1: Lead Vocal',
+      );
+
+      final conversation =
+          (requestBody['conversation'] as List).cast<Map<String, dynamic>>();
+      expect(conversation, hasLength(1));
+      expect(conversation.first['role'], 'assistant');
+      expect(conversation.first['content'], '추천해줄게.');
+      expect(requestBody['user_text'], '군대 가기전에 듣는 노래');
+    });
+
     test('returns a calm message when proxy auth token is temporarily missing',
         () async {
       var requestCount = 0;
@@ -2539,7 +2603,7 @@ void main() {
 
       expect(
         requestBody['prompt_cache_key'],
-        'mixroom-daw-v20260416c:ai_chat',
+        'mixroom-daw-v20260422a:ai_chat',
       );
       expect(requestBody['prompt_cache_retention'], 'in_memory');
       expect(requestBody['max_output_tokens'], 4096);

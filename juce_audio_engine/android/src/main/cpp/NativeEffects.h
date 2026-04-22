@@ -2787,9 +2787,11 @@ public:
                 float p2 = ph + 0.5f;
                 if (p2 >= 1.0f)
                     p2 -= 1.0f;
-                const float g1 = 1.0f - std::abs(2.0f * p1 - 1.0f);
-                const float g2 = 1.0f - std::abs(2.0f * p2 - 1.0f);
-                const float norm = g1 + g2 + 1.0e-6f;
+                const float g1 = 0.5f - 0.5f *
+                                             std::cos(juce::MathConstants<float>::twoPi * p1);
+                const float g2 = 0.5f - 0.5f *
+                                             std::cos(juce::MathConstants<float>::twoPi * p2);
+                const float norm = juce::jmax(1.0e-6f, g1 + g2);
 
                 const float wet = (a * g1 + b * g2) / norm;
                 io[i] = in * dryMix + wet * wetMix;
@@ -3274,8 +3276,6 @@ public:
         sampleRate = sanitiseEffectSampleRate(inputSampleRate);
         bufferSize = juce::jmax(1, maxBlockSize);
         dryBuffer.setSize(numOutputs, bufferSize);
-        lowBuffer.setSize(numOutputs, bufferSize);
-        highBuffer.setSize(numOutputs, bufferSize);
         prepareFilters();
         prepareDecorrelators();
         widthSmoothed.reset(sampleRate, 0.02);
@@ -3291,10 +3291,7 @@ public:
     void reset()
     {
         dryBuffer.clear();
-        lowBuffer.clear();
-        highBuffer.clear();
-        lowpass.reset();
-        highpass.reset();
+        crossover.reset();
         resetDecorrelators();
     }
 
@@ -3306,8 +3303,6 @@ public:
 
         ensureCapacity(blockSamples);
         copyToFixedStereoBuffer(buffer, dryBuffer);
-        copyToFixedStereoBuffer(buffer, lowBuffer);
-        copyToFixedStereoBuffer(buffer, highBuffer);
 
         const float targetWidthAmount =
             juce::jlimit(0.0f, 2.0f, params.widthPercent * 0.01f);
@@ -3321,25 +3316,26 @@ public:
         lowBypassSmoothed.setTargetValue(targetLowBypassHz);
         updateFilters(lowBypassSmoothed.skip(blockSamples));
 
-        auto lowBlock = juce::dsp::AudioBlock<float>(lowBuffer)
-                            .getSubBlock(0, (size_t)blockSamples);
-        auto highBlock = juce::dsp::AudioBlock<float>(highBuffer)
-                             .getSubBlock(0, (size_t)blockSamples);
-        juce::dsp::ProcessContextReplacing<float> lowContext(lowBlock);
-        juce::dsp::ProcessContextReplacing<float> highContext(highBlock);
-        lowpass.process(lowContext);
-        highpass.process(highContext);
-
         const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
         for (int sample = 0; sample < blockSamples; ++sample)
         {
             const float widthAmount = widthSmoothed.getNextValue();
             const float sideGain = 1.0f + (0.55f * widthAmount);
             const float synthGain = 0.85f * widthAmount;
-            const float lowL = lowBuffer.getSample(0, sample);
-            const float lowR = lowBuffer.getSample(1, sample);
-            const float highL = highBuffer.getSample(0, sample);
-            const float highR = highBuffer.getSample(1, sample);
+            float lowL = 0.0f;
+            float highL = 0.0f;
+            float lowR = 0.0f;
+            float highR = 0.0f;
+            crossover.processSample(
+                0,
+                dryBuffer.getSample(0, sample),
+                lowL,
+                highL);
+            crossover.processSample(
+                1,
+                dryBuffer.getSample(1, sample),
+                lowR,
+                highR);
 
             const float mid = 0.5f * (highL + highR);
             const float side = 0.5f * (highL - highR);
@@ -3364,10 +3360,6 @@ public:
     }
 
 private:
-    using StereoFilter = juce::dsp::ProcessorDuplicator<
-        juce::dsp::IIR::Filter<float>,
-        juce::dsp::IIR::Coefficients<float>>;
-
     static bool nearlyEqual(float a, float b, float epsilon = 1.0e-3f)
     {
         return std::abs(a - b) <= epsilon;
@@ -3379,10 +3371,8 @@ private:
         spec.sampleRate = sampleRate;
         spec.maximumBlockSize = (juce::uint32)bufferSize;
         spec.numChannels = (juce::uint32)numOutputs;
-        lowpass.prepare(spec);
-        highpass.prepare(spec);
-        lowpass.reset();
-        highpass.reset();
+        crossover.prepare(spec);
+        crossover.reset();
     }
 
     void prepareDecorrelators()
@@ -3402,8 +3392,6 @@ private:
 
         bufferSize = requiredSamples;
         dryBuffer.setSize(numOutputs, bufferSize);
-        lowBuffer.setSize(numOutputs, bufferSize);
-        highBuffer.setSize(numOutputs, bufferSize);
         prepareFilters();
         lastLowBypassHz = -1.0f;
     }
@@ -3418,10 +3406,7 @@ private:
         if (nearlyEqual(safeCutoff, lastLowBypassHz))
             return;
 
-        *lowpass.state = *juce::dsp::IIR::Coefficients<float>::makeLowPass(
-            sampleRate, safeCutoff);
-        *highpass.state = *juce::dsp::IIR::Coefficients<float>::makeHighPass(
-            sampleRate, safeCutoff);
+        crossover.setCutoffFrequency(safeCutoff);
         lastLowBypassHz = safeCutoff;
     }
 
@@ -3482,8 +3467,8 @@ private:
     int bufferSize{0};
     int decorrelatorSize{0};
     float lastLowBypassHz{-1.0f};
-    juce::AudioBuffer<float> dryBuffer, lowBuffer, highBuffer;
-    StereoFilter lowpass, highpass;
+    juce::AudioBuffer<float> dryBuffer;
+    juce::dsp::LinkwitzRileyFilter<float> crossover;
     juce::LinearSmoothedValue<float> widthSmoothed;
     juce::LinearSmoothedValue<float> monoSmoothed;
     juce::LinearSmoothedValue<float> lowBypassSmoothed;
@@ -3790,6 +3775,7 @@ struct VolumeShaperParameters
     float mixPercent;
     float smoothPercent;
     float swingPercent;
+    float phaseDegrees;
     int rateIndex;
     int shapeIndex;
 };
@@ -3825,6 +3811,7 @@ public:
         params.mixPercent = apvts.getRawParameterValue("mix")->load();
         params.smoothPercent = apvts.getRawParameterValue("smooth")->load();
         params.swingPercent = apvts.getRawParameterValue("swing")->load();
+        params.phaseDegrees = apvts.getRawParameterValue("phase")->load();
         params.rateIndex = juce::jlimit(
             0,
             (int)rateBeats.size() - 1,
@@ -3888,6 +3875,7 @@ public:
         const double cycleBeats =
             rateBeats[(size_t)juce::jlimit(0, (int)rateBeats.size() - 1, params.rateIndex)];
         const float swingAmount = juce::jlimit(0.0f, 1.0f, params.swingPercent * 0.01f);
+        const float phaseOffset = params.phaseDegrees / 360.0f;
         const float smoothingAlpha =
             computeSmoothingAlpha(params.smoothPercent, sampleRate);
         const int channels = juce::jmin(buffer.getNumChannels(), numOutputs);
@@ -3897,8 +3885,8 @@ public:
         {
             const double transportSec =
                 blockTransportStartSec + ((double)sample / sampleRate);
-            const float rawPhase =
-                resolveCyclePhase(transportSec, bpm, cycleBeats);
+            const float rawPhase = wrapUnitPhase(
+                resolveCyclePhase(transportSec, bpm, cycleBeats) + phaseOffset);
             const float displayPhase = applySwing(rawPhase, swingAmount);
             const float targetGain = computeGainForDisplay(
                 params.shapeIndex,
@@ -3932,6 +3920,7 @@ public:
                                                 float depthPercent,
                                                 float smoothPercent,
                                                 float swingPercent,
+                                                float phaseDegrees,
                                                 float displayPhase)
     {
         const int count = juce::jlimit(32, 512, pointCount);
@@ -3939,13 +3928,15 @@ public:
         out[0] = juce::jlimit(0.0f, 1.0f, displayPhase);
 
         const float swingAmount = juce::jlimit(0.0f, 1.0f, swingPercent * 0.01f);
+        const float phaseOffset = phaseDegrees / 360.0f;
         const float alpha = computeSmoothingAlpha(smoothPercent, 2000.0);
         float current = computeGainForDisplay(shapeIndex, 0.0f, depthPercent,
                                               smoothPercent, swingPercent);
         for (int i = 0; i < count; ++i)
         {
             const float x = (count <= 1) ? 0.0f : (float)i / (float)(count - 1);
-            const float rawPhase = invertSwing(x, swingAmount);
+            const float rawPhase =
+                wrapUnitPhase(invertSwing(x, swingAmount) + phaseOffset);
             const float target = computeGainForDisplay(
                 shapeIndex,
                 rawPhase,
@@ -3979,6 +3970,17 @@ private:
         const double beatPos = juce::jmax(0.0, transportSec) * safeBpm / 60.0;
         const double cyclePos = std::fmod(beatPos / safeCycleBeats, 1.0);
         return (float)(cyclePos >= 0.0 ? cyclePos : cyclePos + 1.0);
+    }
+
+    static float wrapUnitPhase(float phase)
+    {
+        if (!std::isfinite(phase))
+            return 0.0f;
+
+        phase = std::fmod(phase, 1.0f);
+        if (phase < 0.0f)
+            phase += 1.0f;
+        return juce::jlimit(0.0f, 1.0f, phase);
     }
 
     static float applySwing(float rawPhase, float swingAmount)
@@ -4058,7 +4060,7 @@ private:
         dryBuffer.setSize(numOutputs, bufferSize);
     }
 
-    VolumeShaperParameters params{100.0f, 100.0f, 18.0f, 0.0f, 3, 0};
+    VolumeShaperParameters params{100.0f, 100.0f, 18.0f, 0.0f, 0.0f, 3, 0};
     double sampleRate{44100.0};
     int bufferSize{0};
     float currentGain{1.0f};
@@ -4117,6 +4119,8 @@ struct TimeShaperParameters
     float amountPercent;
     float mixPercent;
     float smoothPercent;
+    float swingPercent;
+    float phaseDegrees;
     int rateIndex;
     int patternIndex;
 };
@@ -4151,6 +4155,8 @@ public:
         params.amountPercent = apvts.getRawParameterValue("amount")->load();
         params.mixPercent = apvts.getRawParameterValue("mix")->load();
         params.smoothPercent = apvts.getRawParameterValue("smooth")->load();
+        params.swingPercent = apvts.getRawParameterValue("swing")->load();
+        params.phaseDegrees = apvts.getRawParameterValue("phase")->load();
         params.rateIndex = juce::jlimit(
             0,
             (int)rateBeats.size() - 1,
@@ -4220,6 +4226,8 @@ public:
             8,
             juce::jmax(8, ringSize - 4),
             (int)std::round(sampleRate * cycleBeats * 60.0 / bpm));
+        const float swingAmount = juce::jlimit(0.0f, 1.0f, params.swingPercent * 0.01f);
+        const float phaseOffset = params.phaseDegrees / 360.0f;
         const float smoothingAlpha =
             computeSmoothingAlpha(params.smoothPercent, sampleRate);
         const int channels = juce::jmin(buffer.getNumChannels(), numOutputs);
@@ -4235,7 +4243,11 @@ public:
 
             const double transportSec =
                 blockTransportStartSec + ((double)sample / sampleRate);
-            const float phase = resolveCyclePhase(transportSec, bpm, cycleBeats);
+            const float phase = applySwing(
+                wrapUnitPhase(
+                    resolveCyclePhase(transportSec, bpm, cycleBeats) +
+                    phaseOffset),
+                swingAmount);
             const float amount = amountSmoothed.getNextValue();
             const float mix = mixSmoothed.getNextValue();
             const float targetOffsetNorm =
@@ -4286,6 +4298,8 @@ public:
         const double bpm = juce::jlimit(30.0, 400.0, mixroom::fx::getGlobalTempoBpm());
         const double cycleBeats =
             rateBeats[(size_t)juce::jlimit(0, (int)rateBeats.size() - 1, params.rateIndex)];
+        const float swingAmount = juce::jlimit(0.0f, 1.0f, params.swingPercent * 0.01f);
+        const float phaseOffset = params.phaseDegrees / 360.0f;
         float lastPhase = 0.0f;
 
         for (int sample = 0; sample < blockSamples; ++sample)
@@ -4296,7 +4310,11 @@ public:
             writePos = (writePos + 1) % juce::jmax(1, ringSize);
             const double transportSec =
                 blockTransportStartSec + ((double)sample / sampleRate);
-            lastPhase = resolveCyclePhase(transportSec, bpm, cycleBeats);
+            lastPhase = applySwing(
+                wrapUnitPhase(
+                    resolveCyclePhase(transportSec, bpm, cycleBeats) +
+                    phaseOffset),
+                swingAmount);
         }
 
         phaseOut.store(lastPhase, std::memory_order_relaxed);
@@ -4308,6 +4326,8 @@ public:
                                                 int patternIndex,
                                                 float amountPercent,
                                                 float smoothPercent,
+                                                float swingPercent,
+                                                float phaseDegrees,
                                                 float phase)
     {
         const int count = juce::jlimit(32, 512, pointCount);
@@ -4315,13 +4335,19 @@ public:
         out[0] = juce::jlimit(0.0f, 1.0f, phase);
 
         const float amount = juce::jlimit(0.0f, 1.0f, amountPercent * 0.01f);
+        const float swingAmount = juce::jlimit(0.0f, 1.0f, swingPercent * 0.01f);
+        const float phaseOffset = phaseDegrees / 360.0f;
         const float alpha = computeSmoothingAlpha(smoothPercent, 2000.0);
         float current = 1.0f;
         for (int i = 0; i < count; ++i)
         {
             const float x = (count <= 1) ? 0.0f : (float)i / (float)(count - 1);
-            const float target =
-                1.0f - (amount * evaluateOffsetNorm(patternIndex, x));
+            const float target = 1.0f -
+                                 (amount * evaluateOffsetNorm(
+                                               patternIndex,
+                                               applySwing(
+                                                   wrapUnitPhase(x + phaseOffset),
+                                                   swingAmount)));
             if (alpha >= 1.0f)
                 current = target;
             else
@@ -4360,6 +4386,18 @@ private:
         if (value < 0.0f)
             value += 1.0f;
         return juce::jlimit(0.0f, 1.0f, value);
+    }
+
+    static float applySwing(float rawPhase, float swingAmount)
+    {
+        if (swingAmount <= 0.0001f)
+            return juce::jlimit(0.0f, 1.0f, rawPhase);
+
+        const float split =
+            juce::jlimit(0.25f, 0.75f, 0.5f + (swingAmount * 0.22f));
+        if (rawPhase < split)
+            return 0.5f * (rawPhase / split);
+        return 0.5f + 0.5f * ((rawPhase - split) / (1.0f - split));
     }
 
     static float evaluatePlaybackPhase(int patternIndex, float phase)
@@ -4430,7 +4468,7 @@ private:
         dryBuffer.setSize(numOutputs, bufferSize);
     }
 
-    TimeShaperParameters params{100.0f, 100.0f, 18.0f, 1, 0};
+    TimeShaperParameters params{100.0f, 100.0f, 18.0f, 0.0f, 0.0f, 1, 0};
     double sampleRate{44100.0};
     int bufferSize{0};
     int ringSize{0};

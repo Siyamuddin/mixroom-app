@@ -550,6 +550,7 @@ class JuceAudioEngine {
     int wavBitDepth = 16,
     bool wavDithering = true,
     int mp3BitrateKbps = 192,
+    String? clipSnapshotJson,
   }) async {
     try {
       final result = await _ch.invokeMethod<String>(
@@ -561,6 +562,8 @@ class JuceAudioEngine {
           'wavBitDepth': wavBitDepth,
           'wavDithering': wavDithering,
           'mp3BitrateKbps': mp3BitrateKbps,
+          if (clipSnapshotJson != null && clipSnapshotJson.isNotEmpty)
+            'clipSnapshotJson': clipSnapshotJson,
         },
       );
       return result ?? '';
@@ -755,7 +758,7 @@ class JuceAudioEngine {
     int clipIndex, {
     required int pitch,
     required double velocity,
-    int durationMs = 900,
+    int durationMs = 220,
   }) async {
     try {
       final ok = await _ch.invokeMethod<bool>('playPreviewMidiNote', {
@@ -839,7 +842,8 @@ class JuceAudioEngine {
 
   static Future<List<String>> mountBundledSamplePacks() async {
     try {
-      final raw = await _ch.invokeMethod<List<dynamic>>('mountBundledSamplePacks');
+      final raw =
+          await _ch.invokeMethod<List<dynamic>>('mountBundledSamplePacks');
       if (raw == null) return const <String>[];
       return raw
           .map((entry) => entry?.toString().trim() ?? '')

@@ -387,6 +387,12 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 @implementation JuceBridge
 
++ (void)setFlutterAssetRootObjC:(NSString *)rootPath
+{
+    const juce::String jucePath = juceStringFromNSString(rootPath).trim();
+    TimelineMidiClipProcessor::setFlutterAssetRootPath(jucePath);
+}
+
 + (void)initialiseEngineObjC
 {
     // JuceEngine& engine = JuceEngine::get();
@@ -773,6 +779,9 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     NSNumber *mp3BitrateKbps = settings[@"mp3BitrateKbps"];
     if ([mp3BitrateKbps isKindOfClass:[NSNumber class]])
         options.mp3BitrateKbps = [mp3BitrateKbps intValue];
+    NSString *clipSnapshotJson = settings[@"clipSnapshotJson"];
+    if ([clipSnapshotJson isKindOfClass:[NSString class]] && clipSnapshotJson.length > 0)
+        options.clipSnapshotJson = juceStringFromNSString(clipSnapshotJson);
     juce::String result;
 
     juce::MessageManager::getInstance()->callSync([&]
@@ -965,16 +974,16 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 + (void)removeTrackEffectObjC:(NSInteger)trackRow effectIndex:(NSInteger)effectIndex
 {
-    juce::MessageManager::callAsync([trackRow, effectIndex]
-                                    { JuceEngine::get().removeTrackEffect((int)trackRow, (int)effectIndex); });
+    juce::MessageManager::getInstance()->callSync([trackRow, effectIndex]
+                                                  { JuceEngine::get().removeTrackEffect((int)trackRow, (int)effectIndex); });
 }
 
 + (void)reorderTrackEffectsObjC:(NSInteger)trackRow
                       fromIndex:(NSInteger)fromIdx
                         toIndex:(NSInteger)toIdx
 {
-    juce::MessageManager::callAsync([trackRow, fromIdx, toIdx]
-                                    { JuceEngine::get().reorderTrackEffects((int)trackRow, (int)fromIdx, (int)toIdx); });
+    juce::MessageManager::getInstance()->callSync([trackRow, fromIdx, toIdx]
+                                                  { JuceEngine::get().reorderTrackEffects((int)trackRow, (int)fromIdx, (int)toIdx); });
 }
 
 + (NSArray<NSString *> *)getTrackEffectsForRowObjC:(NSInteger)trackRow
@@ -1032,16 +1041,16 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     }
 
     juce::String juceParam = juceStringFromNSString(param);
-    juce::MessageManager::callAsync([trackRow, effectIndex, juceParam, newVal]
-                                    { JuceEngine::get().setTrackEffectParameter((int)trackRow, (int)effectIndex, juceParam, newVal); });
+    juce::MessageManager::getInstance()->callSync([trackRow, effectIndex, juceParam, newVal]
+                                                  { JuceEngine::get().setTrackEffectParameter((int)trackRow, (int)effectIndex, juceParam, newVal); });
 }
 
 + (void)bypassRowEffectObjC:(NSInteger)rowIndex
                 effectIndex:(NSInteger)effectIndex
                      bypass:(BOOL)shouldBypass
 {
-    juce::MessageManager::callAsync([rowIndex, effectIndex, shouldBypass]
-                                    { JuceEngine::get().bypassRowEffect((int)rowIndex, (int)effectIndex, (bool)shouldBypass); });
+    juce::MessageManager::getInstance()->callSync([rowIndex, effectIndex, shouldBypass]
+                                                  { JuceEngine::get().bypassRowEffect((int)rowIndex, (int)effectIndex, (bool)shouldBypass); });
 }
 
 + (bool)getRowEffectBypassStateObjC:(NSInteger)rowIndex
@@ -1055,14 +1064,14 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 + (void)setRowGainObjC:(NSInteger)row gain:(float)gain
 {
-    juce::MessageManager::callAsync([row, gain]
-                                    { JuceEngine::get().setRowGain((int)row, gain); });
+    juce::MessageManager::getInstance()->callSync([row, gain]
+                                                  { JuceEngine::get().setRowGain((int)row, gain); });
 }
 
 + (void)muteRowObjC:(NSInteger)row shouldMute:(BOOL)shouldMute
 {
-    juce::MessageManager::callAsync([row, shouldMute]
-                                    { JuceEngine::get().muteRow((int)row, (bool)shouldMute); });
+    juce::MessageManager::getInstance()->callSync([row, shouldMute]
+                                                  { JuceEngine::get().muteRow((int)row, (bool)shouldMute); });
 }
 
 + (bool)isRowMutedObjC:(NSInteger)row
@@ -1075,8 +1084,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 + (void)setRowPanObjC:(NSInteger)row pan:(float)pan
 {
-    juce::MessageManager::callAsync([row, pan]
-                                    { JuceEngine::get().setRowPan((int)row, pan); });
+    juce::MessageManager::getInstance()->callSync([row, pan]
+                                                  { JuceEngine::get().setRowPan((int)row, pan); });
 }
 
 #pragma mark - Master bus FX and controls
@@ -1161,14 +1170,14 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     }
 
     juce::String juceParam = juceStringFromNSString(param);
-    juce::MessageManager::callAsync([effectIndex, juceParam, newVal]
-                                    { JuceEngine::get().setMasterEffectParameter((int)effectIndex, juceParam, newVal); });
+    juce::MessageManager::getInstance()->callSync([effectIndex, juceParam, newVal]
+                                                  { JuceEngine::get().setMasterEffectParameter((int)effectIndex, juceParam, newVal); });
 }
 
 + (void)bypassMasterEffectObjC:(NSInteger)effectIndex bypass:(BOOL)shouldBypass
 {
-    juce::MessageManager::callAsync([effectIndex, shouldBypass]
-                                    { JuceEngine::get().bypassMasterEffect((int)effectIndex, (bool)shouldBypass); });
+    juce::MessageManager::getInstance()->callSync([effectIndex, shouldBypass]
+                                                  { JuceEngine::get().bypassMasterEffect((int)effectIndex, (bool)shouldBypass); });
 }
 
 + (bool)getMasterEffectBypassStateObjC:(NSInteger)effectIndex
@@ -1181,20 +1190,20 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 + (void)setMasterGainObjC:(float)gain
 {
-    juce::MessageManager::callAsync([gain]
-                                    { JuceEngine::get().setMasterGain(gain); });
+    juce::MessageManager::getInstance()->callSync([gain]
+                                                  { JuceEngine::get().setMasterGain(gain); });
 }
 
 + (void)muteMasterObjC:(BOOL)shouldMute
 {
-    juce::MessageManager::callAsync([shouldMute]
-                                    { JuceEngine::get().muteMaster((bool)shouldMute); });
+    juce::MessageManager::getInstance()->callSync([shouldMute]
+                                                  { JuceEngine::get().muteMaster((bool)shouldMute); });
 }
 
 + (void)setMasterPanObjC:(float)pan
 {
-    juce::MessageManager::callAsync([pan]
-                                    { JuceEngine::get().setMasterPan(pan); });
+    juce::MessageManager::getInstance()->callSync([pan]
+                                                  { JuceEngine::get().setMasterPan(pan); });
 }
 
 + (void)bypassPluginObjC:(NSInteger)trackIndex
@@ -1373,6 +1382,21 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return (BOOL)ok;
 }
 
++ (BOOL)playPreviewMidiNoteObjC:(NSInteger)clipIndex
+                          pitch:(NSInteger)pitch
+                       velocity:(float)velocity
+                     durationMs:(NSInteger)durationMs
+{
+    bool ok = false;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  {
+        ok = JuceEngine::get().playPreviewMidiNote((int)clipIndex,
+                                                   (int)pitch,
+                                                   velocity,
+                                                   (int)durationMs); });
+    return (BOOL)ok;
+}
+
 + (NSArray<NSDictionary *> *)consumeLiveMidiInputEventsObjC
 {
     std::vector<JuceEngine::LiveMidiInputEvent> events;
@@ -1438,46 +1462,46 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 + (void)setClipGainObjC:(NSInteger)clipIndex gain:(float)gain
 {
-    juce::MessageManager::callAsync([clipIndex, gain]
-                                    { JuceEngine::get().setClipGain((int)clipIndex, gain); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, gain]
+                                                  { JuceEngine::get().setClipGain((int)clipIndex, gain); });
 }
 
 + (void)muteClipObjC:(NSInteger)clipIndex shouldMute:(BOOL)shouldMute
 {
-    juce::MessageManager::callAsync([clipIndex, shouldMute]
-                                    { JuceEngine::get().muteClip((int)clipIndex, (bool)shouldMute); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, shouldMute]
+                                                  { JuceEngine::get().muteClip((int)clipIndex, (bool)shouldMute); });
 }
 
 + (void)setClipPanObjC:(NSInteger)clipIndex pan:(float)pan
 {
-    juce::MessageManager::callAsync([clipIndex, pan]
-                                    { JuceEngine::get().setClipPan((int)clipIndex, pan); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, pan]
+                                                  { JuceEngine::get().setClipPan((int)clipIndex, pan); });
 }
 
 + (void)setClipPitchObjC:(NSInteger)clipIndex semitones:(float)semitones
 {
-    juce::MessageManager::callAsync([clipIndex, semitones]
-                                    { JuceEngine::get().setClipPitch((int)clipIndex, semitones); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, semitones]
+                                                  { JuceEngine::get().setClipPitch((int)clipIndex, semitones); });
 }
 
 + (void)setClipReversedObjC:(NSInteger)clipIndex reversed:(BOOL)reversed
 {
-    juce::MessageManager::callAsync([clipIndex, reversed]
-                                    { JuceEngine::get().setClipReversed((int)clipIndex, (bool)reversed); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, reversed]
+                                                  { JuceEngine::get().setClipReversed((int)clipIndex, (bool)reversed); });
 }
 
 + (void)setClipStretchOptionsObjC:(NSInteger)clipIndex
                        tempoRatio:(double)tempoRatio
                     preservePitch:(BOOL)preservePitch
 {
-    juce::MessageManager::callAsync([clipIndex, tempoRatio, preservePitch]
-                                    { JuceEngine::get().setClipStretchOptions((int)clipIndex, tempoRatio, (bool)preservePitch); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, tempoRatio, preservePitch]
+                                                  { JuceEngine::get().setClipStretchOptions((int)clipIndex, tempoRatio, (bool)preservePitch); });
 }
 
 + (void)moveClipToRowObjC:(NSInteger)clipIndex newRowId:(NSInteger)newRowId
 {
-    juce::MessageManager::callAsync([clipIndex, newRowId]
-                                    { JuceEngine::get().moveClipToRow((int)clipIndex, (int)newRowId); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, newRowId]
+                                                  { JuceEngine::get().moveClipToRow((int)clipIndex, (int)newRowId); });
 }
 
 + (void)setClipTimeObjC:(NSInteger)clipIndex
@@ -1485,8 +1509,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
               lengthSec:(double)lengthSec
         inFileOffsetSec:(double)inFileOffsetSec
 {
-    juce::MessageManager::callAsync([clipIndex, startSec, lengthSec, inFileOffsetSec]
-                                    { JuceEngine::get().setClipTime((int)clipIndex, startSec, lengthSec, inFileOffsetSec); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, startSec, lengthSec, inFileOffsetSec]
+                                                  { JuceEngine::get().setClipTime((int)clipIndex, startSec, lengthSec, inFileOffsetSec); });
 }
 
 #pragma mark - Row management
@@ -1578,8 +1602,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         cppPoints.push_back(p);
     }
 
-    juce::MessageManager::callAsync([trackRow, cppPoints]() mutable
-                                    { JuceEngine::get().setTrackAutomationPoints((int)trackRow, cppPoints); });
+    juce::MessageManager::getInstance()->callSync([trackRow, cppPoints]() mutable
+                                                  { JuceEngine::get().setTrackAutomationPoints((int)trackRow, cppPoints); });
 }
 
 + (void)setTrackEffectAutomationPointsObjC:(NSInteger)trackRow
@@ -1622,14 +1646,14 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     }
 
     juce::String juceParam = juceStringFromNSString(paramId ?: @"");
-    juce::MessageManager::callAsync([trackRow, effectIndex, juceParam, minValue, maxValue, cppPoints]() mutable
-                                    { JuceEngine::get().setTrackEffectAutomationPoints((int)trackRow, (int)effectIndex, juceParam, (float)minValue, (float)maxValue, cppPoints); });
+    juce::MessageManager::getInstance()->callSync([trackRow, effectIndex, juceParam, minValue, maxValue, cppPoints]() mutable
+                                                  { JuceEngine::get().setTrackEffectAutomationPoints((int)trackRow, (int)effectIndex, juceParam, (float)minValue, (float)maxValue, cppPoints); });
 }
 
 + (void)clearTrackEffectAutomationForRowObjC:(NSInteger)trackRow
 {
-    juce::MessageManager::callAsync([trackRow]
-                                    { JuceEngine::get().clearTrackEffectAutomationForRow((int)trackRow); });
+    juce::MessageManager::getInstance()->callSync([trackRow]
+                                                  { JuceEngine::get().clearTrackEffectAutomationForRow((int)trackRow); });
 }
 
 + (void)setRowGainAutomationPointsObjC:(NSInteger)row
@@ -1666,8 +1690,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         cppPoints.push_back(p);
     }
 
-    juce::MessageManager::callAsync([row, cppPoints]() mutable
-                                    { JuceEngine::get().setRowGainAutomationPoints((int)row, cppPoints); });
+    juce::MessageManager::getInstance()->callSync([row, cppPoints]() mutable
+                                                  { JuceEngine::get().setRowGainAutomationPoints((int)row, cppPoints); });
 }
 
 + (void)setRowPanAutomationPointsObjC:(NSInteger)row
@@ -1704,8 +1728,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         cppPoints.push_back(p);
     }
 
-    juce::MessageManager::callAsync([row, cppPoints]() mutable
-                                    { JuceEngine::get().setRowPanAutomationPoints((int)row, cppPoints); });
+    juce::MessageManager::getInstance()->callSync([row, cppPoints]() mutable
+                                                  { JuceEngine::get().setRowPanAutomationPoints((int)row, cppPoints); });
 }
 
 + (void)setMasterEffectAutomationPointsObjC:(NSInteger)effectIndex
@@ -1746,14 +1770,14 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     }
 
     juce::String juceParam = juceStringFromNSString(paramId ?: @"");
-    juce::MessageManager::callAsync([effectIndex, juceParam, minValue, maxValue, cppPoints]() mutable
-                                    { JuceEngine::get().setMasterEffectAutomationPoints((int)effectIndex, juceParam, (float)minValue, (float)maxValue, cppPoints); });
+    juce::MessageManager::getInstance()->callSync([effectIndex, juceParam, minValue, maxValue, cppPoints]() mutable
+                                                  { JuceEngine::get().setMasterEffectAutomationPoints((int)effectIndex, juceParam, (float)minValue, (float)maxValue, cppPoints); });
 }
 
 + (void)clearMasterEffectAutomationObjC
 {
-    juce::MessageManager::callAsync([]
-                                    { JuceEngine::get().clearMasterEffectAutomation(); });
+    juce::MessageManager::getInstance()->callSync([]
+                                                  { JuceEngine::get().clearMasterEffectAutomation(); });
 }
 
 + (void)setMasterGainAutomationPointsObjC:(NSArray<NSDictionary *> *)points
@@ -1789,8 +1813,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         cppPoints.push_back(p);
     }
 
-    juce::MessageManager::callAsync([cppPoints]() mutable
-                                    { JuceEngine::get().setMasterGainAutomationPoints(cppPoints); });
+    juce::MessageManager::getInstance()->callSync([cppPoints]() mutable
+                                                  { JuceEngine::get().setMasterGainAutomationPoints(cppPoints); });
 }
 
 + (void)setMasterPanAutomationPointsObjC:(NSArray<NSDictionary *> *)points
@@ -1826,8 +1850,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         cppPoints.push_back(p);
     }
 
-    juce::MessageManager::callAsync([cppPoints]() mutable
-                                    { JuceEngine::get().setMasterPanAutomationPoints(cppPoints); });
+    juce::MessageManager::getInstance()->callSync([cppPoints]() mutable
+                                                  { JuceEngine::get().setMasterPanAutomationPoints(cppPoints); });
 }
 
 + (void)setAutomationTransportObjC:(double)timeSeconds

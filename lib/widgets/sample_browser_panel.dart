@@ -192,9 +192,22 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     return _kAudioExtensions.contains(ext);
   }
 
+  String _decodeDisplayLabel(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty || !trimmed.contains('%')) return trimmed;
+    try {
+      return Uri.decodeFull(trimmed);
+    } catch (_) {
+      return trimmed;
+    }
+  }
+
   String _displayNameForPath(String path) {
     final base = p.basename(path).trim();
-    return base.isEmpty ? path : base;
+    final fallback = path.trim();
+    final rawLabel = base.isEmpty ? fallback : base;
+    final decodedLabel = _decodeDisplayLabel(rawLabel);
+    return decodedLabel.isEmpty ? rawLabel : decodedLabel;
   }
 
   String _friendlyDirError(Object error) {
@@ -245,10 +258,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         final aDir = a is Directory;
         final bDir = b is Directory;
         if (aDir != bDir) return aDir ? -1 : 1;
-        return p
-            .basename(a.path)
+        return _displayNameForPath(a.path)
             .toLowerCase()
-            .compareTo(p.basename(b.path).toLowerCase());
+            .compareTo(_displayNameForPath(b.path).toLowerCase());
       });
       if (!mounted) return;
       setState(() {
@@ -486,8 +498,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         itemBuilder: (context, index) {
           final root = widget.rootFolders[index];
           final selected = root == _selectedRoot;
-          final label =
-              p.basename(root).trim().isEmpty ? root : p.basename(root);
+          final label = _displayNameForPath(root);
           return Listener(
             onPointerDown: (event) =>
                 _startFolderHold(root, label, event.position),
@@ -703,7 +714,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   Widget _buildFileRow(_TreeLine line) {
     final indent = math.min(12 + line.depth * 12.0, 92.0);
     final filePath = line.path;
-    final fileName = p.basename(filePath);
+    final fileName = _displayNameForPath(filePath);
     final isAuditioning = widget.auditioningPath == filePath;
 
     final tile = LayoutBuilder(
@@ -1041,7 +1052,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                         children: [
                           Expanded(
                             child: Text(
-                              p.basename(filePath),
+                              _displayNameForPath(filePath),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(

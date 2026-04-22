@@ -158,6 +158,21 @@ class _FakeUsageRepo:
 
 
 class ApiResponsesTests(unittest.TestCase):
+    def _tool_action_types(self, daw_tool):
+        actions = daw_tool["parameters"]["properties"]["actions"]
+        items = actions["items"]
+        if "properties" in items:
+            return items["properties"]["type"]["enum"]
+
+        allowed = []
+        for variant in items.get("oneOf", []):
+            type_schema = variant.get("properties", {}).get("type", {})
+            if "enum" in type_schema:
+                allowed.extend(type_schema["enum"])
+            elif "const" in type_schema:
+                allowed.append(type_schema["const"])
+        return allowed
+
     def setUp(self) -> None:
         api_responses._secret_cache = None
         api_responses._secret_cache_loaded_at = None
@@ -253,10 +268,26 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertIn("AI Co-Producer", provider.request_body["instructions"])
         self.assertEqual(
             provider.request_body["prompt_cache_key"],
-            "mixroom-daw-v20260416c:ai_chat:legacy",
+            "mixroom-daw-v20260422a:ai_chat:c49fea7425fa",
         )
         self.assertEqual(provider.request_body["prompt_cache_retention"], "in_memory")
         self.assertEqual(provider.request_body["tools"][0]["name"], "informational_response")
+        self.assertIn(
+            "For recommendation or discovery requests",
+            provider.request_body["instructions"],
+        )
+        self.assertIn(
+            "Brief factual questions about public songs, artists, genres, or styles are",
+            provider.request_body["instructions"],
+        )
+        self.assertIn(
+            "across languages, default to a polite neutral professional register",
+            provider.request_body["instructions"],
+        )
+        self.assertIn(
+            "Prefer execution over permission loops.",
+            provider.request_body["instructions"],
+        )
         self.assertEqual(
             provider.request_body["messages"][0],
             {"role": "user", "content": "PROJECT_SNAPSHOT:\nTrack 1: Lead Vocal"},
@@ -465,7 +496,7 @@ class ApiResponsesTests(unittest.TestCase):
         request_context = log_request.call_args.kwargs["request_context"]
         self.assertEqual(
             request_context["prompt_cache_key"],
-            "mixroom-daw-v20260416c:ai_chat:legacy",
+            "mixroom-daw-v20260422a:ai_chat:c49fea7425fa",
         )
         self.assertEqual(request_context["prompt_cache_retention"], "in_memory")
         self.assertEqual(request_context["prompt_tokens"], 8099)
@@ -1344,11 +1375,7 @@ class ApiResponsesTests(unittest.TestCase):
         daw_tool = next(
             tool for tool in tool_defs if tool.get("name") == "daw_assistant_actions"
         )
-        action_types = (
-            daw_tool["parameters"]["properties"]["actions"]["items"]["properties"][
-                "type"
-            ]["enum"]
-        )
+        action_types = self._tool_action_types(daw_tool)
         self.assertIn("project_edit", action_types)
 
     def test_handler_soft_fails_sample_insert_for_legacy_clients(self) -> None:
@@ -1412,11 +1439,7 @@ class ApiResponsesTests(unittest.TestCase):
         daw_tool = next(
             tool for tool in tool_defs if tool.get("name") == "daw_assistant_actions"
         )
-        action_types = (
-            daw_tool["parameters"]["properties"]["actions"]["items"]["properties"][
-                "type"
-            ]["enum"]
-        )
+        action_types = self._tool_action_types(daw_tool)
         self.assertNotIn("project_edit", action_types)
         self.assertNotIn("sample_insert", action_types)
 
@@ -1493,11 +1516,7 @@ class ApiResponsesTests(unittest.TestCase):
         daw_tool = next(
             tool for tool in tool_defs if tool.get("name") == "daw_assistant_actions"
         )
-        action_types = (
-            daw_tool["parameters"]["properties"]["actions"]["items"]["properties"][
-                "type"
-            ]["enum"]
-        )
+        action_types = self._tool_action_types(daw_tool)
         self.assertIn("sample_insert", action_types)
 
     def test_handler_preserves_sample_replace_for_capable_clients(self) -> None:

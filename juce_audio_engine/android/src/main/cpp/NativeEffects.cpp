@@ -1,5 +1,62 @@
 #include "NativeEffects.h"
 
+namespace
+{
+double resolveProcessorTransportSeconds(const juce::AudioProcessor &processor)
+{
+    const double globalSeconds =
+        juce::jmax(0.0, mixroom::fx::getGlobalTransportSeconds());
+    if (mixroom::fx::getGlobalTransportPlaying())
+        return globalSeconds;
+
+    if (auto *playHead = processor.getPlayHead())
+    {
+        if (const auto position = playHead->getPosition())
+        {
+            if (const auto timeSeconds = position->getTimeInSeconds())
+                return juce::jmax(0.0, *timeSeconds);
+            if (const auto timeSamples = position->getTimeInSamples())
+            {
+                const double sampleRate = processor.getSampleRate();
+                if (sampleRate > 0.0)
+                    return juce::jmax(0.0, (double)*timeSamples / sampleRate);
+            }
+        }
+    }
+
+    return globalSeconds;
+}
+
+double resolveProcessorTempoBpm(const juce::AudioProcessor &processor)
+{
+    const double globalBpm =
+        juce::jlimit(30.0, 400.0, mixroom::fx::getGlobalTempoBpm());
+    if (mixroom::fx::getGlobalTransportPlaying())
+        return globalBpm;
+
+    if (auto *playHead = processor.getPlayHead())
+    {
+        if (const auto position = playHead->getPosition())
+            if (const auto bpm = position->getBpm())
+                return juce::jlimit(30.0, 400.0, *bpm);
+    }
+
+    return globalBpm;
+}
+
+bool resolveProcessorTransportPlaying(const juce::AudioProcessor &processor)
+{
+    if (mixroom::fx::getGlobalTransportPlaying())
+        return true;
+
+    if (auto *playHead = processor.getPlayHead())
+        if (const auto position = playHead->getPosition())
+            return position->getIsPlaying();
+
+    return false;
+}
+} // namespace
+
 // ****REVERB****
 
 ReverbAudioProcessor::ReverbAudioProcessor()
@@ -2143,6 +2200,12 @@ VolumeShaperAudioProcessor::VolumeShaperAudioProcessor()
             0.0f, "%"));
 
     parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "phase", "Phase",
+            juce::NormalisableRange<float>(-180.0f, 180.0f, 1.0f),
+            0.0f, "deg"));
+
+    parameters.createAndAddParameter(
         std::make_unique<juce::AudioParameterChoice>(
             "rate", "Rate",
             VolumeShaperModule::rateChoices(),
@@ -2181,12 +2244,12 @@ void VolumeShaperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, 
          ch < getTotalNumOutputChannels(); ++ch)
         buffer.clear(ch, 0, buffer.getNumSamples());
 
-    const bool shouldAdvancePreview = mixroom::fx::getGlobalTransportPlaying();
+    const bool shouldAdvancePreview = resolveProcessorTransportPlaying(*this);
     const float heldPhase = previewPhase.load(std::memory_order_relaxed);
     const float heldGain = previewGain.load(std::memory_order_relaxed);
     shaper.setParameters(parameters);
     shaper.process(buffer,
-                   mixroom::fx::getGlobalTransportSeconds(),
+                   resolveProcessorTransportSeconds(*this),
                    previewPhase,
                    previewGain);
 
@@ -2205,21 +2268,43 @@ void VolumeShaperAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &
          ch < getTotalNumOutputChannels(); ++ch)
         buffer.clear(ch, 0, buffer.getNumSamples());
 
-    const bool shouldAdvancePreview = mixroom::fx::getGlobalTransportPlaying();
+    const bool shouldAdvancePreview = resolveProcessorTransportPlaying(*this);
     const float heldPhase = previewPhase.load(std::memory_order_relaxed);
     const float heldGain = previewGain.load(std::memory_order_relaxed);
     shaper.setParameters(parameters);
     if (shouldAdvancePreview)
     {
-        const double bpm = mixroom::fx::getGlobalTempoBpm();
+        const double bpm = resolveProcessorTempoBpm(*this);
         const int rateIndex = juce::jlimit(
             0,
             (int)VolumeShaperModule::rateBeats.size() - 1,
             (int)parameters.getRawParameterValue("rate")->load());
         const double cycleBeats = VolumeShaperModule::rateBeats[(size_t)rateIndex];
-        const double beatPos = mixroom::fx::getGlobalTransportSeconds() * bpm / 60.0;
+        const double beatPos = resolveProcessorTransportSeconds(*this) * bpm / 60.0;
         const double cyclePos = std::fmod(beatPos / juce::jmax(0.125, cycleBeats), 1.0);
-        const float phase = (float)(cyclePos >= 0.0 ? cyclePos : cyclePos + 1.0);
+        float phase = (float)(cyclePos >= 0.0 ? cyclePos : cyclePos + 1.0);
+        const float phaseDegrees =
+            parameters.getRawParameterValue("phase") != nullptr
+                ? parameters.getRawParameterValue("phase")->load()
+                : 0.0f;
+        const float swingPercent =
+            parameters.getRawParameterValue("swing") != nullptr
+                ? parameters.getRawParameterValue("swing")->load()
+                : 0.0f;
+        phase = std::fmod(phase + (phaseDegrees / 360.0f), 1.0f);
+        if (phase < 0.0f)
+            phase += 1.0f;
+
+        const float swingAmount = juce::jlimit(0.0f, 1.0f, swingPercent * 0.01f);
+        if (swingAmount > 0.0001f)
+        {
+            const float split =
+                juce::jlimit(0.25f, 0.75f, 0.5f + (swingAmount * 0.22f));
+            phase = phase < split
+                        ? 0.5f * (phase / split)
+                        : 0.5f + 0.5f * ((phase - split) / (1.0f - split));
+        }
+
         previewPhase.store(phase, std::memory_order_relaxed);
         previewGain.store(1.0f, std::memory_order_relaxed);
         return;
@@ -2235,8 +2320,9 @@ std::vector<float> VolumeShaperAudioProcessor::getPreviewCurve(int pointCount) c
     const auto *depthParam = parameters.getRawParameterValue("depth");
     const auto *smoothParam = parameters.getRawParameterValue("smooth");
     const auto *swingParam = parameters.getRawParameterValue("swing");
+    const auto *phaseParam = parameters.getRawParameterValue("phase");
     if (shapeParam == nullptr || depthParam == nullptr ||
-        smoothParam == nullptr || swingParam == nullptr)
+        smoothParam == nullptr || swingParam == nullptr || phaseParam == nullptr)
         return std::vector<float>((size_t)(juce::jlimit(32, 512, pointCount) + 1), 1.0f);
 
     return VolumeShaperModule::buildPreviewCurve(
@@ -2245,6 +2331,7 @@ std::vector<float> VolumeShaperAudioProcessor::getPreviewCurve(int pointCount) c
         depthParam->load(),
         smoothParam->load(),
         swingParam->load(),
+        phaseParam->load(),
         previewPhase.load(std::memory_order_relaxed));
 }
 
@@ -2311,6 +2398,18 @@ TimeShaperAudioProcessor::TimeShaperAudioProcessor()
             18.0f, "%"));
 
     parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "swing", "Swing",
+            juce::NormalisableRange<float>(0.0f, 75.0f, 1.0f),
+            0.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "phase", "Phase",
+            juce::NormalisableRange<float>(-180.0f, 180.0f, 1.0f),
+            0.0f, "deg"));
+
+    parameters.createAndAddParameter(
         std::make_unique<juce::AudioParameterChoice>(
             "rate", "Rate",
             TimeShaperModule::rateChoices(),
@@ -2371,7 +2470,7 @@ void TimeShaperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, ju
          ch < getTotalNumOutputChannels(); ++ch)
         buffer.clear(ch, 0, buffer.getNumSamples());
 
-    const bool shouldAdvancePreview = mixroom::fx::getGlobalTransportPlaying();
+    const bool shouldAdvancePreview = resolveProcessorTransportPlaying(*this);
     const float heldPhase = previewPhase.load(std::memory_order_relaxed);
     const float heldReadNorm = previewReadNorm.load(std::memory_order_relaxed);
     if (handleStoppedTransport(shouldAdvancePreview, heldPhase, heldReadNorm))
@@ -2379,7 +2478,7 @@ void TimeShaperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, ju
 
     shaper.setParameters(parameters);
     shaper.process(buffer,
-                   mixroom::fx::getGlobalTransportSeconds(),
+                   resolveProcessorTransportSeconds(*this),
                    previewPhase,
                    previewReadNorm);
 }
@@ -2392,7 +2491,7 @@ void TimeShaperAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &bu
          ch < getTotalNumOutputChannels(); ++ch)
         buffer.clear(ch, 0, buffer.getNumSamples());
 
-    const bool shouldAdvancePreview = mixroom::fx::getGlobalTransportPlaying();
+    const bool shouldAdvancePreview = resolveProcessorTransportPlaying(*this);
     const float heldPhase = previewPhase.load(std::memory_order_relaxed);
     const float heldReadNorm = previewReadNorm.load(std::memory_order_relaxed);
     if (handleStoppedTransport(shouldAdvancePreview, heldPhase, heldReadNorm))
@@ -2400,7 +2499,7 @@ void TimeShaperAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &bu
 
     shaper.setParameters(parameters);
     shaper.updateHistory(buffer,
-                         mixroom::fx::getGlobalTransportSeconds(),
+                         resolveProcessorTransportSeconds(*this),
                          previewPhase,
                          previewReadNorm);
 }
@@ -2410,7 +2509,10 @@ std::vector<float> TimeShaperAudioProcessor::getPreviewCurve(int pointCount) con
     const auto *patternParam = parameters.getRawParameterValue("pattern");
     const auto *amountParam = parameters.getRawParameterValue("amount");
     const auto *smoothParam = parameters.getRawParameterValue("smooth");
-    if (patternParam == nullptr || amountParam == nullptr || smoothParam == nullptr)
+    const auto *swingParam = parameters.getRawParameterValue("swing");
+    const auto *phaseParam = parameters.getRawParameterValue("phase");
+    if (patternParam == nullptr || amountParam == nullptr ||
+        smoothParam == nullptr || swingParam == nullptr || phaseParam == nullptr)
         return std::vector<float>((size_t)(juce::jlimit(32, 512, pointCount) + 1), 1.0f);
 
     return TimeShaperModule::buildPreviewCurve(
@@ -2418,6 +2520,8 @@ std::vector<float> TimeShaperAudioProcessor::getPreviewCurve(int pointCount) con
         (int)patternParam->load(),
         amountParam->load(),
         smoothParam->load(),
+        swingParam->load(),
+        phaseParam->load(),
         previewPhase.load(std::memory_order_relaxed));
 }
 

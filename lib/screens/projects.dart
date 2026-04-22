@@ -7,6 +7,7 @@ import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:mixroom/helpers/export_save_dialog.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:share_plus/share_plus.dart';
@@ -956,7 +957,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final selected = await _showAnchoredShellMenu(
       anchorKey: anchorKey,
       width: 216,
-      estimatedHeight: 272,
+      estimatedHeight: 320,
       child: Material(
         color: Colors.transparent,
         child: MixroomShellSurface(
@@ -977,6 +978,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 icon: Icons.delete_outline_rounded,
                 label: L10n.translate(context, 'Delete'),
                 onTap: () => Navigator.of(context).pop('delete'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
+                icon: Icons.download_rounded,
+                label: L10n.translate(context, 'Save (.mixroom)'),
+                onTap: () => Navigator.of(context).pop('save_mixroom'),
               ),
               const SizedBox(height: 4),
               _ProjectToolAction(
@@ -1021,20 +1028,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _shareProject(ProjectMeta meta) async {
     try {
-      showLoadingDialog(
-        context,
-        message: L10n.translate(context, 'Exporting…'),
-      );
-      await Future.delayed(const Duration(milliseconds: 200));
-      if (!mounted) return;
-
-      final bundlePath = await ProjectBundle.exportMixroomBundle(
-        projectDir: meta.dir,
-        audioMode: BundleAudioMode.flacLossless,
-      );
-      if (!mounted) return;
-
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      final bundlePath = await _exportProjectBundle(meta);
+      if (bundlePath == null || !mounted) return;
 
       final params = ShareParams(
         files: [XFile(bundlePath)],
@@ -1054,6 +1049,60 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         '${L10n.translate(context, 'Export failed')}: $e',
         tone: AppPopupTone.error,
       );
+    }
+  }
+
+  Future<void> _saveProjectBundle(ProjectMeta meta) async {
+    try {
+      final bundlePath = await _exportProjectBundle(meta);
+      if (bundlePath == null || !mounted) return;
+
+      final suggestedFileName = ExportSaveDialog.buildSuggestedFileName(
+        baseName: meta.name,
+        extension: 'mixroom',
+      );
+      final savedPath = await ExportSaveDialog.saveExportedFile(
+        sourceFilePath: bundlePath,
+        suggestedFileName: suggestedFileName,
+        desktopDialogTitle: L10n.translate(context, 'Save export'),
+      );
+      if (!mounted || savedPath == null || savedPath.isEmpty) return;
+
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Project bundle saved'),
+        tone: AppPopupTone.success,
+      );
+    } catch (e) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Export failed')}: $e',
+        tone: AppPopupTone.error,
+      );
+    }
+  }
+
+  Future<String?> _exportProjectBundle(ProjectMeta meta) async {
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Exporting…'),
+    );
+    await Future.delayed(const Duration(milliseconds: 200));
+    if (!mounted) return null;
+
+    try {
+      return await ProjectBundle.exportMixroomBundle(
+        projectDir: meta.dir,
+        audioMode: BundleAudioMode.flacLossless,
+      );
+    } finally {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
     }
   }
 
@@ -1212,6 +1261,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         return;
       case 'delete':
         await _deleteProject(project);
+        return;
+      case 'save_mixroom':
+        await _saveProjectBundle(project);
         return;
       case 'share_mixroom':
         await _shareProject(project);

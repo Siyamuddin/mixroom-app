@@ -26,6 +26,7 @@ const Color _kFxWarmAccent = Color(0xFFC89762);
 const Color _kFxWarmAccentBorder = Color(0xFFE0B27F);
 const Color _kFxCoolAccent = Color(0xFFBBD3E4);
 const Color _kFxCoolAccentSoft = Color(0xFFA7C4D9);
+const Duration _kShaperPreviewPollInterval = Duration(milliseconds: 16);
 
 bool _previewFramesChanged(
   List<double> previous,
@@ -574,6 +575,22 @@ bool _showsShaperPreview(String effectName) {
   return effectName == 'Volume Shaper' || effectName == 'Time Shaper';
 }
 
+List<Map<String, dynamic>> _orderedParamSubset(
+  List<Map<String, dynamic>> params,
+  List<String> orderedNames,
+) {
+  final byName = <String, Map<String, dynamic>>{};
+  for (final param in params) {
+    final name = (param['name'] ?? '').toString().trim();
+    if (name.isEmpty || byName.containsKey(name)) continue;
+    byName[name] = param;
+  }
+  return orderedNames
+      .where(byName.containsKey)
+      .map((name) => byName[name]!)
+      .toList(growable: false);
+}
+
 String _dynamicsReductionMeterTitle(String effectName) {
   switch (effectName) {
     case 'Limiter':
@@ -737,6 +754,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   int? _returnHighlightedEffectIndex;
   Timer? _returnHighlightTimer;
   double? _lastReportedHeight; // since height is dynamic
+  double _requestedPanelHeight = 0.0;
 
   // for undo state
   double? _paramDragStartValue;
@@ -758,6 +776,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   List<double> _stereoScope = const <double>[];
   Timer? _shaperPreviewTimer;
   bool _shaperPreviewRunning = false;
+  bool _shaperPreviewRequestInFlight = false;
   List<double> _shaperPreview = const <double>[];
   double _eqAnalyzerSampleRate = 44100.0;
   int _eqParametricTabIndex = 0;
@@ -906,6 +925,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     _stopEqWaveformPolling();
     _stopStereoScopePolling();
     _stopShaperPreviewPolling();
+    _requestedPanelHeight = widget.minHeight;
     setState(() {
       _selectedEffectIndex = null;
       _currentParams = [];
@@ -1119,6 +1139,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   @override
   void initState() {
     super.initState();
+    _requestedPanelHeight = widget.minHeight;
     _loadEffects();
     // widget.registerRefresh?.call = _refetchAll;
     widget.registerRefresh?.call(_refetchAll);
@@ -1883,10 +1904,14 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   void _startShaperPreviewPolling({required int effectIndex}) {
     _stopShaperPreviewPolling();
     _shaperPreviewRunning = true;
+    _shaperPreviewRequestInFlight = false;
 
     _shaperPreviewTimer =
-        Timer.periodic(const Duration(milliseconds: 40), (_) async {
-      if (!mounted || !_shaperPreviewRunning) return;
+        Timer.periodic(_kShaperPreviewPollInterval, (_) async {
+      if (!mounted || !_shaperPreviewRunning || _shaperPreviewRequestInFlight) {
+        return;
+      }
+      _shaperPreviewRequestInFlight = true;
 
       try {
         final arr = await JuceAudioEngine.getRowShaperPreview(
@@ -1901,12 +1926,15 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         });
       } catch (_) {
         // ignore transient bridge errors while polling
+      } finally {
+        _shaperPreviewRequestInFlight = false;
       }
     });
   }
 
   void _stopShaperPreviewPolling() {
     _shaperPreviewRunning = false;
+    _shaperPreviewRequestInFlight = false;
     _shaperPreviewTimer?.cancel();
     _shaperPreviewTimer = null;
     _shaperPreview = const <double>[];
@@ -2031,17 +2059,26 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         }).toList();
 
       case 'Volume Shaper':
-        return params.where((p) {
-          final n = p['name']?.toString() ?? '';
-          return ['Shape', 'Rate', 'Depth', 'Smooth', 'Swing', 'Mix']
-              .contains(n);
-        }).toList();
+        return _orderedParamSubset(params, const [
+          'Shape',
+          'Rate',
+          'Phase',
+          'Depth',
+          'Smooth',
+          'Swing',
+          'Mix',
+        ]);
 
       case 'Time Shaper':
-        return params.where((p) {
-          final n = p['name']?.toString() ?? '';
-          return ['Pattern', 'Rate', 'Amount', 'Smooth', 'Mix'].contains(n);
-        }).toList();
+        return _orderedParamSubset(params, const [
+          'Pattern',
+          'Rate',
+          'Phase',
+          'Amount',
+          'Smooth',
+          'Swing',
+          'Mix',
+        ]);
 
       case 'Gain':
         return params.where((p) {
@@ -2538,7 +2575,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       final box = context.findRenderObject() as RenderBox?;
 
       if (box != null) {
-        final h = box.size.height;
+        final h = math.max(box.size.height, _requestedPanelHeight);
 
         // Only notify if height changed by a meaningful amount
         if (_lastReportedHeight == null ||
@@ -3235,7 +3272,9 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     ? 520.0
                     : (effectName == 'Volume Shaper' ||
                             effectName == 'Time Shaper')
-                        ? 540.0
+                        ? (220.0 + (math.max(0, params.length) * 74.0))
+                            .clamp(widget.minHeight, 900.0)
+                            .toDouble()
                         : (220.0 + (math.max(0, params.length) * 74.0))
                             .clamp(widget.minHeight, 1200.0)
                             .toDouble();
@@ -3245,6 +3284,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       _currentParams = params;
       _paramsLoading = false;
     });
+    _requestedPanelHeight = math.max(widget.minHeight, estimatedHeight);
     widget.onHeightChanged(math.max(widget.minHeight, estimatedHeight));
   }
 
@@ -3939,373 +3979,364 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           ));
     }
 
-    // Generic parameter page (no scroll, full height in row)
+    // Generic parameter page
     return _wrapWithHalos(
         haloKeys: effectPageHaloKeys,
         borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildFxParamsHeader(
-                context: context,
-                title: effectName,
-                onBack: () => _returnToEffectsList(effectIndex: idx),
-              ),
-              const SizedBox(height: 10),
-
-              if (effectName == 'Stereo Pro' && _currentParams.isNotEmpty) ...[
-                _StereoProPreview(
-                  scopeFrames: _stereoScope,
-                  gainDb:
-                      (_paramByName(_currentParams, 'Gain')?['value'] as num?)
-                              ?.toDouble() ??
-                          0.0,
-                  widthPercent:
-                      (_paramByName(_currentParams, 'Width')?['value'] as num?)
-                              ?.toDouble() ??
-                          100.0,
-                  asymmetryPercent:
-                      (_paramByName(_currentParams, 'Asymmetry')?['value']
-                                  as num?)
-                              ?.toDouble() ??
-                          0.0,
-                  rotationDegrees:
-                      (_paramByName(_currentParams, 'Rotation')?['value']
-                                  as num?)
-                              ?.toDouble() ??
-                          0.0,
-                ),
-                const SizedBox(height: 12),
-              ],
-
-              if (effectName == 'Degrade' && _currentParams.isNotEmpty) ...[
-                _DegradePreview(
-                  spectrumDb: _eqSpectrumDb,
-                  analyzerSampleRate: _eqAnalyzerSampleRate,
-                  mode: (_paramByName(_currentParams, 'Mode')?['value']
-                              ?.toString() ??
-                          'Noise')
-                      .trim(),
-                  toneHz:
-                      (_paramByName(_currentParams, 'Tone')?['value'] as num?)
-                              ?.toDouble() ??
-                          6000.0,
-                  depthPercent:
-                      (_paramByName(_currentParams, 'Depth')?['value'] as num?)
-                              ?.toDouble() ??
-                          35.0,
-                  spreadPercent:
-                      (_paramByName(_currentParams, 'Spread')?['value'] as num?)
-                              ?.toDouble() ??
-                          40.0,
-                ),
-                const SizedBox(height: 12),
-              ],
-
-              if (_showsShaperPreview(effectName) &&
-                  _currentParams.isNotEmpty) ...[
-                _ShaperPreviewCard(
-                  kind: effectName == 'Time Shaper'
-                      ? _ShaperPreviewKind.time
-                      : _ShaperPreviewKind.volume,
-                  previewFrames: _shaperPreview,
-                  title: ((_paramByName(
-                            _currentParams,
-                            effectName == 'Time Shaper' ? 'Pattern' : 'Shape',
-                          )?['value']) ??
-                          (effectName == 'Time Shaper' ? 'Pattern' : 'Shape'))
-                      .toString(),
-                  detail: ((_paramByName(_currentParams, 'Rate')?['value']) ??
-                          'Rate')
-                      .toString(),
-                ),
-                const SizedBox(height: 12),
-              ],
-
-              if (_showsDynamicsReductionMeter(effectName)) ...[
-                // _buildCompressorMeterStrip(),
-                const SizedBox(height: 10),
-                GainReductionSliderMeterHorizontal(
-                  grDb: _compFrameSmoothed.grDb,
-                  maxDb: 24,
-                  title: _dynamicsReductionMeterTitle(effectName),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildFxParamsHeader(
+                  context: context,
+                  title: effectName,
+                  onBack: () => _returnToEffectsList(effectIndex: idx),
                 ),
                 const SizedBox(height: 10),
-              ],
 
-              // Params straight in Column
-              for (var param in _currentParams) ...[
-                if (_effects[idx] == 'Delay' &&
-                    param['name'] == 'Delay Time') ...[
-                  _wrapAutomatableParam(
-                    effectIndex: idx,
-                    effectName: effectName,
-                    param: param,
-                    borderRadius: BorderRadius.circular(10),
-                    child: _buildDelayTimeParam(
+                if (effectName == 'Stereo Pro' &&
+                    _currentParams.isNotEmpty) ...[
+                  _StereoProPreview(
+                    scopeFrames: _stereoScope,
+                    gainDb:
+                        (_paramByName(_currentParams, 'Gain')?['value'] as num?)
+                                ?.toDouble() ??
+                            0.0,
+                    widthPercent:
+                        (_paramByName(_currentParams, 'Width')?['value']
+                                    as num?)
+                                ?.toDouble() ??
+                            100.0,
+                    asymmetryPercent:
+                        (_paramByName(_currentParams, 'Asymmetry')?['value']
+                                    as num?)
+                                ?.toDouble() ??
+                            0.0,
+                    rotationDegrees:
+                        (_paramByName(_currentParams, 'Rotation')?['value']
+                                    as num?)
+                                ?.toDouble() ??
+                            0.0,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                if (effectName == 'Degrade' && _currentParams.isNotEmpty) ...[
+                  _DegradePreview(
+                    spectrumDb: _eqSpectrumDb,
+                    analyzerSampleRate: _eqAnalyzerSampleRate,
+                    mode: (_paramByName(_currentParams, 'Mode')?['value']
+                                ?.toString() ??
+                            'Noise')
+                        .trim(),
+                    toneHz:
+                        (_paramByName(_currentParams, 'Tone')?['value'] as num?)
+                                ?.toDouble() ??
+                            6000.0,
+                    depthPercent:
+                        (_paramByName(_currentParams, 'Depth')?['value']
+                                    as num?)
+                                ?.toDouble() ??
+                            35.0,
+                    spreadPercent:
+                        (_paramByName(_currentParams, 'Spread')?['value']
+                                    as num?)
+                                ?.toDouble() ??
+                            40.0,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                if (_showsShaperPreview(effectName) &&
+                    _currentParams.isNotEmpty) ...[
+                  _ShaperPreviewCard(
+                    kind: effectName == 'Time Shaper'
+                        ? _ShaperPreviewKind.time
+                        : _ShaperPreviewKind.volume,
+                    previewFrames: _shaperPreview,
+                    title: ((_paramByName(
+                              _currentParams,
+                              effectName == 'Time Shaper' ? 'Pattern' : 'Shape',
+                            )?['value']) ??
+                            (effectName == 'Time Shaper' ? 'Pattern' : 'Shape'))
+                        .toString(),
+                    detail: ((_paramByName(_currentParams, 'Rate')?['value']) ??
+                            'Rate')
+                        .toString(),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                if (_showsDynamicsReductionMeter(effectName)) ...[
+                  // _buildCompressorMeterStrip(),
+                  const SizedBox(height: 10),
+                  GainReductionSliderMeterHorizontal(
+                    grDb: _compFrameSmoothed.grDb,
+                    maxDb: 24,
+                    title: _dynamicsReductionMeterTitle(effectName),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+
+                // Params straight in Column
+                for (var param in _currentParams) ...[
+                  if (_effects[idx] == 'Delay' &&
+                      param['name'] == 'Delay Time') ...[
+                    _wrapAutomatableParam(
+                      effectIndex: idx,
+                      effectName: effectName,
+                      param: param,
+                      borderRadius: BorderRadius.circular(10),
+                      child: _buildDelayTimeParam(
+                          context: context,
+                          param: param,
+                          effectIndex: idx,
+                          bpm: widget.projectBpm),
+                    ),
+                  ] else if (_isGainVolumeParam(effectName, param)) ...[
+                    _wrapAutomatableParam(
+                      effectIndex: idx,
+                      effectName: effectName,
+                      param: param,
+                      borderRadius: BorderRadius.circular(10),
+                      child: _buildGainVolumeParam(
                         context: context,
                         param: param,
                         effectIndex: idx,
-                        bpm: widget.projectBpm),
-                  ),
-                ] else if (_isGainVolumeParam(effectName, param)) ...[
-                  _wrapAutomatableParam(
-                    effectIndex: idx,
-                    effectName: effectName,
-                    param: param,
-                    borderRadius: BorderRadius.circular(10),
-                    child: _buildGainVolumeParam(
-                      context: context,
-                      param: param,
-                      effectIndex: idx,
+                      ),
                     ),
-                  ),
-                ] else if (_isPitchShiftSemitonesParam(effectName, param)) ...[
-                  _wrapAutomatableParam(
-                    effectIndex: idx,
-                    effectName: effectName,
-                    param: param,
-                    borderRadius: BorderRadius.circular(10),
-                    child: _buildPitchShiftSemitonesParam(
-                      context: context,
-                      param: param,
+                  ] else if (_isPitchShiftSemitonesParam(
+                      effectName, param)) ...[
+                    _wrapAutomatableParam(
                       effectIndex: idx,
+                      effectName: effectName,
+                      param: param,
+                      borderRadius: BorderRadius.circular(10),
+                      child: _buildPitchShiftSemitonesParam(
+                        context: context,
+                        param: param,
+                        effectIndex: idx,
+                      ),
                     ),
-                  ),
-                ] else if (param['type'] == 'float') ...[
-                  _wrapAutomatableParam(
-                    effectIndex: idx,
-                    effectName: effectName,
-                    param: param,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 4, horizontal: 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(param['name'] as String,
-                              style: Theme.of(context).textTheme.bodyLarge),
-                          // const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Text(
-                                _formatParamValueForDisplay(
-                                  param,
-                                  (param['min'] as num).toDouble(),
-                                ),
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              // const SizedBox(width: 8),
-                              Expanded(
-                                child: SliderTheme(
-                                  data: SliderTheme.of(context).copyWith(
-                                    showValueIndicator:
-                                        ShowValueIndicator.always,
-                                    valueIndicatorTextStyle: const TextStyle(
-                                      color: Color.fromARGB(255, 0, 0, 0),
-                                      fontSize: 12,
-                                    ),
+                  ] else if (param['type'] == 'float') ...[
+                    _wrapAutomatableParam(
+                      effectIndex: idx,
+                      effectName: effectName,
+                      param: param,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 4, horizontal: 4),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(param['name'] as String,
+                                style: Theme.of(context).textTheme.bodyLarge),
+                            // const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Text(
+                                  _formatParamValueForDisplay(
+                                    param,
+                                    (param['min'] as num).toDouble(),
                                   ),
-                                  child: (() {
-                                    final effectName = _effects[idx];
-                                    final paramName = param['name'] as String;
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                                // const SizedBox(width: 8),
+                                Expanded(
+                                  child: SliderTheme(
+                                    data: SliderTheme.of(context).copyWith(
+                                      showValueIndicator:
+                                          ShowValueIndicator.always,
+                                      valueIndicatorTextStyle: const TextStyle(
+                                        color: Color.fromARGB(255, 0, 0, 0),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    child: (() {
+                                      final effectName = _effects[idx];
+                                      final paramName = param['name'] as String;
 
-                                    final minV =
-                                        (param['min'] as num).toDouble();
-                                    final maxV =
-                                        (param['max'] as num).toDouble();
-                                    final rawV = (param['value'] as num)
-                                        .toDouble()
-                                        .clamp(minV, maxV);
-                                    final valueText =
-                                        _formatParamValueForDisplay(
-                                      param,
-                                      rawV,
-                                    );
+                                      final minV =
+                                          (param['min'] as num).toDouble();
+                                      final maxV =
+                                          (param['max'] as num).toDouble();
+                                      final rawV = (param['value'] as num)
+                                          .toDouble()
+                                          .clamp(minV, maxV);
+                                      final valueText =
+                                          _formatParamValueForDisplay(
+                                        param,
+                                        rawV,
+                                      );
 
-                                    final skew = _getParamSkew(
-                                        effectName, paramName); // null = linear
+                                      final skew = _getParamSkew(effectName,
+                                          paramName); // null = linear
 
-                                    // value -> 0..1
-                                    double toNorm(double v) =>
-                                        ((v - minV) / (maxV - minV))
-                                            .clamp(0.0, 1.0);
+                                      // value -> 0..1
+                                      double toNorm(double v) =>
+                                          ((v - minV) / (maxV - minV))
+                                              .clamp(0.0, 1.0);
 
-                                    // 0..1 -> value
-                                    double fromNorm(double t) =>
-                                        minV +
-                                        (maxV - minV) * t.clamp(0.0, 1.0);
+                                      // 0..1 -> value
+                                      double fromNorm(double t) =>
+                                          minV +
+                                          (maxV - minV) * t.clamp(0.0, 1.0);
 
-                                    // if skew exists: position uses norm^skew, and inverse uses ^(1/skew)
-                                    final norm = toNorm(rawV);
-                                    final sliderPos = (skew == null)
-                                        ? norm
-                                        : math.pow(norm, skew).toDouble();
+                                      // if skew exists: position uses norm^skew, and inverse uses ^(1/skew)
+                                      final norm = toNorm(rawV);
+                                      final sliderPos = (skew == null)
+                                          ? norm
+                                          : math.pow(norm, skew).toDouble();
 
-                                    return GestureDetector(
-                                      behavior: HitTestBehavior.translucent,
-                                      onDoubleTap: () {
-                                        final defaultValue =
-                                            _paramDefaultAsDouble(param);
-                                        if (defaultValue == null) return;
-                                        final clampedDefault = defaultValue
-                                            .clamp(minV, maxV)
-                                            .toDouble();
-                                        final oldValue =
-                                            (param['value'] as num).toDouble();
-                                        if ((oldValue - clampedDefault).abs() <
-                                            1.0e-6) {
-                                          return;
-                                        }
-                                        setState(() =>
-                                            param['value'] = clampedDefault);
-                                        _setTrackEffectParam(widget.rowIndex,
-                                            idx, paramName, clampedDefault);
-                                        _commitTrackEffectParam(
-                                          widget.rowIndex,
-                                          idx,
-                                          paramName,
-                                          oldValue,
-                                          clampedDefault,
-                                        );
-                                      },
-                                      child: Slider(
-                                        value: sliderPos,
-                                        min: 0.0,
-                                        max: 1.0,
-                                        divisions: 200,
-                                        label: valueText,
-                                        onChangeStart: (_) {
-                                          _paramDragStartValue = rawV;
-                                        },
-                                        onChanged: (p) {
-                                          final t = p.clamp(0.0, 1.0);
-                                          final newNorm = (skew == null)
-                                              ? t
-                                              : math
-                                                  .pow(t, 1.0 / skew!)
+                                      return GestureDetector(
+                                        behavior: HitTestBehavior.translucent,
+                                        onDoubleTap: () {
+                                          final defaultValue =
+                                              _paramDefaultAsDouble(param);
+                                          if (defaultValue == null) return;
+                                          final clampedDefault = defaultValue
+                                              .clamp(minV, maxV)
+                                              .toDouble();
+                                          final oldValue =
+                                              (param['value'] as num)
                                                   .toDouble();
-                                          final v = fromNorm(newNorm);
-
-                                          setState(() => param['value'] = v);
-                                          _setTrackEffectParam(widget.rowIndex,
-                                              idx, paramName, v);
-                                        },
-                                        onChangeEnd: (p) {
-                                          if (_paramDragStartValue == null)
+                                          if ((oldValue - clampedDefault)
+                                                  .abs() <
+                                              1.0e-6) {
                                             return;
-
-                                          final t = p.clamp(0.0, 1.0);
-                                          final newNorm = (skew == null)
-                                              ? t
-                                              : math
-                                                  .pow(t, 1.0 / skew!)
-                                                  .toDouble();
-                                          final v = fromNorm(newNorm);
-
+                                          }
+                                          setState(() =>
+                                              param['value'] = clampedDefault);
+                                          _setTrackEffectParam(widget.rowIndex,
+                                              idx, paramName, clampedDefault);
                                           _commitTrackEffectParam(
                                             widget.rowIndex,
                                             idx,
                                             paramName,
-                                            _paramDragStartValue!,
-                                            v,
+                                            oldValue,
+                                            clampedDefault,
                                           );
-
-                                          _paramDragStartValue = null;
                                         },
-                                      ),
-                                    );
-                                  })(),
+                                        child: Slider(
+                                          value: sliderPos,
+                                          min: 0.0,
+                                          max: 1.0,
+                                          divisions: 200,
+                                          label: valueText,
+                                          onChangeStart: (_) {
+                                            _paramDragStartValue = rawV;
+                                          },
+                                          onChanged: (p) {
+                                            final t = p.clamp(0.0, 1.0);
+                                            final newNorm = (skew == null)
+                                                ? t
+                                                : math
+                                                    .pow(t, 1.0 / skew!)
+                                                    .toDouble();
+                                            final v = fromNorm(newNorm);
+
+                                            setState(() => param['value'] = v);
+                                            _setTrackEffectParam(
+                                                widget.rowIndex,
+                                                idx,
+                                                paramName,
+                                                v);
+                                          },
+                                          onChangeEnd: (p) {
+                                            if (_paramDragStartValue == null)
+                                              return;
+
+                                            final t = p.clamp(0.0, 1.0);
+                                            final newNorm = (skew == null)
+                                                ? t
+                                                : math
+                                                    .pow(t, 1.0 / skew!)
+                                                    .toDouble();
+                                            final v = fromNorm(newNorm);
+
+                                            _commitTrackEffectParam(
+                                              widget.rowIndex,
+                                              idx,
+                                              paramName,
+                                              _paramDragStartValue!,
+                                              v,
+                                            );
+
+                                            _paramDragStartValue = null;
+                                          },
+                                        ),
+                                      );
+                                    })(),
+                                  ),
                                 ),
-                              ),
-                              // const SizedBox(width: 8),
-                              Text(
-                                _formatParamValueForDisplay(
-                                  param,
-                                  (param['max'] as num).toDouble(),
+                                // const SizedBox(width: 8),
+                                Text(
+                                  _formatParamValueForDisplay(
+                                    param,
+                                    (param['max'] as num).toDouble(),
+                                  ),
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ],
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ] else if (param['type'] == 'bool') ...[
-                  _wrapAutomatableParam(
-                    effectIndex: idx,
-                    effectName: effectName,
-                    param: param,
-                    borderRadius: BorderRadius.circular(10),
-                    child: SwitchListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                      title: Text(param['name'] as String),
-                      value: param['value'] as bool,
-                      onChanged: (v) {
-                        setState(() => param['value'] = v);
-                        _setTrackEffectParam(
-                            widget.rowIndex, idx, param['name'] as String, v);
-                        _commitTrackEffectParam(widget.rowIndex, idx,
-                            param['name'] as String, !v, v);
-                      },
+                  ] else if (param['type'] == 'bool') ...[
+                    _wrapAutomatableParam(
+                      effectIndex: idx,
+                      effectName: effectName,
+                      param: param,
+                      borderRadius: BorderRadius.circular(10),
+                      child: SwitchListTile(
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 4),
+                        title: Text(param['name'] as String),
+                        value: param['value'] as bool,
+                        onChanged: (v) {
+                          setState(() => param['value'] = v);
+                          _setTrackEffectParam(
+                              widget.rowIndex, idx, param['name'] as String, v);
+                          _commitTrackEffectParam(widget.rowIndex, idx,
+                              param['name'] as String, !v, v);
+                        },
+                      ),
                     ),
-                  ),
-                ] else if (param['type'] == 'choice') ...[
-                  (() {
-                    final keys = param.keys
-                        .where((k) => k.startsWith('choice_'))
-                        .toList()
-                      ..sort((a, b) {
-                        final ai = int.parse(a.split('_')[1]);
-                        final bi = int.parse(b.split('_')[1]);
-                        return ai.compareTo(bi);
-                      });
-                    final choices =
-                        keys.map((k) => param[k] as String).toList();
-                    final current = param['value'] as String;
+                  ] else if (param['type'] == 'choice') ...[
+                    (() {
+                      final keys = param.keys
+                          .where((k) => k.startsWith('choice_'))
+                          .toList()
+                        ..sort((a, b) {
+                          final ai = int.parse(a.split('_')[1]);
+                          final bi = int.parse(b.split('_')[1]);
+                          return ai.compareTo(bi);
+                        });
+                      final choices =
+                          keys.map((k) => param[k] as String).toList();
+                      final current = param['value'] as String;
 
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 4.0, horizontal: 4),
-                      child: _wrapAutomatableParam(
-                        effectIndex: idx,
-                        effectName: effectName,
-                        param: param,
-                        borderRadius: BorderRadius.circular(10),
-                        child: effectName == 'Degrade' &&
-                                param['name'] == 'Mode'
-                            ? _buildDegradeModeSelectorTile(
-                                context: context,
-                                label: param['name'] as String,
-                                value: current,
-                                choices: choices,
-                                onSelected: (picked) {
-                                  if (picked == current) return;
-                                  final oldVal = param['value'];
-                                  setState(() => param['value'] = picked);
-                                  _setTrackEffectParam(widget.rowIndex, idx,
-                                      param['name'] as String, picked);
-                                  _commitTrackEffectParam(widget.rowIndex, idx,
-                                      param['name'] as String, oldVal, picked);
-                                },
-                              )
-                            : _buildMixroomChoiceSettingTile(
-                                context: context,
-                                label: param['name'] as String,
-                                value: current,
-                                onTap: () async {
-                                  final picked = await _showMixroomChoiceDialog(
-                                    context: context,
-                                    title:
-                                        '${L10n.translate(context, 'Select ')}${param['name']}',
-                                    choices: choices,
-                                    currentChoice: current,
-                                  );
-                                  if (picked != null) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 4.0, horizontal: 4),
+                        child: _wrapAutomatableParam(
+                          effectIndex: idx,
+                          effectName: effectName,
+                          param: param,
+                          borderRadius: BorderRadius.circular(10),
+                          child: effectName == 'Degrade' &&
+                                  param['name'] == 'Mode'
+                              ? _buildDegradeModeSelectorTile(
+                                  context: context,
+                                  label: param['name'] as String,
+                                  value: current,
+                                  choices: choices,
+                                  onSelected: (picked) {
+                                    if (picked == current) return;
                                     final oldVal = param['value'];
                                     setState(() => param['value'] = picked);
                                     _setTrackEffectParam(widget.rowIndex, idx,
@@ -4316,31 +4347,58 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                         param['name'] as String,
                                         oldVal,
                                         picked);
-                                  }
-                                },
-                              ),
-                      ),
-                    );
-                  })(),
-                ] else ...[
-                  _wrapAutomatableParam(
-                    effectIndex: idx,
-                    effectName: effectName,
-                    param: param,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 4.0, horizontal: 4),
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(param['name'] as String),
-                        trailing: Text("${param['value']}"),
+                                  },
+                                )
+                              : _buildMixroomChoiceSettingTile(
+                                  context: context,
+                                  label: param['name'] as String,
+                                  value: current,
+                                  onTap: () async {
+                                    final picked =
+                                        await _showMixroomChoiceDialog(
+                                      context: context,
+                                      title:
+                                          '${L10n.translate(context, 'Select ')}${param['name']}',
+                                      choices: choices,
+                                      currentChoice: current,
+                                    );
+                                    if (picked != null) {
+                                      final oldVal = param['value'];
+                                      setState(() => param['value'] = picked);
+                                      _setTrackEffectParam(widget.rowIndex, idx,
+                                          param['name'] as String, picked);
+                                      _commitTrackEffectParam(
+                                          widget.rowIndex,
+                                          idx,
+                                          param['name'] as String,
+                                          oldVal,
+                                          picked);
+                                    }
+                                  },
+                                ),
+                        ),
+                      );
+                    })(),
+                  ] else ...[
+                    _wrapAutomatableParam(
+                      effectIndex: idx,
+                      effectName: effectName,
+                      param: param,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 4.0, horizontal: 4),
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(param['name'] as String),
+                          trailing: Text("${param['value']}"),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ],
               ],
-            ],
+            ),
           ),
         ));
   }
@@ -4463,6 +4521,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   List<double> _stereoScope = const <double>[];
   Timer? _shaperPreviewTimer;
   bool _shaperPreviewRunning = false;
+  bool _shaperPreviewRequestInFlight = false;
   List<double> _shaperPreview = const <double>[];
   double _eqAnalyzerSampleRate = 44100.0;
   int _eqParametricTabIndex = 0;
@@ -5347,10 +5406,14 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   void _startShaperPreviewPolling({required int effectIndex}) {
     _stopShaperPreviewPolling();
     _shaperPreviewRunning = true;
+    _shaperPreviewRequestInFlight = false;
 
     _shaperPreviewTimer =
-        Timer.periodic(const Duration(milliseconds: 40), (_) async {
-      if (!mounted || !_shaperPreviewRunning) return;
+        Timer.periodic(_kShaperPreviewPollInterval, (_) async {
+      if (!mounted || !_shaperPreviewRunning || _shaperPreviewRequestInFlight) {
+        return;
+      }
+      _shaperPreviewRequestInFlight = true;
 
       try {
         final arr = await JuceAudioEngine.getMasterShaperPreview(
@@ -5364,12 +5427,15 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         });
       } catch (_) {
         // ignore transient bridge errors while polling
+      } finally {
+        _shaperPreviewRequestInFlight = false;
       }
     });
   }
 
   void _stopShaperPreviewPolling() {
     _shaperPreviewRunning = false;
+    _shaperPreviewRequestInFlight = false;
     _shaperPreviewTimer?.cancel();
     _shaperPreviewTimer = null;
     _shaperPreview = const <double>[];
@@ -6439,19 +6505,27 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           break;
 
         case 'Volume Shaper':
-          params = params.where((param) {
-            final name = param['name']?.toString() ?? '';
-            return ['Shape', 'Rate', 'Depth', 'Smooth', 'Swing', 'Mix']
-                .contains(name);
-          }).toList();
+          params = _orderedParamSubset(params, const [
+            'Shape',
+            'Rate',
+            'Phase',
+            'Depth',
+            'Smooth',
+            'Swing',
+            'Mix',
+          ]);
           break;
 
         case 'Time Shaper':
-          params = params.where((param) {
-            final name = param['name']?.toString() ?? '';
-            return ['Pattern', 'Rate', 'Amount', 'Smooth', 'Mix']
-                .contains(name);
-          }).toList();
+          params = _orderedParamSubset(params, const [
+            'Pattern',
+            'Rate',
+            'Phase',
+            'Amount',
+            'Smooth',
+            'Swing',
+            'Mix',
+          ]);
           break;
       }
     }

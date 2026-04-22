@@ -802,36 +802,36 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_seekJNI(JNIEnv *, jclass, jint t
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipTimeJNI(JNIEnv *, jclass, jint clipIndex, jdouble startSec, jdouble lengthSec, jdouble inFileOffsetSec)
 {
-    juce::MessageManager::callAsync([clipIndex, startSec, lengthSec, inFileOffsetSec]
-                                    { JuceEngine::get().setClipTime((int)clipIndex, (double)startSec, (double)lengthSec, (double)inFileOffsetSec); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, startSec, lengthSec, inFileOffsetSec]
+                                                  { JuceEngine::get().setClipTime((int)clipIndex, (double)startSec, (double)lengthSec, (double)inFileOffsetSec); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipPanJNI(JNIEnv *, jclass, jint clipIndex, jfloat pan)
 {
-    juce::MessageManager::callAsync([clipIndex, pan]
-                                    { JuceEngine::get().setClipPan((int)clipIndex, (float)pan); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, pan]
+                                                  { JuceEngine::get().setClipPan((int)clipIndex, (float)pan); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipPitchJNI(JNIEnv *, jclass, jint clipIndex, jfloat semitones)
 {
-    juce::MessageManager::callAsync([clipIndex, semitones]
-                                    { JuceEngine::get().setClipPitch((int)clipIndex, (float)semitones); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, semitones]
+                                                  { JuceEngine::get().setClipPitch((int)clipIndex, (float)semitones); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipReversedJNI(JNIEnv *, jclass, jint clipIndex, jboolean reversed)
 {
-    juce::MessageManager::callAsync([clipIndex, reversed]
-                                    { JuceEngine::get().setClipReversed((int)clipIndex, reversed != JNI_FALSE); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, reversed]
+                                                  { JuceEngine::get().setClipReversed((int)clipIndex, reversed != JNI_FALSE); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipStretchOptionsJNI(JNIEnv *, jclass, jint clipIndex, jdouble tempoRatio, jboolean preservePitch)
 {
-    juce::MessageManager::callAsync([clipIndex, tempoRatio, preservePitch]
-                                    { JuceEngine::get().setClipStretchOptions((int)clipIndex, (double)tempoRatio, preservePitch != JNI_FALSE); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, tempoRatio, preservePitch]
+                                                  { JuceEngine::get().setClipStretchOptions((int)clipIndex, (double)tempoRatio, preservePitch != JNI_FALSE); });
 }
 
 extern "C" JNIEXPORT jdouble JNICALL
@@ -1235,7 +1235,8 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *env,
                                                               jint sampleRate,
                                                               jint wavBitDepth,
                                                               jboolean wavDithering,
-                                                              jint mp3BitrateKbps)
+                                                              jint mp3BitrateKbps,
+                                                              jstring clipSnapshotJson)
 {
     const char *c = env->GetStringUTFChars(outPath, nullptr);
     juce::String jucePath = c != nullptr ? juce::String::fromUTF8(c) : juce::String();
@@ -1251,6 +1252,12 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *env,
     options.wavBitDepth = (int)wavBitDepth;
     options.wavDithering = (wavDithering == JNI_TRUE);
     options.mp3BitrateKbps = (int)mp3BitrateKbps;
+    if (clipSnapshotJson != nullptr)
+    {
+        const char *clipSnapshotChars = env->GetStringUTFChars(clipSnapshotJson, nullptr);
+        options.clipSnapshotJson = clipSnapshotChars != nullptr ? juce::String::fromUTF8(clipSnapshotChars) : juce::String();
+        env->ReleaseStringUTFChars(clipSnapshotJson, clipSnapshotChars);
+    }
 
     flushPendingMessageThreadTasks();
     juce::String result = JuceEngine::get().exportMix(juce::File(jucePath), options);
@@ -1496,22 +1503,22 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_unloadClipJNI(JNIEnv *, jclass, 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipGainJNI(JNIEnv *, jclass, jint clipIndex, jfloat gain)
 {
-    juce::MessageManager::callAsync([clipIndex, gain]
-                                    { JuceEngine::get().setClipGain((int)clipIndex, (float)gain); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, gain]
+                                                  { JuceEngine::get().setClipGain((int)clipIndex, (float)gain); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_muteClipJNI(JNIEnv *, jclass, jint clipIndex, jboolean mute)
 {
-    juce::MessageManager::callAsync([clipIndex, mute]
-                                    { JuceEngine::get().muteClip((int)clipIndex, mute != JNI_FALSE); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, mute]
+                                                  { JuceEngine::get().muteClip((int)clipIndex, mute != JNI_FALSE); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_moveClipToRowJNI(JNIEnv *, jclass, jint clipIndex, jint newRowId)
 {
-    juce::MessageManager::callAsync([clipIndex, newRowId]
-                                    { JuceEngine::get().moveClipToRow((int)clipIndex, (int)newRowId); });
+    juce::MessageManager::getInstance()->callSync([clipIndex, newRowId]
+                                                  { JuceEngine::get().moveClipToRow((int)clipIndex, (int)newRowId); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1639,15 +1646,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertTrackEffectJNI(JNIEnv *env
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_removeTrackEffectJNI(JNIEnv *, jclass, jint row, jint effectIndex)
 {
-    juce::MessageManager::callAsync([row, effectIndex]
-                                    { JuceEngine::get().removeTrackEffect((int)row, (int)effectIndex); });
+    juce::MessageManager::getInstance()->callSync([row, effectIndex]
+                                                  { JuceEngine::get().removeTrackEffect((int)row, (int)effectIndex); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_reorderTrackEffectsJNI(JNIEnv *, jclass, jint row, jint fromIndex, jint toIndex)
 {
-    juce::MessageManager::callAsync([row, fromIndex, toIndex]
-                                    { JuceEngine::get().reorderTrackEffects((int)row, (int)fromIndex, (int)toIndex); });
+    juce::MessageManager::getInstance()->callSync([row, fromIndex, toIndex]
+                                                  { JuceEngine::get().reorderTrackEffects((int)row, (int)fromIndex, (int)toIndex); });
 }
 
 extern "C" JNIEXPORT jobject JNICALL
@@ -1692,15 +1699,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTrackEffectJNI(
 {
     const juce::String param = juceStringFromJString(env, paramId);
     const juce::var value = javaObjectToVar(env, valueObj);
-    juce::MessageManager::callAsync([row, effectIndex, param, value]
-                                    { JuceEngine::get().setTrackEffectParameter((int)row, (int)effectIndex, param, value); });
+    juce::MessageManager::getInstance()->callSync([row, effectIndex, param, value]
+                                                  { JuceEngine::get().setTrackEffectParameter((int)row, (int)effectIndex, param, value); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_bypassRowEffectJNI(JNIEnv *, jclass, jint row, jint effectIndex, jboolean bypass)
 {
-    juce::MessageManager::callAsync([row, effectIndex, bypass]
-                                    { JuceEngine::get().bypassRowEffect((int)row, (int)effectIndex, bypass != JNI_FALSE); });
+    juce::MessageManager::getInstance()->callSync([row, effectIndex, bypass]
+                                                  { JuceEngine::get().bypassRowEffect((int)row, (int)effectIndex, bypass != JNI_FALSE); });
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1716,8 +1723,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTrackAutomationPointsJNI(JNIEnv *env, jclass, jint row, jobject pointsList)
 {
     auto points = parseAutomationPoints(env, pointsList, 3.0f);
-    juce::MessageManager::callAsync([row, points = std::move(points)]() mutable
-                                    { JuceEngine::get().setTrackAutomationPoints((int)row, points); });
+    juce::MessageManager::getInstance()->callSync([row, points = std::move(points)]() mutable
+                                                  { JuceEngine::get().setTrackAutomationPoints((int)row, points); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1733,8 +1740,8 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTrackEffectAutomationPointsJN
 {
     const juce::String param = juceStringFromJString(env, paramId);
     auto points = parseAutomationPoints(env, pointsList, 1.0f);
-    juce::MessageManager::callAsync([row, effectIndex, param, minValue, maxValue, points = std::move(points)]() mutable
-                                    { JuceEngine::get().setTrackEffectAutomationPoints((int)row, (int)effectIndex, param, (float)minValue, (float)maxValue, points); });
+    juce::MessageManager::getInstance()->callSync([row, effectIndex, param, minValue, maxValue, points = std::move(points)]() mutable
+                                                  { JuceEngine::get().setTrackEffectAutomationPoints((int)row, (int)effectIndex, param, (float)minValue, (float)maxValue, points); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1743,8 +1750,8 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_clearTrackEffectAutomationForRow
     jclass,
     jint row)
 {
-    juce::MessageManager::callAsync([row]
-                                    { JuceEngine::get().clearTrackEffectAutomationForRow((int)row); });
+    juce::MessageManager::getInstance()->callSync([row]
+                                                  { JuceEngine::get().clearTrackEffectAutomationForRow((int)row); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1755,22 +1762,22 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowGainAutomationPointsJNI(
     jobject pointsList)
 {
     auto points = parseAutomationPoints(env, pointsList, 1.0f);
-    juce::MessageManager::callAsync([row, points = std::move(points)]() mutable
-                                    { JuceEngine::get().setRowGainAutomationPoints((int)row, points); });
+    juce::MessageManager::getInstance()->callSync([row, points = std::move(points)]() mutable
+                                                  { JuceEngine::get().setRowGainAutomationPoints((int)row, points); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowGainJNI(JNIEnv *, jclass, jint row, jfloat gain)
 {
-    juce::MessageManager::callAsync([row, gain]
-                                    { JuceEngine::get().setRowGain((int)row, (float)gain); });
+    juce::MessageManager::getInstance()->callSync([row, gain]
+                                                  { JuceEngine::get().setRowGain((int)row, (float)gain); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_muteRowJNI(JNIEnv *, jclass, jint row, jboolean mute)
 {
-    juce::MessageManager::callAsync([row, mute]
-                                    { JuceEngine::get().muteRow((int)row, mute != JNI_FALSE); });
+    juce::MessageManager::getInstance()->callSync([row, mute]
+                                                  { JuceEngine::get().muteRow((int)row, mute != JNI_FALSE); });
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1790,15 +1797,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowPanAutomationPointsJNI(
     jobject pointsList)
 {
     auto points = parseAutomationPoints(env, pointsList, 1.0f);
-    juce::MessageManager::callAsync([row, points = std::move(points)]() mutable
-                                    { JuceEngine::get().setRowPanAutomationPoints((int)row, points); });
+    juce::MessageManager::getInstance()->callSync([row, points = std::move(points)]() mutable
+                                                  { JuceEngine::get().setRowPanAutomationPoints((int)row, points); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowPanJNI(JNIEnv *, jclass, jint row, jfloat pan)
 {
-    juce::MessageManager::callAsync([row, pan]
-                                    { JuceEngine::get().setRowPan((int)row, (float)pan); });
+    juce::MessageManager::getInstance()->callSync([row, pan]
+                                                  { JuceEngine::get().setRowPan((int)row, (float)pan); });
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1858,15 +1865,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterEffectJNI(
 {
     const juce::String param = juceStringFromJString(env, paramId);
     const juce::var value = javaObjectToVar(env, valueObj);
-    juce::MessageManager::callAsync([effectIndex, param, value]
-                                    { JuceEngine::get().setMasterEffectParameter((int)effectIndex, param, value); });
+    juce::MessageManager::getInstance()->callSync([effectIndex, param, value]
+                                                  { JuceEngine::get().setMasterEffectParameter((int)effectIndex, param, value); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_bypassMasterEffectJNI(JNIEnv *, jclass, jint effectIndex, jboolean bypass)
 {
-    juce::MessageManager::callAsync([effectIndex, bypass]
-                                    { JuceEngine::get().bypassMasterEffect((int)effectIndex, bypass != JNI_FALSE); });
+    juce::MessageManager::getInstance()->callSync([effectIndex, bypass]
+                                                  { JuceEngine::get().bypassMasterEffect((int)effectIndex, bypass != JNI_FALSE); });
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1890,8 +1897,8 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterEffectAutomationPointsJ
 {
     const juce::String param = juceStringFromJString(env, paramId);
     auto points = parseAutomationPoints(env, pointsList, 1.0f);
-    juce::MessageManager::callAsync([effectIndex, param, minValue, maxValue, points = std::move(points)]() mutable
-                                    { JuceEngine::get().setMasterEffectAutomationPoints((int)effectIndex, param, (float)minValue, (float)maxValue, points); });
+    juce::MessageManager::getInstance()->callSync([effectIndex, param, minValue, maxValue, points = std::move(points)]() mutable
+                                                  { JuceEngine::get().setMasterEffectAutomationPoints((int)effectIndex, param, (float)minValue, (float)maxValue, points); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1899,8 +1906,8 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_clearMasterEffectAutomationJNI(
     JNIEnv *,
     jclass)
 {
-    juce::MessageManager::callAsync([]
-                                    { JuceEngine::get().clearMasterEffectAutomation(); });
+    juce::MessageManager::getInstance()->callSync([]
+                                                  { JuceEngine::get().clearMasterEffectAutomation(); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1910,22 +1917,22 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterGainAutomationPointsJNI
     jobject pointsList)
 {
     auto points = parseAutomationPoints(env, pointsList, 1.0f);
-    juce::MessageManager::callAsync([points = std::move(points)]() mutable
-                                    { JuceEngine::get().setMasterGainAutomationPoints(points); });
+    juce::MessageManager::getInstance()->callSync([points = std::move(points)]() mutable
+                                                  { JuceEngine::get().setMasterGainAutomationPoints(points); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterGainJNI(JNIEnv *, jclass, jfloat gain)
 {
-    juce::MessageManager::callAsync([gain]
-                                    { JuceEngine::get().setMasterGain((float)gain); });
+    juce::MessageManager::getInstance()->callSync([gain]
+                                                  { JuceEngine::get().setMasterGain((float)gain); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_muteMasterJNI(JNIEnv *, jclass, jboolean mute)
 {
-    juce::MessageManager::callAsync([mute]
-                                    { JuceEngine::get().muteMaster(mute != JNI_FALSE); });
+    juce::MessageManager::getInstance()->callSync([mute]
+                                                  { JuceEngine::get().muteMaster(mute != JNI_FALSE); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1935,15 +1942,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterPanAutomationPointsJNI(
     jobject pointsList)
 {
     auto points = parseAutomationPoints(env, pointsList, 1.0f);
-    juce::MessageManager::callAsync([points = std::move(points)]() mutable
-                                    { JuceEngine::get().setMasterPanAutomationPoints(points); });
+    juce::MessageManager::getInstance()->callSync([points = std::move(points)]() mutable
+                                                  { JuceEngine::get().setMasterPanAutomationPoints(points); });
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterPanJNI(JNIEnv *, jclass, jfloat pan)
 {
-    juce::MessageManager::callAsync([pan]
-                                    { JuceEngine::get().setMasterPan((float)pan); });
+    juce::MessageManager::getInstance()->callSync([pan]
+                                                  { JuceEngine::get().setMasterPan((float)pan); });
 }
 
 extern "C" JNIEXPORT void JNICALL

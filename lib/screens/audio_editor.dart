@@ -67,9 +67,11 @@ import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/config/llm_config.dart';
 import 'package:mixroom/config/app_api_config.dart';
+import 'package:mixroom/helpers/audio_project_persistence.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
+import 'package:mixroom/helpers/dbfs_meter_visuals.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/helpers/instrument_picker_categories.dart';
 import 'package:open_file/open_file.dart';
@@ -1046,6 +1048,10 @@ class _AssistantActionApplyException implements Exception {
 
   @override
   String toString() => 'Assistant action failed ($actionType): $cause';
+}
+
+class _ChatFlowCancelledException implements Exception {
+  const _ChatFlowCancelledException();
 }
 
 List<Map<String, dynamic>> _cloneInstrumentCatalog(
@@ -3661,7 +3667,7 @@ class _TopPopupLayout {
 
 class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     with WidgetsBindingObserver {
-  static const bool _kForceRenderedMidiPlaybackForBeta = true;
+  static const bool _kForceRenderedMidiPlaybackForBeta = false;
   static const bool _kAllowSampledNativeRenderFallbackForBeta = false;
   static const Key _editorScaffoldKey = Key('audio_editor_screen');
   static const Key _editorBackButtonKey = Key('audio_editor_back_button');
@@ -3714,6 +3720,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const double _kOverlayPanelHorizontalInset = 8.0;
   static const double _kProducerBannerHeightEstimate = 62.0;
   static const double _kTopPopupHorizontalMargin = 11.0;
+  static const double _kTopPopupVerticalGap = 10.0;
   static const Set<String> _kSampleAudioExtensions = <String>{
     '.wav',
     '.wave',
@@ -3784,6 +3791,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String _projectId = '';
   String _projectName = "Untitled Project";
   bool _requiresProjectNaming = false;
+  int _projectCreatedAtMs = 0;
   bool _loadedOnce = false;
   Future<String>? _bundledSamplePackRefreshTokenFuture;
   Future<String?>? _androidBundledInstrumentRootPathFuture;
@@ -3974,6 +3982,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _lastTransportPollElapsed = now;
     _transportRateSecPerSec = playing ? 1.0 : 0.0;
     _setGlobalAudioClock(value, forceNotify: true);
+  }
+
+  void _scrubProjectTransport(double ms) {
+    if (_isRecording) return;
+    final clampedMs = math.max(0.0, ms);
+    final newPosition = Duration(milliseconds: clampedMs.round());
+    _syncTransportClock(
+      newPosition,
+      playing: _isPlaying,
+    );
+    unawaited(JuceAudioEngine.seekTransport(clampedMs / 1000.0));
+    JuceAudioEngine.setAutomationTransport(clampedMs / 1000.0);
+    JuceAudioEngine.setMetronomeTransportMs(clampedMs);
   }
 
   Duration _estimateTransportClockFromSample() {
@@ -4220,10 +4241,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Timer? _midiDevicePollTimer;
   bool _midiDevicePollBusy = false;
   Map<String, String> _knownMidiDevicesById = <String, String>{};
-  final Map<int, int> _midiRenderSyncTokens = <int, int>{};
-  final Map<int, Timer> _midiRenderDebounceTimers = <int, Timer>{};
-  final Set<int> _deferredMidiRenderRefreshClipIds = <int>{};
-  int _nextMidiRenderSyncToken = 0;
+  final Map<int, int> _midiClipEngineRefreshTokens = <int, int>{};
+  final Map<int, Future<void>> _midiClipEngineRefreshChains =
+      <int, Future<void>>{};
   bool _timelineMagnetEnabled = false;
   int _timelineQuantizeDivisionsPerBar = 4;
 
@@ -4310,6 +4330,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   double _metronomeVolume = 0.5; // 0–1
 
   final EditorUndoManager _undoManager = EditorUndoManager(maxHistory: 30);
+  late final AudioProjectPersistence _projectPersistence;
+  late final AutosaveCoordinator _projectAutosaveCoordinator;
+  final Map<int, RowEffectsSnapshot> _rowEffectSnapshotsByRowId =
+      <int, RowEffectsSnapshot>{};
+  MasterEffectsSnapshot _masterEffectSnapshot = MasterEffectsSnapshot(
+    <EffectSnapshot>[],
+  );
 
   bool _chatExpanded = false;
   bool _chatInputActive = false;
@@ -4341,7 +4368,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _producerGuidedPromptMinimized = false;
   late final ChatController _chatController;
   final ScrollController _chatListScrollController = ScrollController();
-  Timer? _chatHistoryPersistTimer;
   bool _chatHistoryPruneScheduled = false;
   bool _chatHistoryPruneInFlight = false;
   Timer? _copiedChatMessageTimer;
@@ -4352,6 +4378,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   void Function(int row) _refreshRowFx = _noopRefreshRowFx;
   void Function(int row) _refreshRowFxPlayback = _noopRefreshRowFx;
   bool _isThinking = false;
+  int _chatFlowSequence = 0;
+  int? _activeChatFlowId;
   bool _chatScrollHintEnabled = false;
   late final MixChangeHighlighter _mixHighlighter = MixChangeHighlighter();
   bool _chatWarm = false;
@@ -4407,8 +4435,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   StreamSubscription<ja.PlayerState>? _samplePreviewStateSub;
   String? _auditioningSamplePath;
   bool _samplePreviewPlaying = false;
-  int _pianoPreviewToken = 0;
-  final Map<String, String> _pianoPreviewRenderCache = <String, String>{};
   List<Map<String, dynamic>> _instrumentCatalog =
       _cloneInstrumentCatalog(kInstrumentCatalog);
   bool _instrumentCatalogReady = false;
@@ -5141,9 +5167,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return null;
     }
 
-    final Offset offset =
+    final Offset topLeft =
         anchorObject.localToGlobal(Offset.zero, ancestor: stackObject);
-    return offset & anchorObject.size;
+    final Offset topRight = anchorObject.localToGlobal(
+      Offset(anchorObject.size.width, 0),
+      ancestor: stackObject,
+    );
+    final Offset bottomLeft = anchorObject.localToGlobal(
+      Offset(0, anchorObject.size.height),
+      ancestor: stackObject,
+    );
+    final Offset bottomRight = anchorObject.localToGlobal(
+      Offset(anchorObject.size.width, anchorObject.size.height),
+      ancestor: stackObject,
+    );
+
+    final double left = math.min(math.min(topLeft.dx, topRight.dx),
+        math.min(bottomLeft.dx, bottomRight.dx));
+    final double top = math.min(math.min(topLeft.dy, topRight.dy),
+        math.min(bottomLeft.dy, bottomRight.dy));
+    final double right = math.max(math.max(topLeft.dx, topRight.dx),
+        math.max(bottomLeft.dx, bottomRight.dx));
+    final double bottom = math.max(math.max(topLeft.dy, topRight.dy),
+        math.max(bottomLeft.dy, bottomRight.dy));
+    return Rect.fromLTRB(left, top, right, bottom);
   }
 
   _TopPopupLayout _resolveTopPopupLayout({
@@ -5151,6 +5198,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required double desiredWidth,
     required double connectorWidth,
     bool centerOnToolbarPill = false,
+    bool matchToolbarWidth = false,
   }) {
     final BuildContext? stackContext = _editorContentStackKey.currentContext;
     final RenderObject? stackObject = stackContext?.findRenderObject();
@@ -5167,11 +5215,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final Rect? anchorRect = _topPopupAnchorRect(anchorKey);
     final Rect? toolbarRect =
         centerOnToolbarPill ? _topPopupAnchorRect(_toolbarPillKey) : null;
+    final double targetWidth = matchToolbarWidth && toolbarRect != null
+        ? toolbarRect.width
+        : desiredWidth;
     final double maxWidth = math.max(
       0,
       stackObject.size.width - (_kTopPopupHorizontalMargin * 2),
     );
-    final double resolvedWidth = math.min(desiredWidth, maxWidth);
+    final double resolvedWidth = math.min(targetWidth, maxWidth);
     final double centerX = toolbarRect?.center.dx ??
         anchorRect?.center.dx ??
         (stackObject.size.width / 2);
@@ -5193,7 +5244,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
 
     return _TopPopupLayout(
-      top: topAnchorRect == null ? 56 : topAnchorRect.bottom - 12,
+      top: topAnchorRect == null
+          ? 56
+          : topAnchorRect.bottom + _kTopPopupVerticalGap,
       left: left,
       width: resolvedWidth,
       connectorLeft: connectorLeft,
@@ -5279,8 +5332,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<String?> _ensureAndroidBundledInstrumentRootPath() async {
     if (!Platform.isAndroid) return null;
     return _androidBundledInstrumentRootPathFuture ??= () async {
-      final root = (await JuceAudioEngine.getBundledInstrumentRootPath())
-          ?.trim();
+      final root =
+          (await JuceAudioEngine.getBundledInstrumentRootPath())?.trim();
       if (root == null || root.isEmpty) {
         _androidBundledInstrumentRootPath = null;
         return null;
@@ -5583,6 +5636,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
 
     _projectDir = widget.projectDir;
+    _projectCreatedAtMs = DateTime.now().millisecondsSinceEpoch;
+    _projectPersistence = JsonAudioProjectPersistence();
+    _projectAutosaveCoordinator = AutosaveCoordinator(
+      performSave: _performAutosaveWrite,
+      onError: (error, _) {
+        debugPrint('Project autosave failed: $error');
+      },
+    );
+    _undoManager.addListener(_handleUndoHistoryChanged);
 
     _classifier = InstrumentClassifier();
     _spleeterStemSeparator = SpleeterStemSeparator();
@@ -5635,10 +5697,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       magnitudePredictor: _magnitudePredictor,
       onThinkingChanged: (isThinking) {
         if (!mounted) return;
-        setState(() {
-          _isThinking = isThinking;
-        });
-        if (isThinking && !_chatScrollHintEnabled) {
+        if (isThinking && _isThinking && !_chatScrollHintEnabled) {
           _scrollChatToLatest();
         }
       },
@@ -7252,6 +7311,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(_setIOSSystemGestureDeferral(false));
     unawaited(_producerCollector.closeSession(reason: 'screen_dispose'));
     WidgetsBinding.instance.removeObserver(this);
+    _undoManager.removeListener(_handleUndoHistoryChanged);
     _amplitudeSub?.cancel();
     _micRecorder.dispose();
     unawaited(_spleeterStemSeparator.dispose());
@@ -7267,8 +7327,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _chatTextController.dispose();
     _chatFocusNode.dispose();
     _chatListScrollController.dispose();
-    _chatHistoryPersistTimer?.cancel();
-    _chatHistoryPersistTimer = null;
+    _projectAutosaveCoordinator.dispose();
     _producerCaptureAccessHttpClient.close();
     _copiedChatMessageTimer?.cancel();
     _copiedChatMessageTimer = null;
@@ -7290,12 +7349,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _setLiveMidiInputTargetClipIfNeeded(-1, clearPendingEvents: false),
       );
     }
-    for (final timer in _midiRenderDebounceTimers.values) {
-      timer.cancel();
-    }
-    _midiRenderDebounceTimers.clear();
-    _midiRenderSyncTokens.clear();
-    _deferredMidiRenderRefreshClipIds.clear();
+    _midiClipEngineRefreshTokens.clear();
+    _midiClipEngineRefreshChains.clear();
     _sfzDefinitionCache.clear();
     _sfzSampleCache.clear();
 
@@ -7316,8 +7371,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         debugPrint("App Resumed on Android - Re-initializing.");
         unawaited(_handleAndroidEditorResumed());
       } else if (state == AppLifecycleState.paused ||
-          state == AppLifecycleState.inactive) {
-        _scheduleChatHistoryPersist(immediate: true);
+          state == AppLifecycleState.inactive ||
+          state == AppLifecycleState.hidden ||
+          state == AppLifecycleState.detached) {
+        _markProjectDirty(immediate: true);
         debugPrint("App Paused or Inactive on Android - Disposing.");
         unawaited(_pausePlayback());
         setState(() {
@@ -7328,10 +7385,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (state == AppLifecycleState.resumed) {
         unawaited(_refreshMicrophonePermissionAndInputs());
         unawaited(_refreshAudioRouteInfo());
-      } else if (state == AppLifecycleState.paused) {
-        //} || state == AppLifecycleState.inactive) {
-        // debugPrint("App Paused or Inactive on iOS");
-        _scheduleChatHistoryPersist(immediate: true);
+      } else if (state == AppLifecycleState.paused ||
+          state == AppLifecycleState.inactive ||
+          state == AppLifecycleState.hidden ||
+          state == AppLifecycleState.detached) {
+        _markProjectDirty(immediate: true);
         unawaited(_pauseAudio(_safeAudioEditorStateSetter));
         setState(() {
           _isPlaying = false;
@@ -7502,6 +7560,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _producerPromptQueueIndex = 0;
       }
     });
+    _scheduleProjectAutosave();
     if (!allowlisted) {
       unawaited(_producerCollector.setEnabled(false));
     }
@@ -7589,9 +7648,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _reopenSampleBrowserExpanded = false;
       _invalidateAiLibrarySnapshotCache();
       await _ensureDefaultSampleBrowserRoots();
-      final json = await ProjectManager.readProjectJson(_projectDir);
+      final json = await _projectPersistence.loadProjectState(_projectDir);
       await _restoreChatHistoryFromProjectJson(json);
       _projectId = ProjectManager.ensureProjectIdInJson(json);
+      _projectCreatedAtMs = (json["createdAt"] as num?)?.toInt() ??
+          DateTime.now().millisecondsSinceEpoch;
       final projectVersion = (json["version"] as num?)?.toInt() ?? 1;
       _projectName = (json["name"] ?? "Untitled Project") as String;
       _requiresProjectNaming = _projectRequiresNameConfirmation(json);
@@ -7613,7 +7674,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       json["lastOpenedAt"] = DateTime.now().millisecondsSinceEpoch;
       unawaited(() async {
         try {
-          await ProjectManager.writeProjectJson(_projectDir, json);
+          await _projectPersistence.saveProjectState(
+            projectDir: _projectDir,
+            projectState: json,
+            mode: AudioProjectSaveMode.autosave,
+          );
         } catch (e) {
           debugPrint('Failed to update project lastOpenedAt during load: $e');
         }
@@ -7907,9 +7972,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       // Restore FX snapshots after tracks exist
       final rowFxList = (json["rowEffects"] as List?) ?? [];
+      _rowEffectSnapshotsByRowId.clear();
       for (final rf in rowFxList) {
         final snap = RowEffectsSnapshotJson.fromJson(
             (rf as Map).cast<String, dynamic>());
+        if (snap.rowId >= 0) {
+          _rowEffectSnapshotsByRowId[snap.rowId] = snap;
+        }
         // Same reasoning as rowStates above: saved index is the stable restore
         // anchor across sessions; rowId is a best-effort fallback.
         var resolvedRow = snap.row;
@@ -7934,6 +8003,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final masterFx = master["effects"];
         if (masterFx != null) {
           final ms = MasterEffectsSnapshotJson.fromJson(masterFx);
+          _masterEffectSnapshot = ms;
           await restoreMasterSnapshot(ms);
         }
 
@@ -7949,6 +8019,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await JuceAudioEngine.setMasterGain(_masterGain);
         await JuceAudioEngine.setMasterPan(_masterPan);
       }
+      _syncEffectSnapshotCacheToCurrentRows();
 
       await _refreshAutomationTargetsForAllRows(
         syncNativeWhenDone: false,
@@ -8042,172 +8113,311 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _setLiveMidiInputTargetClipIfNeeded(targetClipId);
   }
 
+  void _handleUndoHistoryChanged() {
+    final action = _undoManager.lastAction;
+    if (action == null) {
+      _scheduleProjectAutosave();
+      return;
+    }
+    unawaited(_refreshAutosaveCachesForUndoAction(action));
+  }
+
+  Future<void> _refreshAutosaveCachesForUndoAction(
+    EditorUndoAction action,
+  ) async {
+    try {
+      switch (action) {
+        case final BypassEffectAction effectAction:
+          await _refreshPersistedEffectSnapshotForRow(effectAction.row);
+        case final InsertEffectAction effectAction:
+          await _refreshPersistedEffectSnapshotForRow(effectAction.row);
+        case final RemoveEffectAction effectAction:
+          await _refreshPersistedEffectSnapshotForRow(effectAction.row);
+        case final ReorderEffectAction effectAction:
+          await _refreshPersistedEffectSnapshotForRow(effectAction.row);
+        case final SetEffectParamAction effectAction:
+          await _refreshPersistedEffectSnapshotForRow(effectAction.row);
+        case final TrackPresetChangeAction trackPresetAction:
+          await _refreshPersistedEffectSnapshotForRow(
+            trackPresetAction.after.row,
+          );
+        case _RowEffectsAutomationSnapshotAction():
+          await _refreshAllPersistedEffectSnapshots();
+        case BypassMasterEffectAction():
+          await _refreshPersistedMasterEffectSnapshot();
+        case InsertMasterEffectAction():
+          await _refreshPersistedMasterEffectSnapshot();
+        case RemoveMasterEffectAction():
+          await _refreshPersistedMasterEffectSnapshot();
+        case ReorderMasterEffectAction():
+          await _refreshPersistedMasterEffectSnapshot();
+        case SetMasterEffectParamAction():
+          await _refreshPersistedMasterEffectSnapshot();
+        case MasterPresetChangeAction():
+          await _refreshPersistedMasterEffectSnapshot();
+        case _MasterEffectsSnapshotAction():
+          await _refreshPersistedMasterEffectSnapshot();
+        default:
+          break;
+      }
+    } catch (e) {
+      debugPrint('Autosave cache refresh failed: $e');
+    }
+    _scheduleProjectAutosave();
+  }
+
+  void _markProjectDirty({
+    Duration debounce = const Duration(seconds: 1),
+    bool immediate = false,
+  }) {
+    if (!_loadedOnce) return;
+    if (_isProjectLoading) return;
+    _projectAutosaveCoordinator.markDirty();
+    if (immediate) {
+      unawaited(_projectAutosaveCoordinator.flush());
+      return;
+    }
+    _projectAutosaveCoordinator.schedule(debounce: debounce);
+  }
+
+  void _scheduleProjectAutosave({
+    Duration debounce = const Duration(seconds: 1),
+  }) {
+    if (!_loadedOnce || _isProjectLoading) return;
+    if (_isRecording || _isMidiClipRecording || _recordTransitionInFlight) {
+      _projectAutosaveCoordinator.markDirty();
+      return;
+    }
+    _projectAutosaveCoordinator.schedule(debounce: debounce);
+  }
+
+  Future<void> _refreshPersistedEffectSnapshotForRow(int row) async {
+    if (row < 0 || row >= _rowCount) return;
+    final snapshot = await captureRowSnapshot(row, rowId: _rowIdAt(row));
+    if (snapshot.rowId >= 0) {
+      _rowEffectSnapshotsByRowId[snapshot.rowId] = snapshot;
+    }
+  }
+
+  Future<void> _refreshPersistedMasterEffectSnapshot() async {
+    _masterEffectSnapshot = await captureMasterSnapshot();
+  }
+
+  void _syncEffectSnapshotCacheToCurrentRows() {
+    final activeRowIds =
+        _rows.map((row) => row.rowId).where((rowId) => rowId >= 0).toSet();
+    _rowEffectSnapshotsByRowId.removeWhere(
+      (rowId, _) => !activeRowIds.contains(rowId),
+    );
+    for (int row = 0; row < _rowCount; row++) {
+      final rowId = _rowIdAt(row);
+      if (rowId < 0 || _rowEffectSnapshotsByRowId.containsKey(rowId)) continue;
+      _rowEffectSnapshotsByRowId[rowId] = RowEffectsSnapshot(
+        row,
+        <EffectSnapshot>[],
+        rowId: rowId,
+      );
+    }
+  }
+
+  Map<String, dynamic> _buildProjectJsonSnapshot() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final rowsJson = _rows
+        .map((r) => {
+              "rowId": r.rowId,
+              "name": r.name,
+              "iconId": r.iconId,
+            })
+        .toList(growable: false);
+
+    final tracksJson = <Map<String, dynamic>>[];
+    for (final tr in _audioTracks) {
+      final src = tr.file;
+      if (!tr.isMidi && !src.existsSync()) continue;
+      final fileName = p.basename(src.path).trim();
+      if (fileName.isEmpty) continue;
+      tracksJson.add({
+        "fileName": fileName,
+        "label": tr.label,
+        "clipType": tr.clipKind.wireName,
+        "trimStartMs": tr.trimStart.inMilliseconds,
+        "trimEndMs": tr.trimEnd.inMilliseconds,
+        "offset": tr.offset,
+        "crossfade": tr.crossfade,
+        "gain": tr.gain,
+        "pitchSemitones": tr.pitchSemitones,
+        "isReversed": tr.isReversed,
+        "sourceTempoBpm": tr.sourceTempoBpm,
+        "stretchToProjectTempo": tr.stretchToProjectTempo,
+        "tempoStretchPreservePitch": tr.tempoStretchPreservePitch,
+        "rowIndex": tr.rowIndex,
+        "rowId": tr.rowId,
+        "automation": tr.volumeAutomation.map((p) => p.toJson()).toList(),
+        "instrumentId": tr.instrumentId,
+        "instrumentName": tr.instrumentName,
+        "instrumentParams": tr.instrumentParams,
+        "midiNotes": tr.midiNotes.map((n) => n.toJson()).toList(),
+      });
+    }
+
+    final rowStates = <Map<String, dynamic>>[];
+    final rowEffects = <Map<String, dynamic>>[];
+    for (int row = 0; row < _rowCount; row++) {
+      final rowId = _rowIdAt(row);
+      rowStates.add(
+        RowStateSnapshot(
+          row: row,
+          rowId: rowId,
+          gain: _rowGain[row],
+          pan: _rowPan[row],
+          volumeAutomation:
+              _rowVolumeAutomation[row].map((p) => p.copy()).toList(),
+          automationLanes: _automationLanesForRowSave(row),
+          automationClips: _automationClipsForRowSave(row),
+          selectedAutomationTargetId: _rowSelectedAutomationTarget[row],
+        ).toJson(),
+      );
+
+      final cached = rowId >= 0 ? _rowEffectSnapshotsByRowId[rowId] : null;
+      rowEffects.add(
+        RowEffectsSnapshot(
+          row,
+          cached?.effects ?? const <EffectSnapshot>[],
+          rowId: rowId,
+        ).toJson(),
+      );
+    }
+
+    final assistantChat =
+        ProjectChatHistory.fromChatMessages(_chatController.messages)
+            .toJsonValue();
+    final json = <String, dynamic>{
+      "version": 5,
+      "name": _projectName,
+      "nameConfirmed": !_requiresProjectNaming,
+      "createdAt": _projectCreatedAtMs > 0
+          ? _projectCreatedAtMs
+          : DateTime.now().millisecondsSinceEpoch,
+      "lastOpenedAt": now,
+      "projectId": _projectId,
+      "tempoBpm": _tempo,
+      "tempoStretchEnabled": _tempoStretchEnabled,
+      "tempoStretchPreservePitchDefault": _tempoStretchPreservePitchDefault,
+      "rows": rowsJson,
+      "tracks": tracksJson,
+      "rowStates": rowStates,
+      "rowEffects": rowEffects,
+      "master": {
+        "gain": _masterGain,
+        "pan": _masterPan,
+        "effects": _masterEffectSnapshot.toJson(),
+      },
+      "ui": {
+        "showProducerCaptureUi": _showProducerCaptureUi,
+      },
+    };
+    if (assistantChat != null) {
+      json["assistantChat"] = assistantChat;
+    }
+    return json;
+  }
+
+  Future<void> _performAutosaveWrite() async {
+    _syncEffectSnapshotCacheToCurrentRows();
+    final json = _buildProjectJsonSnapshot();
+    await _projectPersistence.saveProjectState(
+      projectDir: _projectDir,
+      projectState: json,
+      mode: AudioProjectSaveMode.autosave,
+    );
+  }
+
+  Future<void> _uploadProjectTelemetrySnapshot(
+    Map<String, dynamic> json,
+  ) async {
+    if (!mounted) return;
+    final auth = context.read<AuthService>();
+    try {
+      final telemetrySnapshot = _buildProjectTelemetrySnapshot(json);
+      unawaited(
+        ProjectTelemetryService.instance.uploadProjectSnapshot(
+          auth: auth,
+          projectId: _projectId.trim(),
+          projectName: _projectName,
+          projectJson: Map<String, dynamic>.from(json),
+          projectSnapshot: telemetrySnapshot,
+        ),
+      );
+    } catch (e) {
+      debugPrint("Project telemetry snapshot failed: $e");
+    }
+  }
+
+  Future<void> _normalizeProjectAudioAssetsForCheckpoint() async {
+    final audioDir = ProjectManager.audioDir(_projectDir);
+    if (!await audioDir.exists()) {
+      await audioDir.create(recursive: true);
+    }
+
+    final assignedFileNameBySourcePath = <String, String>{};
+    final usedSavedFileNamesLower = <String>{};
+    final referenced = <String>{};
+
+    for (final tr in _audioTracks) {
+      final src = tr.file;
+      if (!src.existsSync()) continue;
+
+      final normalizedSourcePath = p.normalize(src.path);
+      final existingAssigned =
+          assignedFileNameBySourcePath[normalizedSourcePath];
+      final fileName = existingAssigned ??
+          ProjectManager.uniqueAudioFileName(
+            preferredName: _displayNameForFilePath(src.path),
+            usedNamesLower: usedSavedFileNamesLower,
+          );
+      assignedFileNameBySourcePath[normalizedSourcePath] = fileName;
+      referenced.add(fileName);
+      final dst = File(p.join(audioDir.path, fileName));
+      if (src.path != dst.path) {
+        if (await dst.exists()) {
+          await dst.delete();
+        }
+        await src.copy(dst.path);
+      }
+    }
+
+    final files = audioDir.listSync().whereType<File>();
+    for (final f in files) {
+      final name = p.basename(f.path);
+      if (!referenced.contains(name)) {
+        try {
+          await f.delete();
+        } catch (_) {}
+      }
+    }
+  }
+
+  Future<void> _refreshAllPersistedEffectSnapshots() async {
+    _syncEffectSnapshotCacheToCurrentRows();
+    for (int row = 0; row < _rowCount; row++) {
+      await _refreshPersistedEffectSnapshotForRow(row);
+    }
+    await _refreshPersistedMasterEffectSnapshot();
+  }
+
   Future<void> _saveProject({bool showSnackBar = true}) async {
     try {
-      _chatHistoryPersistTimer?.cancel();
-      _chatHistoryPersistTimer = null;
-      final audioDir = ProjectManager.audioDir(_projectDir);
-      if (!await audioDir.exists()) await audioDir.create(recursive: true);
-
-      // Copy audio sources into project/audio
-      final tracksJson = <Map<String, dynamic>>[];
-      final assignedFileNameBySourcePath = <String, String>{};
-      final usedSavedFileNamesLower = <String>{};
-      for (int i = 0; i < _audioTracks.length; i++) {
-        final tr = _audioTracks[i];
-
-        // final src = tr.originalFile.existsSync() ? tr.originalFile : tr.file;
-        final src = tr.file;
-
-        if (!src.existsSync()) continue;
-
-        final normalizedSourcePath = p.normalize(src.path);
-        final existingAssigned =
-            assignedFileNameBySourcePath[normalizedSourcePath];
-        final fileName = existingAssigned ??
-            ProjectManager.uniqueAudioFileName(
-              preferredName: p.basename(src.path),
-              usedNamesLower: usedSavedFileNamesLower,
-            );
-        assignedFileNameBySourcePath[normalizedSourcePath] = fileName;
-        final dst = File(p.join(audioDir.path, fileName));
-
-        // Copy only if not already inside project
-        if (src.path != dst.path) {
-          if (dst.existsSync()) await dst.delete();
-          await src.copy(dst.path);
-        }
-
-        tracksJson.add({
-          "fileName": fileName, //tr.file.path,
-          "label": tr.label, // what user sees, doesn't have to be unique
-          "clipType": tr.clipKind.wireName,
-          "trimStartMs": tr.trimStart.inMilliseconds,
-          "trimEndMs": tr.trimEnd.inMilliseconds,
-          "offset": tr.offset,
-          "crossfade": tr.crossfade,
-          "gain": tr.gain,
-          "pitchSemitones": tr.pitchSemitones,
-          "isReversed": tr.isReversed,
-          "sourceTempoBpm": tr.sourceTempoBpm,
-          "stretchToProjectTempo": tr.stretchToProjectTempo,
-          "tempoStretchPreservePitch": tr.tempoStretchPreservePitch,
-          "rowIndex": tr.rowIndex,
-          "rowId": tr.rowId,
-          "automation": tr.volumeAutomation.map((p) => p.toJson()).toList(),
-          "instrumentId": tr.instrumentId,
-          "instrumentName": tr.instrumentName,
-          "instrumentParams": tr.instrumentParams,
-          "midiNotes": tr.midiNotes.map((n) => n.toJson()).toList(),
-        });
-      }
-
-      // Garbage collect unreferenced audio files
-      final referenced = tracksJson
-          .map((t) => (t['fileName'] as String?)?.trim() ?? '')
-          .where((name) => name.isNotEmpty)
-          .toSet();
-      final files = audioDir.listSync().whereType<File>();
-      for (final f in files) {
-        final name = p.basename(f.path);
-        if (!referenced.contains(name)) {
-          try {
-            await f.delete();
-          } catch (_) {}
-        }
-      }
-
-      // Capture FX snapshots (maybe don't do this since it is destructive, user could have FX chains on empty rows)
-      // final usedRows = _audioTracks.map((t) => t.rowIndex).where((r) => r >= 0).toSet().toList()..sort();
-      final usedRows = List<int>.generate(_rowCount, (i) => i);
-
-      final rowFx = <Map<String, dynamic>>[];
-      for (final r in usedRows) {
-        final snap = await captureRowSnapshot(r, rowId: _rowIdAt(r));
-        rowFx.add(snap.toJson());
-      }
-
-      final rowStates = <Map<String, dynamic>>[];
-      for (final r in usedRows) {
-        final snap = RowStateSnapshot(
-          row: r,
-          rowId: _rowIdAt(r),
-          gain: _rowGain[r],
-          pan: _rowPan[r],
-          volumeAutomation:
-              _rowVolumeAutomation[r].map((p) => p.copy()).toList(),
-          automationLanes: _automationLanesForRowSave(r),
-          automationClips: _automationClipsForRowSave(r),
-          selectedAutomationTargetId: _rowSelectedAutomationTarget[r],
-        );
-        rowStates.add(snap.toJson());
-      }
-
-      final masterSnap = await captureMasterSnapshot();
-
-      // Load existing json if present, preserve createdAt
-      final existing = await ProjectManager.readProjectJson(_projectDir);
-      final savedProjectId = ProjectManager.ensureProjectIdInJson(existing);
-      final createdAt =
-          existing["createdAt"] ?? DateTime.now().millisecondsSinceEpoch;
-      final assistantChat =
-          ProjectChatHistory.fromChatMessages(_chatController.messages)
-              .toJsonValue();
-
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final rowsJson = _rows
-          .map((r) => {
-                "rowId": r.rowId,
-                "name": r.name,
-                "iconId": r.iconId,
-              })
-          .toList();
-      final json = <String, dynamic>{
-        "version": 5,
-        "name": _projectName,
-        "nameConfirmed": !_requiresProjectNaming,
-        "createdAt": createdAt,
-        "lastOpenedAt": now,
-        "projectId": _projectId.isNotEmpty ? _projectId : savedProjectId,
-        "tempoBpm": _tempo,
-        "tempoStretchEnabled": _tempoStretchEnabled,
-        "tempoStretchPreservePitchDefault": _tempoStretchPreservePitchDefault,
-        "rows": rowsJson,
-        "tracks": tracksJson,
-        "rowStates": rowStates,
-        "rowEffects": rowFx,
-        "master": {
-          "gain": _masterGain,
-          "pan": _masterPan,
-          "effects": masterSnap.toJson()
-        },
-        "ui": {
-          "showProducerCaptureUi": _showProducerCaptureUi,
-        }
-      };
-      if (assistantChat != null) {
-        json["assistantChat"] = assistantChat;
-      }
-
-      await ProjectManager.writeProjectJson(_projectDir, json);
-      if (mounted) {
-        final auth = context.read<AuthService>();
-        try {
-          final telemetrySnapshot = _buildProjectTelemetrySnapshot(json);
-          unawaited(
-            ProjectTelemetryService.instance.uploadProjectSnapshot(
-              auth: auth,
-              projectId:
-                  (_projectId.isNotEmpty ? _projectId : savedProjectId).trim(),
-              projectName: _projectName,
-              projectJson: Map<String, dynamic>.from(json),
-              projectSnapshot: telemetrySnapshot,
-            ),
-          );
-        } catch (e) {
-          debugPrint("Project telemetry snapshot failed: $e");
-        }
-      }
+      await _projectAutosaveCoordinator.flush();
+      await _normalizeProjectAudioAssetsForCheckpoint();
+      await _refreshAllPersistedEffectSnapshots();
+      final json = _buildProjectJsonSnapshot();
+      await _projectPersistence.saveProjectState(
+        projectDir: _projectDir,
+        projectState: json,
+        mode: AudioProjectSaveMode.checkpoint,
+      );
+      _projectAutosaveCoordinator.clearDirty();
+      await _uploadProjectTelemetrySnapshot(json);
 
       if (mounted && showSnackBar) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -8293,6 +8503,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _setStateAndRefreshProjectSettings(() {
         _requiresProjectNaming = false;
       });
+      _scheduleProjectAutosave();
       return true;
     }
 
@@ -8308,6 +8519,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           newProjectDir: newDir,
         );
       });
+      _scheduleProjectAutosave();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -9829,6 +10041,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<String> _runNativeExportMixWithProgress({
     required String outPath,
+    required String clipSnapshotJson,
     required int sampleRate,
     required int wavBitDepth,
     required bool wavDithering,
@@ -9864,6 +10077,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         wavBitDepth: wavBitDepth,
         wavDithering: wavDithering,
         mp3BitrateKbps: mp3BitrateKbps,
+        clipSnapshotJson: clipSnapshotJson,
       );
     } finally {
       pollingDone = true;
@@ -9877,35 +10091,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<String> _exportAudioOnly(ValueChanged<double> onProgress) async {
-    return _runWithAndroidEngineCriticalSection(() async {
-      if (_audioTracks.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(L10n.translate(context,
-                  'No audio tracks selected'))), // TODO: FIX THIS WORDING
-        );
-        return "";
-      }
-
-      var reportedProgress = 0.0;
-      void reportProgress(double value) {
-        final clamped = value.clamp(0.0, 1.0).toDouble();
-        if (clamped <= reportedProgress) return;
-        reportedProgress = clamped;
-        onProgress(clamped);
-      }
-
-      reportProgress(0.02);
-      final settings = _normalizeAudioExportSettings(
-        _activeAudioExportSettings ?? _audioExportSettings,
+    if (_audioTracks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(L10n.translate(context,
+                'No audio tracks selected'))), // TODO: FIX THIS WORDING
       );
-      reportProgress(0.06);
+      return "";
+    }
 
+    var reportedProgress = 0.0;
+    void reportProgress(double value) {
+      final clamped = value.clamp(0.0, 1.0).toDouble();
+      if (clamped <= reportedProgress) return;
+      reportedProgress = clamped;
+      onProgress(clamped);
+    }
+
+    reportProgress(0.02);
+    final settings = _normalizeAudioExportSettings(
+      _activeAudioExportSettings ?? _audioExportSettings,
+    );
+    reportProgress(0.06);
+    await _prepareNativeEngineStateForExport(reportProgress);
+    final clipSnapshotJson = _buildNativeExportClipSnapshotJson();
+
+    return _runWithAndroidEngineCriticalSection(() async {
       if (_desktopNativeWavOnlyExport) {
-        reportProgress(0.12);
         final tempDir = await getTemporaryDirectory();
-        reportProgress(0.18);
-        await _syncNativePluginAutomationForAllRows();
         reportProgress(0.24);
         final nativeOutPath =
             '${tempDir.path}/audio_export_${DateTime.now().millisecondsSinceEpoch}.wav';
@@ -9913,6 +10126,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         try {
           final exportedPath = await _runNativeExportMixWithProgress(
             outPath: nativeOutPath,
+            clipSnapshotJson: clipSnapshotJson,
             sampleRate: settings.sampleRate,
             wavBitDepth: settings.wavBitDepth,
             wavDithering: settings.wavDithering,
@@ -9958,8 +10172,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final rawRenderSampleRate = await _resolveRawRenderSampleRate(settings);
       reportProgress(0.16);
       final tempDir = await getTemporaryDirectory();
-      reportProgress(0.20);
-      await _syncNativePluginAutomationForAllRows();
       reportProgress(0.24);
 
       final useNativeWavDirect = _canUseNativeWavExport(settings) &&
@@ -9970,6 +10182,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         try {
           final exportedPath = await _runNativeExportMixWithProgress(
             outPath: nativeOutPath,
+            clipSnapshotJson: clipSnapshotJson,
             sampleRate: settings.sampleRate,
             wavBitDepth: settings.wavBitDepth,
             wavDithering: settings.wavDithering,
@@ -10019,6 +10232,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       try {
         final exportedPath = await _runNativeExportMixWithProgress(
           outPath: rawOutPath,
+          clipSnapshotJson: clipSnapshotJson,
           sampleRate: rawRenderSampleRate,
           wavBitDepth: 32,
           wavDithering: false,
@@ -10515,7 +10729,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return clipIndex;
   }
 
-  String _midiRecordHeldKey(int channel, int pitch) => '$channel:$pitch';
+  String _midiRecordHeldKey(String source, int channel, int pitch) =>
+      '$source:$channel:$pitch';
 
   double _transportSecToClipSourceBeat(AudioTrack clip, double transportSec) {
     final sourceTempo = _resolvedClipSourceTempoBpm(clip);
@@ -10527,6 +10742,121 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final sourceSec = (timelineSec * _tempoPlaybackRatioForEngine(clip)) +
         (clip.trimStart.inMilliseconds / 1000.0);
     return math.max(0.0, sourceSec * sourceTempo / 60.0);
+  }
+
+  bool _applyMidiRecordNoteOn(
+    AudioTrack clip, {
+    required String source,
+    required int channel,
+    required int pitch,
+    required double velocity,
+    required double transportSec,
+  }) {
+    final beat = _transportSecToClipSourceBeat(clip, transportSec);
+    final key = _midiRecordHeldKey(source, channel, pitch);
+    final note = MidiNote(
+      id: 'live_rec_${clip.engineClipId}_${DateTime.now().microsecondsSinceEpoch}_${_nextMidiRecordNoteToken++}',
+      pitch: pitch.clamp(0, 127).toInt(),
+      startBeat: beat,
+      lengthBeats: 0.0625,
+      velocity: velocity.clamp(0.0, 1.0),
+    );
+    clip.midiNotes.add(note);
+    (_midiHeldNotesByKey[key] ??= <MidiNote>[]).add(note);
+    var changed = true;
+    if (_extendMidiClipForBeat(clip, note.startBeat + note.lengthBeats)) {
+      changed = true;
+    }
+    _midiRecordHasChanges = true;
+    _lastMidiRecordTransportSec =
+        math.max(_lastMidiRecordTransportSec, transportSec);
+    return changed;
+  }
+
+  bool _applyMidiRecordNoteOff(
+    AudioTrack clip, {
+    required String source,
+    required int channel,
+    required int pitch,
+    required double transportSec,
+  }) {
+    final key = _midiRecordHeldKey(source, channel, pitch);
+    final stack = _midiHeldNotesByKey[key];
+    if (stack == null || stack.isEmpty) {
+      _lastMidiRecordTransportSec =
+          math.max(_lastMidiRecordTransportSec, transportSec);
+      return false;
+    }
+    final note = stack.removeLast();
+    if (stack.isEmpty) {
+      _midiHeldNotesByKey.remove(key);
+    }
+    final beat = _transportSecToClipSourceBeat(clip, transportSec);
+    final nextLength = math.max(0.03125, beat - note.startBeat);
+    var changed = false;
+    if ((nextLength - note.lengthBeats).abs() > 0.00001) {
+      note.lengthBeats = nextLength;
+      changed = true;
+    }
+    if (_extendMidiClipForBeat(clip, note.startBeat + note.lengthBeats)) {
+      changed = true;
+    }
+    if (changed) {
+      _midiRecordHasChanges = true;
+    }
+    _lastMidiRecordTransportSec =
+        math.max(_lastMidiRecordTransportSec, transportSec);
+    return changed;
+  }
+
+  Future<void> _handlePianoRollKeyboardNoteDown(
+    int pitch,
+    double velocity,
+  ) async {
+    if (!_isMidiClipRecording || _midiRecordingClipEngineId == null) return;
+    final clipIndex = _clipIndexForEngineId(_midiRecordingClipEngineId!);
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    final clip = _audioTracks[clipIndex];
+    if (!clip.isMidi) return;
+
+    final transportSec = _globalAudioClock.inMilliseconds.toDouble() / 1000.0;
+    final changed = _applyMidiRecordNoteOn(
+      clip,
+      source: 'piano_roll',
+      channel: 1,
+      pitch: pitch,
+      velocity: velocity,
+      transportSec: transportSec,
+    );
+    if (!changed) return;
+
+    _updateOverallDurationIfNeeded();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _handlePianoRollKeyboardNoteUp(int pitch) async {
+    if (!_isMidiClipRecording || _midiRecordingClipEngineId == null) return;
+    final clipIndex = _clipIndexForEngineId(_midiRecordingClipEngineId!);
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    final clip = _audioTracks[clipIndex];
+    if (!clip.isMidi) return;
+
+    final transportSec = _globalAudioClock.inMilliseconds.toDouble() / 1000.0;
+    final changed = _applyMidiRecordNoteOff(
+      clip,
+      source: 'piano_roll',
+      channel: 1,
+      pitch: pitch,
+      transportSec: transportSec,
+    );
+    if (!changed) return;
+
+    _updateOverallDurationIfNeeded();
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   bool _extendMidiClipForBeat(AudioTrack clip, double endBeat) {
@@ -10617,42 +10947,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             (_globalAudioClock.inMilliseconds.toDouble() / 1000.0);
         latestTransportSec = math.max(latestTransportSec, transportSec);
 
-        final beat = _transportSecToClipSourceBeat(clip, transportSec);
-        final key = _midiRecordHeldKey(channel, pitch);
-
         if (noteOn) {
-          final note = MidiNote(
-            id: 'live_rec_${clip.engineClipId}_${DateTime.now().microsecondsSinceEpoch}_${_nextMidiRecordNoteToken++}',
-            pitch: pitch,
-            startBeat: beat,
-            lengthBeats: 0.0625,
-            velocity: velocity,
-          );
-          clip.midiNotes.add(note);
-          (_midiHeldNotesByKey[key] ??= <MidiNote>[]).add(note);
-          if (_extendMidiClipForBeat(clip, note.startBeat + note.lengthBeats)) {
-            changed = true;
-          }
-          changed = true;
-          _midiRecordHasChanges = true;
+          changed = _applyMidiRecordNoteOn(
+                clip,
+                source: 'external',
+                channel: channel,
+                pitch: pitch,
+                velocity: velocity,
+                transportSec: transportSec,
+              ) ||
+              changed;
           continue;
         }
 
-        final stack = _midiHeldNotesByKey[key];
-        if (stack == null || stack.isEmpty) continue;
-        final note = stack.removeLast();
-        if (stack.isEmpty) {
-          _midiHeldNotesByKey.remove(key);
-        }
-        final nextLength = math.max(0.03125, beat - note.startBeat);
-        if ((nextLength - note.lengthBeats).abs() > 0.00001) {
-          note.lengthBeats = nextLength;
-          changed = true;
-        }
-        if (_extendMidiClipForBeat(clip, note.startBeat + note.lengthBeats)) {
-          changed = true;
-        }
-        _midiRecordHasChanges = true;
+        changed = _applyMidiRecordNoteOff(
+              clip,
+              source: 'external',
+              channel: channel,
+              pitch: pitch,
+              transportSec: transportSec,
+            ) ||
+            changed;
       }
 
       final fallbackTransportSec =
@@ -10754,6 +11069,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final recordingClipId = _midiRecordingClipEngineId;
     final clipIndex =
         recordingClipId == null ? -1 : _clipIndexForEngineId(recordingClipId);
+    final hadMidiChanges = _midiRecordHasChanges;
     if (clipIndex >= 0 && clipIndex < _audioTracks.length) {
       final clip = _audioTracks[clipIndex];
       if (clip.isMidi && _midiRecordHasChanges) {
@@ -10766,10 +11082,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (updatedLive) {
           await _syncClipTimingToEngine(clipIndex);
           await _syncClipMixToEngine(clip);
-          _queueMidiRenderCacheRefresh(clip);
           _updateOverallDurationIfNeeded();
         } else {
-          await _rerenderMidiTrack(clip);
+          await _reloadMidiTrackLive(clip);
         }
       }
     }
@@ -10796,6 +11111,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (!keepPlaying && _isPlaying) {
       await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+    }
+    if (hadMidiChanges) {
+      _scheduleProjectAutosave();
     }
   }
 
@@ -11170,10 +11488,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!await audioDir.exists()) await audioDir.create(recursive: true);
       if (!newFile.existsSync()) return;
 
-      final baseName = p.basename(newFile.path);
-      final baseNameNoExt = baseName.contains('.')
-          ? baseName.substring(0, baseName.lastIndexOf('.'))
-          : baseName;
+      final baseNameNoExt = _displayStemForFilePath(newFile.path);
 
       File clipSourceFile = newFile;
       if (transcodeTo48k) {
@@ -11264,12 +11579,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         isReversed: false,
       );
 
+      newTrack.offset = startSec;
+      newTrack.trimStart = trimStartRequested ?? Duration.zero;
+      newTrack.trimEnd = trimEndRequested ?? dur;
+
+      await _syncClipEngineStateAfterLoad(newTrack);
       _startWaveformExtraction(newTrack);
 
       setState(() {
-        newTrack.offset = startSec;
-        newTrack.trimStart = trimStartRequested ?? Duration.zero;
-        newTrack.trimEnd = trimEndRequested ?? dur;
         _audioTracks.add(newTrack);
         addedTrack = true;
         if (showLoadingOverlay) {
@@ -11277,7 +11594,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       });
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
-      await _syncClipMixToEngine(newTrack);
       _updateOverallDurationIfNeeded();
     } finally {
       _releaseReservedEngineClipId(engineClipId);
@@ -11355,20 +11671,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
 
       newTrack.normWaveformData = clip.normWaveformData;
+      newTrack.offset = safeTimeMs / 1000.0;
+      newTrack.trimStart = trimStartRequested ?? Duration.zero;
+      newTrack.trimEnd = trimEndRequested ?? dur;
+      newTrack.gain = clip.gain;
+      newTrack.pitchSemitones = clip.pitchSemitones;
+      newTrack.isReversed = clip.isReversed;
+      newTrack.sourceTempoBpm = clip.sourceTempoBpm;
+      newTrack.stretchToProjectTempo = clip.stretchToProjectTempo;
+      newTrack.tempoStretchPreservePitch = clip.tempoStretchPreservePitch;
+
+      await _syncClipEngineStateAfterLoad(newTrack);
 
       setState(() {
-        newTrack.offset = safeTimeMs / 1000.0;
-        newTrack.trimStart = trimStartRequested ?? Duration.zero;
-        newTrack.trimEnd = trimEndRequested ?? dur;
-        newTrack.gain = clip.gain;
-        newTrack.pitchSemitones = clip.pitchSemitones;
-        newTrack.isReversed = clip.isReversed;
-        newTrack.sourceTempoBpm = clip.sourceTempoBpm;
-        newTrack.stretchToProjectTempo = clip.stretchToProjectTempo;
-        newTrack.tempoStretchPreservePitch = clip.tempoStretchPreservePitch;
         _audioTracks.add(newTrack);
       });
-      await _syncClipMixToEngine(newTrack);
       _updateOverallDurationIfNeeded();
     } finally {
       _releaseReservedEngineClipId(engineClipId);
@@ -11470,23 +11787,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         newTrack.volumeAutomation = automation;
       }
 
-      if (_clipNeedsExplicitTimelineSync(
-        newTrack,
-        loadedStartSec: safeTimeMs / 1000.0,
-        loadedLengthSec: requestedLengthSec > 0
-            ? requestedLengthSec
-            : dur.inMilliseconds / 1000.0,
-        loadedOffsetSec: requestedInFileOffsetSec,
-      )) {
-        await JuceAudioEngine.setClipTime(
-          engineClipId,
-          startSec: newTrack.offset,
-          lengthSec: _clipTimelineDurationSec(newTrack),
-          inFileOffsetSec: newTrack.trimStart.inMilliseconds / 1000.0,
-        );
-      }
-
-      await _syncClipMixToEngineOptimized(
+      await _syncClipEngineStateAfterLoad(
         newTrack,
         assumeEngineDefaults: assumeFreshEngineDefaults,
       );
@@ -11567,18 +11868,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final aliasId = kLegacySfzInstrumentAliases[lower];
     if (aliasId != null && aliasId.isNotEmpty) {
-    for (final spec in _instrumentCatalog) {
-      if (spec['id'] == aliasId) return _platformResolvedInstrumentSpec(spec);
+      for (final spec in _instrumentCatalog) {
+        if (spec['id'] == aliasId) return _platformResolvedInstrumentSpec(spec);
+      }
+      for (final spec in kBundledSfzFallbackCatalog) {
+        if (spec['id'] == aliasId) return _platformResolvedInstrumentSpec(spec);
+      }
+      for (final spec in kInstrumentCatalog) {
+        if (spec['id'] == aliasId) return _platformResolvedInstrumentSpec(spec);
+      }
     }
-    for (final spec in kBundledSfzFallbackCatalog) {
-      if (spec['id'] == aliasId) return _platformResolvedInstrumentSpec(spec);
-    }
-    for (final spec in kInstrumentCatalog) {
-      if (spec['id'] == aliasId) return _platformResolvedInstrumentSpec(spec);
-    }
-  }
 
-  for (final spec in _instrumentCatalog) {
+    for (final spec in _instrumentCatalog) {
       if (spec['id'] == trimmed) return _platformResolvedInstrumentSpec(spec);
     }
     for (final spec in kBundledSfzFallbackCatalog) {
@@ -13663,7 +13964,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         if (_kAllowSampledNativeRenderFallbackForBeta && Platform.isAndroid) {
           try {
-            final engineInstrumentId = _liveMidiEngineInstrumentId(instrumentId);
+            final engineInstrumentId =
+                _liveMidiEngineInstrumentId(instrumentId);
             final renderedPath = await JuceAudioEngine.renderInstrumentClip(
               outPath: outFile.path,
               instrumentId: engineInstrumentId,
@@ -13967,63 +14269,90 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  void _queueMidiRenderCacheRefresh(AudioTrack clip) {
-    if (!clip.isMidi || clip.file.path.isEmpty || clip.engineClipId < 0) return;
-    if (_showPianoRoll && _activeMidiClipEngineId == clip.engineClipId) {
-      _deferredMidiRenderRefreshClipIds.add(clip.engineClipId);
-      return;
+  Duration _estimatedMidiMaterialDuration(
+    List<MidiNote> notes, {
+    required double sourceTempoBpm,
+    Duration minimumDuration = const Duration(milliseconds: 1),
+  }) {
+    final safeTempo = _clampTempo(sourceTempoBpm);
+    final msPerBeat = 60000.0 / safeTempo;
+    double endBeat = 0.0;
+    for (final note in notes) {
+      endBeat = math.max(endBeat, note.startBeat + note.lengthBeats);
     }
+    final estimatedMs = math.max(
+      minimumDuration.inMilliseconds.toDouble(),
+      (endBeat * msPerBeat) + 120.0,
+    );
+    return Duration(milliseconds: estimatedMs.round());
+  }
+
+  void _applyMidiClipStateLocally(
+    AudioTrack clip, {
+    required List<MidiNote> notes,
+    required String instrumentId,
+    required String instrumentName,
+    required Map<String, double> instrumentParams,
+  }) {
+    clip.midiNotes = notes.map((n) => n.copy()).toList(growable: false);
+    clip.instrumentId = instrumentId;
+    clip.instrumentName = instrumentName;
+    clip.instrumentParams = Map<String, double>.from(instrumentParams);
+    clip.sourceTempoBpm = _clampTempo(_tempo);
+    clip.stretchToProjectTempo = true;
+    clip.tempoStretchPreservePitch = true;
+    _updateOverallDurationIfNeeded();
+  }
+
+  void _scheduleMidiClipEngineRefresh(
+    AudioTrack clip, {
+    String? failureNotice,
+  }) {
+    if (!clip.isMidi || clip.engineClipId < 0) return;
+
     final clipId = clip.engineClipId;
-    final token = ++_nextMidiRenderSyncToken;
-    _midiRenderSyncTokens[clipId] = token;
-    _midiRenderDebounceTimers[clipId]?.cancel();
+    final token = (_midiClipEngineRefreshTokens[clipId] ?? 0) + 1;
+    _midiClipEngineRefreshTokens[clipId] = token;
 
-    final notesSnapshot = clip.midiNotes.map((n) => n.copy()).toList();
-    final paramsSnapshot = Map<String, double>.from(clip.instrumentParams);
-    final instrumentIdSnapshot = clip.instrumentId;
-    final instrumentNameSnapshot = clip.instrumentName;
-    final filePathSnapshot = clip.file.path;
+    final previous =
+        _midiClipEngineRefreshChains[clipId] ?? Future<void>.value();
 
-    late final Timer debounceTimer;
-    debounceTimer = Timer(const Duration(milliseconds: 280), () {
-      unawaited(() async {
-        try {
-          final rendered = await _renderInstrumentClipToFile(
-            outFile: File(filePathSnapshot),
-            instrumentId: instrumentIdSnapshot,
-            instrumentName: instrumentNameSnapshot,
-            notes: notesSnapshot,
-            params: paramsSnapshot,
-          );
-          if (!rendered || !File(filePathSnapshot).existsSync()) return;
-          if (_midiRenderSyncTokens[clipId] != token) return;
+    late final Future<void> next;
+    next = previous.catchError((_) {}).then((_) async {
+      if (_midiClipEngineRefreshTokens[clipId] != token) return;
+      if (!clip.isMidi || clip.engineClipId != clipId) return;
 
-          final idx = _clipIndexForEngineId(clipId);
-          if (idx < 0 || idx >= _audioTracks.length) return;
-          final target = _audioTracks[idx];
-          final resolvedDuration =
-              await _resolveSampleDuration(filePathSnapshot);
-          if (resolvedDuration != null) {
-            target.audioDuration = resolvedDuration;
-          }
-          _startWaveformExtraction(target);
-          _updateOverallDurationIfNeeded();
-          if (mounted) {
-            setState(() {});
-          }
-        } catch (_) {
-          // Best effort cache refresh only.
-        } finally {
-          if (_midiRenderDebounceTimers[clipId] == debounceTimer) {
-            _midiRenderDebounceTimers.remove(clipId);
-          }
-          if (_midiRenderSyncTokens[clipId] == token) {
-            _midiRenderSyncTokens.remove(clipId);
-          }
+      final updatedLive = await _updateMidiClipEventsLive(clip);
+      if (_midiClipEngineRefreshTokens[clipId] != token) return;
+
+      if (updatedLive) {
+        final clipIdx = _clipIndexForEngineId(clip.engineClipId);
+        if (clipIdx >= 0) {
+          await _syncClipTimingToEngine(clipIdx);
         }
-      }());
+        await _syncClipMixToEngine(clip);
+        _updateOverallDurationIfNeeded();
+        if (mounted) {
+          setState(() {});
+        }
+        return;
+      }
+
+      final reloaded = await _reloadMidiTrackLive(clip);
+      if (_midiClipEngineRefreshTokens[clipId] != token) return;
+      if (!reloaded &&
+          mounted &&
+          failureNotice != null &&
+          failureNotice.isNotEmpty) {
+        _showSmallNotice(failureNotice);
+      }
+    }).whenComplete(() {
+      if (identical(_midiClipEngineRefreshChains[clipId], next)) {
+        _midiClipEngineRefreshChains.remove(clipId);
+      }
     });
-    _midiRenderDebounceTimers[clipId] = debounceTimer;
+
+    _midiClipEngineRefreshChains[clipId] = next;
   }
 
   Future<void> _addMidiTrack({
@@ -14074,39 +14403,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     try {
       final outFile =
           renderedFile ?? await _nextInstrumentRenderFile(instrumentId);
-      final hasExistingRenderedFile =
-          outFile.existsSync() && outFile.lengthSync() > 0;
-      final shouldRefreshSampledRender =
-          renderedFile != null && _isSampledInstrumentId(instrumentId);
-      if (!hasExistingRenderedFile || shouldRefreshSampledRender) {
-        final rendered = await _renderInstrumentClipToFile(
-          outFile: outFile,
-          instrumentId: instrumentId,
-          instrumentName: instrumentName,
-          notes: midiNotes,
-          params: instrumentParams,
-        );
-        final hasRenderedOutput =
-            outFile.existsSync() && outFile.lengthSync() > 0;
-        if (!rendered || !hasRenderedOutput) {
-          if (hasExistingRenderedFile) {
-            // Project already has a valid rendered WAV; do not block load on
-            // best-effort sampled re-render refresh failures.
-            debugPrint(
-              'Using existing rendered MIDI clip after sampled re-render failed: ${outFile.path}',
-            );
-          } else {
-            if (mounted) {
-              final msg = _isSampledInstrumentId(instrumentId)
-                  ? 'Could not render sampled instrument. Check SFZ assets.'
-                  : 'Could not render instrument clip.';
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text(msg)));
-            }
-            return;
-          }
-        }
-      }
 
       final requestedTrimStart = trimStartRequested ?? Duration.zero;
       final requestedInFileOffsetSec =
@@ -14143,79 +14439,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
         );
       } catch (e, st) {
-        debugPrint('Live MIDI clip load failed, falling back to WAV load: $e\n$st');
+        debugPrint('Live MIDI clip load failed: $e\n$st');
         loadedLiveMidi = false;
       }
 
       if (!loadedLiveMidi) {
-        var loadedRenderedClip = false;
-        try {
-          loadedRenderedClip = await _runWithAndroidEngineCriticalSection(() {
-            return JuceAudioEngine.loadClip(
-              engineClipId,
-              rowId,
-              outFile.path,
-              startSec: startSec,
-              lengthSec: requestedLengthSec,
-              inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
-            );
-          });
-        } catch (e, st) {
-          debugPrint('Rendered MIDI clip WAV load failed: $e\n$st');
-          rethrow;
+        if (mounted) {
+          final msg = _isSampledInstrumentId(instrumentId)
+              ? 'Could not load this sampled instrument for live MIDI playback.'
+              : 'Could not load this instrument for live MIDI playback.';
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(msg)));
         }
-
-        if (!loadedRenderedClip) {
-          debugPrint(
-            'Rendered MIDI clip load returned false for ${outFile.path}; retrying with Dart synth render.',
-          );
-          try {
-            await _renderInstrumentClipWithDartSynth(
-              outFile: outFile,
-              instrumentId: instrumentId,
-              instrumentName: instrumentName,
-              notes: midiNotes,
-              params: instrumentParams,
-              bpm: _tempo,
-            );
-            loadedRenderedClip = await _runWithAndroidEngineCriticalSection(() {
-              return JuceAudioEngine.loadClip(
-                engineClipId,
-                rowId,
-                outFile.path,
-                startSec: startSec,
-                lengthSec: requestedLengthSec,
-                inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
-              );
-            });
-          } catch (e, st) {
-            debugPrint(
-              'Rendered MIDI clip fallback WAV load failed: $e\n$st',
-            );
-            rethrow;
-          }
-        }
-
-        if (!loadedRenderedClip) {
-          debugPrint(
-            'Rendered MIDI clip load failed without exception for ${outFile.path}',
-          );
-          if (mounted) {
-            final msg = _isSampledInstrumentId(instrumentId)
-                ? 'Could not load the rendered sampled instrument clip.'
-                : 'Could not load the rendered MIDI clip.';
-            ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text(msg)));
-          }
-          return;
-        }
+        return;
       }
 
-      final dur = await _runWithAndroidEngineCriticalSection(
-        () => _resolveClipSourceDuration(
-          filePath: outFile.path,
-          engineClipId: engineClipId,
-        ),
+      final dur = _estimatedMidiMaterialDuration(
+        midiNotes,
+        sourceTempoBpm: resolvedSourceTempoBpm,
+        minimumDuration: const Duration(milliseconds: 1200),
       );
 
       final newTrack = await AudioTrack.create(
@@ -14254,23 +14496,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         newTrack.volumeAutomation = automation;
       }
 
-      if (_clipNeedsExplicitTimelineSync(
-        newTrack,
-        loadedStartSec: startSec,
-        loadedLengthSec: requestedLengthSec > 0
-            ? requestedLengthSec
-            : dur.inMilliseconds / 1000.0,
-        loadedOffsetSec: requestedInFileOffsetSec,
-      )) {
-        await JuceAudioEngine.setClipTime(
-          engineClipId,
-          startSec: newTrack.offset,
-          lengthSec: _clipTimelineDurationSec(newTrack),
-          inFileOffsetSec: newTrack.trimStart.inMilliseconds / 1000.0,
-        );
-      }
-
-      await _syncClipMixToEngineOptimized(
+      await _syncClipEngineStateAfterLoad(
         newTrack,
         assumeEngineDefaults: assumeFreshEngineDefaults,
       );
@@ -14304,7 +14530,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentId: clip.instrumentId,
       instrumentName: clip.instrumentName,
       instrumentParams: Map<String, double>.from(clip.instrumentParams),
-      midiNotes: clip.midiNotes.map((n) => n.copy()).toList(),
+      midiNotes: _cloneMidiNotesForNewClip(clip.midiNotes),
       row: row,
       timeMs: timeMs,
       trimStartRequested: trimStartRequested,
@@ -14434,6 +14660,64 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   double _effectiveClipPitchSemitones(AudioTrack clip) {
     return clip.pitchSemitones
         .clamp(_kClipPitchMinSemitones, _kClipPitchMaxSemitones);
+  }
+
+  String _buildNativeExportClipSnapshotJson() {
+    final snapshots = <Map<String, dynamic>>[];
+
+    for (final clip in _audioTracks) {
+      final engineClipId = clip.engineClipId;
+      if (engineClipId < 0) continue;
+
+      int resolvedRowId = clip.rowId;
+      if (resolvedRowId < 0 || _rowIndexForId(resolvedRowId) < 0) {
+        if (_rowCount <= 0) continue;
+        final boundedRow = clip.rowIndex.clamp(0, _rowCount - 1);
+        resolvedRowId = _rowIdAt(boundedRow);
+      }
+
+      // Export must follow the same source path the user is actually hearing.
+      // When live MIDI clip playback is disabled or unavailable, playback runs
+      // from the rendered WAV, so export should keep using that rendered audio
+      // instead of reconstructing a live MIDI instrument path.
+      final exportUsesLiveMidiPath =
+          clip.isMidi && _liveMidiEventPlaybackSupported;
+
+      final snapshot = <String, dynamic>{
+        'alive': true,
+        'clipId': engineClipId,
+        'rowId': resolvedRowId,
+        'startSec': math.max(0.0, clip.offset),
+        'lengthSec': math.max(0.0, _clipTimelineDurationSec(clip)),
+        'inFileOffsetSec':
+            math.max(0.0, clip.trimStart.inMilliseconds / 1000.0),
+        'pitchSemitones': _effectiveClipPitchSemitones(clip),
+        'reversed': !clip.isMidi && clip.isReversed,
+        'tempoRatio': _tempoPlaybackRatioForEngine(clip),
+        'preservePitch': _clipPreserveTempoPitchInEngine(clip),
+        'gainUi': clip.gain.clamp(0.0, 3.0),
+        'panNormalized': 0.0,
+        'muted': false,
+        'isMidi': exportUsesLiveMidiPath,
+        if (clip.file.path.isNotEmpty) 'sourceFilePath': clip.file.path,
+      };
+
+      if (exportUsesLiveMidiPath) {
+        snapshot['midiInstrumentId'] =
+            _liveMidiEngineInstrumentId(clip.instrumentId);
+        snapshot['midiInstrumentName'] = clip.instrumentName;
+        snapshot['midiNotes'] = _midiNotesToEnginePayload(clip.midiNotes);
+        snapshot['midiParams'] = _normalizedInstrumentParamsForPlayback(
+          clip.instrumentId,
+          clip.instrumentParams,
+        );
+        snapshot['midiSourceTempoBpm'] = _resolvedClipSourceTempoBpm(clip);
+      }
+
+      snapshots.add(snapshot);
+    }
+
+    return jsonEncode(snapshots);
   }
 
   Future<void> _syncAllTempoStretchToEngine() async {
@@ -14657,6 +14941,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _queueTempoEngineSync();
     await _syncAllTempoStretchToEngine();
     _updateOverallDurationIfNeeded();
+    _scheduleProjectAutosave();
   }
 
   void _setProjectTempoFromUi(double bpm) {
@@ -14687,23 +14972,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
 
     await _syncAllTempoStretchToEngine();
+    _scheduleProjectAutosave();
   }
 
-  Future<bool> _rerenderMidiTrack(AudioTrack clip) async {
+  Future<bool> _reloadMidiTrackLive(AudioTrack clip) async {
     if (!clip.isMidi || clip.engineClipId < 0) return false;
-    if (clip.file.path.isEmpty) return false;
+    if (!_liveMidiEventPlaybackSupported) return false;
     clip.sourceTempoBpm = _clampTempo(_tempo);
     clip.stretchToProjectTempo = true;
     clip.tempoStretchPreservePitch = true;
-
-    final rendered = await _renderInstrumentClipToFile(
-      outFile: clip.file,
-      instrumentId: clip.instrumentId,
-      instrumentName: clip.instrumentName,
-      notes: clip.midiNotes,
-      params: clip.instrumentParams,
-    );
-    if (!rendered || !clip.file.existsSync()) return false;
 
     final rowId = clip.rowId >= 0 ? clip.rowId : _rowIdAt(clip.rowIndex);
     if (rowId < 0) return false;
@@ -14711,43 +14988,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final lengthSec = _clipTimelineDurationSec(clip);
     final inFileOffsetSec = clip.trimStart.inMilliseconds.toDouble() / 1000.0;
 
-    bool reloaded = false;
-    if (_liveMidiEventPlaybackSupported) {
-      reloaded = await _loadMidiClipIntoEngineLive(
-        engineClipId: clip.engineClipId,
-        rowId: rowId,
-        instrumentId: clip.instrumentId,
-        instrumentName: clip.instrumentName,
-        midiNotes: clip.midiNotes,
-        instrumentParams: clip.instrumentParams,
-        sourceTempoBpm: _resolvedClipSourceTempoBpm(clip),
-        startSec: startSec,
-        lengthSec: lengthSec,
-        inFileOffsetSec: inFileOffsetSec,
-      );
-    } else {
-      await _runWithAndroidEngineCriticalSection(() async {
-        await JuceAudioEngine.unloadClip(clip.engineClipId);
-        await JuceAudioEngine.loadClip(
-          clip.engineClipId,
-          rowId,
-          clip.file.path,
-          startSec: startSec,
-          lengthSec: math.max(0.0, lengthSec),
-          inFileOffsetSec: math.max(0.0, inFileOffsetSec),
-        );
-      });
-      reloaded = true;
-    }
+    final reloaded = await _loadMidiClipIntoEngineLive(
+      engineClipId: clip.engineClipId,
+      rowId: rowId,
+      instrumentId: clip.instrumentId,
+      instrumentName: clip.instrumentName,
+      midiNotes: clip.midiNotes,
+      instrumentParams: clip.instrumentParams,
+      sourceTempoBpm: _resolvedClipSourceTempoBpm(clip),
+      startSec: startSec,
+      lengthSec: lengthSec,
+      inFileOffsetSec: inFileOffsetSec,
+    );
     if (!reloaded) return false;
-    await _syncClipMixToEngine(clip);
-
-    final resolvedDuration = await _resolveSampleDuration(clip.file.path);
-    if (resolvedDuration != null) {
-      clip.audioDuration = resolvedDuration;
-    }
-
-    _startWaveformExtraction(clip);
+    await _syncClipEngineStateAfterLoad(clip);
     if (mounted) {
       setState(() {});
     }
@@ -14755,10 +15009,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return true;
   }
 
-  Future<void> _syncClipTimingToEngine(int clipIndex,
-      {bool skipMoveToRow = false}) async {
-    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
-    final clip = _audioTracks[clipIndex];
+  Future<void> _syncClipTimelineModelToEngine(
+    AudioTrack clip, {
+    bool skipMoveToRow = false,
+  }) async {
     if (clip.engineClipId < 0) return;
     if (_rowCount == 0) return;
 
@@ -14785,6 +15039,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       clip.engineClipId,
       tempoRatio: _tempoPlaybackRatioForEngine(clip),
       preservePitch: _clipPreserveTempoPitchInEngine(clip),
+    );
+  }
+
+  Future<void> _syncClipEngineStateAfterLoad(
+    AudioTrack clip, {
+    bool assumeEngineDefaults = false,
+  }) async {
+    await _syncClipTimelineModelToEngine(clip);
+    await _syncClipMixToEngineOptimized(
+      clip,
+      assumeEngineDefaults: assumeEngineDefaults,
+    );
+  }
+
+  Future<void> _syncClipTimingToEngine(int clipIndex,
+      {bool skipMoveToRow = false}) async {
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    await _syncClipTimelineModelToEngine(
+      _audioTracks[clipIndex],
+      skipMoveToRow: skipMoveToRow,
     );
   }
 
@@ -14841,19 +15115,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  bool _clipNeedsExplicitTimelineSync(
-    AudioTrack clip, {
-    required double loadedStartSec,
-    required double loadedLengthSec,
-    required double loadedOffsetSec,
-  }) {
-    const double epsilon = 0.0005;
-    final targetStartSec = clip.offset;
-    final targetLengthSec = _clipTimelineDurationSec(clip);
-    final targetOffsetSec = clip.trimStart.inMilliseconds / 1000.0;
-    return (targetStartSec - loadedStartSec).abs() > epsilon ||
-        (targetLengthSec - loadedLengthSec).abs() > epsilon ||
-        (targetOffsetSec - loadedOffsetSec).abs() > epsilon;
+  Future<void> _prepareNativeEngineStateForExport(
+    ValueChanged<double> reportProgress,
+  ) async {
+    reportProgress(0.08);
+    await _flushDeferredAndroidRouteRefreshIfNeeded();
+
+    final pendingMidiRefreshes =
+        _midiClipEngineRefreshChains.values.toList(growable: false);
+    if (pendingMidiRefreshes.isNotEmpty) {
+      await Future.wait(
+        pendingMidiRefreshes.map((future) => future.catchError((_) {})),
+      );
+    }
+
+    // The native exporter now builds a dedicated offline graph from a snapshot
+    // of engine state. Rebuilding/reloading clips here right before export can
+    // race that snapshot and produce silent or partial renders.
+    reportProgress(0.12);
+    await _flushDeferredAndroidRouteRefreshIfNeeded();
+    reportProgress(0.14);
   }
 
   Future<void> _setClipGainLive(int clipIndex, double gain) async {
@@ -14938,6 +15219,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _startWaveformExtraction(AudioTrack c) async {
     if (c.didExtractWaveform) return;
+    if (c.isMidi) {
+      c.didExtractWaveform = true;
+      c.normWaveformData = const <double>[];
+      return;
+    }
     c.didExtractWaveform = true;
 
     try {
@@ -15902,6 +16188,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _syncClipTimingToEngine(clipIndex);
     await _syncClipMixToEngine(clip);
     _updateOverallDurationIfNeeded();
+    _scheduleProjectAutosave();
     if (mounted) setState(() {});
   }
 
@@ -17813,16 +18100,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   String _technicalLevelLabel(double peakDb) {
     if (peakDb >= -0.1) return "0.0 dBFS";
-    if (!peakDb.isFinite || peakDb <= -120.0) return "-inf dBFS";
+    if (!peakDb.isFinite || peakDb <= -120.0) return "-∞ dBFS";
     return "${peakDb.toStringAsFixed(1)} dBFS";
   }
 
   Color _technicalLevelColor(double peakDb) {
-    if (peakDb >= -0.1) return const Color(0xFFFF8C8C);
-    if (peakDb >= -3.0) return const Color(0xFFFFB86B);
-    if (peakDb >= -12.0) return const Color(0xFF9ED9FF);
-    if (peakDb >= -24.0) return const Color(0xFF7EBFFF);
-    return const Color(0xFF6EA1D8);
+    if (!peakDb.isFinite || peakDb <= -120.0) {
+      return Colors.white.withValues(alpha: 0.50);
+    }
+    return DbfsMeterVisuals.statusColor(peakDb);
   }
 
   double _heldPeakDbForRow(int row, MeterFrame frame) {
@@ -17856,9 +18142,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   double _ampToDbFs(double amp01) {
-    final double amp = amp01.clamp(0.0, 1.0).toDouble();
-    if (amp <= 0.000001) return double.negativeInfinity;
-    return 20 * math.log(amp) / math.ln10;
+    return DbfsMeterVisuals.ampToDbfs(amp01);
   }
 
   static double _uiFromGainDb(double db) {
@@ -18119,6 +18403,545 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       padding: EdgeInsets.only(top: topInset),
       child: child,
     );
+  }
+
+  Widget _buildExpandedChatHistoryOverlay() {
+    if (!_chatWarm || !_chatExpanded) {
+      return const SizedBox.shrink();
+    }
+
+    final overlayContext = context;
+    final androidOverlayPanelLift =
+        Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0;
+    const transportVisualBottomInset = 0.0;
+    final keyboardLift = _chatKeyboardLiftForOverlay(overlayContext);
+    final chatHistoryBaseBottom = _kChatBarStackHeight +
+        _kTransportBarHeight +
+        transportVisualBottomInset +
+        _chatHistoryBottomGap +
+        androidOverlayPanelLift;
+    final canClearChatHistory =
+        !_isThinking && _chatController.messages.isNotEmpty;
+
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: chatHistoryBaseBottom + keyboardLift,
+      child: RepaintBoundary(
+        child: SizedBox(
+          height: _kChatHistoryHeight,
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(29),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color.fromRGBO(
+                      232,
+                      232,
+                      232,
+                      _kChatChromeOpacity,
+                    ),
+                    borderRadius: BorderRadius.circular(29),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.22),
+                        blurRadius: 18,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 12, 6),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                L10n.translate(context, 'Project Chat'),
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.3,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ),
+                            _buildChatHeaderActionButton(
+                              label: L10n.translate(context, 'Feedback'),
+                              icon: Icons.feedback_outlined,
+                              onPressed: _feedbackSubmissionInFlight
+                                  ? null
+                                  : _openDawFeedbackComposer,
+                            ),
+                            const SizedBox(width: 8),
+                            _buildChatHeaderActionButton(
+                              label: L10n.translate(context, 'Clear'),
+                              icon: Icons.delete_outline_rounded,
+                              onPressed: canClearChatHistory
+                                  ? _confirmClearChatHistory
+                                  : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: ClipRect(
+                                child: ShaderMask(
+                                  blendMode: BlendMode.dstIn,
+                                  shaderCallback: (Rect bounds) {
+                                    final fadeStartStop = bounds.height > 0
+                                        ? math.min(0.022, 4 / bounds.height)
+                                        : 0.022;
+                                    final fadeEndStop = bounds.height > 0
+                                        ? math.min(0.08, 18 / bounds.height)
+                                        : 0.08;
+                                    return LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      stops: <double>[
+                                        0.0,
+                                        fadeStartStop,
+                                        fadeEndStop,
+                                        1.0,
+                                      ],
+                                      colors: const <Color>[
+                                        Colors.transparent,
+                                        Color.fromRGBO(255, 255, 255, 0.45),
+                                        Colors.white,
+                                        Colors.white,
+                                      ],
+                                    ).createShader(bounds);
+                                  },
+                                  child: MediaQuery.removePadding(
+                                    context: overlayContext,
+                                    removeBottom: true,
+                                    child: MediaQuery.removeViewInsets(
+                                      context: overlayContext,
+                                      removeBottom: true,
+                                      child: Chat(
+                                        chatController: _chatController,
+                                        currentUserId: 'user',
+                                        onMessageSend: null,
+                                        timeFormat: null,
+                                        onMessageLongPress: (
+                                          BuildContext context,
+                                          Message message, {
+                                          required LongPressStartDetails
+                                              details,
+                                          required int index,
+                                        }) async {
+                                          if (message is TextMessage) {
+                                            await Clipboard.setData(
+                                              ClipboardData(text: message.text),
+                                            );
+
+                                            await AppHaptics.impact(
+                                              AppHapticImpact.light,
+                                            );
+
+                                            _showCopiedChatMessageFeedback(
+                                              message.id,
+                                            );
+                                          }
+                                        },
+                                        builders: Builders(
+                                          chatAnimatedListBuilder: (
+                                            BuildContext context,
+                                            ChatItem itemBuilder,
+                                          ) {
+                                            return NotificationListener<
+                                                ScrollNotification>(
+                                              onNotification:
+                                                  _handleChatListScrollNotification,
+                                              child: ChatAnimatedList(
+                                                itemBuilder: itemBuilder,
+                                                scrollController:
+                                                    _chatListScrollController,
+                                                handleSafeArea: false,
+                                                bottomPadding: 8,
+                                                bottomSliver: _isThinking
+                                                    ? SliverToBoxAdapter(
+                                                        child:
+                                                            _buildThinkingPlaceholderBubble(),
+                                                      )
+                                                    : null,
+                                                scrollToBottomAppearanceDelay:
+                                                    const Duration(
+                                                  milliseconds: 180,
+                                                ),
+                                                scrollToBottomAppearanceThreshold:
+                                                    _kChatScrollHintThreshold,
+                                              ),
+                                            );
+                                          },
+                                          composerBuilder: (_) =>
+                                              const SizedBox.shrink(),
+                                          emptyChatListBuilder: (_) => Center(
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 28,
+                                              ),
+                                              child: Text(
+                                                L10n.translate(
+                                                  context,
+                                                  'This is an experimental feature in development. Output may be unexpected.',
+                                                ),
+                                                textAlign: TextAlign.center,
+                                                style: const TextStyle(
+                                                  fontFamily: 'Pretendard',
+                                                  fontSize: 14,
+                                                  height: 1.45,
+                                                  color: Colors.white60,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          scrollToBottomBuilder: (
+                                            BuildContext context,
+                                            Animation<double> animation,
+                                            VoidCallback onPressed,
+                                          ) {
+                                            if (!_chatScrollHintEnabled ||
+                                                animation.value <= 0.01) {
+                                              return const SizedBox.shrink();
+                                            }
+                                            return Positioned(
+                                              left: 0,
+                                              right: 0,
+                                              bottom: 16,
+                                              child: Center(
+                                                child: ScaleTransition(
+                                                  scale: animation,
+                                                  child: FloatingActionButton(
+                                                    heroTag: null,
+                                                    mini: true,
+                                                    backgroundColor:
+                                                        const Color.fromRGBO(
+                                                      154,
+                                                      169,
+                                                      191,
+                                                      0.56,
+                                                    ),
+                                                    foregroundColor:
+                                                        const Color(0xFFF7FAFF),
+                                                    onPressed: () {
+                                                      _setChatScrollHintEnabled(
+                                                        false,
+                                                      );
+                                                      onPressed();
+                                                    },
+                                                    child: const Icon(
+                                                      Icons
+                                                          .keyboard_arrow_down_rounded,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          textMessageBuilder: (
+                                            BuildContext context,
+                                            TextMessage message,
+                                            int index, {
+                                            required bool isSentByMe,
+                                            MessageGroupStatus? groupStatus,
+                                          }) {
+                                            if (message.authorId == 'system') {
+                                              return Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  vertical: 10,
+                                                ),
+                                                child: Center(
+                                                  child: Text(
+                                                    message.text,
+                                                    textAlign: TextAlign.center,
+                                                    style: const TextStyle(
+                                                      fontFamily: 'Pretendard',
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      letterSpacing: 0.4,
+                                                      color: Colors.white70,
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            }
+                                            final isCopied =
+                                                _copiedChatMessageId ==
+                                                    message.id;
+                                            final bubbleColor = isSentByMe
+                                                ? const Color.fromRGBO(
+                                                    25,
+                                                    94,
+                                                    160,
+                                                    0.42,
+                                                  )
+                                                : const Color.fromRGBO(
+                                                    244,
+                                                    244,
+                                                    244,
+                                                    0.18,
+                                                  );
+                                            return Align(
+                                              alignment: isSentByMe
+                                                  ? Alignment.centerRight
+                                                  : Alignment.centerLeft,
+                                              child: Column(
+                                                crossAxisAlignment: isSentByMe
+                                                    ? CrossAxisAlignment.end
+                                                    : CrossAxisAlignment.start,
+                                                children: [
+                                                  AnimatedSwitcher(
+                                                    duration: const Duration(
+                                                      milliseconds: 120,
+                                                    ),
+                                                    child: isCopied
+                                                        ? Padding(
+                                                            key: const ValueKey(
+                                                              'copied_badge',
+                                                            ),
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .symmetric(
+                                                              horizontal: 14,
+                                                              vertical: 2,
+                                                            ),
+                                                            child: Container(
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .symmetric(
+                                                                horizontal: 8,
+                                                                vertical: 4,
+                                                              ),
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                color:
+                                                                    const Color(
+                                                                  0xFF7A8E73,
+                                                                ),
+                                                                borderRadius:
+                                                                    BorderRadius
+                                                                        .circular(
+                                                                  999,
+                                                                ),
+                                                              ),
+                                                              child: Row(
+                                                                mainAxisSize:
+                                                                    MainAxisSize
+                                                                        .min,
+                                                                children: [
+                                                                  const Icon(
+                                                                    Icons
+                                                                        .check_rounded,
+                                                                    size: 13,
+                                                                    color: Colors
+                                                                        .white,
+                                                                  ),
+                                                                  const SizedBox(
+                                                                    width: 4,
+                                                                  ),
+                                                                  Text(
+                                                                    L10n.translate(
+                                                                      context,
+                                                                      'Copied',
+                                                                    ),
+                                                                    style:
+                                                                        const TextStyle(
+                                                                      fontFamily:
+                                                                          'Pretendard',
+                                                                      fontSize:
+                                                                          11,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w700,
+                                                                      color: Colors
+                                                                          .white,
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          )
+                                                        : const SizedBox
+                                                            .shrink(),
+                                                  ),
+                                                  AnimatedContainer(
+                                                    duration: const Duration(
+                                                      milliseconds: 140,
+                                                    ),
+                                                    margin: const EdgeInsets
+                                                        .symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 2,
+                                                    ),
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                      horizontal: 14,
+                                                      vertical: 10,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: bubbleColor,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                        18,
+                                                      ),
+                                                      border: Border.all(
+                                                        color: isCopied
+                                                            ? const Color(
+                                                                0xFFD6E8C9,
+                                                              )
+                                                            : Colors
+                                                                .transparent,
+                                                        width: 1.2,
+                                                      ),
+                                                      boxShadow: isCopied
+                                                          ? const [
+                                                              BoxShadow(
+                                                                color: Color(
+                                                                  0x33D6E8C9,
+                                                                ),
+                                                                blurRadius: 12,
+                                                                offset: Offset(
+                                                                  0,
+                                                                  2,
+                                                                ),
+                                                              ),
+                                                            ]
+                                                          : null,
+                                                    ),
+                                                    child: Text(
+                                                      message.text,
+                                                      style: const TextStyle(
+                                                        fontFamily:
+                                                            'Pretendard',
+                                                        fontSize: 15,
+                                                        fontWeight:
+                                                            FontWeight.w500,
+                                                        height: 1.2,
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                        theme: const ChatTheme(
+                                          colors: ChatColors(
+                                            primary: Color.fromRGBO(
+                                                25, 94, 160, 0.42),
+                                            onPrimary: Colors.white,
+                                            surface: Colors.transparent,
+                                            onSurface: Colors.white,
+                                            surfaceContainer:
+                                                Colors.transparent,
+                                            surfaceContainerLow:
+                                                Colors.transparent,
+                                            surfaceContainerHigh:
+                                                Colors.transparent,
+                                          ),
+                                          typography: ChatTypography(
+                                            bodyLarge: TextStyle(
+                                              fontFamily: 'Pretendard',
+                                              fontSize: 15,
+                                              height: 1.35,
+                                              color: Colors.white,
+                                            ),
+                                            bodyMedium: TextStyle(
+                                              fontFamily: 'Pretendard',
+                                              fontSize: 14,
+                                              height: 1.35,
+                                              color: Colors.white70,
+                                            ),
+                                            bodySmall: TextStyle(
+                                              fontFamily: 'Pretendard',
+                                              fontSize: 13,
+                                              height: 1.3,
+                                              color: Colors.white60,
+                                            ),
+                                            labelLarge: TextStyle(
+                                              fontFamily: 'Pretendard',
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w500,
+                                              color: Colors.white70,
+                                            ),
+                                            labelMedium: TextStyle(
+                                              fontFamily: 'Pretendard',
+                                              fontSize: 12,
+                                              color: Colors.white60,
+                                            ),
+                                            labelSmall: TextStyle(
+                                              fontFamily: 'Pretendard',
+                                              fontSize: 11,
+                                              color: Colors.white54,
+                                            ),
+                                          ),
+                                          shape: BorderRadius.all(
+                                            Radius.circular(14),
+                                          ),
+                                        ),
+                                        resolveUser: (UserID id) async {
+                                          if (id == 'user') {
+                                            return const User(
+                                              id: 'user',
+                                              name: 'You',
+                                            );
+                                          }
+                                          return const User(
+                                            id: 'assistant',
+                                            name: 'MixAssistant',
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool get _isChatTypingActive => _chatFocusNode.hasFocus || _chatInputActive;
+
+  double _chatKeyboardLiftForOverlay(BuildContext overlayContext) {
+    final keyboardInset = MediaQuery.viewInsetsOf(overlayContext).bottom;
+    final keyboardVisible = keyboardInset > 0.0;
+    final chatKeyboardActive = keyboardVisible && _isChatTypingActive;
+    final fixedTransportFootprint =
+        _kTransportBarHeight + _androidTransportBottomInset(overlayContext);
+    final rawKeyboardLift = chatKeyboardActive
+        ? math.max(
+            0.0,
+            keyboardInset - MediaQuery.paddingOf(overlayContext).bottom + 8.0,
+          )
+        : 0.0;
+    return math.max(0.0, rawKeyboardLift - fixedTransportFootprint);
   }
 
   Widget _buildTopCircleButtonShell({
@@ -18581,9 +19404,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_isProjectSettingsOpen) return const SizedBox.shrink();
     final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
       anchorKey: _projectSettingsButtonKey,
-      desiredWidth: 242,
+      desiredWidth: 232,
       connectorWidth: 104,
       centerOnToolbarPill: true,
+      matchToolbarWidth: true,
     );
     return Positioned(
       top: popupLayout.top,
@@ -18902,6 +19726,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             onChanged: (v) {
               _setStateAndRefreshProjectSettings(
                   () => _showProducerCaptureUi = v);
+              _scheduleProjectAutosave();
             },
           ),
         ],
@@ -20208,9 +21033,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final selectedChipColor = const Color(0xFFF4F4F4).withValues(alpha: 0.20);
     final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
       anchorKey: _tempoButtonKey,
-      desiredWidth: 242,
+      desiredWidth: 232,
       connectorWidth: 152,
       centerOnToolbarPill: true,
+      matchToolbarWidth: true,
     );
     return Positioned(
       top: popupLayout.top,
@@ -20772,7 +21598,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (rowIndex != null && clip.rowIndex != rowIndex) continue;
       if (fileContains != null &&
           fileContains.isNotEmpty &&
-          !p.basename(clip.file.path).toLowerCase().contains(fileContains)) {
+          !_displayNameForFilePath(clip.file.path)
+              .toLowerCase()
+              .contains(fileContains)) {
         continue;
       }
       if (labelContains != null &&
@@ -21035,7 +21863,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     for (int i = 0; i < _audioTracks.length; i++) {
       final clip = _audioTracks[i];
       if (clip.isMidi) continue;
-      final file = p.basename(clip.file.path);
+      final file = _displayNameForFilePath(clip.file.path);
       if (_isKickLikeText(clip.label) || _isKickLikeText(file)) {
         kickNameCandidates.add(i);
       }
@@ -21256,39 +22084,72 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return out;
   }
 
-  Future<bool> _applyAssistantActions(List<AssistantAction> actions) async {
+  Future<bool> _applyAssistantActions(
+    List<AssistantAction> actions, {
+    int? chatFlowId,
+  }) async {
     var hadFailure = false;
     for (final action in actions) {
       final type = action.type.trim().toLowerCase();
       final data = _toActionMap(action.data);
       try {
+        if (chatFlowId != null) {
+          _throwIfChatFlowStopped(chatFlowId);
+        }
         switch (type) {
           case 'tutorial':
             await _applyTutorialAction(data);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
             break;
           case 'clip_edit':
             await _applyClipEditAction(data);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
             break;
           case 'project_edit':
             await _applyProjectEditAction(data);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
             break;
           case 'sample_insert':
             await _applySampleInsertAction(data);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
             break;
           case 'effect_edit':
             await _applyEffectEditAction(data);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
             break;
           case 'automation_edit':
             await _applyAutomationEditAction(data);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
             break;
           case 'midi_compose':
-            await _applyMidiComposeAction(data);
+            await _applyMidiComposeAction(data, chatFlowId: chatFlowId);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
             break;
           case 'stem_separate':
             await _applyStemSeparateAction(data);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
             break;
           case 'role_override':
             await _applyRoleOverrideAction(data);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
             break;
           case 'clarify':
             final q = (data['question'] ?? '').toString().trim();
@@ -21305,6 +22166,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           default:
             break;
         }
+      } on _ChatFlowCancelledException {
+        rethrow;
       } catch (e, st) {
         debugPrint('Assistant action failed ($type): $e\n$st');
         hadFailure = true;
@@ -21816,6 +22679,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _clipTimelineStartMs(clip) + _clipTimelineDurationMs(clip);
 
   String _normalizedClipPath(String path) => p.normalize(path);
+
+  String _decodeDisplayPathSegment(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty || !trimmed.contains('%')) return trimmed;
+    try {
+      return Uri.decodeFull(trimmed);
+    } catch (_) {
+      return trimmed;
+    }
+  }
+
+  String _displayNameForFilePath(String path) {
+    final base = p.basename(path).trim();
+    final rawLabel = base.isEmpty ? path.trim() : base;
+    final decodedLabel = _decodeDisplayPathSegment(rawLabel);
+    return decodedLabel.isEmpty ? rawLabel : decodedLabel;
+  }
+
+  String _displayStemForFilePath(String path) {
+    final fileName = _displayNameForFilePath(path);
+    final extension = p.extension(fileName);
+    if (extension.isEmpty) return fileName;
+    return fileName.substring(0, fileName.length - extension.length);
+  }
 
   int? _findAudioClipIndexAtTimelineMs(
     double timelineMs, {
@@ -24253,7 +25140,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             continue;
           }
 
-          final explicitStartMs = AssistantActionUtils.resolveMoveMusicalStartMs(
+          final explicitStartMs =
+              AssistantActionUtils.resolveMoveMusicalStartMs(
             data: item,
             target: target,
             bpm: _tempo,
@@ -25023,10 +25911,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _syncNativeMasterAutomation();
   }
 
-  Future<void> _syncNativePluginAutomationForAllRows() async {
-    await _syncNativeAutomationForAllRows();
-  }
-
   static const Map<String, Set<String>> _kAutomationVisibleParamsByEffect =
       <String, Set<String>>{
     'Reverb': <String>{'Room Size', 'Mix', 'Predelay'},
@@ -25677,6 +26561,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     _rowSelectedAutomationTarget[row] = targetId;
     if (mounted) setState(() {});
+    _scheduleProjectAutosave();
   }
 
   List<AutomationPoint> _defaultAutomationPointsForTarget(
@@ -28875,7 +29760,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Future<void> _applyMidiComposeAction(Map<String, dynamic> data) async {
+  Future<void> _applyMidiComposeAction(
+    Map<String, dynamic> data, {
+    int? chatFlowId,
+  }) async {
     final operation = _normalizeMidiComposeOperation(
       (data['operation'] ?? '').toString().trim().toLowerCase(),
     );
@@ -28899,6 +29787,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         sourceClipIndex,
         data,
         target,
+        chatFlowId,
       );
       return;
     }
@@ -28994,11 +29883,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 await _syncClipTimingToEngine(clipIdx);
               }
               await _syncClipMixToEngine(target);
-              _queueMidiRenderCacheRefresh(target);
               _updateOverallDurationIfNeeded();
             } else {
-              final rerendered = await _rerenderMidiTrack(target);
-              if (!rerendered && mounted) {
+              final reloaded = await _reloadMidiTrackLive(target);
+              if (!reloaded && mounted) {
                 _showSmallNotice('Could not update this MIDI clip.');
               }
             }
@@ -29084,11 +29972,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 await _syncClipTimingToEngine(clipIdx);
               }
               await _syncClipMixToEngine(target);
-              _queueMidiRenderCacheRefresh(target);
               _updateOverallDurationIfNeeded();
             } else {
-              final rerendered = await _rerenderMidiTrack(target);
-              if (!rerendered && mounted) {
+              final reloaded = await _reloadMidiTrackLive(target);
+              if (!reloaded && mounted) {
                 _showSmallNotice('Could not update this MIDI clip.');
               }
             }
@@ -29196,11 +30083,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 await _syncClipTimingToEngine(clipIdx);
               }
               await _syncClipMixToEngine(targetClip);
-              _queueMidiRenderCacheRefresh(targetClip);
               _updateOverallDurationIfNeeded();
             } else {
-              final rerendered = await _rerenderMidiTrack(targetClip);
-              if (!rerendered && mounted) {
+              final reloaded = await _reloadMidiTrackLive(targetClip);
+              if (!reloaded && mounted) {
                 _showSmallNotice('Could not update this MIDI clip.');
               }
             }
@@ -29287,7 +30173,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (_audioTracks.length == beforeTrackCount) {
         _insertAssistantChatText(
           _isSampledInstrumentId(instrumentId)
-              ? "I couldn't render that sampled instrument clip."
+              ? "I couldn't load that sampled instrument for live MIDI playback."
               : "I couldn't create that MIDI clip.",
         );
         return;
@@ -29366,11 +30252,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               await _syncClipTimingToEngine(clipIdx);
             }
             await _syncClipMixToEngine(target);
-            _queueMidiRenderCacheRefresh(target);
             _updateOverallDurationIfNeeded();
           } else {
-            final rerendered = await _rerenderMidiTrack(target);
-            if (!rerendered && mounted) {
+            final reloaded = await _reloadMidiTrackLive(target);
+            if (!reloaded && mounted) {
               _showSmallNotice('Could not update this MIDI clip.');
             }
           }
@@ -29418,6 +30303,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int sourceClipIndex,
     Map<String, dynamic> data,
     Map<String, dynamic> target,
+    int? chatFlowId,
   ) async {
     final sourceClip = _audioTracks[sourceClipIndex];
     if (sourceClip.isMidi) {
@@ -29434,6 +30320,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     _showSmallNotice('Converting audio to MIDI...');
     final notes = await _transcribeAudioClipToMidiNotes(sourceClip);
+    if (chatFlowId != null) {
+      _throwIfChatFlowStopped(chatFlowId);
+    }
     if (notes.isEmpty) {
       _insertAssistantChatText(
           "I couldn't extract stable notes from that audio clip.");
@@ -31391,6 +32280,60 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  int _beginChatFlow() {
+    final flowId = ++_chatFlowSequence;
+    if (mounted) {
+      setState(() {
+        _activeChatFlowId = flowId;
+        _isThinking = true;
+      });
+    } else {
+      _activeChatFlowId = flowId;
+      _isThinking = true;
+    }
+    if (!_chatScrollHintEnabled) {
+      _scrollChatToLatest();
+    }
+    return flowId;
+  }
+
+  bool _isChatFlowActive(int flowId) => _activeChatFlowId == flowId;
+
+  void _throwIfChatFlowStopped(int flowId) {
+    if (!_isChatFlowActive(flowId)) {
+      throw const _ChatFlowCancelledException();
+    }
+  }
+
+  void _endChatFlow(int flowId) {
+    if (_activeChatFlowId != flowId) return;
+    if (mounted) {
+      setState(() {
+        _activeChatFlowId = null;
+        _isThinking = false;
+      });
+    } else {
+      _activeChatFlowId = null;
+      _isThinking = false;
+    }
+  }
+
+  void _stopActiveChatFlow() {
+    if (_activeChatFlowId == null) return;
+    _chatFocusNode.unfocus();
+    if (mounted) {
+      setState(() {
+        _activeChatFlowId = null;
+        _isThinking = false;
+        _chatInputActive = false;
+      });
+    } else {
+      _activeChatFlowId = null;
+      _isThinking = false;
+      _chatInputActive = false;
+    }
+  }
+
   void _insertUserChatText(String text) {
     _insertChatTextMessage(authorId: 'user', text: text);
   }
@@ -31471,7 +32414,36 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return count;
   }
 
-  Future<void> _presentPipelineReply(ChatPipelineResult reply) async {
+  String _completedAssistantReplyText(
+    String message,
+    List<AssistantAction> actions,
+  ) {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty || actions.isEmpty) return trimmed;
+
+    final replacements = <Pattern, String>{
+      RegExp(r'^Converting\b', caseSensitive: false): 'Converted',
+      RegExp(r'^Creating\b', caseSensitive: false): 'Created',
+      RegExp(r'^Applying\b', caseSensitive: false): 'Applied',
+      RegExp(r'^Adding\b', caseSensitive: false): 'Added',
+      RegExp(r'^Updating\b', caseSensitive: false): 'Updated',
+      RegExp(r'^Removing\b', caseSensitive: false): 'Removed',
+      RegExp(r'^Separating\b', caseSensitive: false): 'Separated',
+      RegExp(r'^Transcribing\b', caseSensitive: false): 'Transcribed',
+    };
+    for (final entry in replacements.entries) {
+      final replaced = trimmed.replaceFirst(entry.key, entry.value);
+      if (replaced != trimmed) {
+        return replaced;
+      }
+    }
+    return trimmed;
+  }
+
+  Future<void> _presentPipelineReply(
+    ChatPipelineResult reply, {
+    int? chatFlowId,
+  }) async {
     // Ordering note for source-coverage tests:
     // _insertAssistantChatText(reply.message);
     // await _applyAssistantActions(reply.assistantActions);
@@ -31480,7 +32452,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     var actionsApplied = true;
     if (reply.hasAssistantActions) {
-      actionsApplied = await _applyAssistantActions(reply.assistantActions);
+      actionsApplied = await _applyAssistantActions(
+        reply.assistantActions,
+        chatFlowId: chatFlowId,
+      );
     }
 
     final assistantMessagesAfter = _chatTextMessageCount(authorId: 'assistant');
@@ -31489,7 +32464,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         (!reply.hasAssistantActions ||
             assistantMessagesAfter == assistantMessagesBefore);
     if (shouldInsertPrimaryReply) {
-      _insertAssistantChatText(reply.message);
+      if (chatFlowId != null) {
+        _throwIfChatFlowStopped(chatFlowId);
+      }
+      _insertAssistantChatText(
+        _completedAssistantReplyText(reply.message, reply.assistantActions),
+      );
     }
   }
 
@@ -31639,47 +32619,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _scheduleChatHistoryPersist({bool immediate = false}) {
-    _chatHistoryPersistTimer?.cancel();
-    _chatHistoryPersistTimer = null;
     if (immediate) {
-      unawaited(_persistChatHistoryOnly());
+      _markProjectDirty(immediate: true);
       return;
     }
 
-    _chatHistoryPersistTimer = Timer(const Duration(milliseconds: 700), () {
-      _chatHistoryPersistTimer = null;
-      unawaited(_persistChatHistoryOnly());
-    });
+    _scheduleProjectAutosave(
+      debounce: const Duration(milliseconds: 700),
+    );
   }
 
   Future<void> _persistChatHistoryOnly() async {
-    if (!_loadedOnce) return;
-
-    try {
-      final json = await ProjectManager.readProjectJson(_projectDir);
-      final projectId = ProjectManager.ensureProjectIdInJson(json);
-      if (_projectId.isEmpty) {
-        _projectId = projectId;
-      }
-
-      final history =
-          ProjectChatHistory.fromChatMessages(_chatController.messages)
-              .toJsonValue();
-      if (history == null) {
-        json.remove('assistantChat');
-      } else {
-        json['assistantChat'] = history;
-      }
-
-      await ProjectManager.writeProjectJson(_projectDir, json);
-    } catch (e) {
-      debugPrint('Chat history persist failed: $e');
-    }
+    _markProjectDirty(immediate: true);
   }
 
   Future<void> _clearChatHistory() async {
-    _chatHistoryPersistTimer?.cancel();
-    _chatHistoryPersistTimer = null;
     await _setChatMessages(const <Message>[], animated: false);
     _chatPipeline.clearConversation();
     await _persistChatHistoryOnly();
@@ -32238,15 +33192,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     text: L10n.translate(
                       context,
                       'chat_help_cannot_empty',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  buildBullet(
-                    icon: Icons.block_rounded,
-                    iconColor: const Color(0xFFFFB27A),
-                    text: L10n.translate(
-                      context,
-                      'chat_help_cannot_text_to_music',
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -33182,250 +34127,284 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _submitChatPrompt(String userText) async {
     final trimmed = userText.trim();
     if (trimmed.isEmpty) return false;
+    if (_isThinking) return false;
     if (_promptRateLimitStatus?.canSubmit == false) {
       await _showPromptRateLimitDialog();
       return false;
     }
+    final chatFlowId = _beginChatFlow();
     const aiFeature = 'ai_chat';
     final promptTraceId = const Uuid().v4();
     final promptCycleStopwatch = Stopwatch()..start();
     final magnitudeObservability = _magnitudePredictor.observabilityContext;
-    unawaited(
-      AnalyticsService.instance.track(
-        AnalyticsEvents.aiPromptSubmitted(
+    try {
+      unawaited(
+        AnalyticsService.instance.track(
+          AnalyticsEvents.aiPromptSubmitted(
+            projectId: _projectId,
+            aiFeature: aiFeature,
+            promptTraceId: promptTraceId,
+            mixMagnitudeModelSource:
+                magnitudeObservability['mix_magnitude_model_source']
+                    ?.toString(),
+            mixMagnitudeModelBundleVersion:
+                magnitudeObservability['mix_magnitude_model_bundle_version']
+                    ?.toString(),
+            mixApplyModelVersion:
+                magnitudeObservability['mix_apply_model_version']?.toString(),
+            mixMagnitudeRegressorVersion:
+                magnitudeObservability['mix_magnitude_regressor_version']
+                    ?.toString(),
+          ),
+        ),
+      );
+
+      _handleDawOnboardingChatPromptSubmitted();
+      _insertUserChatText(trimmed);
+
+      Map<String, dynamic>? producerPreSnapshot;
+      if (_producerDataMode) {
+        producerPreSnapshot = await _buildProducerSnapshot();
+        _throwIfChatFlowStopped(chatFlowId);
+        _producerGuidedPromptAwaitingFinal = false;
+        if (_producerCollector.hasPendingPromptCycle) {
+          await _finalizeProducerPromptCycle(
+            disposition: 'next_ai_step',
+            insertMessage: false,
+            finalSnapshot: producerPreSnapshot,
+          );
+          _throwIfChatFlowStopped(chatFlowId);
+        }
+      }
+
+      late final ChatPipelineResult reply;
+      String toolName = '';
+      int? applyMixMs;
+      try {
+        await _ensureAiModelsLoaded();
+        _throwIfChatFlowStopped(chatFlowId);
+        final librarySnapshot = await _buildAiLibrarySnapshot();
+        _throwIfChatFlowStopped(chatFlowId);
+        reply = await _chatPipeline.handleUserText(
+          text: trimmed,
+          audioTracks: _audioTracks,
+          bpmFallback: _tempo,
+          rowNames: _visibleAiRowNames(),
+          librarySnapshot: librarySnapshot,
+          rowGain: _rowGain,
+          rowPan: _rowPan,
+          rowAutomation: _rowVolumeAutomation,
+          masterGain0to3: _masterGain,
+          masterPan0to1: _masterPan,
+          selectedClipIndices: _timelineSelectedClipIndices,
+          primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
+          selectedRowIndex: _selectedRow,
+          automationClipSnapshot: _aiAutomationClipSnapshot(),
+          promptTraceId: promptTraceId,
           projectId: _projectId,
           aiFeature: aiFeature,
+          bypassLearnedMagnitudes: _producerDataMode,
+        );
+        _throwIfChatFlowStopped(chatFlowId);
+      } catch (error, stackTrace) {
+        if (!_isChatFlowActive(chatFlowId)) {
+          return false;
+        }
+        _reportAiChatFailure(error, stackTrace, stage: 'chat_pipeline');
+        promptCycleStopwatch.stop();
+        unawaited(
+          _trackAiResponseOutcome(
+            promptTraceId: promptTraceId,
+            aiFeature: aiFeature,
+            projectId: _projectId,
+            fallbackErrorCode: 'chat_pipeline',
+          ),
+        );
+        unawaited(
+          _trackAiPromptCycleFailed(
+            promptTraceId: promptTraceId,
+            aiFeature: aiFeature,
+            projectId: _projectId,
+            errorCode: 'chat_pipeline',
+            promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+          ),
+        );
+        _insertAssistantChatText(_kAiRequestFailureMessage);
+        if (mounted) {
+          setState(() {});
+        }
+        unawaited(_handleDawOnboardingChatReplyReady());
+        return false;
+      }
+
+      toolName = reply.meta?['tool']?.toString().trim() ?? '';
+      if (toolName.isNotEmpty) {
+        _trackAiToolUsage(
+          toolName: toolName,
+          aiFeature: aiFeature,
           promptTraceId: promptTraceId,
-          mixMagnitudeModelSource:
-              magnitudeObservability['mix_magnitude_model_source']?.toString(),
-          mixMagnitudeModelBundleVersion:
-              magnitudeObservability['mix_magnitude_model_bundle_version']
-                  ?.toString(),
-          mixApplyModelVersion:
-              magnitudeObservability['mix_apply_model_version']?.toString(),
-          mixMagnitudeRegressorVersion:
-              magnitudeObservability['mix_magnitude_regressor_version']
-                  ?.toString(),
-        ),
-      ),
-    );
-
-    _handleDawOnboardingChatPromptSubmitted();
-    _insertUserChatText(trimmed);
-
-    Map<String, dynamic>? producerPreSnapshot;
-    if (_producerDataMode) {
-      producerPreSnapshot = await _buildProducerSnapshot();
-      _producerGuidedPromptAwaitingFinal = false;
-      if (_producerCollector.hasPendingPromptCycle) {
-        await _finalizeProducerPromptCycle(
-          disposition: 'next_ai_step',
-          insertMessage: false,
-          finalSnapshot: producerPreSnapshot,
+          actionTypes:
+              reply.mixing?.actions.map((action) => action.type).toList(
+                        growable: false,
+                      ) ??
+                  reply.assistantActions
+                      .map((action) => action.type)
+                      .toList(growable: false),
         );
       }
-    }
 
-    late final ChatPipelineResult reply;
-    String toolName = '';
-    int? applyMixMs;
-    try {
-      await _ensureAiModelsLoaded();
-      final librarySnapshot = await _buildAiLibrarySnapshot();
-      reply = await _chatPipeline.handleUserText(
-        text: trimmed,
-        audioTracks: _audioTracks,
-        bpmFallback: _tempo,
-        rowNames: _visibleAiRowNames(),
-        librarySnapshot: librarySnapshot,
-        rowGain: _rowGain,
-        rowPan: _rowPan,
-        rowAutomation: _rowVolumeAutomation,
-        masterGain0to3: _masterGain,
-        masterPan0to1: _masterPan,
-        selectedClipIndices: _timelineSelectedClipIndices,
-        primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
-        selectedRowIndex: _selectedRow,
-        automationClipSnapshot: _aiAutomationClipSnapshot(),
-        promptTraceId: promptTraceId,
-        projectId: _projectId,
-        aiFeature: aiFeature,
-        bypassLearnedMagnitudes: _producerDataMode,
-      );
-    } catch (error, stackTrace) {
-      _reportAiChatFailure(error, stackTrace, stage: 'chat_pipeline');
-      promptCycleStopwatch.stop();
+      _updatePromptRateLimitStatusFromMeta(reply.meta);
       unawaited(
         _trackAiResponseOutcome(
           promptTraceId: promptTraceId,
           aiFeature: aiFeature,
           projectId: _projectId,
-          fallbackErrorCode: 'chat_pipeline',
+          meta: reply.meta,
         ),
       );
-      unawaited(
-        _trackAiPromptCycleFailed(
-          promptTraceId: promptTraceId,
-          aiFeature: aiFeature,
-          projectId: _projectId,
-          errorCode: 'chat_pipeline',
-          promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
-        ),
+
+      final replyMix = reply.mixing;
+      final replyHasMix =
+          replyMix != null && !(replyMix.isNoOp || replyMix.actions.isEmpty);
+
+      try {
+        if (replyMix != null &&
+            !replyMix.isNoOp &&
+            replyMix.actions.isNotEmpty) {
+          _throwIfChatFlowStopped(chatFlowId);
+          final mix = replyMix;
+          final applyStopwatch = Stopwatch()..start();
+          final appliedCount = await applyMixingResult(
+            mix,
+            emitActionSummaries: true,
+          );
+          applyStopwatch.stop();
+          applyMixMs = applyStopwatch.elapsedMilliseconds;
+          _throwIfChatFlowStopped(chatFlowId);
+          if (appliedCount <= 0) {
+            promptCycleStopwatch.stop();
+            unawaited(
+              _trackAiPromptCycleFailed(
+                promptTraceId: promptTraceId,
+                aiFeature: aiFeature,
+                projectId: _projectId,
+                errorCode: 'chat_apply_no_changes',
+                meta: reply.meta,
+                toolName: toolName,
+                applyMixMs: applyMixMs,
+                promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+              ),
+            );
+            _insertAssistantChatText(_kAiApplyFailureMessage);
+            if (mounted) {
+              setState(() {});
+            }
+            unawaited(_handleDawOnboardingChatReplyReady());
+            return false;
+          }
+
+          _chatPipeline.recordAppliedMix(
+            mix,
+            visibleAssistantText: reply.message,
+          );
+
+          if (_producerDataMode && producerPreSnapshot != null) {
+            final producerPostSnapshot = await _buildProducerSnapshot();
+            _throwIfChatFlowStopped(chatFlowId);
+            await _producerCollector.recordAiStep(
+              prompt: trimmed,
+              preSnapshot: producerPreSnapshot,
+              postSnapshot: producerPostSnapshot,
+              resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
+              llmPayload: reply.meta,
+              projectId: _projectId,
+              projectName: _projectName,
+              projectDir: _projectDir,
+            );
+            _throwIfChatFlowStopped(chatFlowId);
+          }
+        }
+
+        await _presentPipelineReply(reply, chatFlowId: chatFlowId);
+        _throwIfChatFlowStopped(chatFlowId);
+      } on _ChatFlowCancelledException {
+        return false;
+      } catch (error, stackTrace) {
+        if (!_isChatFlowActive(chatFlowId)) {
+          return false;
+        }
+        final applyStackTrace = error is _AssistantActionApplyException
+            ? error.stackTrace
+            : stackTrace;
+        final applyErrorCode = error is _AssistantActionApplyException
+            ? 'chat_apply_${error.actionType}'
+            : 'chat_apply';
+        _reportAiChatFailure(error, applyStackTrace, stage: applyErrorCode);
+        promptCycleStopwatch.stop();
+        unawaited(
+          _trackAiPromptCycleFailed(
+            promptTraceId: promptTraceId,
+            aiFeature: aiFeature,
+            projectId: _projectId,
+            errorCode: applyErrorCode,
+            meta: reply.meta,
+            toolName: toolName,
+            applyMixMs: applyMixMs,
+            promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+          ),
+        );
+        _insertAssistantChatText(
+          replyHasMix ? _kAiApplyFailureMessage : _kAiRequestFailureMessage,
+        );
+        if (mounted) {
+          setState(() {});
+        }
+        unawaited(_handleDawOnboardingChatReplyReady());
+        return false;
+      }
+
+      final visibleReplyMessage = _completedAssistantReplyText(
+        reply.message,
+        reply.assistantActions,
       );
-      _insertAssistantChatText(_kAiRequestFailureMessage);
+      if (!_chatExpanded && mounted && visibleReplyMessage.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(visibleReplyMessage),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+
       if (mounted) {
         setState(() {});
       }
-      unawaited(_handleDawOnboardingChatReplyReady());
-      return false;
-    }
-
-    toolName = reply.meta?['tool']?.toString().trim() ?? '';
-    if (toolName.isNotEmpty) {
-      _trackAiToolUsage(
-        toolName: toolName,
-        aiFeature: aiFeature,
-        promptTraceId: promptTraceId,
-        actionTypes: reply.mixing?.actions.map((action) => action.type).toList(
-                  growable: false,
-                ) ??
-            reply.assistantActions
-                .map((action) => action.type)
-                .toList(growable: false),
-      );
-    }
-
-    _updatePromptRateLimitStatusFromMeta(reply.meta);
-    unawaited(
-      _trackAiResponseOutcome(
-        promptTraceId: promptTraceId,
-        aiFeature: aiFeature,
-        projectId: _projectId,
-        meta: reply.meta,
-      ),
-    );
-
-    final replyMix = reply.mixing;
-    final replyHasMix =
-        replyMix != null && !(replyMix.isNoOp || replyMix.actions.isEmpty);
-
-    try {
-      if (replyMix != null && !replyMix.isNoOp && replyMix.actions.isNotEmpty) {
-        final mix = replyMix;
-        final applyStopwatch = Stopwatch()..start();
-        final appliedCount = await applyMixingResult(
-          mix,
-          emitActionSummaries: true,
-        );
-        applyStopwatch.stop();
-        applyMixMs = applyStopwatch.elapsedMilliseconds;
-        if (appliedCount <= 0) {
-          promptCycleStopwatch.stop();
-          unawaited(
-            _trackAiPromptCycleFailed(
-              promptTraceId: promptTraceId,
-              aiFeature: aiFeature,
-              projectId: _projectId,
-              errorCode: 'chat_apply_no_changes',
-              meta: reply.meta,
-              toolName: toolName,
-              applyMixMs: applyMixMs,
-              promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
-            ),
-          );
-          _insertAssistantChatText(_kAiApplyFailureMessage);
-          if (mounted) {
-            setState(() {});
-          }
-          unawaited(_handleDawOnboardingChatReplyReady());
-          return false;
-        }
-
-        _chatPipeline.recordAppliedMix(
-          mix,
-          visibleAssistantText: reply.message,
-        );
-
-        if (_producerDataMode && producerPreSnapshot != null) {
-          final producerPostSnapshot = await _buildProducerSnapshot();
-          await _producerCollector.recordAiStep(
-            prompt: trimmed,
-            preSnapshot: producerPreSnapshot,
-            postSnapshot: producerPostSnapshot,
-            resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
-            llmPayload: reply.meta,
-            projectId: _projectId,
-            projectName: _projectName,
-            projectDir: _projectDir,
-          );
-        }
-      }
-
-      await _presentPipelineReply(reply);
-    } catch (error, stackTrace) {
-      final applyStackTrace = error is _AssistantActionApplyException
-          ? error.stackTrace
-          : stackTrace;
-      final applyErrorCode = error is _AssistantActionApplyException
-          ? 'chat_apply_${error.actionType}'
-          : 'chat_apply';
-      _reportAiChatFailure(error, applyStackTrace, stage: applyErrorCode);
       promptCycleStopwatch.stop();
+      _logAiPromptDebugPretty(
+        promptTraceId: promptTraceId,
+        toolName: toolName,
+        meta: reply.meta,
+        applyMixMs: applyMixMs,
+        promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
+      );
       unawaited(
-        _trackAiPromptCycleFailed(
+        _trackAiPromptCycleCompleted(
           promptTraceId: promptTraceId,
           aiFeature: aiFeature,
           projectId: _projectId,
-          errorCode: applyErrorCode,
           meta: reply.meta,
           toolName: toolName,
           applyMixMs: applyMixMs,
           promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
         ),
       );
-      _insertAssistantChatText(
-        replyHasMix ? _kAiApplyFailureMessage : _kAiRequestFailureMessage,
-      );
-      if (mounted) {
-        setState(() {});
-      }
       unawaited(_handleDawOnboardingChatReplyReady());
+      return true;
+    } on _ChatFlowCancelledException {
       return false;
+    } finally {
+      _endChatFlow(chatFlowId);
     }
-
-    if (!_chatExpanded && mounted && reply.message.trim().isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(reply.message),
-          duration: const Duration(seconds: 4),
-        ),
-      );
-    }
-
-    if (mounted) {
-      setState(() {});
-    }
-    promptCycleStopwatch.stop();
-    _logAiPromptDebugPretty(
-      promptTraceId: promptTraceId,
-      toolName: toolName,
-      meta: reply.meta,
-      applyMixMs: applyMixMs,
-      promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
-    );
-    unawaited(
-      _trackAiPromptCycleCompleted(
-        promptTraceId: promptTraceId,
-        aiFeature: aiFeature,
-        projectId: _projectId,
-        meta: reply.meta,
-        toolName: toolName,
-        applyMixMs: applyMixMs,
-        promptCycleTotalMs: promptCycleStopwatch.elapsedMilliseconds,
-      ),
-    );
-    unawaited(_handleDawOnboardingChatReplyReady());
-    return true;
   }
 
   Future<bool> _confirmOneButtonMix() async {
@@ -34266,19 +35245,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 Expanded(
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(
-                      _chatInputActive ? 12 : 16,
+                      (_chatExpanded && (_chatInputActive || _isThinking))
+                          ? 12
+                          : 16,
                       10,
-                      _chatInputActive ? 12 : 10,
+                      (_chatExpanded && (_chatInputActive || _isThinking))
+                          ? 12
+                          : 10,
                       10,
                     ),
                     child: Builder(
                       builder: (context) {
+                        final chatBarExpanded =
+                            _chatExpanded && (_chatInputActive || _isThinking);
                         Widget chatBar = _ChatBar(
-                          expanded: _chatInputActive,
+                          expanded: chatBarExpanded,
                           hasText: _chatHasText,
+                          isThinking: _isThinking,
                           controller: _chatTextController,
                           focusNode: _chatFocusNode,
-                          readOnly: _dawTutorialChatPromptLocked,
+                          readOnly: _dawTutorialChatPromptLocked || _isThinking,
                           tutorialHighlighter: _mixHighlighter,
                           promptRateLimitStatus: _promptRateLimitStatus,
                           promptRateLimitLoading: _promptRateLimitLoading,
@@ -34311,16 +35297,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 _chatExpanded = true;
                                 // Desktop chat should accept hardware keyboard
                                 // immediately on first click.
-                                _chatInputActive = Platform.isMacOS;
+                                _chatInputActive =
+                                    Platform.isMacOS && !_isThinking;
                               });
                               _setDawPanelVisible('add_actions', false);
                               _setDawPanelVisible('sample_browser', false);
                               _setDawPanelVisible('chat_panel', true);
-                              if (Platform.isMacOS) {
+                              if (Platform.isMacOS && !_isThinking) {
                                 _setDawPanelVisible('chat_input', true);
                               }
                               _handleDawOnboardingChatOpened();
-                              if (Platform.isMacOS) {
+                              if (Platform.isMacOS && !_isThinking) {
                                 WidgetsBinding.instance
                                     .addPostFrameCallback((_) {
                                   if (!mounted) return;
@@ -34348,6 +35335,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               return;
                             }
                             if (!_chatInputActive) {
+                              if (_isThinking) return;
                               setState(() {
                                 _showAddActionsPanel = false;
                                 _sampleBrowserVisible = false;
@@ -34375,6 +35363,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             }
                           },
                           onSubmit: () async {
+                            if (_isThinking) {
+                              _stopActiveChatFlow();
+                              return;
+                            }
                             final text = _chatTextController.text.trim();
                             if (text.isEmpty) return;
                             _chatTextController.clear();
@@ -34386,6 +35378,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             _chatFocusNode.unfocus();
                             await _submitChatPrompt(text);
                           },
+                          onStop: _stopActiveChatFlow,
                         );
                         if (_showDawOnboarding) {
                           chatBar = Halo(
@@ -34580,114 +35573,130 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 return Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    SizedBox(
-                                      width: undoWidth,
-                                      height: 48,
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: const Color.fromRGBO(
-                                              244, 244, 244, 0.30),
-                                          borderRadius:
-                                              BorderRadius.circular(24),
-                                          boxShadow: const <BoxShadow>[
-                                            BoxShadow(
-                                              color:
-                                                  Color.fromRGBO(0, 0, 0, 0.17),
-                                              blurRadius: 12,
-                                              spreadRadius: 2,
-                                              offset: Offset(0, 1),
+                                    AnimatedBuilder(
+                                      animation: _undoManager,
+                                      builder: (context, _) {
+                                        final canUndo = _undoManager.canUndo;
+                                        final canRedo = _undoManager.canRedo;
+                                        return SizedBox(
+                                          width: undoWidth,
+                                          height: 48,
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              color: const Color.fromRGBO(
+                                                  244, 244, 244, 0.30),
+                                              borderRadius:
+                                                  BorderRadius.circular(24),
+                                              boxShadow: const <BoxShadow>[
+                                                BoxShadow(
+                                                  color: Color.fromRGBO(
+                                                      0, 0, 0, 0.17),
+                                                  blurRadius: 12,
+                                                  spreadRadius: 2,
+                                                  offset: Offset(0, 1),
+                                                ),
+                                              ],
                                             ),
-                                          ],
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            _transportSegment(
-                                              icon: Icons.undo,
-                                              onTap: _undoManager.canUndo
-                                                  ? () async {
-                                                      final action =
-                                                          await _undoManager
-                                                              .undo();
-                                                      if (!mounted ||
-                                                          action == null) {
-                                                        return;
-                                                      }
-                                                      final messenger =
-                                                          ScaffoldMessenger.of(
-                                                              context);
-                                                      messenger
-                                                          .hideCurrentSnackBar();
-                                                      messenger.showSnackBar(
-                                                        SnackBar(
-                                                          content: Text(
-                                                            'Undo: ${action.description}',
-                                                          ),
-                                                          duration:
-                                                              const Duration(
-                                                            milliseconds: 1200,
-                                                          ),
+                                            child: Row(
+                                              children: [
+                                                _transportSegment(
+                                                  icon: Icons.undo,
+                                                  onTap: canUndo
+                                                      ? () async {
+                                                          final action =
+                                                              await _undoManager
+                                                                  .undo();
+                                                          if (!mounted ||
+                                                              action == null) {
+                                                            return;
+                                                          }
+                                                          final messenger =
+                                                              ScaffoldMessenger
+                                                                  .of(context);
+                                                          messenger
+                                                              .hideCurrentSnackBar();
+                                                          messenger
+                                                              .showSnackBar(
+                                                            SnackBar(
+                                                              content: Text(
+                                                                'Undo: ${action.description}',
+                                                              ),
+                                                              duration:
+                                                                  const Duration(
+                                                                milliseconds:
+                                                                    1200,
+                                                              ),
+                                                            ),
+                                                          );
+                                                          setState(() {});
+                                                        }
+                                                      : null,
+                                                  radius:
+                                                      const BorderRadius.only(
+                                                    topLeft:
+                                                        Radius.circular(24),
+                                                    bottomLeft:
+                                                        Radius.circular(24),
+                                                  ),
+                                                  iconSize: 20,
+                                                  iconColor: canUndo
+                                                      ? Colors.white
+                                                      : Colors.white.withValues(
+                                                          alpha: 0.32,
                                                         ),
-                                                      );
-                                                      setState(() {});
-                                                    }
-                                                  : null,
-                                              radius: const BorderRadius.only(
-                                                topLeft: Radius.circular(24),
-                                                bottomLeft: Radius.circular(24),
-                                              ),
-                                              iconSize: 20,
-                                              iconColor: _undoManager.canUndo
-                                                  ? Colors.white
-                                                  : Colors.white.withValues(
-                                                      alpha: 0.32,
-                                                    ),
-                                            ),
-                                            _verticalDivider(48),
-                                            _transportSegment(
-                                              icon: Icons.redo,
-                                              onTap: _undoManager.canRedo
-                                                  ? () async {
-                                                      final action =
-                                                          await _undoManager
-                                                              .redo();
-                                                      if (!mounted ||
-                                                          action == null) {
-                                                        return;
-                                                      }
-                                                      final messenger =
-                                                          ScaffoldMessenger.of(
-                                                              context);
-                                                      messenger
-                                                          .hideCurrentSnackBar();
-                                                      messenger.showSnackBar(
-                                                        SnackBar(
-                                                          content: Text(
-                                                            'Redo: ${action.description}',
-                                                          ),
-                                                          duration:
-                                                              const Duration(
-                                                            milliseconds: 1200,
-                                                          ),
+                                                ),
+                                                _verticalDivider(48),
+                                                _transportSegment(
+                                                  icon: Icons.redo,
+                                                  onTap: canRedo
+                                                      ? () async {
+                                                          final action =
+                                                              await _undoManager
+                                                                  .redo();
+                                                          if (!mounted ||
+                                                              action == null) {
+                                                            return;
+                                                          }
+                                                          final messenger =
+                                                              ScaffoldMessenger
+                                                                  .of(context);
+                                                          messenger
+                                                              .hideCurrentSnackBar();
+                                                          messenger
+                                                              .showSnackBar(
+                                                            SnackBar(
+                                                              content: Text(
+                                                                'Redo: ${action.description}',
+                                                              ),
+                                                              duration:
+                                                                  const Duration(
+                                                                milliseconds:
+                                                                    1200,
+                                                              ),
+                                                            ),
+                                                          );
+                                                          setState(() {});
+                                                        }
+                                                      : null,
+                                                  radius:
+                                                      const BorderRadius.only(
+                                                    topRight:
+                                                        Radius.circular(24),
+                                                    bottomRight:
+                                                        Radius.circular(24),
+                                                  ),
+                                                  iconSize: 20,
+                                                  iconColor: canRedo
+                                                      ? Colors.white
+                                                      : Colors.white.withValues(
+                                                          alpha: 0.32,
                                                         ),
-                                                      );
-                                                      setState(() {});
-                                                    }
-                                                  : null,
-                                              radius: const BorderRadius.only(
-                                                topRight: Radius.circular(24),
-                                                bottomRight:
-                                                    Radius.circular(24),
-                                              ),
-                                              iconSize: 20,
-                                              iconColor: _undoManager.canRedo
-                                                  ? Colors.white
-                                                  : Colors.white.withValues(
-                                                      alpha: 0.32,
-                                                    ),
+                                                ),
+                                              ],
                                             ),
-                                          ],
-                                        ),
-                                      ),
+                                          ),
+                                        );
+                                      },
                                     ),
                                     SizedBox(width: groupGap),
                                     SizedBox(
@@ -35277,6 +36286,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _syncClipTimingToEngine(clipIndex);
     await _syncClipMixToEngine(clip);
     _updateOverallDurationIfNeeded();
+    _scheduleProjectAutosave();
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -35805,7 +36815,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             CompoundUndoAction('Paste clips', actions),
           );
         }
-        return _audioTracks.length > beforeCount;
+        final changed = _audioTracks.length > beforeCount;
+        if (changed) {
+          _focusInsertedClipsAfterPaste(
+            _audioTracks.sublist(beforeCount).toList(growable: false),
+          );
+        }
+        return changed;
       }
 
       if (_copiedClip == null) return false;
@@ -35827,13 +36843,90 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           trimEnd: _copiedTrimEnd,
         ),
       );
-      return _audioTracks.length > beforeCount;
+      final changed = _audioTracks.length > beforeCount;
+      if (changed) {
+        _focusInsertedClipsAfterPaste(
+          _audioTracks.sublist(beforeCount).toList(growable: false),
+        );
+      }
+      return changed;
     });
   }
 
   int _clipIndexForEngineId(int engineClipId) {
     if (engineClipId < 0) return -1;
     return _audioTracks.indexWhere((t) => t.engineClipId == engineClipId);
+  }
+
+  List<MidiNote> _cloneMidiNotesForNewClip(List<MidiNote> notes) {
+    return notes
+        .map(
+          (note) => MidiNote(
+            id: 'midi_${DateTime.now().microsecondsSinceEpoch}_${const Uuid().v4()}',
+            pitch: note.pitch,
+            startBeat: note.startBeat,
+            lengthBeats: note.lengthBeats,
+            velocity: note.velocity,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  void _focusInsertedClipsAfterPaste(List<AudioTrack> insertedTracks) {
+    if (insertedTracks.isEmpty || !mounted) return;
+
+    final insertedIndices = insertedTracks
+        .map((track) {
+          if (track.engineClipId >= 0) {
+            return _clipIndexForEngineId(track.engineClipId);
+          }
+          return _audioTracks.indexOf(track);
+        })
+        .where((index) => index >= 0 && index < _audioTracks.length)
+        .toList(growable: false);
+    if (insertedIndices.isEmpty) return;
+
+    var primaryIndex = insertedIndices.last;
+    for (int i = insertedIndices.length - 1; i >= 0; i--) {
+      final candidate = _audioTracks[insertedIndices[i]];
+      if (candidate.isMidi) {
+        primaryIndex = insertedIndices[i];
+        break;
+      }
+    }
+
+    final primaryClip = _audioTracks[primaryIndex];
+    setState(() {
+      _timelineSelectedClipIndices = insertedIndices;
+      _timelinePrimarySelectedClipIndex = primaryIndex;
+      if (_rowCount > 0) {
+        _selectedRow = primaryClip.rowIndex.clamp(0, _rowCount - 1).toInt();
+      }
+      if (primaryClip.isMidi && primaryClip.engineClipId >= 0) {
+        _activeMidiClipEngineId = primaryClip.engineClipId;
+      }
+    });
+
+    if (_showPianoRoll) {
+      _retargetOpenMidiClipEditorToSelection(primaryIndex);
+    }
+    if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
+      unawaited(_syncLiveMidiInputTargetClip());
+    }
+  }
+
+  void _retargetOpenMidiClipEditorToSelection(int clipIndex) {
+    if (!_showPianoRoll || _isMidiClipRecording) return;
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    final clip = _audioTracks[clipIndex];
+    if (!clip.isMidi || clip.engineClipId < 0) return;
+    if (_activeMidiClipEngineId == clip.engineClipId) return;
+    setState(() {
+      if (_rowCount > 0) {
+        _selectedRow = clip.rowIndex.clamp(0, _rowCount - 1).toInt();
+      }
+      _activeMidiClipEngineId = clip.engineClipId;
+    });
   }
 
   void _openMidiClipEditor(int clipIndex) {
@@ -35855,7 +36948,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _closeMidiClipEditor() {
-    final closingClipId = _activeMidiClipEngineId;
     setState(() {
       _showPianoRoll = false;
       _pianoRollFullscreen = false;
@@ -35866,45 +36958,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
       unawaited(_syncLiveMidiInputTargetClip());
     }
-    if (closingClipId != null &&
-        _deferredMidiRenderRefreshClipIds.remove(closingClipId)) {
-      final idx = _clipIndexForEngineId(closingClipId);
-      if (idx >= 0 && idx < _audioTracks.length) {
-        _queueMidiRenderCacheRefresh(_audioTracks[idx]);
-      }
-    }
-  }
-
-  String _pianoPreviewCacheKey(AudioTrack clip, int pitch, double velocity) {
-    final normalizedParams = _normalizedInstrumentParamsForPlayback(
-      clip.instrumentId,
-      clip.instrumentParams,
-    );
-    final sb = StringBuffer()
-      ..write(clip.instrumentId)
-      ..write('|')
-      ..write(clip.instrumentName)
-      ..write('|')
-      ..write(pitch)
-      ..write('|')
-      ..write(velocity.toStringAsFixed(3))
-      ..write('|tempo=')
-      ..write(_tempo.toStringAsFixed(3));
-    final keys = normalizedParams.keys.toList()..sort();
-    for (final key in keys) {
-      sb
-        ..write('|')
-        ..write(key)
-        ..write('=')
-        ..write((normalizedParams[key] ?? 0.0).toStringAsFixed(5));
-    }
-    return sb.toString();
-  }
-
-  Future<File> _pianoPreviewRenderFile(String cacheKey) async {
-    final tempDir = await getTemporaryDirectory();
-    final safeHash = cacheKey.hashCode.toUnsigned(32).toRadixString(16);
-    return File(p.join(tempDir.path, 'mixroom_midi_preview_$safeHash.wav'));
   }
 
   Future<void> _previewPianoRollNote(int pitch, double velocity) async {
@@ -35919,47 +36972,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         clip.engineClipId,
         pitch: pitch.clamp(0, 127),
         velocity: velocity.clamp(0.0, 1.0),
+        durationMs: 220,
       );
       if (played) return;
-    }
-
-    final token = ++_pianoPreviewToken;
-    try {
-      final safePitch = pitch.clamp(0, 127);
-      final velocityBucket = (velocity.clamp(0.0, 1.0) * 24.0).round() / 24.0;
-      final cacheKey = _pianoPreviewCacheKey(clip, safePitch, velocityBucket);
-      var cachedPath = _pianoPreviewRenderCache[cacheKey];
-      if (cachedPath == null || !File(cachedPath).existsSync()) {
-        final outFile = await _pianoPreviewRenderFile(cacheKey);
-        final previewNote = MidiNote(
-          id: 'preview_${DateTime.now().microsecondsSinceEpoch}',
-          pitch: safePitch,
-          startBeat: 0.0,
-          lengthBeats: 0.42,
-          velocity: velocityBucket,
-        );
-        final rendered = await _renderInstrumentClipToFile(
-          outFile: outFile,
-          instrumentId: clip.instrumentId,
-          instrumentName: clip.instrumentName,
-          notes: <MidiNote>[previewNote],
-          params: Map<String, double>.from(clip.instrumentParams),
-        );
-        if (!rendered || !outFile.existsSync()) return;
-        _pianoPreviewRenderCache[cacheKey] = outFile.path;
-        cachedPath = outFile.path;
-        if (_pianoPreviewRenderCache.length > 48) {
-          _pianoPreviewRenderCache.remove(_pianoPreviewRenderCache.keys.first);
-        }
-      }
-
-      if (!mounted || token != _pianoPreviewToken) return;
-      await _samplePreviewPlayer.stop();
-      await _samplePreviewPlayer.setFilePath(cachedPath);
-      await _samplePreviewPlayer.seek(Duration.zero);
-      await _samplePreviewPlayer.play();
-    } catch (_) {
-      // Silent fail for preview taps.
     }
   }
 
@@ -36027,28 +37042,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         newInstrumentName: instrumentName,
         newInstrumentParams: newParams,
         applyToClip: (target, notesToApply, nextInstrumentId,
-            nextInstrumentName, nextParams) async {
-          target.midiNotes = notesToApply.map((n) => n.copy()).toList();
-          target.instrumentId = nextInstrumentId;
-          target.instrumentName = nextInstrumentName;
-          target.instrumentParams = Map<String, double>.from(nextParams);
-          target.sourceTempoBpm = _clampTempo(_tempo);
-          target.stretchToProjectTempo = true;
-          target.tempoStretchPreservePitch = true;
-          final updatedLive = await _updateMidiClipEventsLive(target);
-          if (updatedLive) {
-            _queueMidiRenderCacheRefresh(target);
-            _updateOverallDurationIfNeeded();
-          } else {
-            final rerendered = await _rerenderMidiTrack(target);
-            if (!rerendered && mounted) {
-              _showSmallNotice(
-                  'Could not switch instrument for this MIDI clip.');
-            }
-          }
+            nextInstrumentName, nextParams) {
+          _applyMidiClipStateLocally(
+            target,
+            notes: notesToApply,
+            instrumentId: nextInstrumentId,
+            instrumentName: nextInstrumentName,
+            instrumentParams: nextParams,
+          );
+          _scheduleMidiClipEngineRefresh(
+            target,
+            failureNotice: 'Could not switch instrument for this MIDI clip.',
+          );
           if (mounted) {
             setState(() {});
           }
+          return Future<void>.value();
         },
       ),
     );
@@ -36376,6 +37385,284 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _updateOverallDurationIfNeeded();
   }
 
+  _DeletedRowUiState _captureDeletedRowUiState(int row) {
+    return _DeletedRowUiState(
+      muted: row < _rowMuted.length ? _rowMuted[row] : false,
+      soloed: row < _rowSoloed.length ? _rowSoloed[row] : false,
+      muteApplied: row < _rowMuteApplied.length ? _rowMuteApplied[row] : null,
+      expanded: row < _rowExpanded.length ? _rowExpanded[row] : false,
+      expandedTab: row < _rowExpandedTab.length ? _rowExpandedTab[row] : 0,
+      gainSnapshot:
+          row < _rowGainSnapshot.length ? _rowGainSnapshot[row] : _kGainUiUnity,
+      panSnapshot: row < _rowPanSnapshot.length ? _rowPanSnapshot[row] : 0.5,
+      automationSnapshot: row < _rowAutomationSnapshot.length
+          ? _rowAutomationSnapshot[row]
+              .map((point) => point.copy())
+              .toList(growable: false)
+          : const <AutomationPoint>[],
+      peakHoldDb: _rowPeakHoldDb[row],
+      peakHoldLastUpdate: _rowPeakHoldLastUpdate[row],
+      peakHoldFreezeUntil: _rowPeakHoldFreezeUntil[row],
+    );
+  }
+
+  Future<_DeletedRowSnapshot?> _captureDeletedRowSnapshot(int row) async {
+    if (row < 0 || row >= _rowCount) return null;
+    final rowInfo = _rows[row];
+    final rowId = rowInfo.rowId;
+    final deletedClips = _audioTracks.where((clip) {
+      final matchesRowId = rowId >= 0 && clip.rowId == rowId;
+      final matchesRowIndex = clip.rowIndex == row;
+      return matchesRowId || matchesRowIndex;
+    }).toList(growable: false);
+
+    final containsActiveMidiClip = _activeMidiClipEngineId != null &&
+        deletedClips
+            .any((clip) => clip.engineClipId == _activeMidiClipEngineId);
+
+    return _DeletedRowSnapshot(
+      originalIndex: row,
+      row: TimelineRow(
+        rowId: rowInfo.rowId,
+        name: rowInfo.name,
+        iconId: rowInfo.iconId,
+      ),
+      wasOnlyRow: _rowCount <= 1,
+      uiState: _captureDeletedRowUiState(row),
+      rowState: RowStateSnapshot(
+        row: row,
+        rowId: rowId,
+        gain: row < _rowGain.length ? _rowGain[row] : _kGainUiUnity,
+        pan: row < _rowPan.length ? _rowPan[row] : 0.5,
+        volumeAutomation: row < _rowVolumeAutomation.length
+            ? _rowVolumeAutomation[row]
+                .map((point) => point.copy())
+                .toList(growable: false)
+            : <AutomationPoint>[AutomationPoint(x: 0.0, volume: 0.75)],
+        automationLanes: _automationLanesForRowSave(row),
+        automationClips: _automationClipsForRowSave(row),
+        selectedAutomationTargetId: row < _rowSelectedAutomationTarget.length
+            ? _rowSelectedAutomationTarget[row]
+            : 'volume',
+      ),
+      rowEffects: await captureRowSnapshot(row, rowId: rowId),
+      clips: deletedClips,
+      closesMidiEditor: containsActiveMidiClip,
+    );
+  }
+
+  Future<void> _restoreDeletedRowClips(
+    int row,
+    List<AudioTrack> clips,
+  ) async {
+    for (final clip in clips) {
+      if (clip.isMidi) {
+        await _addMidiTrack(
+          instrumentId: clip.instrumentId,
+          instrumentName: clip.instrumentName,
+          instrumentParams: Map<String, double>.from(clip.instrumentParams),
+          midiNotes: clip.midiNotes.map((note) => note.copy()).toList(),
+          row: row,
+          timeMs: clip.offset * 1000.0,
+          trimStartRequested: clip.trimStart,
+          trimEndRequested: clip.trimEnd,
+          renderedFile: clip.file,
+          label: clip.label,
+          gain: clip.gain,
+          pitchSemitones: clip.pitchSemitones,
+          sourceTempoBpm: clip.sourceTempoBpm,
+          stretchToProjectTempo: clip.stretchToProjectTempo,
+          tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
+          crossfade: clip.crossfade,
+          automation: clip.volumeAutomation.map((p) => p.copy()).toList(),
+          rowAlreadyEnsured: true,
+          notifyUi: false,
+          updateProjectDuration: false,
+          assumeFreshEngineDefaults: true,
+        );
+        continue;
+      }
+
+      await _addAudioTrackFromProjectFile(
+        projectAudioFile: clip.file,
+        label: clip.label,
+        row: row,
+        timeMs: clip.offset * 1000.0,
+        trimStartRequested: clip.trimStart,
+        trimEndRequested: clip.trimEnd,
+        gain: clip.gain,
+        pitchSemitones: clip.pitchSemitones,
+        isReversed: clip.isReversed,
+        sourceTempoBpm: clip.sourceTempoBpm,
+        stretchToProjectTempo: clip.stretchToProjectTempo,
+        tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
+        crossfade: clip.crossfade,
+        automation: clip.volumeAutomation.map((p) => p.copy()).toList(),
+        rowAlreadyEnsured: true,
+        notifyUi: false,
+        updateProjectDuration: false,
+        assumeFreshEngineDefaults: true,
+      );
+    }
+  }
+
+  Future<void> _restoreDeletedRowState(
+    int row,
+    RowStateSnapshot rowState,
+    _DeletedRowUiState uiState,
+  ) async {
+    if (row < 0 || row >= _rowCount) return;
+
+    _rowGain[row] = rowState.gain.clamp(_kGainUiMin, _kGainUiMax).toDouble();
+    _rowPan[row] = rowState.pan;
+    _rowMuted[row] = uiState.muted;
+    _rowSoloed[row] = uiState.soloed;
+    _rowMuteApplied[row] = uiState.muteApplied;
+    _rowExpanded[row] = uiState.expanded;
+    _rowExpandedTab[row] = uiState.expandedTab;
+    _restoreAutomationLanesForRow(
+      row,
+      rowState.automationLanes,
+      selectedTargetId: rowState.selectedAutomationTargetId,
+    );
+    _restoreAutomationClipsForRow(row, rowState.automationClips);
+    if (row < _rowGainSnapshot.length) {
+      _rowGainSnapshot[row] = uiState.gainSnapshot;
+    }
+    if (row < _rowPanSnapshot.length) {
+      _rowPanSnapshot[row] = uiState.panSnapshot;
+    }
+    if (row < _rowAutomationSnapshot.length) {
+      _rowAutomationSnapshot[row] = uiState.automationSnapshot
+          .map((point) => point.copy())
+          .toList(growable: false);
+    }
+    if (uiState.peakHoldDb != null) {
+      _rowPeakHoldDb[row] = uiState.peakHoldDb!;
+    } else {
+      _rowPeakHoldDb.remove(row);
+    }
+    if (uiState.peakHoldLastUpdate != null) {
+      _rowPeakHoldLastUpdate[row] = uiState.peakHoldLastUpdate!;
+    } else {
+      _rowPeakHoldLastUpdate.remove(row);
+    }
+    if (uiState.peakHoldFreezeUntil != null) {
+      _rowPeakHoldFreezeUntil[row] = uiState.peakHoldFreezeUntil!;
+    } else {
+      _rowPeakHoldFreezeUntil.remove(row);
+    }
+
+    await JuceAudioEngine.setRowGain(row, _rowGain[row]);
+    await JuceAudioEngine.setRowPan(row, _rowPan[row]);
+    await _refreshAutomationTargetsForRow(
+      row,
+      setStateWhenDone: false,
+      syncNativeWhenDone: false,
+    );
+    await _syncNativeAutomationForRow(row);
+  }
+
+  Future<int> _restoreDeletedRowFromSnapshot(
+      _DeletedRowSnapshot snapshot) async {
+    var restoredRowIndex = snapshot.originalIndex;
+    var restoredRowId = snapshot.row.rowId;
+
+    if (snapshot.wasOnlyRow) {
+      if (_rowCount == 0) {
+        restoredRowId = await JuceAudioEngine.addRow(snapshot.row.name,
+            iconId: snapshot.row.iconId);
+        if (restoredRowId < 0) return snapshot.row.rowId;
+        await _applyRowsToEditorState(
+          <TimelineRow>[
+            TimelineRow(
+              rowId: restoredRowId,
+              name: snapshot.row.name,
+              iconId: snapshot.row.iconId,
+            ),
+          ],
+          refreshAutomationTargets: false,
+          syncClipRows: false,
+        );
+      } else {
+        restoredRowIndex = 0;
+        restoredRowId = _rowIdAt(restoredRowIndex);
+        await JuceAudioEngine.renameRow(restoredRowId, snapshot.row.name);
+        await JuceAudioEngine.setRowIcon(restoredRowId, snapshot.row.iconId);
+        await _applyRowsToEditorState(
+          <TimelineRow>[
+            TimelineRow(
+              rowId: restoredRowId,
+              name: snapshot.row.name,
+              iconId: snapshot.row.iconId,
+            ),
+          ],
+          refreshAutomationTargets: false,
+          syncClipRows: false,
+        );
+      }
+    } else {
+      final desiredIndex = snapshot.originalIndex.clamp(0, _rowCount);
+      if (_rowCount == 0) {
+        restoredRowId = await JuceAudioEngine.addRow(snapshot.row.name,
+            iconId: snapshot.row.iconId);
+        restoredRowIndex = 0;
+      } else if (desiredIndex >= _rowCount) {
+        restoredRowId = await JuceAudioEngine.insertRowBelow(
+          _rowIdAt(_rowCount - 1),
+          snapshot.row.name,
+          iconId: snapshot.row.iconId,
+        );
+        restoredRowIndex = _rowCount;
+      } else {
+        restoredRowId = await JuceAudioEngine.insertRowAbove(
+          _rowIdAt(desiredIndex),
+          snapshot.row.name,
+          iconId: snapshot.row.iconId,
+        );
+        restoredRowIndex = desiredIndex;
+      }
+      if (restoredRowId < 0) return snapshot.row.rowId;
+
+      await JuceAudioEngine.renameRow(restoredRowId, snapshot.row.name);
+      await JuceAudioEngine.setRowIcon(restoredRowId, snapshot.row.iconId);
+
+      final nextRows = List<TimelineRow>.from(_rows)
+        ..insert(
+          restoredRowIndex,
+          TimelineRow(
+            rowId: restoredRowId,
+            name: snapshot.row.name,
+            iconId: snapshot.row.iconId,
+          ),
+        );
+      await _applyRowsToEditorState(
+        nextRows,
+        refreshAutomationTargets: false,
+        syncClipRows: true,
+      );
+    }
+
+    await _restoreDeletedRowClips(restoredRowIndex, snapshot.clips);
+    await restoreRowSnapshot(
+      RowEffectsSnapshot(
+        restoredRowIndex,
+        snapshot.rowEffects.effects,
+        rowId: restoredRowId,
+      ),
+    );
+    await _restoreDeletedRowState(
+      restoredRowIndex,
+      snapshot.rowState,
+      snapshot.uiState,
+    );
+    await _recomputeAudibleState();
+    _updateOverallDurationIfNeeded();
+    _refreshRowFx(restoredRowIndex);
+    _refreshAudioEditorView();
+    return restoredRowId;
+  }
+
   Future<bool> _deleteRowImpl(int row) async {
     if (row < 0 || row >= _rowCount) return false;
     if (_rowCount == 1) {
@@ -36422,9 +37709,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _deleteRow(int row) async {
-    // Row delete now removes clips on that row. The row-layout snapshot undo
-    // path does not capture full clip payloads, so avoid recording a partial undo.
-    await _deleteRowImpl(row);
+    final snapshot = await _captureDeletedRowSnapshot(row);
+    if (snapshot == null) return;
+    await _undoManager.execute(
+      _DeleteRowAction(
+        initialRowId: snapshot.row.rowId,
+        deleteRow: (currentRowId) async {
+          var targetRow = _rowIndexForId(currentRowId);
+          if (targetRow < 0 || targetRow >= _rowCount) {
+            targetRow = snapshot.originalIndex.clamp(0, _rowCount - 1);
+          }
+          if (targetRow < 0 || targetRow >= _rowCount) return;
+          await _deleteRowImpl(targetRow);
+          if (snapshot.closesMidiEditor) {
+            _closeMidiClipEditor();
+          }
+        },
+        restoreRow: () => _restoreDeletedRowFromSnapshot(snapshot),
+      ),
+    );
   }
 
   Future<bool> _renameRowImpl(int row, String name) async {
@@ -36549,6 +37852,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           0.0,
           rawKeyboardLift - fixedTransportFootprint,
         );
+        final chatTypingActive = _isChatTypingActive;
+        final showProducerCapture =
+            _isProducerCaptureUiVisible && !chatTypingActive;
         final chatTapAwayBottomInset = _kChatHistoryHeight +
             _kChatBarStackHeight +
             _kTransportBarHeight +
@@ -36928,30 +38234,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
                                         // transport
                                         onScrubRequested: (ms) {
-                                          if (_isRecording) {
-                                            return; // do nothing while recording (hopefully no bug where you can still physically scrub but does nothing here)
-                                          }
-
-                                          final newPosition = Duration(
-                                              milliseconds: ms.toInt());
-                                          _syncTransportClock(
-                                            newPosition,
-                                            playing: _isPlaying,
-                                          );
-                                          // for (int i = 0; i < _audioTracks.length; i++) {
-                                          //   final track = _audioTracks[i];
-                                          //   final effectivePos = _calculateEffectiveAudioPositionForTrack(track, newPosition);
-                                          //   JuceAudioEngine.seek(i, effectivePos.inMicroseconds / 1e6);
-                                          //   setState(() {
-                                          //     track.currentPosition = effectivePos;
-                                          //   });
-                                          // }
-                                          JuceAudioEngine
-                                              .setAutomationTransport(
-                                            ms / 1000.0,
-                                          );
-                                          JuceAudioEngine
-                                              .setMetronomeTransportMs(ms);
+                                          _scrubProjectTransport(ms);
                                         },
                                         maxDuration: _audioOnlyOverallDuration,
                                         getFullDurationMs: (t) =>
@@ -37444,6 +38727,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   selectedClipIndices);
                                           _timelinePrimarySelectedClipIndex =
                                               primaryClipIndex;
+                                          _retargetOpenMidiClipEditorToSelection(
+                                            primaryClipIndex,
+                                          );
                                           unawaited(
                                             _syncLiveMidiInputTargetClip(),
                                           );
@@ -37479,6 +38765,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         recordingStartMs: _recordingStartMs,
                                         recordingPeaks:
                                             _recordingPeaks, // TODO: FIX TO USE WITH JUCE
+                                        selectedClipIndex:
+                                            _timelinePrimarySelectedClipIndex,
+                                        selectedClipIndices:
+                                            _timelineSelectedClipIndices,
                                         registerRowFxRefresher: (fn) {
                                           _refreshRowFx = fn;
                                           WidgetsBinding.instance
@@ -37557,9 +38847,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       MediaQuery.viewInsetsOf(overlayContext)
                                           .bottom;
                                   final keyboardVisible = keyboardInset > 0.0;
-                                  final chatTypingActive =
-                                      _chatFocusNode.hasFocus ||
-                                          _chatInputActive;
+                                  final chatTypingActive = _isChatTypingActive;
                                   final chatKeyboardActive =
                                       keyboardVisible && chatTypingActive;
                                   final androidOverlayPanelLift =
@@ -37586,12 +38874,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     0.0,
                                     rawKeyboardLift - fixedTransportFootprint,
                                   );
-                                  final chatHistoryBaseBottom =
-                                      _kChatBarStackHeight +
-                                          _kTransportBarHeight +
-                                          transportVisualBottomInset +
-                                          _chatHistoryBottomGap +
-                                          androidOverlayPanelLift;
                                   final chatLift = keyboardLift;
                                   final mediaSize =
                                       MediaQuery.sizeOf(overlayContext);
@@ -37627,28 +38909,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       transportVisualBottomInset +
                                       _kTransportBarHeight +
                                       6.0;
-                                  final addButtonAnchorContext =
-                                      _addButtonAnchorKey.currentContext;
-                                  final addButtonAnchorObject =
-                                      addButtonAnchorContext
-                                          ?.findRenderObject();
-                                  if (addButtonAnchorObject is RenderBox &&
-                                      addButtonAnchorObject.hasSize) {
-                                    final anchorTop = addButtonAnchorObject
-                                        .localToGlobal(Offset.zero)
-                                        .dy;
-                                    final addButtonTop = anchorTop;
-                                    final anchoredBottom =
-                                        mediaSize.height - addButtonTop + 4.0;
-                                    addActionsBottom = anchoredBottom
-                                        .clamp(
-                                          chatLift +
-                                              transportVisualBottomInset +
-                                              _kTransportBarHeight +
-                                              4.0,
-                                          mediaSize.height - 48.0,
-                                        )
-                                        .toDouble();
+                                  if (_showAddActionsPanel) {
+                                    final addButtonAnchorContext =
+                                        _addButtonAnchorKey.currentContext;
+                                    final addButtonAnchorObject =
+                                        addButtonAnchorContext
+                                            ?.findRenderObject();
+                                    if (addButtonAnchorContext != null &&
+                                        addButtonAnchorContext.mounted &&
+                                        addButtonAnchorObject is RenderBox &&
+                                        addButtonAnchorObject.attached &&
+                                        addButtonAnchorObject.hasSize) {
+                                      final addButtonTop = addButtonAnchorObject
+                                          .localToGlobal(Offset.zero)
+                                          .dy;
+                                      final anchoredBottom =
+                                          mediaSize.height - addButtonTop + 4.0;
+                                      addActionsBottom = anchoredBottom
+                                          .clamp(
+                                            chatLift +
+                                                transportVisualBottomInset +
+                                                _kTransportBarHeight +
+                                                4.0,
+                                            mediaSize.height - 48.0,
+                                          )
+                                          .toDouble();
+                                    }
                                   }
                                   final addActionsRight = 10.0;
                                   final addActionsWidth = math.min(
@@ -37665,21 +38951,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             child: const SizedBox.shrink(),
                                           ),
                                         ),
-                                      Positioned(
-                                        left: 0,
-                                        right: 0,
-                                        bottom: 0,
-                                        child: RepaintBoundary(
-                                          child: _buildBottomChatAndTransport(
-                                            includeChatBar: true,
-                                            includeProducerCapture:
-                                                _isProducerCaptureUiVisible &&
-                                                    !chatTypingActive,
-                                            includeTransport: true,
-                                            chatBarKeyboardOffset: chatLift,
-                                          ),
-                                        ),
-                                      ),
                                       Positioned(
                                         right: addActionsRight,
                                         bottom: addActionsBottom,
@@ -37915,511 +39186,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             },
                                           ),
                                         ),
-                                      Positioned(
-                                        left: 0,
-                                        right: 0,
-                                        bottom:
-                                            chatHistoryBaseBottom + chatLift,
-                                        child: RepaintBoundary(
-                                          child: AnimatedSlide(
-                                            offset: _chatExpanded
-                                                ? Offset.zero
-                                                : const Offset(0, 0.3),
-                                            duration: _chatExpanded
-                                                ? const Duration(
-                                                    milliseconds: 160)
-                                                : const Duration(
-                                                    milliseconds: 85),
-                                            curve: Curves.easeOutCubic,
-                                            child: SizedBox(
-                                              height: _kChatHistoryHeight,
-                                              child: _chatWarm
-                                                  ? Container(
-                                                      margin: const EdgeInsets
-                                                          .symmetric(
-                                                          horizontal: 12),
-                                                      child: IgnorePointer(
-                                                        ignoring:
-                                                            !_chatExpanded,
-                                                        child: AnimatedOpacity(
-                                                          duration: _chatExpanded
-                                                              ? const Duration(
-                                                                  milliseconds:
-                                                                      110)
-                                                              : const Duration(
-                                                                  milliseconds:
-                                                                      70),
-                                                          curve: Curves
-                                                              .easeOutCubic,
-                                                          opacity: _chatExpanded
-                                                              ? 1
-                                                              : 0,
-                                                          child: ClipRRect(
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        29),
-                                                            child:
-                                                                BackdropFilter(
-                                                              filter: ImageFilter
-                                                                  .blur(
-                                                                      sigmaX:
-                                                                          14,
-                                                                      sigmaY:
-                                                                          14),
-                                                              child: Container(
-                                                                decoration:
-                                                                    BoxDecoration(
-                                                                  color: const Color
-                                                                      .fromRGBO(
-                                                                    232,
-                                                                    232,
-                                                                    232,
-                                                                    _kChatChromeOpacity,
-                                                                  ),
-                                                                  borderRadius:
-                                                                      BorderRadius
-                                                                          .circular(
-                                                                              29),
-                                                                  border: Border
-                                                                      .all(
-                                                                    color: Colors
-                                                                        .white
-                                                                        .withValues(
-                                                                      alpha:
-                                                                          0.12,
-                                                                    ),
-                                                                  ),
-                                                                  boxShadow: [
-                                                                    BoxShadow(
-                                                                      color: Colors
-                                                                          .black
-                                                                          .withValues(
-                                                                        alpha:
-                                                                            0.22,
-                                                                      ),
-                                                                      blurRadius:
-                                                                          18,
-                                                                      offset:
-                                                                          const Offset(
-                                                                        0,
-                                                                        10,
-                                                                      ),
-                                                                    ),
-                                                                  ],
-                                                                ),
-                                                                child: Builder(
-                                                                  builder:
-                                                                      (context) {
-                                                                    final canClearChatHistory = !_isThinking &&
-                                                                        _chatController
-                                                                            .messages
-                                                                            .isNotEmpty;
-                                                                    return Column(
-                                                                      children: [
-                                                                        Padding(
-                                                                          padding: const EdgeInsets
-                                                                              .fromLTRB(
-                                                                              16,
-                                                                              12,
-                                                                              12,
-                                                                              6),
-                                                                          child:
-                                                                              Row(
-                                                                            children: [
-                                                                              Expanded(
-                                                                                child: Text(
-                                                                                  L10n.translate(
-                                                                                    context,
-                                                                                    'Project Chat',
-                                                                                  ),
-                                                                                  style: const TextStyle(
-                                                                                    fontFamily: 'Pretendard',
-                                                                                    fontSize: 13,
-                                                                                    fontWeight: FontWeight.w700,
-                                                                                    letterSpacing: 0.3,
-                                                                                    color: Colors.white70,
-                                                                                  ),
-                                                                                ),
-                                                                              ),
-                                                                              _buildChatHeaderActionButton(
-                                                                                label: L10n.translate(
-                                                                                  context,
-                                                                                  'Feedback',
-                                                                                ),
-                                                                                icon: Icons.feedback_outlined,
-                                                                                onPressed: _feedbackSubmissionInFlight ? null : _openDawFeedbackComposer,
-                                                                              ),
-                                                                              const SizedBox(width: 8),
-                                                                              _buildChatHeaderActionButton(
-                                                                                label: L10n.translate(
-                                                                                  context,
-                                                                                  'Clear',
-                                                                                ),
-                                                                                icon: Icons.delete_outline_rounded,
-                                                                                onPressed: canClearChatHistory ? _confirmClearChatHistory : null,
-                                                                              ),
-                                                                            ],
-                                                                          ),
-                                                                        ),
-                                                                        Expanded(
-                                                                          child:
-                                                                              Stack(
-                                                                            children: [
-                                                                              Positioned.fill(
-                                                                                child: ClipRect(
-                                                                                  child: ShaderMask(
-                                                                                    blendMode: BlendMode.dstIn,
-                                                                                    shaderCallback: (
-                                                                                      Rect bounds,
-                                                                                    ) {
-                                                                                      final fadeStartStop = bounds.height > 0
-                                                                                          ? math.min(
-                                                                                              0.022,
-                                                                                              4 / bounds.height,
-                                                                                            )
-                                                                                          : 0.022;
-                                                                                      final fadeEndStop = bounds.height > 0
-                                                                                          ? math.min(
-                                                                                              0.08,
-                                                                                              18 / bounds.height,
-                                                                                            )
-                                                                                          : 0.08;
-                                                                                      return LinearGradient(
-                                                                                        begin: Alignment.topCenter,
-                                                                                        end: Alignment.bottomCenter,
-                                                                                        stops: <double>[
-                                                                                          0.0,
-                                                                                          fadeStartStop,
-                                                                                          fadeEndStop,
-                                                                                          1.0,
-                                                                                        ],
-                                                                                        colors: const <Color>[
-                                                                                          Colors.transparent,
-                                                                                          Color.fromRGBO(255, 255, 255, 0.45),
-                                                                                          Colors.white,
-                                                                                          Colors.white,
-                                                                                        ],
-                                                                                      ).createShader(
-                                                                                        bounds,
-                                                                                      );
-                                                                                    },
-                                                                                    child: MediaQuery.removePadding(
-                                                                                      context: overlayContext,
-                                                                                      removeBottom: true,
-                                                                                      child: MediaQuery.removeViewInsets(
-                                                                                        context: overlayContext,
-                                                                                        removeBottom: true,
-                                                                                        child: Chat(
-                                                                                          chatController: _chatController,
-                                                                                          currentUserId: 'user',
-                                                                                          onMessageSend: null,
-                                                                                          timeFormat: null,
-                                                                                          onMessageLongPress: (
-                                                                                            BuildContext context,
-                                                                                            Message message, {
-                                                                                            required LongPressStartDetails details,
-                                                                                            required int index,
-                                                                                          }) async {
-                                                                                            if (message is TextMessage) {
-                                                                                              await Clipboard.setData(
-                                                                                                ClipboardData(text: message.text),
-                                                                                              );
-
-                                                                                              await AppHaptics.impact(
-                                                                                                AppHapticImpact.light,
-                                                                                              );
-
-                                                                                              _showCopiedChatMessageFeedback(
-                                                                                                message.id,
-                                                                                              );
-                                                                                            }
-                                                                                          },
-                                                                                          builders: Builders(
-                                                                                            chatAnimatedListBuilder: (
-                                                                                              BuildContext context,
-                                                                                              ChatItem itemBuilder,
-                                                                                            ) {
-                                                                                              return NotificationListener<ScrollNotification>(
-                                                                                                onNotification: _handleChatListScrollNotification,
-                                                                                                child: ChatAnimatedList(
-                                                                                                  itemBuilder: itemBuilder,
-                                                                                                  scrollController: _chatListScrollController,
-                                                                                                  handleSafeArea: false,
-                                                                                                  bottomPadding: 8,
-                                                                                                  bottomSliver: _isThinking
-                                                                                                      ? SliverToBoxAdapter(
-                                                                                                          child: _buildThinkingPlaceholderBubble(),
-                                                                                                        )
-                                                                                                      : null,
-                                                                                                  scrollToBottomAppearanceDelay: const Duration(milliseconds: 180),
-                                                                                                  scrollToBottomAppearanceThreshold: _kChatScrollHintThreshold,
-                                                                                                ),
-                                                                                              );
-                                                                                            },
-                                                                                            composerBuilder: (_) => const SizedBox.shrink(),
-                                                                                            emptyChatListBuilder: (_) => Center(
-                                                                                              child: Padding(
-                                                                                                padding: const EdgeInsets.symmetric(horizontal: 28),
-                                                                                                child: Text(
-                                                                                                  L10n.translate(
-                                                                                                    context,
-                                                                                                    'This is an experimental feature in development. Output may be unexpected.',
-                                                                                                  ),
-                                                                                                  textAlign: TextAlign.center,
-                                                                                                  style: const TextStyle(
-                                                                                                    fontFamily: 'Pretendard',
-                                                                                                    fontSize: 14,
-                                                                                                    height: 1.45,
-                                                                                                    color: Colors.white60,
-                                                                                                  ),
-                                                                                                ),
-                                                                                              ),
-                                                                                            ),
-                                                                                            scrollToBottomBuilder: (
-                                                                                              BuildContext context,
-                                                                                              Animation<double> animation,
-                                                                                              VoidCallback onPressed,
-                                                                                            ) {
-                                                                                              if (!_chatScrollHintEnabled || animation.value <= 0.01) {
-                                                                                                return const SizedBox.shrink();
-                                                                                              }
-                                                                                              return Positioned(
-                                                                                                left: 0,
-                                                                                                right: 0,
-                                                                                                bottom: 16,
-                                                                                                child: Center(
-                                                                                                  child: ScaleTransition(
-                                                                                                    scale: animation,
-                                                                                                    child: FloatingActionButton(
-                                                                                                      heroTag: null,
-                                                                                                      mini: true,
-                                                                                                      backgroundColor: const Color.fromRGBO(154, 169, 191, 0.56),
-                                                                                                      foregroundColor: const Color(0xFFF7FAFF),
-                                                                                                      onPressed: () {
-                                                                                                        _setChatScrollHintEnabled(false);
-                                                                                                        onPressed();
-                                                                                                      },
-                                                                                                      child: const Icon(Icons.keyboard_arrow_down_rounded),
-                                                                                                    ),
-                                                                                                  ),
-                                                                                                ),
-                                                                                              );
-                                                                                            },
-                                                                                            textMessageBuilder: (
-                                                                                              BuildContext context,
-                                                                                              TextMessage message,
-                                                                                              int index, {
-                                                                                              required bool isSentByMe,
-                                                                                              MessageGroupStatus? groupStatus,
-                                                                                            }) {
-                                                                                              if (message.authorId == 'system') {
-                                                                                                return Padding(
-                                                                                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                                                                                  child: Center(
-                                                                                                    child: Text(
-                                                                                                      message.text,
-                                                                                                      textAlign: TextAlign.center,
-                                                                                                      style: const TextStyle(
-                                                                                                        fontFamily: 'Pretendard',
-                                                                                                        fontSize: 13,
-                                                                                                        fontWeight: FontWeight.w600,
-                                                                                                        letterSpacing: 0.4,
-                                                                                                        color: Colors.white70,
-                                                                                                      ),
-                                                                                                    ),
-                                                                                                  ),
-                                                                                                );
-                                                                                              }
-                                                                                              final isCopied = _copiedChatMessageId == message.id;
-                                                                                              final bubbleColor = isSentByMe
-                                                                                                  ? const Color.fromRGBO(
-                                                                                                      25,
-                                                                                                      94,
-                                                                                                      160,
-                                                                                                      0.42,
-                                                                                                    )
-                                                                                                  : const Color.fromRGBO(
-                                                                                                      244,
-                                                                                                      244,
-                                                                                                      244,
-                                                                                                      0.18,
-                                                                                                    );
-                                                                                              return Align(
-                                                                                                alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
-                                                                                                child: Column(
-                                                                                                  crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                                                                                  children: [
-                                                                                                    AnimatedSwitcher(
-                                                                                                      duration: const Duration(milliseconds: 120),
-                                                                                                      child: isCopied
-                                                                                                          ? Padding(
-                                                                                                              key: const ValueKey('copied_badge'),
-                                                                                                              padding: const EdgeInsets.symmetric(
-                                                                                                                horizontal: 14,
-                                                                                                                vertical: 2,
-                                                                                                              ),
-                                                                                                              child: Container(
-                                                                                                                padding: const EdgeInsets.symmetric(
-                                                                                                                  horizontal: 8,
-                                                                                                                  vertical: 4,
-                                                                                                                ),
-                                                                                                                decoration: BoxDecoration(
-                                                                                                                  color: const Color(0xFF7A8E73),
-                                                                                                                  borderRadius: BorderRadius.circular(999),
-                                                                                                                ),
-                                                                                                                child: Row(
-                                                                                                                  mainAxisSize: MainAxisSize.min,
-                                                                                                                  children: [
-                                                                                                                    const Icon(
-                                                                                                                      Icons.check_rounded,
-                                                                                                                      size: 13,
-                                                                                                                      color: Colors.white,
-                                                                                                                    ),
-                                                                                                                    const SizedBox(width: 4),
-                                                                                                                    Text(
-                                                                                                                      L10n.translate(
-                                                                                                                        context,
-                                                                                                                        'Copied',
-                                                                                                                      ),
-                                                                                                                      style: TextStyle(
-                                                                                                                        fontFamily: 'Pretendard',
-                                                                                                                        fontSize: 11,
-                                                                                                                        fontWeight: FontWeight.w700,
-                                                                                                                        color: Colors.white,
-                                                                                                                      ),
-                                                                                                                    ),
-                                                                                                                  ],
-                                                                                                                ),
-                                                                                                              ),
-                                                                                                            )
-                                                                                                          : const SizedBox.shrink(),
-                                                                                                    ),
-                                                                                                    AnimatedContainer(
-                                                                                                      duration: const Duration(milliseconds: 140),
-                                                                                                      margin: const EdgeInsets.symmetric(
-                                                                                                        horizontal: 12,
-                                                                                                        vertical: 2,
-                                                                                                      ),
-                                                                                                      padding: const EdgeInsets.symmetric(
-                                                                                                        horizontal: 14,
-                                                                                                        vertical: 10,
-                                                                                                      ),
-                                                                                                      decoration: BoxDecoration(
-                                                                                                        color: bubbleColor,
-                                                                                                        borderRadius: BorderRadius.circular(18),
-                                                                                                        border: Border.all(
-                                                                                                          color: isCopied ? const Color(0xFFD6E8C9) : Colors.transparent,
-                                                                                                          width: 1.2,
-                                                                                                        ),
-                                                                                                        boxShadow: isCopied
-                                                                                                            ? const [
-                                                                                                                BoxShadow(
-                                                                                                                  color: Color(0x33D6E8C9),
-                                                                                                                  blurRadius: 12,
-                                                                                                                  offset: Offset(0, 2),
-                                                                                                                ),
-                                                                                                              ]
-                                                                                                            : null,
-                                                                                                      ),
-                                                                                                      child: Text(
-                                                                                                        message.text,
-                                                                                                        style: const TextStyle(
-                                                                                                          fontFamily: 'Pretendard',
-                                                                                                          fontSize: 15,
-                                                                                                          fontWeight: FontWeight.w500,
-                                                                                                          height: 1.2,
-                                                                                                          color: Colors.white,
-                                                                                                        ),
-                                                                                                      ),
-                                                                                                    ),
-                                                                                                  ],
-                                                                                                ),
-                                                                                              );
-                                                                                            },
-                                                                                          ),
-                                                                                          theme: const ChatTheme(
-                                                                                            colors: ChatColors(
-                                                                                              // User message bubble (you)
-                                                                                              primary: Color.fromRGBO(25, 94, 160, 0.42),
-                                                                                              onPrimary: Colors.white,
-                                                                                              // Message list surface layers (kill them)
-                                                                                              surface: Colors.transparent,
-                                                                                              onSurface: Colors.white,
-                                                                                              surfaceContainer: Colors.transparent, //Color.fromARGB(100, 170, 170, 170),
-                                                                                              surfaceContainerLow: Colors.transparent,
-                                                                                              surfaceContainerHigh: Colors.transparent,
-                                                                                            ),
-                                                                                            typography: ChatTypography(
-                                                                                              bodyLarge: TextStyle(
-                                                                                                fontFamily: 'Pretendard',
-                                                                                                fontSize: 15,
-                                                                                                height: 1.35,
-                                                                                                color: Colors.white,
-                                                                                              ),
-                                                                                              bodyMedium: TextStyle(
-                                                                                                fontFamily: 'Pretendard',
-                                                                                                fontSize: 14,
-                                                                                                height: 1.35,
-                                                                                                color: Colors.white70,
-                                                                                              ),
-                                                                                              bodySmall: TextStyle(
-                                                                                                fontFamily: 'Pretendard',
-                                                                                                fontSize: 13,
-                                                                                                height: 1.3,
-                                                                                                color: Colors.white60,
-                                                                                              ),
-                                                                                              labelLarge: TextStyle(
-                                                                                                fontFamily: 'Pretendard',
-                                                                                                fontSize: 13,
-                                                                                                fontWeight: FontWeight.w500,
-                                                                                                color: Colors.white70,
-                                                                                              ),
-                                                                                              labelMedium: TextStyle(
-                                                                                                fontFamily: 'Pretendard',
-                                                                                                fontSize: 12,
-                                                                                                color: Colors.white60,
-                                                                                              ),
-                                                                                              labelSmall: TextStyle(
-                                                                                                fontFamily: 'Pretendard',
-                                                                                                fontSize: 11,
-                                                                                                color: Colors.white54,
-                                                                                              ),
-                                                                                            ),
-
-                                                                                            // Message bubble shape — keep subtle, not “chat app rounded”
-                                                                                            shape: BorderRadius.all(Radius.circular(14)),
-                                                                                          ),
-                                                                                          resolveUser: (UserID id) async {
-                                                                                            if (id == 'user') {
-                                                                                              return const User(id: 'user', name: 'You');
-                                                                                            }
-                                                                                            return const User(id: 'assistant', name: 'MixAssistant');
-                                                                                          },
-                                                                                        ),
-                                                                                      ),
-                                                                                    ),
-                                                                                  ),
-                                                                                ),
-                                                                              ),
-                                                                            ],
-                                                                          ),
-                                                                        ),
-                                                                      ],
-                                                                    );
-                                                                  },
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    )
-                                                  : const SizedBox(),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
+                                      const SizedBox.shrink(),
                                     ],
                                   );
                                 },
@@ -38450,9 +39217,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   ? _kProducerBannerHeightEstimate
                                                   : 0.0) +
                                               (Platform.isAndroid
+                                                  ? 10.0
+                                                  : 0.0) +
+                                              (Platform.isAndroid
                                                   ? _kAndroidOverlayPanelLift
                                                   : 0.0) +
-                                              14.0;
+                                              _kSamplePanelBottomGap;
                                       final maxFullscreenHeight = math.max(
                                         280.0,
                                         screenH -
@@ -38480,6 +39250,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           borderRadius:
                                               BorderRadius.circular(18),
                                           child: PianoRollEditor(
+                                            key: ValueKey<int>(
+                                              clip.engineClipId,
+                                            ),
                                             clip: clip,
                                             availableInstruments:
                                                 _activeInstrumentCatalog(),
@@ -38493,6 +39266,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             quantizeDivisionsPerBar:
                                                 _timelineQuantizeDivisionsPerBar,
                                             fullscreen: _pianoRollFullscreen,
+                                            isRecording: _isMidiClipRecording &&
+                                                _midiRecordingClipEngineId ==
+                                                    clip.engineClipId,
                                             onFullscreenChanged: (v) {
                                               setState(() =>
                                                   _pianoRollFullscreen = v);
@@ -38501,8 +39277,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             onClose: _closeMidiClipEditor,
                                             onCommit:
                                                 _commitMidiClipFromPianoRoll,
+                                            onScrubRequested:
+                                                _scrubProjectTransport,
                                             onPreviewNote:
                                                 _previewPianoRollNote,
+                                            onKeyboardNoteDown:
+                                                _handlePianoRollKeyboardNoteDown,
+                                            onKeyboardNoteUp:
+                                                _handlePianoRollKeyboardNoteUp,
                                           ),
                                         ),
                                       );
@@ -38620,6 +39402,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     ),
                                   ),
                                 ),
+                              _buildExpandedChatHistoryOverlay(),
                             ],
                           );
                         },
@@ -38635,6 +39418,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     //     elevation: 4,
                     //   ),
                     // ),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: RepaintBoundary(
+                      child: _buildBottomChatAndTransport(
+                        includeChatBar: true,
+                        includeProducerCapture: showProducerCapture,
+                        includeTransport: true,
+                        chatBarKeyboardOffset: keyboardLift,
+                      ),
+                    ),
                   ),
                 ),
                 if (_isSyncing)
@@ -39211,6 +40010,79 @@ class DotsLoader extends StatefulWidget {
   State<DotsLoader> createState() => _DotsLoaderState();
 }
 
+class _InlineThinkingLabel extends StatefulWidget {
+  const _InlineThinkingLabel({
+    required this.textStyle,
+  });
+
+  final TextStyle textStyle;
+
+  @override
+  State<_InlineThinkingLabel> createState() => _InlineThinkingLabelState();
+}
+
+class _InlineThinkingLabelState extends State<_InlineThinkingLabel>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final t = _controller.value;
+        double dotOpacity(double offset) =>
+            0.26 +
+            (((math.sin(((t + offset) * math.pi * 2)) + 1) * 0.5) * 0.62);
+        double dotScale(double offset) =>
+            0.82 +
+            (((math.sin(((t + offset) * math.pi * 2)) + 1) * 0.5) * 0.28);
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Thinking',
+              style: widget.textStyle,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(width: 7),
+            _ThinkingDot(
+              opacity: dotOpacity(0.0),
+              scale: dotScale(0.0),
+            ),
+            const SizedBox(width: 4),
+            _ThinkingDot(
+              opacity: dotOpacity(-0.18),
+              scale: dotScale(-0.18),
+            ),
+            const SizedBox(width: 4),
+            _ThinkingDot(
+              opacity: dotOpacity(-0.36),
+              scale: dotScale(-0.36),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _ChatThinkingBubble extends StatefulWidget {
   const _ChatThinkingBubble();
 
@@ -39274,13 +40146,13 @@ class _ChatThinkingBubbleState extends State<_ChatThinkingBubble>
                 ),
                 const SizedBox(width: 4),
                 _ThinkingDot(
-                  opacity: dotOpacity(0.18),
-                  scale: dotScale(0.18),
+                  opacity: dotOpacity(-0.18),
+                  scale: dotScale(-0.18),
                 ),
                 const SizedBox(width: 4),
                 _ThinkingDot(
-                  opacity: dotOpacity(0.36),
-                  scale: dotScale(0.36),
+                  opacity: dotOpacity(-0.36),
+                  scale: dotScale(-0.36),
                 ),
               ],
             ),
@@ -41225,6 +42097,56 @@ class _RowUiStateSnapshot {
   });
 }
 
+class _DeletedRowUiState {
+  final bool muted;
+  final bool soloed;
+  final bool? muteApplied;
+  final bool expanded;
+  final int expandedTab;
+  final double gainSnapshot;
+  final double panSnapshot;
+  final List<AutomationPoint> automationSnapshot;
+  final double? peakHoldDb;
+  final DateTime? peakHoldLastUpdate;
+  final DateTime? peakHoldFreezeUntil;
+
+  const _DeletedRowUiState({
+    required this.muted,
+    required this.soloed,
+    required this.muteApplied,
+    required this.expanded,
+    required this.expandedTab,
+    required this.gainSnapshot,
+    required this.panSnapshot,
+    required this.automationSnapshot,
+    this.peakHoldDb,
+    this.peakHoldLastUpdate,
+    this.peakHoldFreezeUntil,
+  });
+}
+
+class _DeletedRowSnapshot {
+  final int originalIndex;
+  final TimelineRow row;
+  final bool wasOnlyRow;
+  final _DeletedRowUiState uiState;
+  final RowStateSnapshot rowState;
+  final RowEffectsSnapshot rowEffects;
+  final List<AudioTrack> clips;
+  final bool closesMidiEditor;
+
+  const _DeletedRowSnapshot({
+    required this.originalIndex,
+    required this.row,
+    required this.wasOnlyRow,
+    required this.uiState,
+    required this.rowState,
+    required this.rowEffects,
+    required this.clips,
+    required this.closesMidiEditor,
+  });
+}
+
 class _RowLayoutSnapshot {
   final List<TimelineRow> rows;
 
@@ -41240,15 +42162,17 @@ abstract class EditorUndoAction {
   Future<void> redo();
 }
 
-class EditorUndoManager {
+class EditorUndoManager extends ChangeNotifier {
   final int maxHistory;
   final List<EditorUndoAction> _undo = [];
   final List<EditorUndoAction> _redo = [];
+  EditorUndoAction? _lastAction;
 
   EditorUndoManager({this.maxHistory = 5});
 
   bool get canUndo => _undo.isNotEmpty;
   bool get canRedo => _redo.isNotEmpty;
+  EditorUndoAction? get lastAction => _lastAction;
 
   Future<void> execute(EditorUndoAction action) async {
     await action.redo();
@@ -41257,6 +42181,8 @@ class EditorUndoManager {
       _undo.removeAt(0);
     }
     _redo.clear();
+    _lastAction = action;
+    notifyListeners();
   }
 
   // yes it is redundant, but works for the edge case of:
@@ -41273,6 +42199,8 @@ class EditorUndoManager {
       _undo.removeAt(0);
     }
     _redo.clear();
+    _lastAction = action;
+    notifyListeners();
   }
 
   Future<EditorUndoAction?> undo() async {
@@ -41280,6 +42208,8 @@ class EditorUndoManager {
     final a = _undo.removeLast();
     await a.undo();
     _redo.add(a);
+    _lastAction = a;
+    notifyListeners();
     return a;
   }
 
@@ -41288,12 +42218,16 @@ class EditorUndoManager {
     final a = _redo.removeLast();
     await a.redo();
     _undo.add(a);
+    _lastAction = a;
+    notifyListeners();
     return a;
   }
 
   void clear() {
+    if (_undo.isEmpty && _redo.isEmpty) return;
     _undo.clear();
     _redo.clear();
+    notifyListeners();
   }
 }
 
@@ -41318,6 +42252,29 @@ class _RowLayoutSnapshotAction extends EditorUndoAction {
 
   @override
   Future<void> undo() => applySnapshot(before);
+}
+
+class _DeleteRowAction extends EditorUndoAction {
+  int _currentRowId;
+  final Future<void> Function(int currentRowId) deleteRow;
+  final Future<int> Function() restoreRow;
+
+  _DeleteRowAction({
+    required int initialRowId,
+    required this.deleteRow,
+    required this.restoreRow,
+  }) : _currentRowId = initialRowId;
+
+  @override
+  String get description => 'Delete row';
+
+  @override
+  Future<void> redo() => deleteRow(_currentRowId);
+
+  @override
+  Future<void> undo() async {
+    _currentRowId = await restoreRow();
+  }
 }
 
 class _ProjectNameInputDialog extends StatefulWidget {
@@ -41689,7 +42646,8 @@ class _TempoInputDialogState extends State<_TempoInputDialog> {
                   FilledButton(
                     onPressed: () => _close(_controller.text.trim()),
                     style: FilledButton.styleFrom(
-                      backgroundColor: const Color.fromRGBO(118, 147, 174, 0.92),
+                      backgroundColor:
+                          const Color.fromRGBO(118, 147, 174, 0.92),
                       foregroundColor: const Color(0xFFF4F4F4),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,
@@ -43297,7 +44255,41 @@ AudioTrack? _resolveClip(List<AudioTrack> tracks, int index) {
 Widget _chatHelpButton({
   required BuildContext context,
   required VoidCallback onTap,
+  bool busy = false,
 }) {
+  final child = Container(
+    width: 28,
+    height: 28,
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: 0.10),
+      shape: BoxShape.circle,
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 0.12),
+      ),
+    ),
+    alignment: Alignment.center,
+    child: busy
+        ? const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.8,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+            ),
+          )
+        : const Icon(
+            Icons.question_mark_rounded,
+            size: 16,
+            color: Colors.white,
+          ),
+  );
+  if (busy) {
+    return SizedBox(
+      width: 28,
+      height: 28,
+      child: child,
+    );
+  }
   return Tooltip(
     message: L10n.translate(context, 'chat_help_tooltip'),
     child: SizedBox(
@@ -43313,23 +44305,7 @@ Widget _chatHelpButton({
           radius: 20,
           splashColor: Colors.white.withValues(alpha: 0.14),
           highlightColor: Colors.white.withValues(alpha: 0.08),
-          child: Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.10),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.12),
-              ),
-            ),
-            alignment: Alignment.center,
-            child: const Icon(
-              Icons.question_mark_rounded,
-              size: 16,
-              color: Colors.white,
-            ),
-          ),
+          child: child,
         ),
       ),
     ),
@@ -43339,6 +44315,7 @@ Widget _chatHelpButton({
 class _ChatBar extends StatelessWidget {
   final bool expanded;
   final bool hasText;
+  final bool isThinking;
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool readOnly;
@@ -43349,11 +44326,13 @@ class _ChatBar extends StatelessWidget {
   final VoidCallback onShowCapabilities;
   final VoidCallback onTapBar;
   final VoidCallback onSubmit;
+  final VoidCallback onStop;
 
   const _ChatBar({
     super.key,
     required this.expanded,
     required this.hasText,
+    required this.isThinking,
     required this.controller,
     required this.focusNode,
     this.readOnly = false,
@@ -43364,6 +44343,7 @@ class _ChatBar extends StatelessWidget {
     required this.onShowCapabilities,
     required this.onTapBar,
     required this.onSubmit,
+    required this.onStop,
   });
 
   String _badgeLabel(BuildContext context) {
@@ -43563,14 +44543,19 @@ class _ChatBar extends StatelessWidget {
                             _chatHelpButton(
                               context: context,
                               onTap: onShowCapabilities,
+                              busy: isThinking,
                             ),
                             const SizedBox(width: 10),
                             Expanded(
-                              child: Text(
-                                typeHint,
-                                style: collapsedTextStyle,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                              child: isThinking
+                                  ? const _InlineThinkingLabel(
+                                      textStyle: collapsedTextStyle,
+                                    )
+                                  : Text(
+                                      typeHint,
+                                      style: collapsedTextStyle,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                             ),
                             const SizedBox(width: 10),
                             _buildPromptLimitBadge(context),
@@ -43584,12 +44569,13 @@ class _ChatBar extends StatelessWidget {
                                 child: TextField(
                                   controller: controller,
                                   focusNode: focusNode,
-                                  readOnly: readOnly,
+                                  readOnly: readOnly || isThinking,
                                   onTap: onTapBar,
                                   style: inputTextStyle,
                                   cursorColor: Colors.white,
                                   decoration: InputDecoration(
-                                    hintText: typeHint,
+                                    hintText:
+                                        isThinking ? 'Thinking...' : typeHint,
                                     hintStyle: hintTextStyle,
                                     border: InputBorder.none,
                                     isDense: true,
@@ -43597,8 +44583,11 @@ class _ChatBar extends StatelessWidget {
                                         EdgeInsets.symmetric(vertical: 7),
                                   ),
                                   textAlignVertical: TextAlignVertical.center,
-                                  textInputAction: TextInputAction.send,
-                                  onSubmitted: (_) => onSubmit(),
+                                  textInputAction: isThinking
+                                      ? TextInputAction.none
+                                      : TextInputAction.send,
+                                  onSubmitted:
+                                      isThinking ? null : (_) => onSubmit(),
                                 ),
                               ),
                               const SizedBox(width: 10),
@@ -43609,14 +44598,16 @@ class _ChatBar extends StatelessWidget {
                                 height: 34,
                                 child: Builder(
                                   builder: (context) {
-                                    final sendEnabled = hasText;
+                                    final sendEnabled = isThinking || hasText;
                                     Widget sendButton = Opacity(
                                       opacity: sendEnabled ? 1 : 0.32,
                                       child: Material(
                                         color: Colors.transparent,
                                         shape: const CircleBorder(),
                                         child: InkResponse(
-                                          onTap: sendEnabled ? onSubmit : null,
+                                          onTap: sendEnabled
+                                              ? (isThinking ? onStop : onSubmit)
+                                              : null,
                                           containedInkWell: true,
                                           customBorder: const CircleBorder(),
                                           radius: 20,
@@ -43628,15 +44619,22 @@ class _ChatBar extends StatelessWidget {
                                             width: 34,
                                             height: 34,
                                             decoration: BoxDecoration(
-                                              gradient: const LinearGradient(
+                                              gradient: LinearGradient(
                                                 begin: Alignment.topCenter,
                                                 end: Alignment.bottomCenter,
-                                                colors: <Color>[
-                                                  Color.fromRGBO(
-                                                      111, 133, 157, 0.80),
-                                                  Color.fromRGBO(
-                                                      72, 92, 113, 0.84),
-                                                ],
+                                                colors: isThinking
+                                                    ? const <Color>[
+                                                        Color.fromRGBO(168, 110,
+                                                            110, 0.88),
+                                                        Color.fromRGBO(
+                                                            112, 66, 66, 0.92),
+                                                      ]
+                                                    : const <Color>[
+                                                        Color.fromRGBO(111, 133,
+                                                            157, 0.80),
+                                                        Color.fromRGBO(
+                                                            72, 92, 113, 0.84),
+                                                      ],
                                               ),
                                               shape: BoxShape.circle,
                                               border: Border.all(
@@ -43644,8 +44642,10 @@ class _ChatBar extends StatelessWidget {
                                                     .withValues(alpha: 0.24),
                                               ),
                                             ),
-                                            child: const Icon(
-                                              Icons.near_me_rounded,
+                                            child: Icon(
+                                              isThinking
+                                                  ? Icons.stop_rounded
+                                                  : Icons.near_me_rounded,
                                               color: Colors.white,
                                               size: 18,
                                             ),
@@ -43924,7 +44924,7 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
     final border = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
-      ..color = Colors.white.withOpacity(0.12);
+      ..color = Colors.white.withValues(alpha: 0.12);
 
     final meterRect = Offset.zero & s;
     c.drawRect(meterRect, bg);
@@ -43938,17 +44938,16 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
     final laneBgPaint = Paint()
       ..color = const Color.fromRGBO(244, 244, 244, 0.14);
     final tickPaint = Paint()
-      ..color = Colors.white.withOpacity(0.08)
+      ..color = Colors.white.withValues(alpha: 0.08)
       ..strokeWidth = 1;
     final peakPaint = Paint()
-      ..color = Colors.white.withOpacity(0.95)
+      ..color = Colors.white.withValues(alpha: 0.95)
       ..strokeWidth = 1.2;
     final clipPaint = Paint()..color = const Color(0xFFFF6464);
 
-    final dbTicks = [-36.0, -24.0, -12.0, -6.0, -3.0, 0.0];
+    final dbTicks = [-48.0, -36.0, -24.0, -15.0, -10.0, -6.0, -3.0, 0.0];
     for (final db in dbTicks) {
-      final amp = math.pow(10.0, db / 20.0).toDouble();
-      final x = (pad + (amp.clamp(0.0, 1.0) * innerWidth));
+      final x = pad + (DbfsMeterVisuals.dbfsToUnit(db) * innerWidth);
       c.drawLine(Offset(x, pad), Offset(x, meterBottomY), tickPaint);
     }
 
@@ -43960,46 +44959,62 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
       final laneRect = Rect.fromLTWH(pad, top, innerWidth, laneHeight);
       c.drawRect(laneRect, laneBgPaint);
 
-      final rmsNorm = rms.clamp(0.0, 1.0).toDouble();
-      final peakNorm = peak.clamp(0.0, 1.0).toDouble();
+      final rmsUnit = DbfsMeterVisuals.ampToUnit(rms);
+      final peakUnit = DbfsMeterVisuals.ampToUnit(peak);
+      final rmsWidth = innerWidth * rmsUnit;
+      final peakWidth = innerWidth * peakUnit;
 
-      final rmsWidth = innerWidth * rmsNorm;
       if (rmsWidth > 0.0) {
         final rmsRect = Rect.fromLTWH(pad, top, rmsWidth, laneHeight);
-        final gradient = const LinearGradient(
-          colors: [Color(0xFF2EC96D), Color(0xFFF5C94D), Color(0xFFE55A5A)],
-          stops: [0.0, 0.78, 1.0],
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-        );
         c.drawRect(
           rmsRect,
-          Paint()..shader = gradient.createShader(laneRect),
+          Paint()
+            ..shader =
+                DbfsMeterVisuals.horizontalGradient(opacity: 0.95).createShader(
+              laneRect,
+            ),
         );
       }
 
-      final peakX =
-          (pad + (innerWidth * peakNorm)).clamp(pad, pad + innerWidth);
-      c.drawLine(
-        Offset(peakX, top),
-        Offset(peakX, top + laneHeight),
-        peakPaint,
-      );
+      if (peakWidth > rmsWidth) {
+        final transientRect = Rect.fromLTWH(
+          pad + rmsWidth,
+          top,
+          peakWidth - rmsWidth,
+          laneHeight,
+        );
+        c.drawRect(
+          transientRect,
+          Paint()
+            ..shader =
+                DbfsMeterVisuals.horizontalGradient(opacity: 0.34).createShader(
+              laneRect,
+            ),
+        );
+      }
+
+      if (peakWidth > 0.5) {
+        final peakX = (pad + peakWidth).clamp(pad, pad + innerWidth).toDouble();
+        c.drawLine(
+          Offset(peakX, top),
+          Offset(peakX, top + laneHeight),
+          peakPaint,
+        );
+      }
     }
 
     drawLane(top: pad, rms: f.rmsL, peak: f.peakL);
     drawLane(top: pad + laneHeight + laneGap, rms: f.rmsR, peak: f.peakR);
 
-    final labelTicks = [-36.0, -24.0, -12.0, -6.0, 0.0];
+    final labelTicks = [-48.0, -30.0, -15.0, -6.0, 0.0];
     for (final db in labelTicks) {
-      final amp = math.pow(10.0, db / 20.0).toDouble().clamp(0.0, 1.0);
-      final x = pad + (innerWidth * amp);
+      final x = pad + (innerWidth * DbfsMeterVisuals.dbfsToUnit(db));
       final text = db.toStringAsFixed(0);
       final tp = TextPainter(
         text: TextSpan(
           text: text,
           style: TextStyle(
-            color: Colors.white.withOpacity(0.42),
+            color: Colors.white.withValues(alpha: 0.42),
             fontSize: 6.6,
             fontWeight: FontWeight.w500,
           ),
@@ -44014,7 +45029,7 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
       text: TextSpan(
         text: 'dBFS',
         style: TextStyle(
-          color: Colors.white.withOpacity(0.42),
+          color: Colors.white.withValues(alpha: 0.42),
           fontSize: 6.0,
           fontWeight: FontWeight.w600,
         ),
@@ -44075,7 +45090,7 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
     final border = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
-      ..color = Colors.white.withOpacity(0.10);
+      ..color = Colors.white.withValues(alpha: 0.10);
 
     // NO rounding: clean rectangle
     final rect = Offset.zero & s;
@@ -44084,11 +45099,11 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
 
     // ===== Tick lines (scale feel) =====
     final tick = Paint()
-      ..color = Colors.white.withOpacity(0.06)
+      ..color = Colors.white.withValues(alpha: 0.06)
       ..strokeWidth = 1;
 
-    for (int i = 1; i <= 4; i++) {
-      final x = s.width * (i / 5.0);
+    for (final db in const [-36.0, -24.0, -15.0, -10.0, -6.0, -3.0]) {
+      final x = s.width * DbfsMeterVisuals.dbfsToUnit(db);
       c.drawLine(
         Offset(x, 1),
         Offset(x, s.height - 1),
@@ -44097,13 +45112,9 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
     }
 
     // ===== Meter paints =====
-    final peakPaint = Paint()..color = Colors.white.withOpacity(0.80);
-    final rmsPaint = Paint()..color = Colors.white.withOpacity(0.22);
-
-    // Idle floor prevents dead-empty look
-    const idleFloor = 0.015;
-
-    double wFor(double v) => ((v + idleFloor).clamp(0.0, 1.0)) * s.width;
+    final peakPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.88)
+      ..strokeWidth = 1.15;
 
     // Split into two lanes
     const laneGap = 1.0;
@@ -44116,33 +45127,91 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
 
     // ===== Left lane (Top) =====
     final topLane = laneRect(0);
-
-    final lRmsW = wFor(f.rmsL);
-    final lPeakW = wFor(f.peakL);
-
     c.drawRect(
-      Rect.fromLTWH(topLane.left, topLane.top, lRmsW, topLane.height),
-      rmsPaint,
+      topLane,
+      Paint()..color = Colors.white.withValues(alpha: 0.04),
     );
-    c.drawRect(
-      Rect.fromLTWH(topLane.left, topLane.top, lPeakW, topLane.height),
-      peakPaint,
-    );
+
+    final lRmsW = s.width * DbfsMeterVisuals.ampToUnit(f.rmsL);
+    final lPeakW = s.width * DbfsMeterVisuals.ampToUnit(f.peakL);
+
+    if (lRmsW > 0.0) {
+      c.drawRect(
+        Rect.fromLTWH(topLane.left, topLane.top, lRmsW, topLane.height),
+        Paint()
+          ..shader =
+              DbfsMeterVisuals.horizontalGradient(opacity: 0.94).createShader(
+            topLane,
+          ),
+      );
+    }
+    if (lPeakW > lRmsW) {
+      c.drawRect(
+        Rect.fromLTWH(
+          topLane.left + lRmsW,
+          topLane.top,
+          lPeakW - lRmsW,
+          topLane.height,
+        ),
+        Paint()
+          ..shader =
+              DbfsMeterVisuals.horizontalGradient(opacity: 0.34).createShader(
+            topLane,
+          ),
+      );
+    }
+    if (lPeakW > 0.5) {
+      final lPeakX = lPeakW.clamp(0.0, s.width).toDouble();
+      c.drawLine(
+        Offset(lPeakX, topLane.top),
+        Offset(lPeakX, topLane.bottom),
+        peakPaint,
+      );
+    }
 
     // ===== Right lane (Bottom) =====
     final botLane = laneRect(1);
-
-    final rRmsW = wFor(f.rmsR);
-    final rPeakW = wFor(f.peakR);
-
     c.drawRect(
-      Rect.fromLTWH(botLane.left, botLane.top, rRmsW, botLane.height),
-      rmsPaint,
+      botLane,
+      Paint()..color = Colors.white.withValues(alpha: 0.04),
     );
-    c.drawRect(
-      Rect.fromLTWH(botLane.left, botLane.top, rPeakW, botLane.height),
-      peakPaint,
-    );
+
+    final rRmsW = s.width * DbfsMeterVisuals.ampToUnit(f.rmsR);
+    final rPeakW = s.width * DbfsMeterVisuals.ampToUnit(f.peakR);
+
+    if (rRmsW > 0.0) {
+      c.drawRect(
+        Rect.fromLTWH(botLane.left, botLane.top, rRmsW, botLane.height),
+        Paint()
+          ..shader =
+              DbfsMeterVisuals.horizontalGradient(opacity: 0.94).createShader(
+            botLane,
+          ),
+      );
+    }
+    if (rPeakW > rRmsW) {
+      c.drawRect(
+        Rect.fromLTWH(
+          botLane.left + rRmsW,
+          botLane.top,
+          rPeakW - rRmsW,
+          botLane.height,
+        ),
+        Paint()
+          ..shader =
+              DbfsMeterVisuals.horizontalGradient(opacity: 0.34).createShader(
+            botLane,
+          ),
+      );
+    }
+    if (rPeakW > 0.5) {
+      final rPeakX = rPeakW.clamp(0.0, s.width).toDouble();
+      c.drawLine(
+        Offset(rPeakX, botLane.top),
+        Offset(rPeakX, botLane.bottom),
+        peakPaint,
+      );
+    }
 
     // ===== Clip indicator (optional) =====
     // if (f.clip) {

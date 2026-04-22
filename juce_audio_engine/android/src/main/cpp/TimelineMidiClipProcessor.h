@@ -730,6 +730,13 @@ private:
         juce::String path = rawPath.trim().replaceCharacter('\\', '/');
         while (path.contains("//"))
             path = path.replace("//", "/");
+        const bool preserveLeadingSlash =
+            juce::File::isAbsolutePath(path) ||
+            path.startsWith("./") ||
+            path.startsWith("../") ||
+            path.startsWithChar('~');
+        if (preserveLeadingSlash)
+            return path;
         while (path.startsWithChar('/'))
             path = path.substring(1);
         return path;
@@ -1010,7 +1017,11 @@ private:
 
         const juce::File sampleFile = resolveFlutterAssetFile(normalized);
         if (!sampleFile.existsAsFile())
+        {
+            juce::Logger::writeToLog(
+                "Live MIDI sampled instrument missing sample file: " + normalized);
             return nullptr;
+        }
 
         juce::AudioFormatManager formats;
         formats.registerBasicFormats();
@@ -1083,7 +1094,11 @@ private:
 
         const juce::File sfzFile = resolveFlutterAssetFile(sfzAssetPath);
         if (!sfzFile.existsAsFile())
+        {
+            juce::Logger::writeToLog(
+                "Live MIDI sampled instrument missing sfz file: " + sfzAssetPath);
             return nullptr;
+        }
 
         const juce::String sfzText = sfzFile.loadFileAsString();
         if (sfzText.isEmpty())
@@ -1238,7 +1253,11 @@ private:
         }
 
         if (definition->regions.empty())
+        {
+            juce::Logger::writeToLog(
+                "Live MIDI sampled instrument produced no playable regions: " + sfzAssetPath);
             return nullptr;
+        }
 
         {
             const juce::ScopedLock lock(cache.lock);

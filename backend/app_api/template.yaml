@@ -145,6 +145,10 @@ Parameters:
   ApiThrottleRateLimit:
     Type: Number
     Default: 500
+  ApiDetailedMetricsEnabled:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
   WebAclArn:
     Type: String
     Default: ''
@@ -211,6 +215,7 @@ Parameters:
     Default: ''
 
 Conditions:
+  ApiDetailedMetricsEnabledCondition: !Equals [!Ref ApiDetailedMetricsEnabled, 'true']
   HasAiUsageStateTableName: !Not [!Equals [!Ref AiUsageStateTableName, '']]
   HasAiUsageEventsTableName: !Not [!Equals [!Ref AiUsageEventsTableName, '']]
   HasAiPromptLimitSettingsTableName: !Not [!Equals [!Ref AiPromptLimitSettingsTableName, '']]
@@ -304,7 +309,7 @@ Resources:
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
-          MetricsEnabled: true
+          MetricsEnabled: !If [ApiDetailedMetricsEnabledCondition, true, false]
           ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
           ThrottlingRateLimit: !Ref ApiThrottleRateLimit
       Cors:

@@ -12,6 +12,7 @@ import 'package:mixroom/widgets/effects_panel.dart';
 import 'package:mixroom/widgets/sample_browser_panel.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/automation_clip_clone_helper.dart';
+import 'package:mixroom/helpers/dbfs_meter_visuals.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
@@ -354,6 +355,8 @@ class AudioCanvasTimeline extends StatefulWidget {
   final double recordingStartMs;
   final List<double> recordingPeaks;
   final bool recordingInProgress; // sent from above if user is recording
+  final int selectedClipIndex;
+  final List<int> selectedClipIndices;
 
   // === Row FX callbacks ===
   final Future<List<String>> Function(int row) getRowEffects;
@@ -506,6 +509,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.recordingRowIndex,
     required this.recordingStartMs,
     required this.recordingPeaks,
+    this.selectedClipIndex = -1,
+    this.selectedClipIndices = const <int>[],
     required this.getRowEffects,
     required this.getRowEffectIds,
     required this.getRowEffectBypassState,
@@ -617,17 +622,25 @@ class AudioCanvasTimelineController {
 class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double kRowHeight = 80.0;
   static const double kExpandedRowHeight = (kRowHeight * 3) +
-      24.0; // keep extra headroom to avoid expanded-tab vertical overflow
+      40.0; // keep extra headroom to avoid expanded-tab vertical overflow
   // Effects panel min height should be driven by left header content.
   static const double _kHeaderTabButtonHeight = 34.0;
   static const double _kHeaderTabGap = 6.0;
   static const double _kHeaderMeterHeight = 82.0;
+  static const double _kHeaderDbfsReadoutHeight = 30.0;
+  static const double _kHeaderDbfsReadoutGap = 6.0;
+  static const double _kHeaderBottomPadding = 24.0;
   static const double _kHeaderTabsMinHeight = 12.0 + // top spacers
       8.0 + // vertical padding around tab stack
       (_kHeaderTabButtonHeight * 3.0) +
       (_kHeaderTabGap * 2.0) +
       8.0 + // meter top spacing
-      _kHeaderMeterHeight;
+      _kHeaderMeterHeight +
+      _kHeaderDbfsReadoutGap +
+      _kHeaderDbfsReadoutHeight +
+      _kHeaderBottomPadding;
+  static const Duration _kHeaderPeakHoldFreeze = Duration(milliseconds: 900);
+  static const double _kHeaderPeakHoldDecayDbPerSec = 11.0;
   // Match Volume tab baseline, but never go below measured header needs.
   static const double _kEffectsPanelMinHeight =
       (_kHeaderTabsMinHeight > kExpandedRowHeight)
@@ -637,6 +650,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double kBottomInteractionPadding = 96.0;
   static const double _kExtraAddRowBottomPadding = 18.0;
   final List<double> _effectsPanelHeights = <double>[];
+  final Map<int, double> _headerPeakHoldDbByRowId = <int, double>{};
+  final Map<int, DateTime> _headerPeakHoldLastUpdateByRowId = <int, DateTime>{};
+  final Map<int, DateTime> _headerPeakHoldFreezeUntilByRowId =
+      <int, DateTime>{};
   _EditorLayoutSpec _editorLayoutSpec = const _EditorLayoutSpec(
       bottomInteractionPadding: kBottomInteractionPadding);
 
@@ -1644,6 +1661,42 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _emitSelectionChanged();
   }
 
+  void _syncSelectionFromWidgetConfig() {
+    final nextSelected = widget.selectedClipIndices
+        .where((i) => i >= 0 && i < widget.clips.length)
+        .toSet();
+    var nextPrimary = widget.selectedClipIndex;
+    if (nextPrimary < 0 || nextPrimary >= widget.clips.length) {
+      nextPrimary = -1;
+    }
+    if (nextPrimary >= 0) {
+      nextSelected.add(nextPrimary);
+    } else if (nextSelected.isNotEmpty) {
+      nextPrimary = nextSelected.reduce((a, b) => a > b ? a : b);
+    }
+
+    final currentSelected = _selectedClipIndices.toList(growable: false)
+      ..sort();
+    final incomingSelected = nextSelected.toList(growable: false)..sort();
+    if (_selectedClipIndex == nextPrimary &&
+        listEquals(currentSelected, incomingSelected)) {
+      return;
+    }
+
+    _selectedClipIndex = nextPrimary;
+    _selectedClipIndices
+      ..clear()
+      ..addAll(nextSelected);
+    if (_selectedClipIndex >= 0 &&
+        !_selectedClipIndices.contains(_selectedClipIndex)) {
+      _selectedClipIndices.add(_selectedClipIndex);
+    }
+    if (_selectedClipIndices.isEmpty) {
+      _selectedClipIndex = -1;
+      _clipPopupMs = null;
+    }
+  }
+
   int? _rowForLocalY(double localY) {
     if (_rowCount <= 0) return null;
     double currentY = 0;
@@ -2089,15 +2142,65 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   double _expandedPanelHeightForRow(int row) {
     if (row < 0 || row >= _rowCount || !_rowExpanded[row]) return 0.0;
     if (_isAutomationEditorOpenForRow(row)) {
-      return kExpandedRowHeight;
+      return math.max(kExpandedRowHeight, _kEffectsPanelMinHeight);
     }
     return _isFixedHeightExpandedTab(_expandedTab[row])
-        ? kExpandedRowHeight
+        ? math.max(kExpandedRowHeight, _kEffectsPanelMinHeight)
         : _effectsPanelHeights[row];
   }
 
   double _rowBlockHeightForIndex(int row) {
     return kRowHeight + _expandedPanelHeightForRow(row);
+  }
+
+  String _headerPeakLevelLabel(double peakDb) {
+    if (peakDb >= -0.1) return '0.0 dBFS';
+    if (!peakDb.isFinite || peakDb <= -120.0) return '-∞ dBFS';
+    return '${peakDb.toStringAsFixed(1)} dBFS';
+  }
+
+  Color _headerPeakLevelColor(double peakDb) {
+    if (!peakDb.isFinite || peakDb <= -120.0) {
+      return Colors.white.withValues(alpha: 0.50);
+    }
+    return DbfsMeterVisuals.statusColor(peakDb);
+  }
+
+  double _heldPeakDbForHeaderRow(int row, MeterFrame frame) {
+    if (row < 0 || row >= _rowCount) return double.negativeInfinity;
+    final rowId = widget.rows[row].rowId;
+    final now = DateTime.now();
+    final currentPeakDb = DbfsMeterVisuals.ampToDbfs(
+      math.max(frame.peakL, frame.peakR),
+    );
+
+    final prevDb = _headerPeakHoldDbByRowId[rowId] ?? currentPeakDb;
+    final lastUpdate = _headerPeakHoldLastUpdateByRowId[rowId] ?? now;
+    final freezeUntil = _headerPeakHoldFreezeUntilByRowId[rowId] ?? now;
+    final dt = (now.difference(lastUpdate).inMicroseconds / 1000000.0)
+        .clamp(0.0, 0.25);
+
+    double heldDb = prevDb;
+    if (!currentPeakDb.isFinite || currentPeakDb <= -120.0) {
+      heldDb = double.negativeInfinity;
+      _headerPeakHoldFreezeUntilByRowId[rowId] = now;
+    } else if (currentPeakDb >= prevDb || !prevDb.isFinite) {
+      heldDb = currentPeakDb;
+      _headerPeakHoldFreezeUntilByRowId[rowId] =
+          now.add(_kHeaderPeakHoldFreeze);
+    } else if (now.isAfter(freezeUntil)) {
+      heldDb = math.max(
+        currentPeakDb,
+        prevDb - (_kHeaderPeakHoldDecayDbPerSec * dt),
+      );
+    }
+    if (heldDb <= -120.0) {
+      heldDb = double.negativeInfinity;
+    }
+
+    _headerPeakHoldDbByRowId[rowId] = heldDb;
+    _headerPeakHoldLastUpdateByRowId[rowId] = now;
+    return heldDb;
   }
 
   int _defaultAutomationClipRowForSourceRow(int row) {
@@ -2757,6 +2860,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     });
     widget.registerRowFxRefresher?.call(_refreshRowFx);
     widget.registerRowFxPlaybackRefresher?.call(_refreshRowFxPlayback);
+    _syncSelectionFromWidgetConfig();
     _notifySnapSettingsChanged();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -2807,6 +2911,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           ..addAll(remainingPending);
       }
     }
+    if (oldWidget.selectedClipIndex != widget.selectedClipIndex ||
+        !listEquals(
+            oldWidget.selectedClipIndices, widget.selectedClipIndices)) {
+      _syncSelectionFromWidgetConfig();
+    }
     final bool rowTopologyChanged =
         oldWidget.rows.length != widget.rows.length ||
             List.generate(
@@ -2825,6 +2934,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _automationEditorTargetId = null;
     }
     final liveRowIds = widget.rows.map((row) => row.rowId).toSet();
+    _headerPeakHoldDbByRowId
+        .removeWhere((rowId, _) => !liveRowIds.contains(rowId));
+    _headerPeakHoldLastUpdateByRowId
+        .removeWhere((rowId, _) => !liveRowIds.contains(rowId));
+    _headerPeakHoldFreezeUntilByRowId
+        .removeWhere((rowId, _) => !liveRowIds.contains(rowId));
     _rowEffectParameterRevealers
         .removeWhere((rowId, _) => !liveRowIds.contains(rowId));
     _selectedAutomationClipByLane.removeWhere((laneKey, clipId) {
@@ -5105,6 +5220,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   Future<void> _openClipRenameDialog(int clipIndex) async {
     if (clipIndex < 0 || clipIndex >= widget.clips.length) return;
     final clip = widget.clips[clipIndex];
+    // Seed rename with the exact stored label so valid percent sequences in a
+    // user-provided name are not silently normalized and then persisted.
     final initialName = clip.label.trim().isNotEmpty
         ? clip.label.trim()
         : (clip.isMidi
@@ -8633,6 +8750,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           final boundedHeight = constraints.maxHeight.isFinite
               ? constraints.maxHeight
               : _kEffectsPanelMinHeight;
+          final headerDbfsReadoutWidth = constraints.maxWidth.isFinite
+              ? (constraints.maxWidth - 12.0).clamp(60.0, 86.0).toDouble()
+              : 72.0;
           return SingleChildScrollView(
             physics: const ClampingScrollPhysics(),
             child: ConstrainedBox(
@@ -8663,10 +8783,26 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       child: AnimatedBuilder(
                         animation: widget.meters,
                         builder: (_, __) {
-                          final f = widget.meters.rows[row];
-                          return MiniStereoMeterPro(
-                            frame: f,
-                            height: _kHeaderMeterHeight,
+                          final f = row < widget.meters.rows.length
+                              ? widget.meters.rows[row]
+                              : MeterFrame.zero;
+                          final heldPeakDb = _heldPeakDbForHeaderRow(row, f);
+                          return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              MiniStereoMeterPro(
+                                frame: f,
+                                height: _kHeaderMeterHeight,
+                              ),
+                              const SizedBox(height: _kHeaderDbfsReadoutGap),
+                              HeaderDbfsReadoutPro(
+                                label: _headerPeakLevelLabel(heldPeakDb),
+                                color: _headerPeakLevelColor(heldPeakDb),
+                                width: headerDbfsReadoutWidth,
+                                height: _kHeaderDbfsReadoutHeight,
+                              ),
+                              const SizedBox(height: _kHeaderBottomPadding),
+                            ],
                           );
                         },
                       ),
@@ -11308,7 +11444,6 @@ class _TimelinePainter extends CustomPainter {
           ? (clip.instrumentName.isNotEmpty ? clip.instrumentName : "MIDI Clip")
           : "Audio Clip";
     }
-
     final tp = TextPainter(
         textDirection: TextDirection.ltr, maxLines: 1, ellipsis: "…");
 
@@ -13656,38 +13791,29 @@ class _MiniStereoMeterProPainter extends CustomPainter {
     );
 
     // --- Background slot (always visible) ---
-    final bg = Paint()..color = const Color(0xFF1A2230).withOpacity(0.95);
+    final bg = Paint()..color = const Color(0xFF1A2230).withValues(alpha: 0.95);
 
     final border = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
-      ..color = Colors.white.withOpacity(0.10);
+      ..color = Colors.white.withValues(alpha: 0.10);
 
     c.drawRRect(r, bg);
     c.drawRRect(r, border);
 
     // --- Tick lines (subtle scale) ---
     final tick = Paint()
-      ..color = Colors.white.withOpacity(0.06)
+      ..color = Colors.white.withValues(alpha: 0.06)
       ..strokeWidth = 1;
 
-    for (int i = 1; i <= 4; i++) {
-      final y = s.height * (i / 5.0);
+    for (final db in const [-36.0, -24.0, -15.0, -10.0, -6.0, -3.0]) {
+      final y = s.height * (1.0 - DbfsMeterVisuals.dbfsToUnit(db));
       c.drawLine(
         Offset(1, y),
         Offset(s.width - 1, y),
         tick,
       );
     }
-
-    // --- Meter paints ---
-    final peakPaint = Paint()..color = Colors.white.withOpacity(0.80);
-    final rmsPaint = Paint()..color = Colors.white.withOpacity(0.25);
-
-    // --- Idle baseline (prevents “dead stick”) ---
-    const idleFloor = 0.02;
-
-    double barH(double v) => ((v + idleFloor).clamp(0.0, 1.0)) * s.height;
 
     // --- Lane gap between L/R ---
     const laneGap = 0.5;
@@ -13697,31 +13823,67 @@ class _MiniStereoMeterProPainter extends CustomPainter {
     final leftX = 0.0;
     final rightX = laneW + laneGap;
 
-    // --- Left channel ---
-    final rmsLH = barH(f.rmsL);
-    final peakLH = barH(f.peakL);
+    void drawLane({
+      required double left,
+      required double rms,
+      required double peak,
+    }) {
+      final laneRect = Rect.fromLTWH(left, 0, laneW, s.height);
+      c.drawRect(
+        laneRect,
+        Paint()..color = Colors.white.withValues(alpha: 0.04),
+      );
 
-    c.drawRect(
-      Rect.fromLTWH(leftX, s.height - rmsLH, laneW, rmsLH),
-      rmsPaint,
-    );
-    c.drawRect(
-      Rect.fromLTWH(leftX, s.height - peakLH, laneW, peakLH),
-      peakPaint,
-    );
+      final rmsHeight = s.height * DbfsMeterVisuals.ampToUnit(rms);
+      final peakHeight = s.height * DbfsMeterVisuals.ampToUnit(peak);
+      if (rmsHeight > 0.0) {
+        c.drawRect(
+          Rect.fromLTWH(
+            laneRect.left,
+            laneRect.bottom - rmsHeight,
+            laneRect.width,
+            rmsHeight,
+          ),
+          Paint()
+            ..shader =
+                DbfsMeterVisuals.verticalGradient(opacity: 0.94).createShader(
+              laneRect,
+            ),
+        );
+      }
+      if (peakHeight > rmsHeight) {
+        c.drawRect(
+          Rect.fromLTWH(
+            laneRect.left,
+            laneRect.bottom - peakHeight,
+            laneRect.width,
+            peakHeight - rmsHeight,
+          ),
+          Paint()
+            ..shader =
+                DbfsMeterVisuals.verticalGradient(opacity: 0.32).createShader(
+              laneRect,
+            ),
+        );
+      }
+      if (peakHeight > 0.5) {
+        final peakDb = DbfsMeterVisuals.ampToDbfs(peak);
+        final peakPaint = Paint()
+          ..color = DbfsMeterVisuals.statusColor(peakDb)
+          ..strokeWidth = 1.0;
+        final peakY = (laneRect.bottom - peakHeight)
+            .clamp(laneRect.top, laneRect.bottom)
+            .toDouble();
+        c.drawLine(
+          Offset(laneRect.left, peakY),
+          Offset(laneRect.right, peakY),
+          peakPaint,
+        );
+      }
+    }
 
-    // --- Right channel ---
-    final rmsRH = barH(f.rmsR);
-    final peakRH = barH(f.peakR);
-
-    c.drawRect(
-      Rect.fromLTWH(rightX, s.height - rmsRH, laneW, rmsRH),
-      rmsPaint,
-    );
-    c.drawRect(
-      Rect.fromLTWH(rightX, s.height - peakRH, laneW, peakRH),
-      peakPaint,
-    );
+    drawLane(left: leftX, rms: f.rmsL, peak: f.peakL);
+    drawLane(left: rightX, rms: f.rmsR, peak: f.peakR);
 
     // --- Clip indicator ---
     // if (f.clip) {
@@ -13736,4 +13898,55 @@ class _MiniStereoMeterProPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _MiniStereoMeterProPainter old) => old.f != f;
+}
+
+class HeaderDbfsReadoutPro extends StatelessWidget {
+  final String label;
+  final Color color;
+  final double width;
+  final double height;
+
+  const HeaderDbfsReadoutPro({
+    super.key,
+    required this.label,
+    required this.color,
+    this.width = 72,
+    this.height = 30,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      height: height,
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.17),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: color.withValues(alpha: 0.46)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Pretendard',
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.12,
+                  color: color,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

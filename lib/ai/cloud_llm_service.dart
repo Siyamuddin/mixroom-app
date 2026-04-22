@@ -162,7 +162,7 @@ class LlmResult {
 
 class CloudLlmService {
   static const _apiUrl = 'https://api.openai.com/v1/responses';
-  static const _promptCacheVersion = 'mixroom-daw-v20260416c';
+  static const _promptCacheVersion = 'mixroom-daw-v20260422a';
   static const _directOpenAiMaxOutputTokens = 4096;
   static const _defaultPromptCacheRetention = 'in_memory';
   static const _recoverableAuthMessage =
@@ -2526,12 +2526,11 @@ class CloudLlmService {
         continue;
       }
 
-      final wantsHalfTimeBackbeat =
-          tempoBpm != null && tempoBpm >= 135.0 ||
-              kickItems.any((kick) {
-                final kickStart = _sampleInsertItemStartBeat(kick);
-                return kickStart != null && (kickStart - 3.0).abs() < 1e-6;
-              });
+      final wantsHalfTimeBackbeat = tempoBpm != null && tempoBpm >= 135.0 ||
+          kickItems.any((kick) {
+            final kickStart = _sampleInsertItemStartBeat(kick);
+            return kickStart != null && (kickStart - 3.0).abs() < 1e-6;
+          });
       item['start_beat'] = wantsHalfTimeBackbeat ? 3 : 2;
 
       if (explicitStepBeats == null ||

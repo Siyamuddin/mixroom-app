@@ -72,6 +72,80 @@ static NSString *MixroomRouteKindForPortType(NSString *portType) {
 #endif
 }
 
+static NSString *MixroomFlutterAssetRootPath(void) {
+    NSBundle *mainBundle = [NSBundle mainBundle];
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+
+    NSString *privateFrameworksPath = mainBundle.privateFrameworksPath ?: @"";
+    if (privateFrameworksPath.length > 0) {
+        NSString *frameworkFlutterAssets =
+            [[privateFrameworksPath stringByAppendingPathComponent:@"App.framework"]
+                stringByAppendingPathComponent:@"flutter_assets"];
+        if ([fileManager fileExistsAtPath:frameworkFlutterAssets]) {
+            [candidates addObject:frameworkFlutterAssets];
+        }
+    }
+
+    NSString *assetManifestKey = [FlutterDartProject lookupKeyForAsset:@"AssetManifest.bin"];
+    if (assetManifestKey.length == 0) {
+        assetManifestKey = [FlutterDartProject lookupKeyForAsset:@"AssetManifest.json"];
+    }
+    if (assetManifestKey.length > 0) {
+        NSString *manifestPath =
+            [[mainBundle bundlePath] stringByAppendingPathComponent:assetManifestKey];
+        if (manifestPath.length > 0) {
+            if ([fileManager fileExistsAtPath:manifestPath]) {
+                [candidates addObject:[manifestPath stringByDeletingLastPathComponent]];
+            }
+        }
+    }
+
+    NSString *resourcePath = mainBundle.resourcePath ?: @"";
+    if (resourcePath.length > 0) {
+        NSString *resourceFlutterAssets =
+            [resourcePath stringByAppendingPathComponent:@"flutter_assets"];
+        if ([fileManager fileExistsAtPath:resourceFlutterAssets]) {
+            [candidates addObject:resourceFlutterAssets];
+        } else {
+            [candidates addObject:resourcePath];
+        }
+    }
+
+    NSString *instrumentProbeRelativePath =
+        @"assets/instruments/VSCO-2-CE-1.1.0/UprightPiano.sfz";
+    for (NSString *candidate in candidates) {
+        if (candidate.length == 0) {
+            continue;
+        }
+        NSString *instrumentProbe =
+            [candidate stringByAppendingPathComponent:instrumentProbeRelativePath];
+        if ([fileManager fileExistsAtPath:instrumentProbe]) {
+            return candidate;
+        }
+    }
+
+    for (NSString *candidate in candidates) {
+        if (candidate.length == 0) {
+            continue;
+        }
+        NSString *manifestBin =
+            [candidate stringByAppendingPathComponent:@"AssetManifest.bin"];
+        NSString *manifestJson =
+            [candidate stringByAppendingPathComponent:@"AssetManifest.json"];
+        if ([fileManager fileExistsAtPath:manifestBin] ||
+            [fileManager fileExistsAtPath:manifestJson]) {
+            return candidate;
+        }
+    }
+
+    if (candidates.count > 0) {
+        return candidates.firstObject;
+    }
+
+    return @"";
+}
+
 - (NSDictionary<NSString *, id> *)buildAudioRouteInfo {
 #if TARGET_OS_OSX
     NSString *inputDeviceName = [JuceBridge getCurrentDeviceNameObjC] ?: @"";
@@ -205,6 +279,13 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
     NSLog(@"✅ JuceAudioEnginePlugin registered");
     [JuceBridge initializeMessageManager];
+    NSString *flutterAssetRootPath = MixroomFlutterAssetRootPath();
+    if (flutterAssetRootPath.length > 0) {
+        [JuceBridge setFlutterAssetRootObjC:flutterAssetRootPath];
+        NSLog(@"🎹 Live MIDI flutter asset root: %@", flutterAssetRootPath);
+    } else {
+        NSLog(@"⚠️ Live MIDI flutter asset root could not be resolved");
+    }
     
 
     FlutterMethodChannel* channel = [FlutterMethodChannel
@@ -343,14 +424,24 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         });
 #endif
     } else if ([call.method isEqualToString:@"exportMix"]) {
-        NSString* out = [JuceBridge exportMixObjC:args[@"outPath"] settings:args];
-        result(out);
+        NSDictionary *exportArgs = [args copy];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSString *out = [JuceBridge exportMixObjC:exportArgs[@"outPath"] settings:exportArgs];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                result(out);
+            });
+        });
     } else if ([call.method isEqualToString:@"getExportProgress"]) {
         result(@([JuceBridge getExportProgressObjC]));
     } else if ([call.method isEqualToString:@"exportTrack"]) {
-        NSInteger track = [args[@"track"] integerValue];
-        NSString* out = [JuceBridge exportTrackObjC:track outPath:args[@"outPath"] settings:args];
-        result(out);
+        NSDictionary *exportArgs = [args copy];
+        NSInteger track = [exportArgs[@"track"] integerValue];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSString *out = [JuceBridge exportTrackObjC:track outPath:exportArgs[@"outPath"] settings:exportArgs];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                result(out);
+            });
+        });
     } else if ([call.method isEqualToString:@"renderInstrumentClip"]) {
         NSString *outPath = args[@"outPath"] ?: @"";
         NSString *instrumentId = args[@"instrumentId"] ?: @"mixroom.basic_synth";
@@ -462,6 +553,15 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"setLiveMidiInputTargetClip"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         result(@([JuceBridge setLiveMidiInputTargetClipObjC:clip]));
+    } else if ([call.method isEqualToString:@"playPreviewMidiNote"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        NSInteger pitch = [args[@"pitch"] integerValue];
+        float velocity = [args[@"velocity"] floatValue];
+        NSInteger durationMs = [args[@"durationMs"] integerValue];
+        result(@([JuceBridge playPreviewMidiNoteObjC:clip
+                                               pitch:pitch
+                                            velocity:velocity
+                                          durationMs:durationMs]));
     } else if ([call.method isEqualToString:@"consumeLiveMidiInputEvents"]) {
         result([JuceBridge consumeLiveMidiInputEventsObjC]);
     } else if ([call.method isEqualToString:@"getConnectedMidiInputDevices"]) {

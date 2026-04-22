@@ -5,6 +5,7 @@
 + (void)initialiseEngineObjC;
 + (void)initializeMessageManager;
 + (void)shutdownEngineObjC;
++ (void)setFlutterAssetRootObjC:(NSString *)rootPath;
 
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
 + (void)loadTrackObjC:(NSInteger)idx path:(NSString *)path;
@@ -88,6 +89,10 @@
                     params:(NSDictionary<NSString *, NSNumber *> *)params
              sourceTempoBpm:(double)sourceTempoBpm;
 + (BOOL)setLiveMidiInputTargetClipObjC:(NSInteger)clipIndex;
++ (BOOL)playPreviewMidiNoteObjC:(NSInteger)clipIndex
+                          pitch:(NSInteger)pitch
+                       velocity:(float)velocity
+                     durationMs:(NSInteger)durationMs;
 + (NSArray<NSDictionary *> *)consumeLiveMidiInputEventsObjC;
 + (NSArray<NSDictionary *> *)getConnectedMidiInputDevicesObjC;
 + (void)unloadClipObjC:(NSInteger)clipIndex;

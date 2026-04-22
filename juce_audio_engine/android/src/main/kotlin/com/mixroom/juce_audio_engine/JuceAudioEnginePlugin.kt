@@ -747,6 +747,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
               (args["wavBitDepth"] as? Number)?.toInt() ?: 16,
               args.boolValue("wavDithering", true),
               (args["mp3BitrateKbps"] as? Number)?.toInt() ?: 192,
+              args.stringValue("clipSnapshotJson", ""),
             )
           }
         }

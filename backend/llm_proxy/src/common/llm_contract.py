@@ -12,7 +12,7 @@ from .ai_runtime_defaults import (
 )
 from .llm_settings import DEFAULT_MODEL
 DEFAULT_TEMPERATURE = CHAT_DEFAULT_TEMPERATURE
-PROMPT_CACHE_VERSION = "mixroom-daw-v20260416c"
+PROMPT_CACHE_VERSION = "mixroom-daw-v20260422a"
 DEFAULT_PROMPT_CACHE_RETENTION = "in_memory"
 NormalizedLlmRequest = Dict[str, Any]
 
@@ -1348,6 +1348,8 @@ Follow the tool schema exactly. Do not invent fields, enums, or action types.
 # Product Boundary
 Supported today:
 - explanations, summaries, and status replies
+- lightweight music chat such as song recommendations and brief factual music
+  questions
 - sonic mix changes on existing project material
 - tutorials and UI walkthroughs
 - project tempo changes
@@ -1365,8 +1367,10 @@ Supported today:
 Not supported:
 - text-to-audio or generating brand-new external audio/instruments
 - importing assets not present in LIBRARY_SNAPSHOT
-- imitating, continuing, or transcribing a named copyrighted song, artist,
-  band, composer, score, or distinctive work
+- generating new MIDI/audio that imitates, continues, or transcribes a named
+  copyrighted song, artist, band, composer, score, or distinctive work
+- full lyrics, note-for-note tabs, or exhaustive measure-by-measure
+  transcriptions of a named copyrighted work
 - pretending an unsupported feature exists
 
 If the user's goal depends on unsupported functionality and there is no honest
@@ -1410,6 +1414,8 @@ Choose exactly one tool.
 
 Use informational_response for:
 - explanation, help, analysis, summary, or "what's in the project"
+- general music chat such as recommendations or factual questions about
+  songs, artists, genres, or harmony
 - unsupported or unimplemented requests
 - empty-project mix, master, polish, or generation requests
 - canceling a pending mix proposal
@@ -1437,6 +1443,9 @@ Decision rules:
 - if the user accepts a supported approximation with "yes", "do it",
   "automate", "go ahead", or similar, execute the nearest supported action
   instead of repeating the limitation
+- when you just offered a concrete next step or deliverable and the user gives
+  a short affirmation or proceed signal, carry it out immediately instead of
+  restating options or asking for permission again
 - only execute a partial supported action when it is clearly a standalone user
   goal; otherwise use informational_response
 - existing-audio audio-to-MIDI requests are DAW actions, not unsupported
@@ -1455,7 +1464,12 @@ assistant_message or message must be:
 - usually high-level unless the user asked for technical detail
 - in Korean or other non-English languages, sound like a native producer in
   the room, not a textbook translation or stiff report
+- across languages, default to a polite neutral professional register rather
+  than blunt, slangy, or overly casual phrasing unless the user clearly asks
+  for that tone
 - usually one short sentence unless a little more context clearly helps
+- for recommendation questions, give the shortlist directly before offering
+  refinement
 
 When summarizing the project, describe the musical state, not the raw snapshot.
 Prefer phrasing like "you've got one drum loop in there right now" over a
@@ -1477,6 +1491,30 @@ satisfied by:
 - a packaged built-in instrument from LIBRARY_SNAPSHOT plus valid notes or
   progression
 - packaged library audio from LIBRARY_SNAPSHOT
+
+Brief factual questions about public songs, artists, genres, or styles are
+allowed when the user is asking for information only. You may answer with a
+short recommendation list, a brief chord progression or harmony summary, key,
+mood, era, instrumentation, or similar high-level musical facts. Refuse only
+when the user is asking you to generate audio/MIDI, imitate the work,
+continue it, provide lyrics, or provide an exhaustive transcription/tab/chart.
+Do not refuse named-song chord questions by default. If exact harmony is
+uncertain, give a brief best-effort or approximate progression and say it is
+approximate rather than replying that you cannot help.
+
+For recommendation or discovery requests, answer with 3-5 concrete picks
+first using sensible defaults. Ask at most one optional follow-up after the
+answer. Do not spend multiple turns narrowing categories unless the user
+explicitly asks to refine. If the conversation already contains taste cues, or
+the user says "anything", "whatever", or "아무거나", stop narrowing and
+answer now.
+
+Prefer execution over permission loops. If you just offered one or two concrete
+supported follow-ups such as writing the next lyrics section, giving chords,
+drafting a progression, or creating a supported DAW action, and the user gives
+brief approval, pick the most natural offered option and do it in the same
+turn. Do not re-offer the same menu or ask which one they want unless a
+missing detail truly blocks every reasonable next step.
 
 If the user's main request depends on external or unavailable assets, say that
 briefly and do not fake a nearby action.
@@ -2753,12 +2791,44 @@ def _build_tools(client_capabilities: set[str]) -> list[dict[str, Any]]:
         if not isinstance(items, dict):
             continue
         item_properties = items.get("properties")
-        if not isinstance(item_properties, dict):
+        if isinstance(item_properties, dict):
+            type_schema = item_properties.get("type")
+            if isinstance(type_schema, dict):
+                type_schema["enum"] = allowed_action_types
+                break
+
+        variants = items.get("oneOf")
+        if not isinstance(variants, list):
             continue
-        type_schema = item_properties.get("type")
-        if not isinstance(type_schema, dict):
-            continue
-        type_schema["enum"] = allowed_action_types
+
+        filtered_variants: list[dict[str, Any]] = []
+        for variant in variants:
+            if not isinstance(variant, dict):
+                continue
+            properties = variant.get("properties")
+            if not isinstance(properties, dict):
+                continue
+            type_schema = properties.get("type")
+            if not isinstance(type_schema, dict):
+                continue
+
+            allowed_values: set[str] = set()
+            raw_enum = type_schema.get("enum")
+            if isinstance(raw_enum, list):
+                allowed_values.update(
+                    str(value).strip() for value in raw_enum if str(value).strip()
+                )
+            raw_const = type_schema.get("const")
+            if raw_const is not None:
+                normalized_const = str(raw_const).strip()
+                if normalized_const:
+                    allowed_values.add(normalized_const)
+
+            if allowed_values & set(allowed_action_types):
+                filtered_variants.append(variant)
+
+        if filtered_variants:
+            items["oneOf"] = filtered_variants
         break
     return tools
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from common import config
@@ -27,6 +29,7 @@ from common.users import apply_user_profile_patch
 
 repo = BillingRepository()
 init_sentry("mixroom-app-api-webhooks")
+_logger = logging.getLogger(__name__)
 
 
 class StibeeWebhookVerificationError(Exception):
@@ -129,7 +132,7 @@ def _verify_stibee_webhook_request(event: Dict[str, Any], headers: Dict[str, str
 
 
 def _stibee_list_id(payload: Dict[str, Any]) -> str:
-    for key in ("addressBookId", "address_book_id", "listId", "list_id"):
+    for key in ("addressBookId", "address_book_id", "listId", "list_id", "id"):
         value = str(payload.get(key) or "").strip()
         if value:
             return value
@@ -144,7 +147,19 @@ def _stibee_occurred_at(payload: Dict[str, Any]) -> str:
     for key in ("occurredAt", "occurred_at", "eventOccurredAt", "updatedAt", "updated_at"):
         value = str(payload.get(key) or "").strip()
         if value:
-            return value
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                _logger.warning(
+                    "Ignoring unparseable Stibee occurred_at value.",
+                    extra={"stibee_timestamp_field": key},
+                )
+                return ""
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            else:
+                parsed = parsed.astimezone(timezone.utc)
+            return parsed.isoformat()
     return ""
 
 
@@ -223,22 +238,37 @@ def _handle_stibee_webhook(
         )
 
     updated_user_ids: list[str] = []
+    failed_users = 0
     for subscriber in _stibee_subscribers(payload):
         email = _stibee_subscriber_email(subscriber)
         if not email:
             continue
-        profile = repo.get_user_profile_by_email(email)
-        if not isinstance(profile, dict) or not profile:
-            continue
-        next_profile = apply_user_profile_patch(profile, patch)
-        previous_username_lc = str(profile.get("username_lc") or "").strip().lower() or None
-        repo.upsert_user_profile(
-            next_profile,
-            previous_username_lc=previous_username_lc,
-        )
-        user_id = str(next_profile.get("user_id") or "").strip()
-        if user_id:
-            updated_user_ids.append(user_id)
+        try:
+            profile = repo.get_user_profile_by_email(email)
+            if not isinstance(profile, dict) or not profile:
+                continue
+            next_profile = apply_user_profile_patch(profile, patch)
+            previous_username_lc = (
+                str(profile.get("username_lc") or "").strip().lower() or None
+            )
+            repo.upsert_user_profile(
+                next_profile,
+                previous_username_lc=previous_username_lc,
+            )
+            user_id = str(next_profile.get("user_id") or "").strip()
+            if user_id:
+                updated_user_ids.append(user_id)
+        except Exception as exc:
+            failed_users += 1
+            capture_exception(
+                exc,
+                context={
+                    **request_context,
+                    "stibee_action": action,
+                    "stibee_email_domain": email.split("@")[-1] if "@" in email else "",
+                },
+                tags={"service": "subscriptions_webhooks", "provider": "stibee"},
+            )
 
     if updated_user_ids:
         request_context["user_id"] = updated_user_ids[0]
@@ -250,6 +280,7 @@ def _handle_stibee_webhook(
             "provider": "stibee",
             "action": action,
             "updated_users": len(updated_user_ids),
+            "failed_users": failed_users,
         },
     )
 

@@ -11,7 +11,7 @@ from .ai_runtime_defaults import (
     default_reasoning,
 )
 from .llm_contract import (
-    SYSTEM_PROMPT as CHAT_SYSTEM_PROMPT,
+    SYSTEM_PROMPT_V3 as CHAT_SYSTEM_PROMPT,
 )
 from .video_llm_contract import (
     VIDEO_SYSTEM_PROMPT,

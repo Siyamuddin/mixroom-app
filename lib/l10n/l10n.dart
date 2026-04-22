@@ -272,6 +272,7 @@ class L10n {
           'Edit': 'Edit',
           'Rename': 'Rename',
           'Share / Export': 'Share / Export',
+          'Save (.mixroom)': 'Save (.mixroom)',
           'Share (.mixroom)': 'Share (.mixroom)',
           'Export WAV': 'Export WAV',
           'Export MP3': 'Export MP3',
@@ -289,6 +290,60 @@ class L10n {
           'Duplicate, delete, and adjust length/velocity for selected notes.':
               'Duplicate, delete, and adjust length/velocity for selected notes.',
           'Got it': 'Got it',
+          'Matches the current piano roll grid.':
+              'Matches the current piano roll grid.',
+          'Apply to selected notes.': 'Apply to selected notes.',
+          'Apply to all notes.': 'Apply to all notes.',
+          'Selected notes already match that grid.':
+              'Selected notes already match that grid.',
+          'Notes already match that grid.': 'Notes already match that grid.',
+          'Piano Roll Tools': 'Piano Roll Tools',
+          'Recording is active. Finish the take before running edit tools.':
+              'Recording is active. Finish the take before running edit tools.',
+          'Fast cleanup tools for timing, rhythm, and pitch.':
+              'Fast cleanup tools for timing, rhythm, and pitch.',
+          'Select All': 'Select All',
+          'Grab every note in the current clip.':
+              'Grab every note in the current clip.',
+          'Quantize All Notes': 'Quantize All Notes',
+          'Snap note starts to a timing grid.':
+              'Snap note starts to a timing grid.',
+          'Choose the grid to snap note starts to.':
+              'Choose the grid to snap note starts to.',
+          'Quantize Selected': 'Quantize Selected',
+          'Tighten only the notes you have selected.':
+              'Tighten only the notes you have selected.',
+          'Choose the grid for the selected notes.':
+              'Choose the grid for the selected notes.',
+          'Chop All Notes': 'Chop All Notes',
+          'Split notes into repeated rhythmic slices.':
+              'Split notes into repeated rhythmic slices.',
+          'Choose the slice grid for the whole clip.':
+              'Choose the slice grid for the whole clip.',
+          'Chop Selected': 'Chop Selected',
+          'Slice only the notes you selected.':
+              'Slice only the notes you selected.',
+          'Choose the slice grid for the selection.':
+              'Choose the slice grid for the selection.',
+          'Humanize Velocity': 'Humanize Velocity',
+          'Add slight dynamics to the selected notes.':
+              'Add slight dynamics to the selected notes.',
+          'Add slight dynamics across the whole clip.':
+              'Add slight dynamics across the whole clip.',
+          'No notes changed.': 'No notes changed.',
+          'Octave Up': 'Octave Up',
+          'Move the selected notes up by 12 semitones.':
+              'Move the selected notes up by 12 semitones.',
+          'Selected notes are already at the top range.':
+              'Selected notes are already at the top range.',
+          'Octave Down': 'Octave Down',
+          'Move the selected notes down by 12 semitones.':
+              'Move the selected notes down by 12 semitones.',
+          'Selected notes are already at the bottom range.':
+              'Selected notes are already at the bottom range.',
+          'Finish recording to use piano roll tools':
+              'Finish recording to use piano roll tools',
+          'Piano roll tools': 'Piano roll tools',
           'Custom': 'Custom',
           'Resample quality': 'Resample quality',
           'Draft (fast)': 'Draft (fast)',
@@ -306,6 +361,7 @@ class L10n {
           'Start export': 'Start export',
           'Could not open export options.': 'Could not open export options.',
           'Save export': 'Save export',
+          'Project bundle saved': 'Project bundle saved',
           'Allow access': 'Allow access',
           'Allow media access': 'Allow media access',
           'Mixroom needs access to audio files to browse sample folders and import local media on Android.':
@@ -385,19 +441,18 @@ class L10n {
           'chat_help_intro': 'Mixroom AI is your production assistant.',
           'chat_help_can': 'It can',
           'chat_help_can_mix':
-              'Adjust mix settings like level, EQ, compression, reverb, and balance.',
+              'Adjust mix settings and match a reference track.',
           'chat_help_can_edit':
-              'Edit selected clips, automation, tempo alignment, and stem splitting (vocal/inst).',
-          'chat_help_can_tools': 'Show where tools live and run MIDI edits.',
+              'Edit clips, split stems, align tempo, and turn audio into MIDI.',
+          'chat_help_can_tools':
+              'Add starter-pack samples and generate MIDI ideas.',
           'chat_help_cannot': 'It will not',
           'chat_help_cannot_generate':
-              'Generate a brand-new song, beat, vocal, or instrument from text alone.',
+              'Generate brand-new audio, vocals, or instruments from scratch.',
           'chat_help_cannot_empty':
-              'Create audio from nothing when there is no project material yet.',
-          'chat_help_cannot_text_to_music':
-              'Do text-to-music requests like “make me a song.”',
+              'Generate a finished song from a single prompt.',
           'chat_help_examples':
-              'Try: “Make the vocal clearer.” “Separate this clip into vocals and instrumental.” “Where is export?”',
+              'Try: “Mix my project like this reference track.” “Turn this into MIDI.” “Add house drums 128.”',
           'Please agree to the Terms of Service and Privacy Policy.':
               'Please agree to the Terms of Service and Privacy Policy.',
           'Bio must be 160 characters or fewer.':
@@ -901,6 +956,7 @@ class L10n {
           'Edit': '편집',
           'Rename': '이름 변경',
           'Share / Export': '공유 / 내보내기',
+          'Save (.mixroom)': '저장 (.mixroom)',
           'Share (.mixroom)': '공유 (.mixroom)',
           'Export WAV': 'WAV 내보내기',
           'Export MP3': 'MP3 내보내기',
@@ -918,6 +974,52 @@ class L10n {
           'Duplicate, delete, and adjust length/velocity for selected notes.':
               '선택한 노트를 복제, 삭제하거나 길이와 벨로시티를 조정하세요.',
           'Got it': '확인',
+          'Matches the current piano roll grid.': '현재 피아노 롤 그리드와 같습니다.',
+          'Apply to selected notes.': '선택한 노트에 적용합니다.',
+          'Apply to all notes.': '모든 노트에 적용합니다.',
+          'Selected notes already match that grid.': '선택한 노트가 이미 해당 그리드에 맞습니다.',
+          'Notes already match that grid.': '노트가 이미 해당 그리드에 맞습니다.',
+          'Piano Roll Tools': '피아노 롤 도구',
+          'Recording is active. Finish the take before running edit tools.':
+              '녹음 중입니다. 편집 도구를 사용하려면 먼저 녹음을 끝내세요.',
+          'Fast cleanup tools for timing, rhythm, and pitch.':
+              '타이밍, 리듬, 피치를 빠르게 정리하는 도구입니다.',
+          'Select All': '모두 선택',
+          'Grab every note in the current clip.': '현재 클립의 모든 노트를 선택합니다.',
+          'Quantize All Notes': '모든 노트 퀀타이즈',
+          'Snap note starts to a timing grid.': '노트 시작점을 타이밍 그리드에 맞춥니다.',
+          'Choose the grid to snap note starts to.': '노트 시작점을 맞출 그리드를 선택하세요.',
+          'Quantize Selected': '선택한 노트 퀀타이즈',
+          'Tighten only the notes you have selected.': '선택한 노트만 더 정확하게 정렬합니다.',
+          'Choose the grid for the selected notes.': '선택한 노트에 적용할 그리드를 선택하세요.',
+          'Chop All Notes': '모든 노트 자르기',
+          'Split notes into repeated rhythmic slices.':
+              '노트를 반복되는 리듬 조각으로 분할합니다.',
+          'Choose the slice grid for the whole clip.':
+              '전체 클립에 적용할 분할 그리드를 선택하세요.',
+          'Chop Selected': '선택한 노트 자르기',
+          'Slice only the notes you selected.': '선택한 노트만 분할합니다.',
+          'Choose the slice grid for the selection.':
+              '선택한 노트에 적용할 분할 그리드를 선택하세요.',
+          'Humanize Velocity': '벨로시티 휴머나이즈',
+          'Add slight dynamics to the selected notes.':
+              '선택한 노트에 약간의 다이내믹을 더합니다.',
+          'Add slight dynamics across the whole clip.':
+              '전체 클립에 약간의 다이내믹을 더합니다.',
+          'No notes changed.': '변경된 노트가 없습니다.',
+          'Octave Up': '한 옥타브 올리기',
+          'Move the selected notes up by 12 semitones.':
+              '선택한 노트를 12반음 위로 올립니다.',
+          'Selected notes are already at the top range.':
+              '선택한 노트가 이미 가장 높은 범위에 있습니다.',
+          'Octave Down': '한 옥타브 내리기',
+          'Move the selected notes down by 12 semitones.':
+              '선택한 노트를 12반음 아래로 내립니다.',
+          'Selected notes are already at the bottom range.':
+              '선택한 노트가 이미 가장 낮은 범위에 있습니다.',
+          'Finish recording to use piano roll tools':
+              '피아노 롤 도구를 사용하려면 녹음을 끝내세요',
+          'Piano roll tools': '피아노 롤 도구',
           'Custom': '사용자 지정',
           'Resample quality': '리샘플 품질',
           'Draft (fast)': '초안 (빠름)',
@@ -935,6 +1037,7 @@ class L10n {
           'Start export': '내보내기 시작',
           'Could not open export options.': '내보내기 옵션을 열 수 없습니다.',
           'Save export': '내보내기 저장',
+          'Project bundle saved': '.mixroom 파일을 저장했습니다',
           'Allow access': '접근 허용',
           'Allow media access': '미디어 접근 허용',
           'Mixroom needs access to audio files to browse sample folders and import local media on Android.':
@@ -1007,18 +1110,14 @@ class L10n {
           'chat_help_title': 'Mixroom AI로\n무엇을 할 수 있나요?',
           'chat_help_intro': 'Mixroom AI는 작업 도우미입니다.',
           'chat_help_can': '가능한 작업',
-          'chat_help_can_mix': '레벨, EQ, 컴프레서, 리버브, 밸런스 같은 믹스 설정을 조정할 수 있어요.',
-          'chat_help_can_edit':
-              '선택한 클립 편집, 오토메이션, 템포 정렬, 스템 분리(보컬/반주)를 할 수 있어요.',
-          'chat_help_can_tools': '도구 위치를 알려주고 MIDI 편집을 실행할 수 있어요.',
+          'chat_help_can_mix': '믹스 설정을 조정하고 레퍼런스 트랙에 맞출 수 있습니다.',
+          'chat_help_can_edit': '클립 편집, 스템 분리, 템포 정렬, 오디오-MIDI 변환이 가능합니다.',
+          'chat_help_can_tools': '스타터 팩 샘플을 추가하고 MIDI 아이디어를 만들 수 있습니다.',
           'chat_help_cannot': '지원하지 않는 작업',
-          'chat_help_cannot_generate': '텍스트만으로 새로운 음악(비트, 보컬, 악기 등)을 생성하지않습니다.',
-          'chat_help_cannot_empty':
-              '프로젝트에 사용할 오디오 소스가 없는 경우 새로운 오디오를 생성하는 기능은 없습니다.',
-          'chat_help_cannot_text_to_music':
-              '“곡 하나 만들어줘” 와 같은 텍스트 기반의 음악 생성 요청(Text-to-Music)은 불가합니다.',
+          'chat_help_cannot_generate': '새 오디오, 보컬, 악기를 처음부터 생성하지 않습니다.',
+          'chat_help_cannot_empty': '프롬프트 한 줄로 완성된 곡을 만들지는 않습니다.',
           'chat_help_examples':
-              '예시: “보컬을 더 선명하게 해줘.” “이 클립을 보컬과 반주로 분리해줘.” “Export가 어디 있어?”',
+              '예시: “이 레퍼런스 트랙처럼 내 프로젝트를 믹스해줘.” “이걸 MIDI로 바꿔줘.” “house drums 128 추가해줘.”',
           'Please agree to the Terms of Service and Privacy Policy.':
               '이용약관 및 개인정보 처리방침에 동의해주세요.',
           'Bio must be 160 characters or fewer.': '소개는 160자 이하로 입력해주세요.',
@@ -1354,6 +1453,8 @@ class L10n {
           'App Version': '应用版本',
           'Your Projects': '你的项目',
           'Demo Projects': '演示项目',
+          'Save (.mixroom)': '保存 (.mixroom)',
+          'Project bundle saved': '.mixroom 文件已保存',
           'No demo projects available.': '暂无可用演示项目。',
           'A newer version is ready!': '新版本已可更新！',
           'Latest version installed': '已是最新版本',
@@ -1767,6 +1868,7 @@ class L10n {
           'Edit': '編集',
           'Rename': '名前を変更',
           'Share / Export': '共有 / 書き出し',
+          'Save (.mixroom)': '保存 (.mixroom)',
           'Share (.mixroom)': '共有 (.mixroom)',
           'Export WAV': 'WAVを書き出す',
           'Export MP3': 'MP3を書き出す',
@@ -1784,6 +1886,49 @@ class L10n {
           'Duplicate, delete, and adjust length/velocity for selected notes.':
               '選択したノートを複製、削除し、長さやベロシティを調整できます。',
           'Got it': '了解',
+          'Matches the current piano roll grid.': '現在のピアノロールグリッドに一致しています。',
+          'Apply to selected notes.': '選択したノートに適用します。',
+          'Apply to all notes.': 'すべてのノートに適用します。',
+          'Selected notes already match that grid.':
+              '選択したノートはすでにそのグリッドに合っています。',
+          'Notes already match that grid.': 'ノートはすでにそのグリッドに合っています。',
+          'Piano Roll Tools': 'ピアノロールツール',
+          'Recording is active. Finish the take before running edit tools.':
+              '録音中です。編集ツールを使う前に録音を終了してください。',
+          'Fast cleanup tools for timing, rhythm, and pitch.':
+              'タイミング、リズム、音程を素早く整えるツールです。',
+          'Select All': 'すべて選択',
+          'Grab every note in the current clip.': '現在のクリップ内のすべてのノートを選択します。',
+          'Quantize All Notes': 'すべてのノートをクオンタイズ',
+          'Snap note starts to a timing grid.': 'ノートの開始位置をタイミンググリッドに揃えます。',
+          'Choose the grid to snap note starts to.':
+              'ノート開始位置を揃えるグリッドを選択してください。',
+          'Quantize Selected': '選択したノートをクオンタイズ',
+          'Tighten only the notes you have selected.': '選択したノートだけを整えます。',
+          'Choose the grid for the selected notes.': '選択したノート用のグリッドを選択してください。',
+          'Chop All Notes': 'すべてのノートを分割',
+          'Split notes into repeated rhythmic slices.':
+              'ノートを繰り返しのリズムスライスに分割します。',
+          'Choose the slice grid for the whole clip.':
+              'クリップ全体に適用する分割グリッドを選択してください。',
+          'Chop Selected': '選択したノートを分割',
+          'Slice only the notes you selected.': '選択したノートだけを分割します。',
+          'Choose the slice grid for the selection.':
+              '選択したノート用の分割グリッドを選択してください。',
+          'Humanize Velocity': 'ベロシティをヒューマナイズ',
+          'Add slight dynamics to the selected notes.': '選択したノートにわずかな強弱を加えます。',
+          'Add slight dynamics across the whole clip.': 'クリップ全体にわずかな強弱を加えます。',
+          'No notes changed.': '変更されたノートはありません。',
+          'Octave Up': '1オクターブ上げる',
+          'Move the selected notes up by 12 semitones.': '選択したノートを12半音上げます。',
+          'Selected notes are already at the top range.': '選択したノートはすでに上限の範囲です。',
+          'Octave Down': '1オクターブ下げる',
+          'Move the selected notes down by 12 semitones.': '選択したノートを12半音下げます。',
+          'Selected notes are already at the bottom range.':
+              '選択したノートはすでに下限の範囲です。',
+          'Finish recording to use piano roll tools':
+              'ピアノロールツールを使うには録音を終了してください',
+          'Piano roll tools': 'ピアノロールツール',
           'Custom': 'カスタム',
           'Resample quality': 'リサンプル品質',
           'Draft (fast)': 'ドラフト (高速)',
@@ -1801,6 +1946,7 @@ class L10n {
           'Start export': '書き出し開始',
           'Could not open export options.': '書き出しオプションを開けませんでした。',
           'Save export': '書き出しを保存',
+          'Project bundle saved': '.mixroom ファイルを保存しました',
           'Allow access': 'アクセスを許可',
           'Allow media access': 'メディアへのアクセスを許可',
           'Mixroom needs access to audio files to browse sample folders and import local media on Android.':
@@ -1873,18 +2019,14 @@ class L10n {
           'chat_help_title': 'Mixroom AIで何ができますか?',
           'chat_help_intro': 'Mixroom AIは制作アシスタントです。',
           'chat_help_can': 'できること',
-          'chat_help_can_mix': 'レベル、EQ、コンプレッサー、リバーブ、バランスなどのミックス設定を調整できます。',
-          'chat_help_can_edit':
-              '選択したクリップ編集、オートメーション、テンポ合わせ、ステム分離（ボーカル/伴奏）ができます。',
-          'chat_help_can_tools': 'ツールの場所を案内し、MIDI編集を実行できます。',
+          'chat_help_can_mix': 'ミックスを調整し、リファレンストラックに寄せられます。',
+          'chat_help_can_edit': 'クリップ編集、ステム分離、テンポ合わせ、オーディオからMIDI変換ができます。',
+          'chat_help_can_tools': 'スターターパックのサンプル追加とMIDIアイデア生成ができます。',
           'chat_help_cannot': 'できないこと',
-          'chat_help_cannot_generate':
-              'テキストだけでまったく新しい曲、ビート、ボーカル、楽器を生成することはできません。',
-          'chat_help_cannot_empty': 'プロジェクトに素材がない状態で、新しいオーディオをゼロから作ることはできません。',
-          'chat_help_cannot_text_to_music':
-              '「曲を作って」のようなテキストから音楽を作る依頼には対応していません。',
+          'chat_help_cannot_generate': '新しいオーディオ、ボーカル、楽器をゼロから生成することはできません。',
+          'chat_help_cannot_empty': '1つのプロンプトだけで完成した曲は作れません。',
           'chat_help_examples':
-              '例: 「ボーカルをもっとクリアにして。」 「このクリップをボーカルと伴奏に分離して。」 「書き出しはどこ？」',
+              '例: 「このリファレンストラックみたいに自分のプロジェクトをミックスして。」 「これをMIDIにして。」 「house drums 128 を追加して。」',
           'Please agree to the Terms of Service and Privacy Policy.':
               '利用規約とプライバシーポリシーに同意してください。',
           'Bio must be 160 characters or fewer.': '自己紹介は160文字以内で入力してください。',
