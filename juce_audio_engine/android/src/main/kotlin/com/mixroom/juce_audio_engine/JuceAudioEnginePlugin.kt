@@ -588,9 +588,17 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     val outputName = JuceBridge.getCurrentOutputDeviceNameJNI().trim()
-    val shouldReopenPlaybackRoute =
-      hadRoutingAnomaly || outputName.isEmpty() || hasLingeringInputRoute
+    // Some Android devices keep duplex inputs reported as active even when the
+    // output route is already valid. Treating that alone as a broken playback
+    // route forces a synchronous close/reopen on every play tap.
+    val shouldReopenPlaybackRoute = hadRoutingAnomaly || outputName.isEmpty()
     if (!shouldReopenPlaybackRoute) {
+      if (hasLingeringInputRoute) {
+        Log.i(
+          "JuceAudioEngine",
+          "Skipping playback route reopen despite active inputs: $reason output=$outputName",
+        )
+      }
       return true
     }
 
@@ -669,7 +677,6 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(JuceBridge.getTrackDurationJNI(args.intValue("track")))
         }
         "play" -> {
-          preparePlaybackRoute("play")
           JuceBridge.playJNI()
           result.success(null)
         }

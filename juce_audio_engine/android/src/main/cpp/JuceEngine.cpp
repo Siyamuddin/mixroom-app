@@ -94,6 +94,7 @@ juce::String getDefaultOutputDeviceNameForManager(juce::AudioDeviceManager &devi
 int resolveStableAndroidBufferSize(juce::AudioIODevice *device, int currentBufferSize)
 {
     constexpr int kTargetStableBufferSize = 512;
+    constexpr int kMaxPreferredBufferSize = 1024;
 
     if (device == nullptr)
         return currentBufferSize > 0 ? juce::jmax(currentBufferSize, kTargetStableBufferSize)
@@ -104,22 +105,36 @@ int resolveStableAndroidBufferSize(juce::AudioIODevice *device, int currentBuffe
         return currentBufferSize > 0 ? juce::jmax(currentBufferSize, kTargetStableBufferSize)
                                      : kTargetStableBufferSize;
 
-    const int reportedBufferSize = device->getCurrentBufferSizeSamples();
-    if (reportedBufferSize > 0 && sizes.contains(reportedBufferSize))
-        return reportedBufferSize;
-
-    if (currentBufferSize > 0 && sizes.contains(currentBufferSize))
-        return currentBufferSize;
-
-    int fallback = sizes[0];
+    int preferredAtOrAboveTarget = 0;
+    int preferredBelowTarget = 0;
+    int fallback = 0;
     for (const auto size : sizes)
     {
-        if (size > fallback)
+        if (size <= 0)
+            continue;
+
+        if (fallback <= 0 || size < fallback)
             fallback = size;
-        if (size >= kTargetStableBufferSize)
-            return size;
+
+        if (size >= kTargetStableBufferSize && size <= kMaxPreferredBufferSize)
+        {
+            if (preferredAtOrAboveTarget <= 0 || size < preferredAtOrAboveTarget)
+                preferredAtOrAboveTarget = size;
+            continue;
+        }
+
+        if (size < kTargetStableBufferSize && size > preferredBelowTarget)
+            preferredBelowTarget = size;
     }
-    return fallback;
+
+    if (preferredAtOrAboveTarget > 0)
+        return preferredAtOrAboveTarget;
+    if (preferredBelowTarget > 0)
+        return preferredBelowTarget;
+    if (fallback > 0)
+        return fallback;
+
+    return currentBufferSize > 0 ? currentBufferSize : kTargetStableBufferSize;
 }
 
 void sanitiseAutomationPoints(std::vector<AutomationPoint> &points, float maxValue);
@@ -339,13 +354,10 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         setup.useDefaultOutputChannels = true;
 
 #if JUCE_ANDROID
-    if (desiredInputChannels > 0)
-    {
-        auto *device = deviceManager.getCurrentAudioDevice();
-        const int stableBufferSize = resolveStableAndroidBufferSize(device, setup.bufferSize);
-        if (stableBufferSize > 0)
-            setup.bufferSize = stableBufferSize;
-    }
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const int stableBufferSize = resolveStableAndroidBufferSize(device, setup.bufferSize);
+    if (stableBufferSize > 0)
+        setup.bufferSize = stableBufferSize;
 #endif
 
     setup.useDefaultInputChannels = false;
@@ -380,6 +392,16 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         currentSetup.useDefaultInputChannels != setup.useDefaultInputChannels ||
         currentSetup.inputChannels != setup.inputChannels;
     const bool bufferSizeChanged = currentSetup.bufferSize != setup.bufferSize;
+#if JUCE_ANDROID
+    constexpr int kProblematicAndroidBufferSize = 1024;
+    const bool shouldForceBufferOnlyReopen =
+        !nonBufferSetupChanged &&
+        bufferSizeChanged &&
+        currentSetup.bufferSize > kProblematicAndroidBufferSize &&
+        setup.bufferSize > 0;
+#else
+    const bool shouldForceBufferOnlyReopen = false;
+#endif
 
     const auto routeMatchesDesiredInputs = [&]() -> bool
     {
@@ -405,7 +427,9 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         return activeInputs >= expectedInputs;
     };
 
-    if (!nonBufferSetupChanged && routeMatchesDesiredInputs())
+    if (!nonBufferSetupChanged &&
+        routeMatchesDesiredInputs() &&
+        !shouldForceBufferOnlyReopen)
     {
         if (bufferSizeChanged)
         {
@@ -835,6 +859,11 @@ void JuceEngine::initialiseEngine()
     }
     deviceManager.removeChangeListener(this);
     deviceManager.addChangeListener(this);
+
+#if JUCE_ANDROID
+    if (applyPreferredAudioDeviceSetup(0, true, "initialise-playback-buffer"))
+        logCurrentAudioDeviceState("initialise-playback-buffer");
+#endif
 
     const double hostRate = getKnownDeviceSampleRate(deviceManager, 44100.0);
     const int blockSize = getKnownDeviceBufferSize(deviceManager, 512);
