@@ -677,7 +677,6 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(JuceBridge.getTrackDurationJNI(args.intValue("track")))
         }
         "play" -> {
-          preparePlaybackRoute("play")
           JuceBridge.playJNI()
           result.success(null)
         }
