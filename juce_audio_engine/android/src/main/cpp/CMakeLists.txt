@@ -30,11 +30,11 @@ include_directories(${ANDROID_NDK}/sources/android/cpufeatures)
 # Find Harfbuzz
 add_subdirectory(harfbuzz)
 include_directories(harfbuzz/src)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/juce/modules/SheenBidi/Headers)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/juce/modules/sheenbidi/Headers)
 
 file(GLOB_RECURSE SHEENBIDI_SRC
-    ${CMAKE_CURRENT_SOURCE_DIR}/juce/modules/SheenBidi/Source/*.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/juce/modules/SheenBidi/Source/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/juce/modules/sheenbidi/Source/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/juce/modules/sheenbidi/Source/*.c
 )
 
 add_library(sheenbidi STATIC ${SHEENBIDI_SRC})
